@@ -25,7 +25,7 @@
  * down). All buttons are 44px tap targets minimum.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   claimSlabTransferAction,
@@ -107,12 +107,15 @@ const MOBILE_CSS = `
   }
 `;
 
+export type TruckOption = { id: string; name: string; busy: boolean };
+
 export function TransferDispatchList({
   rows,
   delivered,
   currentUserId,
   canUnclaimOthers,
   stoneTypes,
+  trucks,
   toast,
 }: {
   rows: TransferRow[];
@@ -120,6 +123,9 @@ export function TransferDispatchList({
   currentUserId: string;
   canUnclaimOthers: boolean;
   stoneTypes: StoneTypeDef[];
+  /** Mig 144 — fleet for the claim truck picker; `busy` = carrying an
+   *  active undelivered claim already. */
+  trucks: TruckOption[];
   toast: string | null;
 }) {
   const router = useRouter();
@@ -137,6 +143,10 @@ export function TransferDispatchList({
   // Multiple batches can be expanded at once (different vendors); the
   // Set keeps state local to this component without a per-group hook.
   const [deliverAllOpen, setDeliverAllOpen] = useState<Set<string>>(new Set());
+  // Mig 144 — which truck the runner is loading this claim onto. One
+  // pick applies to the whole batch; submitted as `truck_name` (the
+  // server find-or-creates). Required before claiming.
+  const [truckName, setTruckName] = useState("");
   // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
   // 15-second cadence keeps the display feel real without spamming
   // re-renders — slab transfers are minute-to-hour scale, not seconds.
@@ -503,6 +513,36 @@ export function TransferDispatchList({
             </span>
           </div>
         )}
+        {/* Mig 144 — truck picker. The runner names the truck they're
+            loading (pick an existing one or type a new name) before
+            claiming. Busy trucks are shown but not pickable. */}
+        {!hasActiveClaim && availableRows.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 14px",
+              marginBottom: 10,
+              background: "var(--surface-alt)",
+              border: `1.5px solid ${truckName.trim() ? "#1d4ed8" : "var(--border)"}`,
+              borderRadius: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
+              🚚 Truck
+            </span>
+            <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+              <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              {truckName.trim()
+                ? "Carries this whole claim."
+                : "Pick or add the truck before claiming."}
+            </span>
+          </div>
+        )}
         {/* Mig 065 — batch claim action bar. Shows the running tally
             of how many are selected, the 10-cap, and the submit
             button. Disappears when nothing's selected (or when the
@@ -540,6 +580,13 @@ export function TransferDispatchList({
               <form
                 action={claimSlabTransferBatchAction}
                 onSubmit={(e) => {
+                  // Mig 144 — truck is required so we know what carried
+                  // the load. Guard before the confirm dialog.
+                  if (!truckName.trim()) {
+                    e.preventDefault();
+                    setToastMsg("Pick or add the truck first.");
+                    return;
+                  }
                   // Daksh — confirm the truck-load before submitting.
                   // Once claimed the runner is locked to this batch
                   // until they deliver or release, so the dialog
@@ -548,7 +595,7 @@ export function TransferDispatchList({
                   const n = selectedIds.size;
                   if (
                     !window.confirm(
-                      `Claim ${n} slab${n === 1 ? "" : "s"} as one batch?\n\n` +
+                      `Claim ${n} slab${n === 1 ? "" : "s"} onto truck "${truckName.trim()}"?\n\n` +
                         `You'll need to deliver or release all of them before you can open a new batch.`,
                     )
                   ) {
@@ -566,17 +613,20 @@ export function TransferDispatchList({
                   value={JSON.stringify([...selectedIds])}
                 />
                 <input type="hidden" name="redirect_to" value="/carving/transfer" />
+                {/* Mig 144 — truck the runner picked above. */}
+                <input type="hidden" name="truck_name" value={truckName.trim()} />
                 <button
                   type="submit"
                   className="primary-button"
-                  disabled={selectedIds.size === 0}
+                  disabled={selectedIds.size === 0 || !truckName.trim()}
+                  title={!truckName.trim() ? "Pick or add the truck first" : undefined}
                   style={{
                     fontSize: 14,
                     padding: "10px 20px",
                     fontWeight: 700,
                     minHeight: 44,
-                    opacity: selectedIds.size === 0 ? 0.5 : 1,
-                    cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                    opacity: selectedIds.size === 0 || !truckName.trim() ? 0.5 : 1,
+                    cursor: selectedIds.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
                   }}
                 >
                   📦 Claim {selectedIds.size > 0 ? `${selectedIds.size} slab${selectedIds.size === 1 ? "" : "s"}` : "selected"}
@@ -1639,4 +1689,209 @@ function formatRelative(iso: string): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h`;
   return `${Math.floor(hr / 24)}d`;
+}
+
+// ── Truck pick-or-create combobox (Mig 144) ───────────────────────
+// Themed dropdown matching the app (not native chrome). Type to filter
+// the fleet, click/keyboard-select a free truck, or type a brand-new
+// name (the "Use new …" row) which the server creates on claim. Busy
+// trucks (already carrying an undelivered load) are shown but locked.
+function TruckCombobox({
+  value,
+  onChange,
+  trucks,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  trucks: TruckOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const all = useMemo(
+    () =>
+      [...trucks].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+    [trucks],
+  );
+  const q = value.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (q ? all.filter((t) => t.name.toLowerCase().includes(q)) : all),
+    [all, q],
+  );
+  const exactMatch = all.some((t) => t.name.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+  const rows: Array<{ kind: "opt" | "new"; name: string; busy: boolean }> = [
+    ...filtered.map((t) => ({ kind: "opt" as const, name: t.name, busy: t.busy })),
+    ...(showCreate ? [{ kind: "new" as const, name: value.trim(), busy: false }] : []),
+  ];
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    setActive((a) => Math.min(Math.max(a, 0), Math.max(rows.length - 1, 0)));
+  }, [rows.length]);
+
+  function choose(row: { kind: "opt" | "new"; name: string; busy: boolean }) {
+    if (row.busy) return; // can't load onto a truck already out on a run
+    onChange(row.name);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setActive((a) => Math.min(a + 1, rows.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+            } else if (e.key === "Enter") {
+              if (open && rows[active]) {
+                e.preventDefault();
+                choose(rows[active]);
+              }
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          autoComplete="off"
+          placeholder="Pick a truck or type a new name…"
+          style={{
+            width: "100%",
+            padding: "10px 36px 10px 12px",
+            fontSize: 14,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+            minHeight: 44,
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Toggle truck list"
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            height: "100%",
+            width: 34,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            fontSize: 11,
+          }}
+        >
+          ▼
+        </button>
+      </div>
+
+      {open && rows.length > 0 && (
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 240,
+            overflowY: "auto",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+            padding: 4,
+          }}
+        >
+          {rows.map((row, i) => {
+            const isActive = i === active;
+            const isNew = row.kind === "new";
+            const disabled = row.busy;
+            return (
+              <div
+                key={`${row.kind}:${row.name}`}
+                role="option"
+                aria-selected={isActive}
+                aria-disabled={disabled}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(row);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 10px",
+                  borderRadius: 6,
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                  color: disabled ? "var(--muted)" : "var(--text)",
+                  opacity: disabled ? 0.6 : 1,
+                  background:
+                    isActive && !disabled ? "var(--gold-soft, rgba(232,197,114,0.18))" : "transparent",
+                }}
+              >
+                {isNew ? (
+                  <>
+                    <span style={{ fontSize: 13 }}>＋</span>
+                    <span>
+                      Use new: <strong style={{ color: "var(--gold-dark)" }}>{row.name}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 13, opacity: 0.7 }}>🚚</span>
+                    <span style={{ flex: 1 }}>{row.name}</span>
+                    {row.busy && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#b45309",
+                          background: "rgba(180,115,51,0.12)",
+                          padding: "2px 6px",
+                          borderRadius: 999,
+                        }}
+                      >
+                        busy
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }

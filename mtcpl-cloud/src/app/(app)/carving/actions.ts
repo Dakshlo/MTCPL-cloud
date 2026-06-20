@@ -4967,6 +4967,40 @@ export async function acknowledgeReceiptAction(formData: FormData) {
 // Anyone with the slab_transfer role can claim. Carving head + owner +
 // developer can also claim (and can unclaim someone else's grab if
 // they need to redirect — useful when a runner goes off shift).
+/**
+ * Mig 144 — resolve a truck name from the claim form to a trucks.id,
+ * creating the truck if it's a brand-new name (pick-or-create). Case-
+ * insensitive find so "MH-04-1234" / "mh-04-1234" reuse one row.
+ * Returns null when no name was supplied (truck is optional server-side;
+ * the claim UI requires it). Non-fatal: a failure resolves to null so a
+ * claim is never blocked by truck bookkeeping.
+ */
+async function resolveTruckByName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  name: string,
+  userId: string,
+): Promise<string | null> {
+  const clean = (name ?? "").trim();
+  if (!clean) return null;
+  try {
+    const { data: existing } = await admin
+      .from("trucks")
+      .select("id")
+      .ilike("name", clean)
+      .maybeSingle();
+    if (existing) return (existing as { id: string }).id;
+    const { data: created } = await admin
+      .from("trucks")
+      .insert({ name: clean, created_by: userId })
+      .select("id")
+      .maybeSingle();
+    return created ? (created as { id: string }).id : null;
+  } catch (e) {
+    console.warn("[resolveTruckByName] non-fatal", e);
+    return null;
+  }
+}
+
 export async function claimSlabTransferAction(formData: FormData) {
   const { profile } = await requireAuth([
     "developer",
@@ -5032,11 +5066,13 @@ export async function claimSlabTransferAction(formData: FormData) {
   // claims so the "Claimed by me" UI groups all rows by batch
   // uniformly. A single-slab claim renders as a group of one.
   const claimBatchId = crypto.randomUUID();
+  // Mig 144 — which truck carries this claim (pick-or-create on the form).
+  const claimTruckId = await resolveTruckByName(admin, txt(formData, "truck_name"), profile.id);
   // Race-guard: only claim if still unclaimed. Whoever wins the race
   // gets the lock; the loser sees "Already claimed" on the next view.
   const { data: updated } = await admin
     .from("carving_items")
-    .update({ claimed_by: profile.id, claimed_at: now, claim_batch_id: claimBatchId })
+    .update({ claimed_by: profile.id, claimed_at: now, claim_batch_id: claimBatchId, claim_truck_id: claimTruckId })
     .eq("id", carvingItemId)
     .is("claimed_by", null)
     .select("id");
@@ -5146,6 +5182,8 @@ export async function claimSlabTransferBatchAction(formData: FormData) {
 
   const now = new Date().toISOString();
   const claimBatchId = crypto.randomUUID();
+  // Mig 144 — one truck carries the whole batch (pick-or-create on form).
+  const claimTruckId = await resolveTruckByName(admin, txt(formData, "truck_name"), profile.id);
   // Race-guard: only claim items still unclaimed. If any one was
   // grabbed mid-call by another runner, the UPDATE will return
   // fewer rows than ids.length — bail and show a stale-state toast
@@ -5156,6 +5194,7 @@ export async function claimSlabTransferBatchAction(formData: FormData) {
       claimed_by: profile.id,
       claimed_at: now,
       claim_batch_id: claimBatchId,
+      claim_truck_id: claimTruckId,
     })
     .in("id", ids)
     .is("claimed_by", null)
@@ -5171,7 +5210,7 @@ export async function claimSlabTransferBatchAction(formData: FormData) {
     if (claimedIds.length > 0) {
       await admin
         .from("carving_items")
-        .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
+        .update({ claimed_by: null, claimed_at: null, claim_batch_id: null, claim_truck_id: null })
         .in("id", claimedIds);
     }
     redirect(
@@ -5232,7 +5271,7 @@ export async function unclaimSlabTransferAction(formData: FormData) {
 
   await admin
     .from("carving_items")
-    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
+    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null, claim_truck_id: null })
     .eq("id", carvingItemId);
 
   await recordEvent(carvingItemId, "transfer_unclaimed", profile.id, "Released claim");
@@ -5285,7 +5324,7 @@ export async function unclaimSlabTransferBatchAction(formData: FormData) {
   const ids = rows.map((r) => r.id);
   await admin
     .from("carving_items")
-    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null })
+    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null, claim_truck_id: null })
     .in("id", ids);
 
   await Promise.all(

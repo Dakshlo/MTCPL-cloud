@@ -54,6 +54,8 @@ export default async function SlabTransferPage({
     { data: deliveredByMe },
     { data: vendors },
     { data: stoneTypes },
+    { data: trucksData },
+    { data: busyClaims },
   ] = await Promise.all([
     admin
       .from("carving_items")
@@ -82,7 +84,28 @@ export default async function SlabTransferPage({
       .select("id, name, color_top, color_front, color_side, sort_order, is_active")
       .order("sort_order")
       .order("name"),
+    // Mig 144 — active trucks for the claim picker.
+    admin.from("trucks").select("id, name").eq("is_active", true).order("name"),
+    // Mig 144 — claims still in flight: their trucks are "busy" (derived).
+    admin
+      .from("carving_items")
+      .select("claim_truck_id")
+      .not("claim_truck_id", "is", null)
+      .is("received_at_vendor_at", null),
   ]);
+
+  // Mig 144 — a truck is busy iff it carries an active, undelivered
+  // claim. Derived (never stored) so delivering/unclaiming frees it.
+  const busyTruckIds = new Set(
+    ((busyClaims ?? []) as { claim_truck_id: string | null }[])
+      .map((c) => c.claim_truck_id)
+      .filter(Boolean) as string[],
+  );
+  const trucks = ((trucksData ?? []) as { id: string; name: string }[]).map((t) => ({
+    id: t.id,
+    name: t.name,
+    busy: busyTruckIds.has(t.id),
+  }));
 
   // Hydrate slab dims + stock_location. carving_items doesn't carry
   // dims directly — they're on slab_requirements. Pull both pending
@@ -203,6 +226,7 @@ export default async function SlabTransferPage({
       currentUserId={profile.id}
       canUnclaimOthers={["developer", "owner", "carving_head"].includes(profile.role)}
       stoneTypes={stoneTypes ?? []}
+      trucks={trucks}
       toast={params.toast ?? null}
     />
   );
