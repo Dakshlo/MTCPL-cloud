@@ -1111,7 +1111,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           to   { transform: translateX(0);    opacity: 1; }
         }
       `}</style>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14, flex: "0 0 auto" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 14 }}>
         <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.6px", color: dark ? "#fff" : "#1a1a1a" }}>
           {vendor.name}
         </span>
@@ -1136,11 +1136,10 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
           const cols = Math.min(g.machines.length, Math.max(1, Math.round(Math.sqrt(g.machines.length) * 1.5)));
           const rows = Math.ceil(g.machines.length / cols);
           return (
-          <div key={g.type} style={{ flex: rows, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div key={g.type} style={{ flex: `${rows} 0 auto`, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {grouped.length > 1 && (
               <div
                 style={{
-                  flex: "0 0 auto",
                   fontSize: 12,
                   fontWeight: 800,
                   color: muted,
@@ -1157,7 +1156,7 @@ function VendorTvSlide({ vendor, now, slideKey, dark }: { vendor: FloorVendor; n
                 minHeight: 0,
                 display: "grid",
                 gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                gridAutoRows: "1fr",
+                gridAutoRows: "minmax(min-content, 1fr)",
                 gap: 16,
               }}
             >
@@ -1396,7 +1395,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         </div>
       )}
       {machine.status === "carving" && machine.current_jobs.length > 0 && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ paddingTop: 8, borderTop: `1px solid ${dividerColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
           {machine.current_jobs.map((job, ji) => (
             <div key={job.id} style={ji > 0 ? { paddingTop: 8, borderTop: `1px dashed ${dividerColor}` } : undefined}>
               <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16, color: codeColor }}>
@@ -1455,7 +1454,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         </div>
       )}
       {machine.status === "maintenance" && (
-        <div style={{ marginTop: "auto", paddingTop: 8, borderTop: `1px solid ${dividerColor}` }}>
+        <div style={{ paddingTop: 8, borderTop: `1px solid ${dividerColor}` }}>
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
