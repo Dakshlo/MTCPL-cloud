@@ -34,6 +34,7 @@ import {
   unclaimSlabTransferBatchAction,
   acknowledgeReceiptAction,
   acknowledgeReceiptBatchAction,
+  bringInToDispatchBatchAction,
 } from "../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -86,6 +87,22 @@ export type DeliveredRow = {
   is_lathe: boolean;
 };
 
+// Phase 5 — a carving-done slab waiting to be brought in to its dispatch
+// station (the Carving → Dispatch tab).
+export type DispatchTransferRow = {
+  id: string;
+  slab_id: string;
+  temple: string;
+  slab_label: string | null;
+  stone: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+  vendor_name: string;
+  station_name: string | null;
+  ready_at: string | null;
+};
+
 // Single source of truth for the responsive breakpoint. Used by the
 // route-visual grid and the button rows so they all collapse at the
 // same width.
@@ -116,6 +133,8 @@ export function TransferDispatchList({
   canUnclaimOthers,
   stoneTypes,
   trucks,
+  dispatchRows,
+  initialTab = "carving",
   toast,
 }: {
   rows: TransferRow[];
@@ -126,9 +145,17 @@ export function TransferDispatchList({
   /** Mig 144 — fleet for the claim truck picker; `busy` = carrying an
    *  active undelivered claim already. */
   trucks: TruckOption[];
+  /** Phase 5 — carving-done slabs awaiting the carving→dispatch bring-in. */
+  dispatchRows: DispatchTransferRow[];
+  /** Phase 5 — which tab to open first (from ?tab=). */
+  initialTab?: "carving" | "dispatch";
   toast: string | null;
 }) {
   const router = useRouter();
+  // Phase 5 — two lanes: Cutting→Carving (existing) and Carving→Dispatch.
+  const [activeTab, setActiveTab] = useState<"carving" | "dispatch">(initialTab);
+  // Selected ids for the Carving→Dispatch "bring in" batch.
+  const [dispatchSelected, setDispatchSelected] = useState<Set<string>>(new Set());
   const [toastMsg, setToastMsg] = useState<string | null>(toast);
   // Mig 065 — multi-select state for batch claim. Clearing rules:
   //   • Initial render → empty Set
@@ -233,6 +260,58 @@ export function TransferDispatchList({
         </div>
       )}
 
+      {/* Phase 5 — lane tabs: Cutting→Carving (existing) vs the new
+          Carving→Dispatch bring-in queue. */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {(
+          [
+            { key: "carving", label: "🚧 Cutting → Carving", count: cncRows.length },
+            { key: "dispatch", label: "📦 Carving → Dispatch", count: dispatchRows.length },
+          ] as const
+        ).map((t) => {
+          const on = activeTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                flex: "1 1 200px",
+                minHeight: 48,
+                padding: "10px 16px",
+                border: on ? "2px solid #1d4ed8" : "1.5px solid var(--border)",
+                background: on ? "#dbeafe" : "var(--surface)",
+                color: on ? "#1d4ed8" : "var(--text)",
+                borderRadius: 12,
+                fontSize: 15,
+                fontWeight: 800,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              {t.label}
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  background: on ? "#1d4ed8" : "var(--surface-alt)",
+                  color: on ? "#fff" : "var(--muted)",
+                  borderRadius: 999,
+                  padding: "1px 9px",
+                }}
+              >
+                {t.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "carving" && (
+        <>
       {/* CLAIMED BY ME — primary actionable section.
           Mig 065 — when multiple slabs share a claim_batch_id, render
           them inside a single batch wrapper with a small header so the
@@ -786,6 +865,252 @@ export function TransferDispatchList({
           </div>
         </SectionShell>
       )}
+        </>
+      )}
+
+      {activeTab === "dispatch" && (
+        <DispatchTransferTab
+          rows={dispatchRows}
+          selected={dispatchSelected}
+          setSelected={setDispatchSelected}
+          stoneTypes={stoneTypes}
+          onNeedToast={setToastMsg}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Carving → Dispatch bring-in tab (Phase 5) ─────────────────────
+// Lists approved slabs waiting to be brought in to their dispatch
+// station. Selecting + "Bring in" stamps received_at_dispatch_at so the
+// slab becomes clickable on the Dispatch board.
+function DispatchTransferTab({
+  rows,
+  selected,
+  setSelected,
+  stoneTypes,
+  onNeedToast,
+}: {
+  rows: DispatchTransferRow[];
+  selected: Set<string>;
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
+  stoneTypes: StoneTypeDef[];
+  onNeedToast: (m: string) => void;
+}) {
+  const byStation = new Map<string, DispatchTransferRow[]>();
+  for (const r of rows) {
+    const key = r.station_name ?? "Unassigned station";
+    const g = byStation.get(key);
+    if (g) g.push(r);
+    else byStation.set(key, [r]);
+  }
+  const groups = [...byStation.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const allIds = rows.map((r) => r.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+
+  return (
+    <SectionShell
+      kind="available"
+      title="📦 Carving → Dispatch"
+      subtitle={
+        rows.length === 0
+          ? "Nothing waiting — carved slabs show here until you bring them in."
+          : `${rows.length} carved slab${rows.length !== 1 ? "s" : ""} ready to bring in to dispatch`
+      }
+    >
+      {rows.length === 0 ? (
+        <div className="muted" style={{ fontSize: 13, padding: "8px 2px" }}>
+          When a slab is approved it waits here until you bring it in to its
+          dispatch station. Once brought in, it becomes selectable on the
+          Dispatch board. Slabs the reviewer self-transferred skip this queue.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Bring-in action bar */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 14px",
+              background: selected.size > 0 ? "#dbeafe" : "var(--surface-alt)",
+              border: `1.5px solid ${selected.size > 0 ? "#1d4ed8" : "var(--border)"}`,
+              borderRadius: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() =>
+                setSelected(() => (allSelected ? new Set() : new Set(allIds)))
+              }
+              style={{ fontSize: 12, padding: "8px 14px", minHeight: 44 }}
+            >
+              {allSelected ? "Clear all" : "Select all"}
+            </button>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: selected.size > 0 ? "#1d4ed8" : "var(--muted)",
+              }}
+            >
+              {selected.size === 0 ? "Select slabs to bring in" : `${selected.size} selected`}
+            </span>
+            <div style={{ marginLeft: "auto" }}>
+              <form
+                action={bringInToDispatchBatchAction}
+                onSubmit={(e) => {
+                  if (selected.size === 0) {
+                    e.preventDefault();
+                    onNeedToast("Select at least one slab.");
+                    return;
+                  }
+                  setSelected(() => new Set());
+                }}
+              >
+                <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selected])} />
+                <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={selected.size === 0}
+                  style={{
+                    fontSize: 14,
+                    padding: "10px 20px",
+                    fontWeight: 700,
+                    minHeight: 44,
+                    opacity: selected.size === 0 ? 0.5 : 1,
+                    cursor: selected.size === 0 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  🚚 Bring {selected.size > 0 ? `${selected.size} ` : ""}in to dispatch
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {groups.map(([station, grows]) => (
+            <div key={station} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "4px 2px",
+                  borderBottom: "1px solid var(--border)",
+                  marginBottom: 2,
+                }}
+              >
+                <span style={{ fontSize: 14 }}>📦</span>
+                <strong style={{ fontSize: 13, color: "var(--text)" }}>{station}</strong>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
+                  {grows.length} slab{grows.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {grows.map((r) => (
+                <DispatchBringInRow
+                  key={r.id}
+                  row={r}
+                  stoneTypes={stoneTypes}
+                  selected={selected.has(r.id)}
+                  onToggle={() =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(r.id)) next.delete(r.id);
+                      else next.add(r.id);
+                      return next;
+                    })
+                  }
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function DispatchBringInRow({
+  row,
+  stoneTypes,
+  selected,
+  onToggle,
+}: {
+  row: DispatchTransferRow;
+  stoneTypes: StoneTypeDef[];
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const L = row.length_ft;
+  const W = row.width_ft;
+  const T = row.thickness_ft;
+  return (
+    <div
+      onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 10px",
+        border: selected ? "2px solid #1d4ed8" : "1px solid var(--border)",
+        background: selected ? "rgba(29,78,216,0.06)" : "var(--surface)",
+        borderRadius: 10,
+        cursor: "pointer",
+        userSelect: "none",
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 21,
+          height: 21,
+          borderRadius: 7,
+          flexShrink: 0,
+          border: selected ? "none" : "2px solid var(--border)",
+          background: selected ? "#1d4ed8" : "transparent",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 13,
+          fontWeight: 900,
+        }}
+      >
+        {selected ? "✓" : ""}
+      </span>
+      <div style={{ flexShrink: 0 }}>
+        <SlabThumb
+          l={L}
+          w={W}
+          t={T}
+          stone={row.stone}
+          stoneTypes={stoneTypes}
+          size={40}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>
+            {row.slab_id}
+          </code>
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{row.temple}</span>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+          {L}×{W}×{T} in · {row.stone ?? "—"} · carved by {row.vendor_name}
+        </div>
+      </div>
     </div>
   );
 }

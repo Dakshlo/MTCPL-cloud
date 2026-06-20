@@ -205,6 +205,34 @@ export default async function DispatchPage({
     }
   }
 
+  // Phase 5 (Mig 145/146) — carving→dispatch gate. A slab that came
+  // through carving is only CLICKABLE once it's been brought in to the
+  // dispatch station (received_at_dispatch_at set). Slabs WITHOUT a
+  // carving_items row are direct-dispatch (mig 130) and stay exempt —
+  // they simply never appear in this map. Kept as a SEPARATE query from
+  // the timer above so a pre-migration schema only loses the gate
+  // (everything stays clickable) rather than breaking the timer too.
+  const dispatchGateBySlab = new Map<string, { receivedAtDispatch: string | null }>();
+  if (readyRows.length > 0) {
+    const { data: gateRows } = await admin
+      .from("carving_items")
+      .select("slab_requirement_id, ready_to_dispatch_at, received_at_dispatch_at")
+      .in("slab_requirement_id", readyRows.map((s) => s.id));
+    for (const r of (gateRows ?? []) as Array<{
+      slab_requirement_id: string;
+      ready_to_dispatch_at: string | null;
+      received_at_dispatch_at: string | null;
+    }>) {
+      // Prefer the approved/ready row for the gate; otherwise take any.
+      const prev = dispatchGateBySlab.get(r.slab_requirement_id);
+      if (!prev || r.ready_to_dispatch_at) {
+        dispatchGateBySlab.set(r.slab_requirement_id, {
+          receivedAtDispatch: r.received_at_dispatch_at,
+        });
+      }
+    }
+  }
+
   function shapeReadySlab(s: {
     id: string; label: string | null; description?: string | null; temple: string; stone: string | null;
     quality: string | null; length_ft: number; width_ft: number; thickness_ft: number; priority: boolean | null;
@@ -230,6 +258,11 @@ export default async function DispatchPage({
       reworked: timer?.reworked ?? false,
       // Mig 132 — pending cancel request: red card, can't be dispatched.
       cancelPending: !!s.cancel_requested_at,
+      // Phase 5 — dispatch gate. hasCarving=false → direct-dispatch
+      // (exempt). When true, the slab is clickable only once
+      // receivedAtDispatch is stamped (brought in / self-transferred).
+      hasCarving: dispatchGateBySlab.has(s.id),
+      receivedAtDispatch: dispatchGateBySlab.get(s.id)?.receivedAtDispatch ?? null,
       component_section: s.component_section ?? null,
       component_element: s.component_element ?? null,
       additional_description: s.additional_description ?? null,

@@ -30,7 +30,7 @@ import { TransferDispatchList } from "./transfer-list";
 export default async function SlabTransferPage({
   searchParams,
 }: {
-  searchParams: Promise<{ toast?: string }>;
+  searchParams: Promise<{ toast?: string; tab?: string }>;
 }) {
   const { profile } = await requireAuth([
     "developer",
@@ -56,6 +56,7 @@ export default async function SlabTransferPage({
     { data: stoneTypes },
     { data: trucksData },
     { data: busyClaims },
+    { data: dispatchJobs },
   ] = await Promise.all([
     admin
       .from("carving_items")
@@ -92,6 +93,17 @@ export default async function SlabTransferPage({
       .select("claim_truck_id")
       .not("claim_truck_id", "is", null)
       .is("received_at_vendor_at", null),
+    // Phase 5 (Mig 145/146) — the carving→dispatch queue: approved slabs
+    // ready for dispatch that haven't been brought in to the station yet.
+    admin
+      .from("carving_items")
+      .select(
+        "id, slab_requirement_id, vendor_name, ready_to_dispatch_at, dispatch_station_id",
+      )
+      .eq("status", "completed")
+      .not("ready_to_dispatch_at", "is", null)
+      .is("received_at_dispatch_at", null)
+      .order("ready_to_dispatch_at", { ascending: true }),
   ]);
 
   // Mig 144 — a truck is busy iff it carries an active, undelivered
@@ -113,6 +125,7 @@ export default async function SlabTransferPage({
   const slabIds = [
     ...(jobs ?? []).map((j) => j.slab_requirement_id),
     ...(deliveredByMe ?? []).map((j) => j.slab_requirement_id),
+    ...(dispatchJobs ?? []).map((j) => j.slab_requirement_id),
   ];
   const slabInfo = new Map<
     string,
@@ -219,6 +232,48 @@ export default async function SlabTransferPage({
     };
   });
 
+  // Phase 5 — hydrate dispatch-station names for the carving→dispatch tab.
+  const stationIds = [
+    ...new Set(
+      (dispatchJobs ?? [])
+        .map((j) => (j as { dispatch_station_id?: string | null }).dispatch_station_id)
+        .filter(Boolean) as string[],
+    ),
+  ];
+  const stationNames = new Map<string, string>();
+  if (stationIds.length > 0) {
+    const { data: stations } = await admin
+      .from("dispatch_stations")
+      .select("id, name")
+      .in("id", stationIds);
+    for (const st of stations ?? [])
+      stationNames.set((st as { id: string }).id, (st as { name: string }).name);
+  }
+  const dispatchRows = ((dispatchJobs ?? []) as Array<{
+    id: string;
+    slab_requirement_id: string;
+    vendor_name: string | null;
+    ready_to_dispatch_at: string | null;
+    dispatch_station_id: string | null;
+  }>).map((j) => {
+    const info = slabInfo.get(j.slab_requirement_id);
+    return {
+      id: j.id,
+      slab_id: j.slab_requirement_id,
+      temple: info?.temple ?? "—",
+      slab_label: info?.label ?? null,
+      stone: info?.stone ?? null,
+      length_ft: info?.length_ft ?? 0,
+      width_ft: info?.width_ft ?? 0,
+      thickness_ft: info?.thickness_ft ?? 0,
+      vendor_name: j.vendor_name ?? "—",
+      station_name: j.dispatch_station_id
+        ? stationNames.get(j.dispatch_station_id) ?? null
+        : null,
+      ready_at: j.ready_to_dispatch_at,
+    };
+  });
+
   return (
     <TransferDispatchList
       rows={rows}
@@ -227,6 +282,8 @@ export default async function SlabTransferPage({
       canUnclaimOthers={["developer", "owner", "carving_head"].includes(profile.role)}
       stoneTypes={stoneTypes ?? []}
       trucks={trucks}
+      dispatchRows={dispatchRows}
+      initialTab={params.tab === "dispatch" ? "dispatch" : "carving"}
       toast={params.toast ?? null}
     />
   );

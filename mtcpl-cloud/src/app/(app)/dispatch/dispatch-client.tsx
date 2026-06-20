@@ -102,6 +102,15 @@ export type ReadySlab = {
   /** Mig 132 — a cancel request is pending: red card, locked out of
    *  dispatch until the owner approves/rejects. */
   cancelPending: boolean;
+  /** Phase 5 — true when the slab came through carving (has a
+   *  carving_items row). Direct-dispatch slabs (mig 130) are false and
+   *  stay exempt from the carving→dispatch gate. */
+  hasCarving?: boolean;
+  /** Phase 5 — set once the slab has been brought in to the dispatch
+   *  station (or self-transferred at approval); it's then clickable.
+   *  NULL on a carving slab = still awaiting the carving→dispatch
+   *  transfer, so the card shows locked. */
+  receivedAtDispatch?: string | null;
   /** Mig 123 / 128 — component hierarchy (Category 1 = component_section,
    *  Category 2 = component_element, Additional). Nullable; older slabs null. */
   component_section: string | null;
@@ -227,8 +236,13 @@ function SlabCard({
   onToggle?: () => void;
   onLongPress?: () => void;
 }) {
-  const selectable = !!onToggle && !s.cancelPending;
-  const pressHandlers = onLongPress && !s.cancelPending ? longPressHandlers(onLongPress) : {};
+  // Phase 5 — a carving slab not yet brought in to the dispatch station
+  // is shown but locked (non-clickable). Direct-dispatch slabs
+  // (hasCarving=false) are exempt. cancelPending still takes precedence.
+  const awaitingTransfer = !!s.hasCarving && !s.receivedAtDispatch;
+  const selectable = !!onToggle && !s.cancelPending && !awaitingTransfer;
+  const pressHandlers =
+    onLongPress && !s.cancelPending && !awaitingTransfer ? longPressHandlers(onLongPress) : {};
   return (
     <div
       onClick={selectable ? onToggle : undefined}
@@ -237,15 +251,22 @@ function SlabCard({
       tabIndex={selectable ? 0 : undefined}
       onKeyDown={selectable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle!(); } } : undefined}
       style={{
-        background: s.cancelPending ? "rgba(185,28,28,0.07)" : selected ? "rgba(184,115,51,0.1)" : "var(--surface)",
-        border: s.cancelPending ? "2px solid #b91c1c" : selected ? "2px solid var(--gold-dark)" : "1px solid var(--border)",
-        borderLeft: s.cancelPending ? "6px solid #b91c1c" : selected ? "6px solid var(--gold-dark)" : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
+        background: s.cancelPending ? "rgba(185,28,28,0.07)" : awaitingTransfer ? "rgba(79,70,229,0.06)" : selected ? "rgba(184,115,51,0.1)" : "var(--surface)",
+        border: s.cancelPending ? "2px solid #b91c1c" : awaitingTransfer ? "2px solid #4f46e5" : selected ? "2px solid var(--gold-dark)" : "1px solid var(--border)",
+        borderLeft: s.cancelPending ? "6px solid #b91c1c" : awaitingTransfer ? "6px solid #4f46e5" : selected ? "6px solid var(--gold-dark)" : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
         borderRadius: 12, padding: "10px 12px",
         display: "flex", flexDirection: "column", gap: 5,
-        cursor: selectable ? "pointer" : s.cancelPending ? "not-allowed" : "default", userSelect: "none",
+        opacity: awaitingTransfer ? 0.82 : 1,
+        cursor: selectable ? "pointer" : (s.cancelPending || awaitingTransfer) ? "not-allowed" : "default", userSelect: "none",
         transition: "border-color .12s ease, background .12s ease, transform .12s ease",
       }}
-      title={s.cancelPending ? "Cancel requested — locked until the owner decides" : undefined}
+      title={
+        s.cancelPending
+          ? "Cancel requested — locked until the owner decides"
+          : awaitingTransfer
+            ? "Awaiting carving→dispatch transfer — bring it in on the Slab Transfer page"
+            : undefined
+      }
     >
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
         {selectable && (
@@ -270,6 +291,12 @@ function SlabCard({
       {s.cancelPending && (
         <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
           🚫 CANCEL REQUESTED — waiting for owner
+        </div>
+      )}
+      {/* Phase 5 — awaiting the carving→dispatch transfer (indigo). */}
+      {awaitingTransfer && !s.cancelPending && (
+        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#4f46e5", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
+          🚚 AWAITING DISPATCH TRANSFER
         </div>
       )}
       <SlabComponentDetail
@@ -771,7 +798,9 @@ function TempleDispatchPeek({
   }
 
   // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
-  const selectableMatched = matched.filter((s) => !s.cancelPending);
+  const selectableMatched = matched.filter(
+    (s) => !s.cancelPending && !(s.hasCarving && !s.receivedAtDispatch),
+  );
   const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (

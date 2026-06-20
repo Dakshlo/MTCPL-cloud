@@ -5512,6 +5512,123 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
   redirect(`${redirectTo}?toast=${encodeURIComponent(`Delivered ${ids.length} slab(s)`)}`);
 }
 
+// ── Phase 5 (Mig 145/146) — carving → dispatch transfer lane ───────
+//
+// After a carving job is approved (status='completed' + ready_to_dispatch_at
+// set) the slab waits at the carving station until the transfer person
+// BRINGS IT IN to the dispatch station. That stamps received_at_dispatch_at,
+// the gate that makes the slab clickable on the Dispatch board. Self-
+// transfer at approval stamps it instantly and bypasses this lane.
+
+export async function bringInToDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+    "storekeeper",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const carvingItemId = txt(formData, "carving_item_id");
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  if (!carvingItemId) redirect(`${redirectTo}?toast=Missing+job+id`);
+
+  const { data: ci } = await admin
+    .from("carving_items")
+    .select("id, status, ready_to_dispatch_at, received_at_dispatch_at")
+    .eq("id", carvingItemId)
+    .maybeSingle();
+  if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
+  const item = ci as {
+    id: string;
+    status: string;
+    ready_to_dispatch_at: string | null;
+    received_at_dispatch_at: string | null;
+  };
+  if (item.received_at_dispatch_at) redirect(`${redirectTo}?toast=Already+at+dispatch`);
+  if (item.status !== "completed" || !item.ready_to_dispatch_at) {
+    redirect(`${redirectTo}?toast=Not+ready+for+dispatch+transfer`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({ received_at_dispatch_at: now, received_at_dispatch_by: profile.id })
+    .eq("id", carvingItemId)
+    .is("received_at_dispatch_at", null);
+
+  await recordEvent(carvingItemId, "received_at_dispatch", profile.id, "Brought in to dispatch");
+  await logAudit(profile.id, "dispatch_transfer_in", "carving_item", carvingItemId, {});
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent("Brought in to dispatch")}`);
+}
+
+export async function bringInToDispatchBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer",
+    "owner",
+    "carving_head",
+    "slab_transfer",
+    "storekeeper",
+  ]);
+  const admin = createAdminSupabaseClient();
+
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer";
+  let ids: string[] = [];
+  const raw = txt(formData, "carving_item_ids");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) ids = parsed.map((x) => String(x)).filter(Boolean);
+    } catch {
+      redirect(`${redirectTo}?toast=Bad+payload`);
+    }
+  }
+  if (ids.length === 0) redirect(`${redirectTo}?toast=No+slabs+selected`);
+
+  // Only stamp rows genuinely awaiting dispatch transfer (approved,
+  // ready, not already brought in). Anything stale is silently skipped.
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, status, ready_to_dispatch_at, received_at_dispatch_at")
+    .in("id", ids);
+  const eligible = ((items ?? []) as Array<{
+    id: string;
+    status: string;
+    ready_to_dispatch_at: string | null;
+    received_at_dispatch_at: string | null;
+  }>)
+    .filter((r) => r.status === "completed" && r.ready_to_dispatch_at && !r.received_at_dispatch_at)
+    .map((r) => r.id);
+  if (eligible.length === 0) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to bring in — refresh and retry.")}`);
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from("carving_items")
+    .update({ received_at_dispatch_at: now, received_at_dispatch_by: profile.id })
+    .in("id", eligible)
+    .is("received_at_dispatch_at", null);
+
+  await Promise.all(
+    eligible.map((id) =>
+      recordEvent(id, "received_at_dispatch", profile.id, "Brought in to dispatch (batch)"),
+    ),
+  );
+  await logAudit(profile.id, "dispatch_transfer_in_batch", "carving_item", eligible[0], {
+    carving_item_ids: eligible,
+    count: eligible.length,
+  });
+
+  refreshAll();
+  redirect(
+    `${redirectTo}?toast=${encodeURIComponent(`Brought ${eligible.length} slab(s) in to dispatch`)}`,
+  );
+}
+
 // ── Migration 024: re-tag work-type on an existing job ─────────────
 //
 // Carving head can change a job's requires_machine_type after the
