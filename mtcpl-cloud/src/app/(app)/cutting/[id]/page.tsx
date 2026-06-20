@@ -254,6 +254,14 @@ export default async function CuttingDetailPage({
     supabase.from("blocks").select("quality").eq("id", block.block_id).maybeSingle(),
   ]);
 
+  // Mig 143 — curated stock-location names for the Cutting-Done combobox.
+  const { data: stockLocRows } = await supabase
+    .from("stock_locations")
+    .select("name")
+    .eq("is_active", true)
+    .order("name");
+  const stockLocations = ((stockLocRows ?? []) as { name: string }[]).map((r) => r.name);
+
   const session = block.cut_sessions as unknown as {
     id: string;
     session_code: string;
@@ -994,6 +1002,7 @@ export default async function CuttingDetailPage({
             finishAction={finishBlockAction}
             precutIds={precutIds}
             precutAction={precutSlabsAction}
+            stockLocations={stockLocations}
           />
         </>
       )}
@@ -1066,6 +1075,7 @@ export default async function CuttingDetailPage({
                 allowTransfer={allowTransfer}
                 parentQuality={parentQuality}
                 finishAction={editPendingApprovalAction}
+                stockLocations={stockLocations}
                 precutIds={precutIds}
                 initialPayload={{
                   cut_slab_ids: stagedPayload.cut_slab_ids ?? [],

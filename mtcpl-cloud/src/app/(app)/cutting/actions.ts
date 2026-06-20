@@ -513,6 +513,34 @@ export type FinishBlockResult =
   | { ok: true; alreadyDone?: boolean; awaitingApproval?: boolean }
   | { ok: false; error: string };
 
+/**
+ * Curated stock-location list (migration 143). Remembers a picked or
+ * freshly-typed location name so the Cutting-Done combobox grows as the
+ * floor uses new spots ("create-inline"). Case-insensitive: re-typing an
+ * existing name is a no-op. Non-fatal — a hiccup here never blocks the
+ * cut from being recorded.
+ */
+async function rememberStockLocation(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  name: string | null,
+  userId: string,
+) {
+  const clean = (name ?? "").trim();
+  if (!clean) return;
+  try {
+    const { data: existing } = await supabase
+      .from("stock_locations")
+      .select("id")
+      .ilike("name", clean)
+      .maybeSingle();
+    if (!existing) {
+      await supabase.from("stock_locations").insert({ name: clean, created_by: userId });
+    }
+  } catch (e) {
+    console.warn("[rememberStockLocation] non-fatal", e);
+  }
+}
+
 export async function finishBlockAction(formData: FormData): Promise<FinishBlockResult> {
   const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "cutting_operator"]);
   const supabase = createAdminSupabaseClient();
@@ -548,6 +576,13 @@ export async function finishBlockAction(formData: FormData): Promise<FinishBlock
   // added later by office staff inherit nothing here — the office
   // team sets stock_location separately via the slab edit flow.
   const stockLocation = String(formData.get("stock_location") || "").trim() || null;
+  // Mig 143 — stock location is now MANDATORY (pick-or-create combobox on
+  // the form). Guard server-side too so a stale client can't slip a blank
+  // through, then remember the name for the curated dropdown.
+  if (!stockLocation) {
+    return { ok: false, error: "Stock location is required — pick or type where the slabs are being stocked." };
+  }
+  await rememberStockLocation(supabase, stockLocation, profile.id);
 
   // Log the incoming request so we can trace failures from Vercel logs.
   console.log("[finishBlockAction] START", {
@@ -832,6 +867,11 @@ export async function precutSlabsAction(
     if (totalSel === 0) {
       throw new Error("Select at least one slab that is already cut.");
     }
+    // Mig 143 — stock location mandatory; remember it for the dropdown.
+    if (!stockLocation) {
+      throw new Error("Stock location is required — pick or type where the slabs are being stocked.");
+    }
+    await rememberStockLocation(supabase, stockLocation, profile.id);
 
     // Block must still be live-cutting — pre-cut makes no sense after
     // the cutter has submitted for audit. (The RPC re-checks this, but
@@ -1546,6 +1586,11 @@ export async function editPendingApprovalAction(
     String(formData.get("transferred_slab_ids") || "[]"),
   ) as string[];
   const stockLocation = String(formData.get("stock_location") || "").trim() || null;
+  // Mig 143 — stock location mandatory on the approval-edit resave too.
+  if (!stockLocation) {
+    return { ok: false, error: "Stock location is required — pick or type where the slabs are being stocked." };
+  }
+  await rememberStockLocation(supabase, stockLocation, profile.id);
   const stone = String(formData.get("stone") || "PinkStone");
   const yard = Number(formData.get("yard") || 1);
 

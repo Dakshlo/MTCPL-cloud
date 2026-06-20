@@ -68,6 +68,7 @@ export function FinishBlockForm({
   submitLabelOverride,
   precutIds = [],
   precutAction,
+  stockLocations = [],
 }: {
   sessionBlockId: string;
   sessionId: string;
@@ -122,6 +123,9 @@ export function FinishBlockForm({
   precutAction?: (
     formData: FormData,
   ) => Promise<{ ok: true; count: number } | { ok: false; error: string }>;
+  /** Mig 143 — curated stock-location names powering the pick-or-create
+   *  combobox on the Stock location field. */
+  stockLocations?: string[];
 }) {
   // Mig 126 — slabs already pre-cut (released early). Locked-in: always
   // part of cut_slab_ids, never uncheckable.
@@ -242,6 +246,11 @@ export function FinishBlockForm({
     // Same cutting-donor confirmation the final Done uses — claiming a
     // slab from a block that's actively being cut needs a heads-up.
     if (!confirmIfCuttingDonors(precutTransferIds)) return;
+    // Mig 143 — stock location is mandatory (also enforced server-side).
+    if (!stockLocation.trim()) {
+      setSubmitError("Stock location is required — pick or type where the slabs are being stocked.");
+      return;
+    }
     setSubmitError(null);
     setPrecutMsg(null);
     const fd = new FormData();
@@ -411,6 +420,11 @@ export function FinishBlockForm({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>, restock: "yes" | "no") {
     e.preventDefault();
     if (!confirmIfCuttingDonors()) return;
+    // Mig 143 — stock location is mandatory (also enforced server-side).
+    if (!stockLocation.trim()) {
+      setSubmitError("Stock location is required — pick or type where the slabs are being stocked.");
+      return;
+    }
     setSubmitError(null);
     const formData = new FormData(e.currentTarget);
     // Make sure the right restock flag is on the form
@@ -760,7 +774,9 @@ export function FinishBlockForm({
           type="text"
           value={stockLocation}
           onChange={(e) => setStockLocation(e.target.value)}
-
+          list="cutting-stock-locations"
+          autoComplete="off"
+          placeholder="Pick a location or type a new one…"
           required
           style={{
             width: "100%",
@@ -772,9 +788,17 @@ export function FinishBlockForm({
             color: "var(--text)",
           }}
         />
+        {/* Mig 143 — curated list powers the dropdown; typing a brand-new
+            name creates it on submit (create-inline). */}
+        <datalist id="cutting-stock-locations">
+          {[...new Set(stockLocations.map((s) => s.trim()).filter(Boolean))].map((loc) => (
+            <option key={loc} value={loc} />
+          ))}
+        </datalist>
         <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
-          Applied to every cut slab from this block — the carving team
-          uses this to locate the slabs after the cut.
+          Pick from the list or type a new spot — it&apos;s saved for next
+          time. Applied to every cut slab from this block so the carving
+          team can locate them after the cut.
         </div>
       </div>
 
