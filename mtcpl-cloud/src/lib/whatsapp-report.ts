@@ -19,6 +19,17 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
+import { isMarble, cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import {
+  buildLineages,
+  aggregateLineages,
+  type BjBlockRow,
+  type BjSlabRow,
+  type BjCsbRow,
+  type BjMarbleTruckRow,
+  type BjCutSessionSlabRow,
+} from "@/app/(app)/block-journey/build-lineages";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -84,6 +95,16 @@ function istDateKey(): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** Start of the current IST month (UTC ISO) + a short label + days elapsed.
+ *  Powers the month-to-date production cards (cutting / carving / dispatch). */
+function istMonthStart() {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth();
+  const startUTC = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0) - 5.5 * 3600 * 1000).toISOString();
+  return { startUTC, label: `${MONTHS[m]} ${y}`, daysElapsed: ist.getUTCDate() };
+}
+
 // ── Data ────────────────────────────────────────────────────────────
 
 type DayTotals = {
@@ -98,6 +119,25 @@ export type DailyReport = {
   prevLabel: string;
   today: DayTotals;
   prev: DayTotals;
+  /** Month-to-date totals — cutting / carving / dispatch headline the
+   *  cards now (with the last-24 h figure shown in brackets). */
+  mtd: DayTotals;
+  month: { label: string; days: number };
+  /** Current usable raw-block stock (status available/reserved), CFT by
+   *  category. null if it couldn't be computed. */
+  stock: {
+    totalCft: number;
+    marbleCft: number;
+    sandstoneCft: number;
+    marbleCount: number;
+    sandstoneCount: number;
+  } | null;
+  /** Block recovery split by stone category — sandstone as a yield %,
+   *  marble as CFT per tonne (same framing as the Block Journey page). */
+  recovery: {
+    sandstone: { recoveredPct: number; originalCft: number; slabCft: number; lineages: number };
+    marble: { cftPerTonne: number; tonnes: number; slabCft: number; lineages: number };
+  } | null;
   blocksByStone: Array<{ stone: string; count: number; cft: number }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
@@ -366,6 +406,117 @@ async function trendForDays(admin: AdminClient, days = 10) {
   return list.map((d) => ({ label: d.label, short: d.label.split(" ")[0], blocks: d.blocks, cutting: d.cutting, carving: d.carving }));
 }
 
+/** Stone-name → category map (marble vs sandstone) from stone_types. */
+async function stoneCategoryMapFor(admin: AdminClient): Promise<Record<string, StoneCategory>> {
+  const map: Record<string, StoneCategory> = {};
+  const { data } = await admin.from("stone_types").select("name, stone_category");
+  for (const s of (data ?? []) as Array<{ name: string; stone_category?: string | null }>) {
+    map[s.name] = s.stone_category === "marble" ? "marble" : "sandstone";
+  }
+  return map;
+}
+
+/** Current USABLE raw-block stock — blocks still available/reserved (i.e. not
+ *  cut, consumed or discarded), CFT by category. Sandstone = L×W×H; marble =
+ *  tonnes × 8 CFT-equiv (falls back to dims if a marble block lacks weight). */
+async function blockStock(
+  admin: AdminClient,
+  categoryMap: Record<string, StoneCategory>,
+): Promise<DailyReport["stock"]> {
+  try {
+    const { data } = await admin
+      .from("blocks")
+      .select("stone, length_ft, width_ft, height_ft, tonnes, status")
+      .in("status", ["available", "reserved"]);
+    let marbleCft = 0, sandstoneCft = 0, marbleCount = 0, sandstoneCount = 0;
+    for (const b of (data ?? []) as Array<{
+      stone: string | null; length_ft: number; width_ft: number; height_ft: number; tonnes: number | null;
+    }>) {
+      const dimsCft = cft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
+      if (isMarble(b.stone, categoryMap)) {
+        marbleCft += cftEquivFromTonnes(Number(b.tonnes) || 0) || dimsCft;
+        marbleCount += 1;
+      } else {
+        sandstoneCft += dimsCft;
+        sandstoneCount += 1;
+      }
+    }
+    return { totalCft: marbleCft + sandstoneCft, marbleCft, sandstoneCft, marbleCount, sandstoneCount };
+  } catch {
+    return null;
+  }
+}
+
+/** Block recovery split by category — reuses the Block Journey lineage engine
+ *  so the numbers match that page exactly. Sandstone yields a recovered %,
+ *  marble a CFT-per-tonne. Wrapped so a hiccup never blocks the daily report. */
+async function buildRecoveryByCategory(
+  admin: AdminClient,
+  categoryMap: Record<string, StoneCategory>,
+): Promise<DailyReport["recovery"]> {
+  try {
+    // Post-cut slabs, paginated (same walk the Block Journey page uses).
+    const postCut: BjSlabRow[] = [];
+    for (let off = 0; off < 50000; off += 1000) {
+      const { data } = await admin
+        .from("slab_requirements")
+        .select("id, length_ft, width_ft, thickness_ft, source_block_id, label, temple, status, cut_source_kind")
+        .not("source_block_id", "is", null)
+        .in("status", POST_CUT_STATUSES as unknown as string[])
+        .order("id", { ascending: true })
+        .range(off, off + 999);
+      if (!data || data.length === 0) break;
+      postCut.push(...(data as unknown as BjSlabRow[]));
+      if (data.length < 1000) break;
+    }
+    const blockCols =
+      "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at";
+    const [freshR, reusedR, doneCsbR, trucksR, cssR] = await Promise.all([
+      admin.from("blocks").select(blockCols).eq("category", "Fresh"),
+      admin.from("blocks").select(blockCols).eq("category", "Reused"),
+      admin.from("cut_session_blocks").select("block_id, status, updated_at").eq("status", "done"),
+      admin.from("marble_truck_entries").select("id, stone, truck_no, vendor_name, total_tonnes, num_blocks, created_at"),
+      admin.from("cut_session_slabs").select("slab_requirement_id, is_filler, cut_session_blocks!inner(block_id)"),
+    ]);
+    const cutSessionSlabs: BjCutSessionSlabRow[] = [];
+    for (const r of (cssR.data ?? []) as Array<{
+      slab_requirement_id: string;
+      is_filler: boolean | null;
+      cut_session_blocks: { block_id: string } | { block_id: string }[] | null;
+    }>) {
+      const csb = Array.isArray(r.cut_session_blocks) ? r.cut_session_blocks[0] : r.cut_session_blocks;
+      if (!csb?.block_id) continue;
+      cutSessionSlabs.push({ slab_requirement_id: r.slab_requirement_id, is_filler: r.is_filler ?? null, block_id: csb.block_id });
+    }
+    const lineages = buildLineages(
+      (freshR.data ?? []) as unknown as BjBlockRow[],
+      (reusedR.data ?? []) as unknown as BjBlockRow[],
+      postCut,
+      (doneCsbR.data ?? []) as unknown as BjCsbRow[],
+      categoryMap,
+      (trucksR.data ?? []) as unknown as BjMarbleTruckRow[],
+      cutSessionSlabs,
+    );
+    const agg = aggregateLineages(lineages);
+    return {
+      sandstone: {
+        recoveredPct: agg.weightedRecoveredPct,
+        originalCft: agg.totalOriginalCft,
+        slabCft: agg.totalSlabCft,
+        lineages: agg.totalLineages - agg.marble.lineageCount,
+      },
+      marble: {
+        cftPerTonne: agg.marble.weightedCftPerTonne,
+        tonnes: agg.marble.totalTonnes,
+        slabCft: agg.marble.totalSlabCft,
+        lineages: agg.marble.lineageCount,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function buildDailyReportData(): Promise<DailyReport> {
   const admin = createAdminSupabaseClient();
   // Main = last 24 h (10 AM → 10 AM); prev = the 24 h before that.
@@ -374,6 +525,15 @@ export async function buildDailyReportData(): Promise<DailyReport> {
   const today = await aggregateDay(admin, t.startUTC, t.endUTC, true);
   const prev = await aggregateDay(admin, p.startUTC, p.endUTC, false);
   const payToday = await paymentsForWindow(admin, t.startUTC, t.endUTC, true);
+
+  // Month-to-date production (cutting / carving / dispatch) — from the 1st of
+  // the IST month through the report window end. Plus current usable block
+  // stock and block recovery, both wrapped so they never block the report.
+  const mStart = istMonthStart();
+  const categoryMap = await stoneCategoryMapFor(admin);
+  const mtd = await aggregateDay(admin, mStart.startUTC, t.endUTC, false);
+  const stock = await blockStock(admin, categoryMap);
+  const recovery = await buildRecoveryByCategory(admin, categoryMap);
 
   // Month-to-date CNC costing — same prorated-to-elapsed-days engine as the
   // /reports/various-costing/cnc page. Wrapped so a CNC hiccup never blocks
@@ -437,6 +597,10 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     prevLabel: p.label,
     today: today.totals,
     prev: prev.totals,
+    mtd: mtd.totals,
+    month: { label: mStart.label, days: mStart.daysElapsed },
+    stock,
+    recovery,
     blocksByStone: today.det.blocksByStone,
     cuttingByStone: today.det.cuttingByStone,
     carvingByVendor: today.det.carvingByVendor,
@@ -494,7 +658,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     P.t("Daily Work Report", M, top - 42, 16, bold, ink);
     P.t("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, top - 55, 7.5, bold, ink);
     let y = top - 55;
-    if (withSubtitle) { P.t("Activity in the 24 hours ending 10 AM IST", M, y - 12, 8, font, muted); y -= 12; }
+    if (withSubtitle) { P.t("Month-to-date production · last 24 h shown in brackets", M, y - 12, 8, font, muted); y -= 12; }
     y -= 8;
     P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 2.5, color: COL.gold });
     P.pg.drawLine({ start: { x: M, y: y - 2 }, end: { x: W - M, y: y - 2 }, thickness: 0.5, color: brown });
@@ -513,23 +677,36 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   {
     const P = newPage();
     let y = header(P, H - 26, true);
-    const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}   (${d > 0 ? "+" : ""}${d})`; };
-    const cards = [
-      { c: COL.blue, label: "BLOCKS ADDED", big: String(data.today.blocks.count), sub: `${data.today.blocks.cft.toFixed(1)} CFT`, cmp: delta(data.today.blocks.count, data.prev.blocks.count) },
-      { c: COL.cyan, label: "CUTTING DONE", big: String(data.today.cutting.slabs), sub: `${data.today.cutting.cft.toFixed(1)} CFT`, cmp: delta(data.today.cutting.slabs, data.prev.cutting.slabs) },
-      { c: COL.amber, label: "CARVING DONE", big: String(data.today.carving.slabs), sub: `${data.today.carving.cft.toFixed(1)} CFT`, cmp: delta(data.today.carving.slabs, data.prev.carving.slabs) },
-      { c: COL.green, label: "DISPATCHED", big: String(data.today.dispatch.slabs), sub: `${data.today.dispatch.cft.toFixed(1)} CFT · ${data.today.dispatch.tonnes.toFixed(1)} T · ${data.today.dispatch.trucks} trucks`, cmp: delta(data.today.dispatch.slabs, data.prev.dispatch.slabs) },
+    const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}  (${d > 0 ? "+" : ""}${d})`; };
+    const mLabel = data.month.label;
+    // Blocks = added in the last 24 h + a live in-stock line. Cutting /
+    // Carving / Dispatch headline the MONTH-TO-DATE total, with the last
+    // 24 h shown in the bracket pill (Daksh's dad wants the running month).
+    const cards: Array<{ c: ReturnType<typeof rgb>; label: string; caption?: string; big: string; sub: string; pill: string; extra?: string }> = [
+      {
+        c: COL.blue, label: "BLOCKS ADDED",
+        big: String(data.today.blocks.count), sub: `${data.today.blocks.cft.toFixed(1)} CFT added (24h)`,
+        pill: delta(data.today.blocks.count, data.prev.blocks.count),
+        extra: data.stock
+          ? `In stock: ${data.stock.totalCft.toFixed(0)} CFT  ·  Marble ${data.stock.marbleCft.toFixed(0)}  ·  Sandstone ${data.stock.sandstoneCft.toFixed(0)}`
+          : undefined,
+      },
+      { c: COL.cyan, label: "CUTTING DONE", caption: `Month to date · ${mLabel}`, big: String(data.mtd.cutting.slabs), sub: `${data.mtd.cutting.cft.toFixed(1)} CFT`, pill: `+${data.today.cutting.slabs} in 24h` },
+      { c: COL.amber, label: "CARVING DONE", caption: `Month to date · ${mLabel}`, big: String(data.mtd.carving.slabs), sub: `${data.mtd.carving.cft.toFixed(1)} CFT`, pill: `+${data.today.carving.slabs} in 24h` },
+      { c: COL.green, label: "DISPATCHED", caption: `Month to date · ${mLabel}`, big: String(data.mtd.dispatch.slabs), sub: `${data.mtd.dispatch.cft.toFixed(1)} CFT · ${data.mtd.dispatch.tonnes.toFixed(1)} T · ${data.mtd.dispatch.trucks} trucks`, pill: `+${data.today.dispatch.slabs} in 24h` },
     ];
     const ch = 150, gap = 12;
     for (const k of cards) {
       P.card(M, y, cw, ch, 16, k.c);
       P.card(M + 18, y - 14, 30, 5, 2.5, white, { opacity: 0.5 });
       P.t(k.label, M + 20, y - 32, 13, bold, white);
-      P.t(k.big, M + 18, y - 100, 52, bold, white);
-      P.t(k.sub, M + 20, y - 124, 12, font, white);
-      const pw = font.widthOfTextAtSize(k.cmp, 9) + 16;
+      if (k.caption) P.t(k.caption, M + 20, y - 46, 9, font, white);
+      P.t(k.big, M + 18, y - 102, 50, bold, white);
+      P.t(k.sub, M + 20, y - 126, 12, font, white);
+      if (k.extra) P.t(k.extra, M + 20, y - 142, 9, font, white);
+      const pw = font.widthOfTextAtSize(k.pill, 9) + 16;
       P.card(W - M - pw - 12, y - 40, pw, 18, 6, white, { opacity: 0.18 });
-      P.t(k.cmp, W - M - pw - 4, y - 52, 9, font, white);
+      P.t(k.pill, W - M - pw - 4, y - 52, 9, font, white);
       y -= ch + gap;
     }
     footer(P, 1, PAGES);
@@ -550,7 +727,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.t(`Spent so far: ${inr(c.totalCost)}`, M + 18, y - 124, 10.5, bold, white);
       // Carved output that the cost is spread over — slab count + the combined
       // SFT/CFT quantity (Daksh). Marble carves in SFT, sandstone in CFT.
-      P.t(`Carved ${c.slabs} slab${c.slabs === 1 ? "" : "s"} · ${c.sft.toFixed(0)} SFT + ${c.cft.toFixed(0)} CFT`, M + 18, y - 140, 9.5, bold, white);
+      P.t(`Carved ${c.slabs} slab${c.slabs === 1 ? "" : "s"} · ${c.sft.toFixed(0)} SFT + ${c.cft.toFixed(0)} CFT = ${(c.sft + c.cft).toFixed(0)} combined`, M + 18, y - 140, 9.5, bold, white);
       P.t(`/SFT ${Number.isFinite(c.costPerSft) ? inr2(c.costPerSft) : "--"}   ·   /CFT ${Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--"}`, M + 18, y - 158, 9.5, font, white);
       P.t(`Op ${inr(c.operational)} · Dep ${inr(c.depreciation)} · ${c.machines} machine${c.machines === 1 ? "" : "s"}`, M + 18, y - 174, 9, font, white);
       y -= hh + 12;
@@ -629,6 +806,24 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       });
       y -= 12;
     };
+    // Block recovery split by stone category (matches the Block Journey
+    // page): sandstone as a yield %, marble as CFT per tonne.
+    if (data.recovery) {
+      const rec = data.recovery, rh = 96;
+      P.card(M, y, cw, rh, 14, COL.gold);
+      P.t("BLOCK RECOVERY", M + 16, y - 22, 11, bold, white);
+      P.t("Lifetime yield from every cut block", M + 16, y - 35, 8, font, white);
+      const colW = (cw - 32) / 2;
+      P.t("SANDSTONE", M + 16, y - 54, 8.5, bold, white);
+      P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 16, y - 78, 22, bold, white);
+      P.t(`${rec.sandstone.slabCft.toFixed(0)} / ${rec.sandstone.originalCft.toFixed(0)} CFT · ${rec.sandstone.lineages} blocks`, M + 16, y - 90, 8, font, white);
+      const mx = M + 16 + colW;
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 92 }, thickness: 0.5, color: white, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 54, 8.5, bold, white);
+      P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 78, 22, bold, white);
+      P.t(`${rec.marble.slabCft.toFixed(0)} CFT from ${rec.marble.tonnes.toFixed(1)} T · ${rec.marble.lineages} blocks`, mx, y - 90, 8, font, white);
+      y -= rh + 14;
+    }
     section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.map((rw) => ({ n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` })));
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
     section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
