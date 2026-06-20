@@ -21,6 +21,7 @@ import { LoginLocationProbe } from "@/components/login-location-probe";
 // (topbar + sidebar) can trigger the same gold-pulse overlay.
 import { SignOutOverlayHost } from "@/components/sign-out-overlay";
 import { TvKioskSignOut } from "@/components/tv-kiosk-signout";
+import { TvFullscreenGate } from "@/components/tv-fullscreen-gate";
 // Idle auto-logout for accounts-desk users (handle money) — 10 min of
 // inactivity signs them out, active use keeps the session alive.
 import { IdleLogout } from "@/components/idle-logout";
@@ -83,6 +84,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     return (
       <>
         {children}
+        <TvFullscreenGate />
         <TvKioskSignOut />
       </>
     );
