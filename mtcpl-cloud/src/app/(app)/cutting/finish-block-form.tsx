@@ -1,9 +1,205 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ALLOWED_YARDS, yardLabel } from "@/lib/yards";
 import { ExtraSizePicker } from "./extra-size-picker";
+
+/**
+ * Stock-location picker (mig 143) — a themed pick-or-create combobox.
+ * Replaces the native <datalist>, whose dropdown is browser-chrome and
+ * clashes with the app theme. Type to filter the curated list, click a
+ * suggestion, or type a brand-new name (the "Use new …" row) which gets
+ * created on submit. Fully styled with the app's CSS variables.
+ */
+function StockLocationCombobox({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const all = useMemo(
+    () => [...new Set(options.map((s) => s.trim()).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+    ),
+    [options],
+  );
+  const q = value.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (q ? all.filter((o) => o.toLowerCase().includes(q)) : all),
+    [all, q],
+  );
+  const exactMatch = all.some((o) => o.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+  // Flat list of selectable rows for keyboard nav: existing matches first,
+  // then the optional "create" row.
+  const rows: Array<{ kind: "opt" | "new"; label: string }> = [
+    ...filtered.map((o) => ({ kind: "opt" as const, label: o })),
+    ...(showCreate ? [{ kind: "new" as const, label: value.trim() }] : []),
+  ];
+
+  // Close when clicking outside the widget.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Keep the highlighted row in range as the filter narrows.
+  useEffect(() => {
+    setActive((a) => Math.min(Math.max(a, 0), Math.max(rows.length - 1, 0)));
+  }, [rows.length]);
+
+  function choose(row: { kind: "opt" | "new"; label: string }) {
+    onChange(row.label);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setActive((a) => Math.min(a + 1, rows.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+            } else if (e.key === "Enter") {
+              if (open && rows[active]) {
+                e.preventDefault();
+                choose(rows[active]);
+              }
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          autoComplete="off"
+          placeholder="Pick a location or type a new one…"
+          required
+          style={{
+            width: "100%",
+            padding: "10px 36px 10px 12px",
+            fontSize: 14,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--surface)",
+            color: "var(--text)",
+          }}
+        />
+        {/* Chevron toggle */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Toggle list"
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            height: "100%",
+            width: 34,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            fontSize: 11,
+          }}
+        >
+          ▼
+        </button>
+      </div>
+
+      {open && rows.length > 0 && (
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 240,
+            overflowY: "auto",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+            padding: 4,
+          }}
+        >
+          {rows.map((row, i) => {
+            const isActive = i === active;
+            const isNew = row.kind === "new";
+            return (
+              <div
+                key={`${row.kind}:${row.label}`}
+                role="option"
+                aria-selected={isActive}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => {
+                  // mousedown (not click) so it fires before input blur
+                  e.preventDefault();
+                  choose(row);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 10px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "var(--text)",
+                  background: isActive ? "var(--gold-soft, rgba(232,197,114,0.18))" : "transparent",
+                }}
+              >
+                {isNew ? (
+                  <>
+                    <span style={{ fontSize: 13 }}>＋</span>
+                    <span>
+                      Use new:{" "}
+                      <strong style={{ color: "var(--gold-dark)" }}>{row.label}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 13, opacity: 0.6 }}>📍</span>
+                    <span>{row.label}</span>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type PlacedSlab = {
   id: string;
@@ -770,31 +966,13 @@ export function FinishBlockForm({
             slabs कहाँ रखी जा रही हैं? · Where are these slabs being stocked physically?
           </div>
         </div>
-        <input
-          type="text"
-          value={stockLocation}
-          onChange={(e) => setStockLocation(e.target.value)}
-          list="cutting-stock-locations"
-          autoComplete="off"
-          placeholder="Pick a location or type a new one…"
-          required
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            fontSize: 14,
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--surface)",
-            color: "var(--text)",
-          }}
-        />
-        {/* Mig 143 — curated list powers the dropdown; typing a brand-new
+        {/* Mig 143 — themed pick-or-create combobox; typing a brand-new
             name creates it on submit (create-inline). */}
-        <datalist id="cutting-stock-locations">
-          {[...new Set(stockLocations.map((s) => s.trim()).filter(Boolean))].map((loc) => (
-            <option key={loc} value={loc} />
-          ))}
-        </datalist>
+        <StockLocationCombobox
+          value={stockLocation}
+          onChange={setStockLocation}
+          options={stockLocations}
+        />
         <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
           Pick from the list or type a new spot — it&apos;s saved for next
           time. Applied to every cut slab from this block so the carving
