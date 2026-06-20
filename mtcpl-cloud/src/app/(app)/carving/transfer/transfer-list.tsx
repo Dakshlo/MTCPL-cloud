@@ -159,6 +159,27 @@ export function TransferDispatchList({
   // Mig 144 — truck for the carving→dispatch run. Shares the same fleet
   // (and busy state) as the cutting→carving claim picker.
   const [dispatchTruckName, setDispatchTruckName] = useState("");
+  // EN/HI toggle for the floor. The storekeeper has low vision and reads
+  // Hindi more easily; the language sticks across reloads via localStorage.
+  // t(en, hi) returns the active-language string inline (no separate map).
+  const [lang, setLang] = useState<"en" | "hi">("en");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("mtcpl_transfer_lang");
+      if (saved === "hi" || saved === "en") setLang(saved);
+    } catch {
+      /* localStorage blocked — stay on English */
+    }
+  }, []);
+  function setLangPersist(l: "en" | "hi") {
+    setLang(l);
+    try {
+      localStorage.setItem("mtcpl_transfer_lang", l);
+    } catch {
+      /* ignore */
+    }
+  }
+  const t = (en: string, hi: string) => (lang === "hi" ? hi : en);
   const [toastMsg, setToastMsg] = useState<string | null>(toast);
   // Mig 065 — multi-select state for batch claim. Clearing rules:
   //   • Initial render → empty Set
@@ -231,24 +252,55 @@ export function TransferDispatchList({
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 32 }}>
       <style>{MOBILE_CSS}</style>
 
+      {/* EN/HI language toggle — small, top-right. Sticks via localStorage. */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: "inline-flex", border: "1.5px solid var(--border)", borderRadius: 999, overflow: "hidden" }}>
+          {(["en", "hi"] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              onClick={() => setLangPersist(l)}
+              aria-pressed={lang === l}
+              style={{
+                padding: "5px 14px",
+                fontSize: 14,
+                fontWeight: 800,
+                border: "none",
+                cursor: "pointer",
+                background: lang === l ? "#1d4ed8" : "var(--surface)",
+                color: lang === l ? "#fff" : "var(--muted)",
+              }}
+            >
+              {l === "en" ? "EN" : "हिं"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22 }}>🚧 Slab Transfer</h1>
-          <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+          <h1 style={{ margin: 0, fontSize: 27 }}>🚧 {t("Slab Transfer", "स्लैब ट्रांसफर")}</h1>
+          <p className="muted" style={{ margin: "5px 0 0", fontSize: 15.5, lineHeight: 1.4 }}>
             {activeTab === "carving"
-              ? "Move cut slabs from the stock yard to each vendor's shade. Pick a truck and claim a slab before picking it up."
-              : "Bring carved-done slabs in to their dispatch station so they can be loaded."}
+              ? t(
+                  "Move cut slabs from the yard to each vendor's shade. Pick a truck and claim a slab before pickup.",
+                  "कटी हुई स्लैब को यार्ड से वेंडर की शेड तक ले जाएँ। ट्रक चुनें और उठाने से पहले स्लैब क्लेम करें।",
+                )
+              : t(
+                  "Bring carved-done slabs in to their dispatch station so they can be loaded.",
+                  "तैयार नक्काशी वाली स्लैब को डिस्पैच स्टेशन पर लाएँ ताकि उन्हें लोड किया जा सके।",
+                )}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {activeTab === "carving" ? (
             <>
-              <StatTile label="Mine" value={mineRows.length} fg="#1d4ed8" />
-              <StatTile label="To claim" value={availableRows.length} fg="#b45309" />
-              <StatTile label="Delivered" value={delivered.length} fg="#15803d" />
+              <StatTile label={t("Mine", "मेरे")} value={mineRows.length} fg="#1d4ed8" />
+              <StatTile label={t("To claim", "उपलब्ध")} value={availableRows.length} fg="#b45309" />
+              <StatTile label={t("Delivered", "पहुँचाया")} value={delivered.length} fg="#15803d" />
             </>
           ) : (
-            <StatTile label="To bring in" value={dispatchRows.length} fg="#4f46e5" />
+            <StatTile label={t("To bring in", "लाना है")} value={dispatchRows.length} fg="#4f46e5" />
           )}
         </div>
       </div>
@@ -275,25 +327,25 @@ export function TransferDispatchList({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {(
           [
-            { key: "carving", label: "🚧 Cutting → Carving", count: cncRows.length },
-            { key: "dispatch", label: "📦 Carving → Dispatch", count: dispatchRows.length },
+            { key: "carving", label: t("🚧 Cutting → Carving", "🚧 कटाई → नक्काशी"), count: cncRows.length },
+            { key: "dispatch", label: t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच"), count: dispatchRows.length },
           ] as const
-        ).map((t) => {
-          const on = activeTab === t.key;
+        ).map((tab) => {
+          const on = activeTab === tab.key;
           return (
             <button
-              key={t.key}
+              key={tab.key}
               type="button"
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => setActiveTab(tab.key)}
               style={{
                 flex: "1 1 200px",
-                minHeight: 48,
+                minHeight: 52,
                 padding: "10px 16px",
                 border: on ? "2px solid #1d4ed8" : "1.5px solid var(--border)",
                 background: on ? "#dbeafe" : "var(--surface)",
                 color: on ? "#1d4ed8" : "var(--text)",
                 borderRadius: 12,
-                fontSize: 15,
+                fontSize: 17,
                 fontWeight: 800,
                 cursor: "pointer",
                 display: "flex",
@@ -302,18 +354,18 @@ export function TransferDispatchList({
                 gap: 8,
               }}
             >
-              {t.label}
+              {tab.label}
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 14,
                   fontWeight: 800,
                   background: on ? "#1d4ed8" : "var(--surface-alt)",
                   color: on ? "#fff" : "var(--muted)",
                   borderRadius: 999,
-                  padding: "1px 9px",
+                  padding: "1px 10px",
                 }}
               >
-                {t.count}
+                {tab.count}
               </span>
             </button>
           );
@@ -329,11 +381,11 @@ export function TransferDispatchList({
           NULL-batch rows from before mig 065) render as a group of 1. */}
       <SectionShell
         kind="mine"
-        title="🚧 Claimed by me"
+        title={t("🚧 Claimed by me", "🚧 मेरे क्लेम किए")}
         subtitle={
           mineRows.length === 0
-            ? "Nothing claimed yet — pick something from Available below."
-            : `${mineRows.length} slab${mineRows.length !== 1 ? "s" : ""} to deliver`
+            ? t("Nothing claimed yet — pick something from Available below.", "अभी कुछ नहीं — नीचे उपलब्ध में से चुनें।")
+            : t(`${mineRows.length} slab(s) to deliver`, `${mineRows.length} स्लैब पहुँचानी है`)
         }
       >
         {mineRows.length > 0 && (
@@ -427,27 +479,29 @@ export function TransferDispatchList({
                             }}
                             style={{
                               flex: "1 1 180px",
-                              fontSize: 14,
-                              padding: "10px 18px",
-                              fontWeight: 700,
+                              fontSize: 16,
+                              padding: "12px 18px",
+                              fontWeight: 800,
                               background: "#16a34a",
                               color: "#fff",
                               border: "none",
                               borderRadius: 8,
                               cursor: "pointer",
-                              minHeight: 44,
+                              minHeight: 48,
                               boxShadow: "0 2px 8px rgba(22,163,74,0.25)",
                             }}
                           >
-                            ✅ Deliver all {g.rows.length}
+                            ✅ {t("Deliver all", "सब पहुँचाएँ")} {g.rows.length}
                           </button>
                           <form
                             action={unclaimSlabTransferBatchAction}
                             onSubmit={(e) => {
                               if (
                                 !window.confirm(
-                                  `Release all ${g.rows.length} slabs back to the yard?\n\n` +
-                                    `Another runner can then claim them. Use this if you changed plans or someone else is doing this trip.`,
+                                  t(
+                                    `Release all ${g.rows.length} slabs back to the yard?\n\nAnother runner can then claim them. Use this if you changed plans or someone else is doing this trip.`,
+                                    `सभी ${g.rows.length} स्लैब वापस यार्ड में छोड़ें?\n\nफिर कोई और रनर इन्हें क्लेम कर सकता है। प्लान बदलने या कोई और यह फेरा करने पर इसका उपयोग करें।`,
+                                  ),
                                 )
                               ) {
                                 e.preventDefault();
@@ -459,9 +513,9 @@ export function TransferDispatchList({
                             <button
                               type="submit"
                               className="ghost-button danger-ghost"
-                              style={{ fontSize: 13, padding: "10px 16px", minHeight: 44 }}
+                              style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}
                             >
-                              🛑 Release all
+                              🛑 {t("Release all", "सब छोड़ें")}
                             </button>
                           </form>
                         </>
@@ -472,8 +526,10 @@ export function TransferDispatchList({
                           onSubmit={(e) => {
                             if (
                               !window.confirm(
-                                `Mark all ${g.rows.length} slabs as delivered to ${g.rows[0].vendor_name}?\n\n` +
-                                  `This closes the whole batch in one shot.`,
+                                t(
+                                  `Mark all ${g.rows.length} slabs as delivered to ${g.rows[0].vendor_name}?\n\nThis closes the whole batch in one shot.`,
+                                  `सभी ${g.rows.length} स्लैब ${g.rows[0].vendor_name} को पहुँचाई हुई मार्क करें?\n\nइससे पूरा बैच एक साथ बंद हो जाएगा।`,
+                                ),
                               )
                             ) {
                               e.preventDefault();
@@ -498,34 +554,34 @@ export function TransferDispatchList({
                           <input
                             type="text"
                             name="dropoff_note"
-                            placeholder={`Shared dropoff (empty = ${g.rows[0].vendor_dropoff ?? "standard spot"})`}
+                            placeholder={t(`Shared dropoff (empty = ${g.rows[0].vendor_dropoff ?? "standard spot"})`, `साझा जगह (खाली = ${g.rows[0].vendor_dropoff ?? "सामान्य जगह"})`)}
                             style={{
-                              fontSize: 13,
-                              padding: "10px 12px",
+                              fontSize: 15,
+                              padding: "11px 12px",
                               border: "1px solid var(--border)",
                               borderRadius: 8,
                               background: "var(--bg)",
                               color: "var(--text)",
                               flex: "1 1 200px",
                               minWidth: 160,
-                              minHeight: 44,
+                              minHeight: 48,
                             }}
                           />
                           <button
                             type="submit"
                             style={{
-                              fontSize: 14,
-                              padding: "10px 18px",
-                              fontWeight: 700,
+                              fontSize: 16,
+                              padding: "11px 18px",
+                              fontWeight: 800,
                               background: "#16a34a",
                               color: "#fff",
                               border: "none",
                               borderRadius: 8,
                               cursor: "pointer",
-                              minHeight: 44,
+                              minHeight: 48,
                             }}
                           >
-                            ✅ Deliver all {g.rows.length}
+                            ✅ {t("Deliver all", "सब पहुँचाएँ")} {g.rows.length}
                           </button>
                           <button
                             type="button"
@@ -537,9 +593,9 @@ export function TransferDispatchList({
                               })
                             }
                             className="ghost-button"
-                            style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+                            style={{ fontSize: 14, padding: "11px 14px", minHeight: 48 }}
                           >
-                            Cancel
+                            {t("Cancel", "रद्द")}
                           </button>
                         </form>
                       )}
@@ -552,6 +608,7 @@ export function TransferDispatchList({
                       kind="mine"
                       stoneTypes={stoneTypes}
                       now={now}
+                      t={t}
                     />
                   ))}
                 </div>
@@ -569,11 +626,11 @@ export function TransferDispatchList({
           while the runner already has an active claim. */}
       <SectionShell
         kind="available"
-        title="📦 Available to claim"
+        title={t("📦 Available to claim", "📦 उपलब्ध (क्लेम करें)")}
         subtitle={
           availableRows.length === 0
-            ? "Yard is clear — nothing pending."
-            : `${availableRows.length} slab${availableRows.length !== 1 ? "s" : ""} ready for pickup`
+            ? t("Yard is clear — nothing pending.", "यार्ड खाली है — कुछ बाकी नहीं।")
+            : t(`${availableRows.length} slab(s) ready for pickup`, `${availableRows.length} स्लैब उठाने को तैयार`)
         }
         collapsible
         defaultOpen
@@ -595,10 +652,12 @@ export function TransferDispatchList({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 16 }}>🏗️</span>
-            <span>
-              Finish your current batch first — <strong>Mark delivered</strong> or
-              <strong> Release claim</strong> on each above before opening a new batch.
+            <span style={{ fontSize: 18 }}>🏗️</span>
+            <span style={{ fontSize: 14 }}>
+              {t(
+                "Finish your current batch first — Mark delivered or Release claim on each above before opening a new batch.",
+                "पहले अपना मौजूदा बैच पूरा करें — ऊपर हर स्लैब को पहुँचाएँ या क्लेम छोड़ें, फिर नया बैच लें।",
+              )}
             </span>
           </div>
         )}
@@ -619,16 +678,16 @@ export function TransferDispatchList({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 700, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
-              🚚 Truck
+            <span style={{ fontSize: 16, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
+              🚚 {t("Truck", "ट्रक")}
             </span>
             <div style={{ flex: "1 1 220px", minWidth: 180 }}>
               <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
             </div>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            <span style={{ fontSize: 13, color: "var(--muted)" }}>
               {truckName.trim()
-                ? "Carries this whole claim."
-                : "Pick or add the truck before claiming."}
+                ? t("Carries this whole claim.", "यह पूरा क्लेम इसी ट्रक पर।")
+                : t("Pick or add the truck before claiming.", "क्लेम से पहले ट्रक चुनें या जोड़ें।")}
             </span>
           </div>
         )}
@@ -650,10 +709,10 @@ export function TransferDispatchList({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 700, color: selectedIds.size > 0 ? "#1d4ed8" : "var(--muted)" }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: selectedIds.size > 0 ? "#1d4ed8" : "var(--muted)" }}>
               {selectedIds.size === 0
-                ? `Select up to ${CLAIM_BATCH_MAX} slabs to claim as one batch`
-                : `${selectedIds.size} / ${CLAIM_BATCH_MAX} selected`}
+                ? t(`Select up to ${CLAIM_BATCH_MAX} slabs to claim as one batch`, `एक बैच में ${CLAIM_BATCH_MAX} तक स्लैब चुनें`)
+                : t(`${selectedIds.size} / ${CLAIM_BATCH_MAX} selected`, `${selectedIds.size} / ${CLAIM_BATCH_MAX} चुनी`)}
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
               {selectedIds.size > 0 && (
@@ -661,9 +720,9 @@ export function TransferDispatchList({
                   type="button"
                   className="ghost-button"
                   onClick={() => setSelectedIds(new Set())}
-                  style={{ fontSize: 12, padding: "8px 14px", minHeight: 44 }}
+                  style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}
                 >
-                  Clear
+                  {t("Clear", "हटाएँ")}
                 </button>
               )}
               <form
@@ -684,8 +743,10 @@ export function TransferDispatchList({
                   const n = selectedIds.size;
                   if (
                     !window.confirm(
-                      `Claim ${n} slab${n === 1 ? "" : "s"} onto truck "${truckName.trim()}"?\n\n` +
-                        `You'll need to deliver or release all of them before you can open a new batch.`,
+                      t(
+                        `Claim ${n} slab(s) onto truck "${truckName.trim()}"?\n\nYou'll need to deliver or release all of them before you can open a new batch.`,
+                        `${n} स्लैब ट्रक "${truckName.trim()}" पर क्लेम करें?\n\nनया बैच लेने से पहले इन सबको पहुँचाना या छोड़ना होगा।`,
+                      ),
                     )
                   ) {
                     e.preventDefault();
@@ -710,15 +771,15 @@ export function TransferDispatchList({
                   disabled={selectedIds.size === 0 || !truckName.trim()}
                   title={!truckName.trim() ? "Pick or add the truck first" : undefined}
                   style={{
-                    fontSize: 14,
-                    padding: "10px 20px",
-                    fontWeight: 700,
-                    minHeight: 44,
+                    fontSize: 16,
+                    padding: "11px 22px",
+                    fontWeight: 800,
+                    minHeight: 48,
                     opacity: selectedIds.size === 0 || !truckName.trim() ? 0.5 : 1,
                     cursor: selectedIds.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
                   }}
                 >
-                  📦 Claim {selectedIds.size > 0 ? `${selectedIds.size} slab${selectedIds.size === 1 ? "" : "s"}` : "selected"}
+                  📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}
                 </button>
               </form>
             </div>
@@ -807,11 +868,12 @@ export function TransferDispatchList({
                           row={r}
                           kind="available"
                           stoneTypes={stoneTypes}
+                          t={t}
                           disabledReason={
                             hasActiveClaim
-                              ? "Deliver or release your current batch first"
+                              ? t("Deliver or release your current batch first", "पहले मौजूदा बैच पहुँचाएँ या छोड़ें")
                               : atCap
-                                ? `Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`
+                                ? t(`Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`, `एक बैच में ज़्यादा से ज़्यादा ${CLAIM_BATCH_MAX} — पहले चुनी हुई क्लेम करें`)
                                 : null
                           }
                           selected={isSelected}
@@ -839,8 +901,8 @@ export function TransferDispatchList({
       {delivered.length > 0 && (
         <SectionShell
           kind="delivered"
-          title="✅ Delivered today"
-          subtitle={`${delivered.length} slab${delivered.length !== 1 ? "s" : ""} delivered in the last 48 hours`}
+          title={t("✅ Delivered today", "✅ आज पहुँचाई")}
+          subtitle={t(`${delivered.length} slab(s) delivered in the last 48 hours`, `पिछले 48 घंटे में ${delivered.length} स्लैब पहुँचाई`)}
           collapsible
           defaultOpen={false}
         >
@@ -857,8 +919,8 @@ export function TransferDispatchList({
       {othersRows.length > 0 && (
         <SectionShell
           kind="others"
-          title="👥 Claimed by other runners"
-          subtitle="Already grabbed — visible for awareness only."
+          title={t("👥 Claimed by other runners", "👥 दूसरों के क्लेम")}
+          subtitle={t("Already grabbed — visible for awareness only.", "पहले ही ले लिए — सिर्फ जानकारी के लिए।")}
           collapsible
           defaultOpen={false}
         >
@@ -870,6 +932,7 @@ export function TransferDispatchList({
                 kind="others"
                 canUnclaim={canUnclaimOthers}
                 stoneTypes={stoneTypes}
+                t={t}
               />
             ))}
           </div>
@@ -888,6 +951,7 @@ export function TransferDispatchList({
           truckName={dispatchTruckName}
           setTruckName={setDispatchTruckName}
           onNeedToast={setToastMsg}
+          t={t}
         />
       )}
     </div>
@@ -907,6 +971,7 @@ function DispatchTransferTab({
   truckName,
   setTruckName,
   onNeedToast,
+  t,
 }: {
   rows: DispatchTransferRow[];
   selected: Set<string>;
@@ -916,6 +981,7 @@ function DispatchTransferTab({
   truckName: string;
   setTruckName: (v: string) => void;
   onNeedToast: (m: string) => void;
+  t: (en: string, hi: string) => string;
 }) {
   const byStation = new Map<string, DispatchTransferRow[]>();
   for (const r of rows) {
@@ -931,18 +997,19 @@ function DispatchTransferTab({
   return (
     <SectionShell
       kind="available"
-      title="📦 Carving → Dispatch"
+      title={t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच")}
       subtitle={
         rows.length === 0
-          ? "Nothing waiting — carved slabs show here until you bring them in."
-          : `${rows.length} carved slab${rows.length !== 1 ? "s" : ""} ready to bring in to dispatch`
+          ? t("Nothing waiting — carved slabs show here until you bring them in.", "कुछ बाकी नहीं — तैयार स्लैब यहाँ दिखेंगी जब तक आप उन्हें न लाएँ।")
+          : t(`${rows.length} carved slab(s) ready to bring in to dispatch`, `${rows.length} तैयार स्लैब डिस्पैच पर लाने को तैयार`)
       }
     >
       {rows.length === 0 ? (
-        <div className="muted" style={{ fontSize: 13, padding: "8px 2px" }}>
-          When a slab is approved it waits here until you bring it in to its
-          dispatch station. Once brought in, it becomes selectable on the
-          Dispatch board. Slabs the reviewer self-transferred skip this queue.
+        <div className="muted" style={{ fontSize: 15, padding: "8px 2px", lineHeight: 1.5 }}>
+          {t(
+            "When a slab is approved it waits here until you bring it in to its dispatch station. Once brought in, it becomes selectable on the Dispatch board. Slabs the reviewer self-transferred skip this queue.",
+            "स्लैब अप्रूव होने पर यहाँ रहती है जब तक आप उसे डिस्पैच स्टेशन पर न लाएँ। लाने के बाद वह डिस्पैच बोर्ड पर चुनी जा सकती है। जो स्लैब रिव्यूअर ने खुद ट्रांसफर कर दीं वे यह कतार छोड़ देती हैं।",
+          )}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -961,14 +1028,16 @@ function DispatchTransferTab({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
-              🚚 Truck
+            <span style={{ fontSize: 16, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
+              🚚 {t("Truck", "ट्रक")}
             </span>
             <div style={{ flex: "1 1 220px", minWidth: 180 }}>
               <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
             </div>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {truckName.trim() ? "Carries this dispatch run." : "Pick or add the truck before bringing in."}
+            <span style={{ fontSize: 13, color: "var(--muted)" }}>
+              {truckName.trim()
+                ? t("Carries this dispatch run.", "यह डिस्पैच फेरा इसी ट्रक पर।")
+                : t("Pick or add the truck before bringing in.", "लाने से पहले ट्रक चुनें या जोड़ें।")}
             </span>
           </div>
           {/* Bring-in action bar */}
@@ -990,18 +1059,18 @@ function DispatchTransferTab({
               onClick={() =>
                 setSelected(() => (allSelected ? new Set() : new Set(allIds)))
               }
-              style={{ fontSize: 12, padding: "8px 14px", minHeight: 44 }}
+              style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}
             >
-              {allSelected ? "Clear all" : "Select all"}
+              {allSelected ? t("Clear all", "सब हटाएँ") : t("Select all", "सब चुनें")}
             </button>
             <span
               style={{
-                fontSize: 13,
+                fontSize: 15,
                 fontWeight: 700,
                 color: selected.size > 0 ? "#1d4ed8" : "var(--muted)",
               }}
             >
-              {selected.size === 0 ? "Select slabs to bring in" : `${selected.size} selected`}
+              {selected.size === 0 ? t("Select slabs to bring in", "लाने के लिए स्लैब चुनें") : t(`${selected.size} selected`, `${selected.size} चुनी`)}
             </span>
             <div style={{ marginLeft: "auto" }}>
               <form
@@ -1029,15 +1098,15 @@ function DispatchTransferTab({
                   disabled={selected.size === 0 || !truckName.trim()}
                   title={!truckName.trim() ? "Pick or add the truck first" : undefined}
                   style={{
-                    fontSize: 14,
-                    padding: "10px 20px",
-                    fontWeight: 700,
-                    minHeight: 44,
+                    fontSize: 16,
+                    padding: "11px 22px",
+                    fontWeight: 800,
+                    minHeight: 48,
                     opacity: selected.size === 0 || !truckName.trim() ? 0.5 : 1,
                     cursor: selected.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
                   }}
                 >
-                  🚚 Bring {selected.size > 0 ? `${selected.size} ` : ""}in to dispatch
+                  🚚 {t("Bring in to dispatch", "डिस्पैच पर लाएँ")} {selected.size > 0 ? selected.size : ""}
                 </button>
               </form>
             </div>
@@ -1055,10 +1124,10 @@ function DispatchTransferTab({
                   marginBottom: 2,
                 }}
               >
-                <span style={{ fontSize: 14 }}>📦</span>
-                <strong style={{ fontSize: 13, color: "var(--text)" }}>{station}</strong>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
-                  {grows.length} slab{grows.length === 1 ? "" : "s"}
+                <span style={{ fontSize: 15 }}>📦</span>
+                <strong style={{ fontSize: 15, color: "var(--text)" }}>{station}</strong>
+                <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
+                  {grows.length} {t("slab", "स्लैब")}{grows.length === 1 ? "" : t("s", "")}
                 </span>
               </div>
               {grows.map((r) => (
@@ -1125,8 +1194,8 @@ function DispatchBringInRow({
       <span
         aria-hidden
         style={{
-          width: 21,
-          height: 21,
+          width: 26,
+          height: 26,
           borderRadius: 7,
           flexShrink: 0,
           border: selected ? "none" : "2px solid var(--border)",
@@ -1135,7 +1204,7 @@ function DispatchBringInRow({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 13,
+          fontSize: 15,
           fontWeight: 900,
         }}
       >
@@ -1148,18 +1217,18 @@ function DispatchBringInRow({
           t={T}
           stone={row.stone}
           stoneTypes={stoneTypes}
-          size={40}
+          size={48}
         />
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>
+          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 16 }}>
             {row.slab_id}
           </code>
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{row.temple}</span>
+          <span style={{ fontSize: 13.5, color: "var(--muted)" }}>{row.temple}</span>
         </div>
-        <div style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-          {L}×{W}×{T} in · {row.stone ?? "—"} · carved by {row.vendor_name}
+        <div style={{ fontSize: 13, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+          {L}×{W}×{T} in · {row.stone ?? "—"}
         </div>
       </div>
     </div>
@@ -1257,8 +1326,8 @@ function SectionShell({
             {isOpen ? "▼" : "▶"}
           </span>
         )}
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: tint.titleFg }}>{title}</h2>
-        <span style={{ fontSize: 12, color: tint.subtitleFg }}>{subtitle}</span>
+        <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: tint.titleFg }}>{title}</h2>
+        <span style={{ fontSize: 14, color: tint.subtitleFg }}>{subtitle}</span>
       </div>
       {isOpen && children}
     </section>
@@ -1274,11 +1343,13 @@ function TransferCard({
   stoneTypes,
   disabledReason,
   now,
+  t,
 }: {
   row: TransferRow;
   kind: "mine" | "available" | "others";
   canUnclaim?: boolean;
   stoneTypes: StoneTypeDef[];
+  t: (en: string, hi: string) => string;
   /** When set, the Claim button on an Available row is disabled
    *  and shows this hint as a tooltip + greyed out style. Used to
    *  enforce the one-active-claim-per-runner rule. */
@@ -1376,15 +1447,15 @@ function TransferCard({
               title={disabledReason ?? undefined}
               style={{
                 width: "100%",
-                fontSize: 14,
-                padding: "12px 20px",
-                fontWeight: 700,
-                minHeight: 44,
+                fontSize: 16,
+                padding: "13px 20px",
+                fontWeight: 800,
+                minHeight: 48,
                 opacity: disabledReason ? 0.45 : 1,
                 cursor: disabledReason ? "not-allowed" : "pointer",
               }}
             >
-              {disabledReason ? "🏗️ Deliver current first" : "📦 Claim this slab"}
+              {disabledReason ? t("🏗️ Deliver current first", "🏗️ पहले मौजूदा पहुँचाएँ") : t("📦 Claim this slab", "📦 यह स्लैब क्लेम करें")}
             </button>
           </form>
         )}
@@ -1396,19 +1467,19 @@ function TransferCard({
               style={{
                 flex: 1,
                 minWidth: 160,
-                fontSize: 14,
-                padding: "12px 20px",
-                fontWeight: 700,
+                fontSize: 16,
+                padding: "13px 20px",
+                fontWeight: 800,
                 background: "#16a34a",
                 color: "#fff",
                 border: "none",
                 borderRadius: 8,
                 cursor: "pointer",
-                minHeight: 44,
+                minHeight: 48,
                 boxShadow: "0 2px 8px rgba(22,163,74,0.25)",
               }}
             >
-              ✅ Mark delivered
+              ✅ {t("Mark delivered", "पहुँचा दिया")}
             </button>
             <form action={unclaimSlabTransferAction}>
               <input type="hidden" name="carving_item_id" value={row.id} />
@@ -1416,9 +1487,9 @@ function TransferCard({
               <button
                 type="submit"
                 className="ghost-button"
-                style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+                style={{ fontSize: 14, padding: "11px 14px", minHeight: 48 }}
               >
-                Release claim
+                {t("Release claim", "क्लेम छोड़ें")}
               </button>
             </form>
           </>
@@ -1433,42 +1504,42 @@ function TransferCard({
             <input
               type="text"
               name="dropoff_note"
-              placeholder={`Where? (empty = ${row.vendor_dropoff ?? "standard spot"})`}
+              placeholder={t(`Where? (empty = ${row.vendor_dropoff ?? "standard spot"})`, `कहाँ रखा? (खाली = ${row.vendor_dropoff ?? "सामान्य जगह"})`)}
               style={{
-                fontSize: 13,
-                padding: "10px 12px",
+                fontSize: 15,
+                padding: "11px 12px",
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 background: "var(--bg)",
                 color: "var(--text)",
                 flex: "1 1 180px",
                 minWidth: 140,
-                minHeight: 44,
+                minHeight: 48,
               }}
             />
             <button
               type="submit"
               style={{
-                fontSize: 13,
-                padding: "10px 18px",
-                fontWeight: 700,
+                fontSize: 15,
+                padding: "11px 18px",
+                fontWeight: 800,
                 background: "#16a34a",
                 color: "#fff",
                 border: "none",
                 borderRadius: 8,
                 cursor: "pointer",
-                minHeight: 44,
+                minHeight: 48,
               }}
             >
-              ✅ Done
+              ✅ {t("Done", "हो गया")}
             </button>
             <button
               type="button"
               onClick={() => setDeliverOpen(false)}
               className="ghost-button"
-              style={{ fontSize: 12, padding: "10px 14px", minHeight: 44 }}
+              style={{ fontSize: 14, padding: "11px 14px", minHeight: 48 }}
             >
-              Cancel
+              {t("Cancel", "रद्द")}
             </button>
           </form>
         )}
@@ -1479,9 +1550,9 @@ function TransferCard({
             <button
               type="submit"
               className="ghost-button danger-ghost"
-              style={{ fontSize: 12, padding: "8px 14px" }}
+              style={{ fontSize: 14, padding: "9px 14px" }}
             >
-              Release their claim
+              {t("Release their claim", "उनका क्लेम छोड़ें")}
             </button>
           </form>
         )}
@@ -1507,11 +1578,13 @@ function CompactRow({
   selected,
   onToggleSelect,
   selectDisabled,
+  t,
 }: {
   row: TransferRow;
   kind: "available" | "others";
   canUnclaim?: boolean;
   stoneTypes: StoneTypeDef[];
+  t: (en: string, hi: string) => string;
   disabledReason?: string | null;
   /** Mig 065 — for `kind="available"`, the row renders a checkbox
    *  instead of an inline Claim button. Parent owns the selected-set
@@ -1572,7 +1645,7 @@ function CompactRow({
             style={{
               fontFamily: "ui-monospace, monospace",
               fontWeight: 800,
-              fontSize: 15,
+              fontSize: 18,
               color: "var(--text)",
             }}
           >
@@ -1582,7 +1655,7 @@ function CompactRow({
             style={{
               fontFamily: "ui-monospace, monospace",
               fontWeight: 700,
-              fontSize: 13,
+              fontSize: 14,
               color: "var(--text)",
               background: "var(--surface-alt)",
               padding: "2px 7px",
@@ -1596,7 +1669,7 @@ function CompactRow({
         {/* Line 2 — temple + label, secondary */}
         <div
           style={{
-            fontSize: 12,
+            fontSize: 13.5,
             color: "var(--muted)",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -1632,9 +1705,9 @@ function CompactRow({
             )}
           </span>
           {kind === "others" && row.claimed_by_name && (
-            <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 10 }}>
-              · Claimed by <strong>{row.claimed_by_name}</strong>
-              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ago`}
+            <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>
+              · {t("Claimed by", "क्लेम:")} <strong>{row.claimed_by_name}</strong>
+              {row.claimed_at && ` · ${formatRelative(row.claimed_at)} ${t("ago", "पहले")}`}
             </span>
           )}
         </div>
