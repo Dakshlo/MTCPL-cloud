@@ -4257,6 +4257,66 @@ const APPROVE_QUALITY_FLAGS = new Set([
   "other",
 ]);
 
+/**
+ * Mig 145 — resolve a dispatch-station name from the approval form to a
+ * dispatch_stations.id, creating it if brand-new (pick-or-create). Case-
+ * insensitive find so duplicates collapse. Returns null when no name was
+ * supplied. Non-fatal: never blocks an approval over station bookkeeping.
+ */
+async function resolveDispatchStationByName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  name: string,
+  userId: string,
+): Promise<string | null> {
+  const clean = (name ?? "").trim();
+  if (!clean) return null;
+  try {
+    const { data: existing } = await admin
+      .from("dispatch_stations")
+      .select("id")
+      .ilike("name", clean)
+      .maybeSingle();
+    if (existing) return (existing as { id: string }).id;
+    const { data: created } = await admin
+      .from("dispatch_stations")
+      .insert({ name: clean, created_by: userId })
+      .select("id")
+      .maybeSingle();
+    return created ? (created as { id: string }).id : null;
+  } catch (e) {
+    console.warn("[resolveDispatchStationByName] non-fatal", e);
+    return null;
+  }
+}
+
+/**
+ * Mig 145 — active dispatch stations for the Carving-Done approval
+ * picker. Fetched on mount by ApproveRejectForms so the list needn't be
+ * threaded through the whole carving dashboard tree. Default station
+ * sorts first so the form can pre-select it.
+ */
+export async function getDispatchStationsAction(): Promise<
+  | { ok: true; stations: { id: string; name: string; is_default: boolean }[] }
+  | { ok: false }
+> {
+  try {
+    await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+    const admin = createAdminSupabaseClient();
+    const { data } = await admin
+      .from("dispatch_stations")
+      .select("id, name, is_default")
+      .eq("is_active", true)
+      .order("is_default", { ascending: false })
+      .order("name");
+    return {
+      ok: true,
+      stations: (data ?? []) as { id: string; name: string; is_default: boolean }[],
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function approveCarvingJobAction(formData: FormData) {
   const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
   const admin = createAdminSupabaseClient();
@@ -4379,6 +4439,19 @@ export async function approveCarvingJobAction(formData: FormData) {
   const now = new Date().toISOString();
   const finalLocation = j.temporary_location ?? j.location ?? "Carving area";
 
+  // Mig 145 — dispatch station the reviewer routed this slab to, and
+  // whether they SELF-TRANSFERRED. Self-transfer bypasses the carving→
+  // dispatch runner: we stamp received_at_dispatch_at now so the slab is
+  // immediately clickable on the Dispatch board. A normal approval
+  // leaves received_at_dispatch_at NULL until the transfer person brings
+  // it in (Phase 5 gate).
+  const dispatchStationId = await resolveDispatchStationByName(
+    admin,
+    txt(formData, "dispatch_station_name"),
+    profile.id,
+  );
+  const selfTransfer = txt(formData, "self_transfer") === "1";
+
   // Surface the actual error if the update fails (could be a
   // missing column on prod schema if migration 014 wasn't run).
   const { error: updateErr } = await admin
@@ -4411,6 +4484,19 @@ export async function approveCarvingJobAction(formData: FormData) {
       location: finalLocation,
       ready_to_dispatch_at: now,
       ready_to_dispatch_by: profile.id,
+      // Mig 145 — dispatch routing + (optional) instant self-transfer.
+      // Only reference the new columns when we actually have a value, so
+      // an approve that runs a little BEFORE the migration (or from a
+      // surface that doesn't send these fields) never touches them — same
+      // safety posture as the depart columns above.
+      ...(dispatchStationId ? { dispatch_station_id: dispatchStationId } : {}),
+      ...(selfTransfer
+        ? {
+            dispatch_self_transfer: true,
+            received_at_dispatch_at: now,
+            received_at_dispatch_by: profile.id,
+          }
+        : {}),
     })
     .eq("id", jobId);
   if (updateErr) {

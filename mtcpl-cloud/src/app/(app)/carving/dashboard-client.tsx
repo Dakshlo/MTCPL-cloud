@@ -24,6 +24,7 @@ import { BulkAssignModal } from "./bulk-assign-modal";
 import { ReceiveModal } from "./receive-modal";
 import {
   approveCarvingJobAction,
+  getDispatchStationsAction,
   reworkCarvingJobAction,
   stillPendingWorkAction,
   involveOwnerAction,
@@ -4339,6 +4340,30 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
   // Mig 088 — optional carved-sides correction at approval. "" = keep
   // whatever was set at assign (post nothing); "1"/"2" = override.
   const [sidesOverride, setSidesOverride] = useState<"" | "1" | "2">("");
+  // Mig 145 — dispatch station + self-transfer (Approve mode only).
+  // Stations are fetched on mount via a server action so the list isn't
+  // threaded through the whole dashboard tree; the default pre-selects.
+  // Self-transfer bypasses the carving→dispatch runner (the slab is
+  // received at dispatch immediately and is clickable there at once).
+  const [dispatchStations, setDispatchStations] = useState<
+    { id: string; name: string; is_default: boolean }[]
+  >([]);
+  const [dispatchStation, setDispatchStation] = useState("");
+  const [selfTransfer, setSelfTransfer] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getDispatchStationsAction()
+      .then((res) => {
+        if (!alive || !res.ok) return;
+        setDispatchStations(res.stations);
+        const def = res.stations.find((s) => s.is_default) ?? res.stations[0];
+        if (def) setDispatchStation((cur) => cur || def.name);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   // Mig 081 follow-on — option metadata for the custom picker.
   // Each row drives icon + label + subtitle + accent tint on the
   // popup card. Keep the value strings in lock-step with the
@@ -4475,6 +4500,11 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
     // Mig 097 — Depart rides on the approve action.
     if (mode === "approve" && depart) {
       fd.set("depart", "1");
+    }
+    // Mig 145 — dispatch station routing + optional self-transfer.
+    if (mode === "approve") {
+      if (dispatchStation.trim()) fd.set("dispatch_station_name", dispatchStation.trim());
+      if (selfTransfer) fd.set("self_transfer", "1");
     }
     // Mig 132 — the old hard-Reject is replaced by the slab-cancel
     // REQUEST flow: reason + photo go to the owner's task panel; the
@@ -4854,6 +4884,64 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
             would add no value). */}
         {mode === "approve" ? (
           <div>
+            {/* Mig 145 — dispatch station routing + self-transfer.
+                The finished slab heads to this station for loading.
+                Self-transfer bypasses the carving→dispatch runner so the
+                slab is dispatchable immediately; otherwise it joins the
+                carving→dispatch queue until a runner brings it in.
+                Hidden until stations load — pre-migration the list comes
+                back empty, and we must NOT post these fields then. */}
+            {dispatchStations.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 6,
+                }}
+              >
+                <span aria-hidden>📦</span>
+                Dispatch station
+              </div>
+              <DispatchStationCombobox
+                value={dispatchStation}
+                onChange={setDispatchStation}
+                stations={dispatchStations}
+              />
+              <label
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "flex-start",
+                  marginTop: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selfTransfer}
+                  onChange={(e) => setSelfTransfer(e.target.checked)}
+                  style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", accentColor: "#1d4ed8" }}
+                />
+                <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>
+                    Self-transfer to dispatch now
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Skip the transfer runner — the slab is received at dispatch
+                    immediately and can be loaded right away. Leave off to send
+                    it to the carving→dispatch queue.
+                  </span>
+                </span>
+              </label>
+            </div>
+            )}
             {/* Mig 088 — confirm / correct carved sides right before it
                 counts. "Keep" leaves whatever was set at assign. */}
             <div style={{ marginBottom: 14 }}>
@@ -5767,6 +5855,205 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span style={{ fontSize: 13, color: "var(--text)", textAlign: "right", minWidth: 0 }}>
         {children}
       </span>
+    </div>
+  );
+}
+
+// ── Dispatch-station pick-or-create combobox (Mig 145) ────────────
+// Themed dropdown (not native chrome) matching the app. Type to filter
+// the curated stations, click/keyboard-select, or type a brand-new name
+// (the "Use new …" row) which the server creates on approve.
+function DispatchStationCombobox({
+  value,
+  onChange,
+  stations,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  stations: { id: string; name: string; is_default: boolean }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const all = useMemo(
+    () =>
+      [...stations].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+    [stations],
+  );
+  const q = value.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (q ? all.filter((s) => s.name.toLowerCase().includes(q)) : all),
+    [all, q],
+  );
+  const exactMatch = all.some((s) => s.name.toLowerCase() === q);
+  const showCreate = q.length > 0 && !exactMatch;
+  const rows: Array<{ kind: "opt" | "new"; name: string; isDefault: boolean }> = [
+    ...filtered.map((s) => ({ kind: "opt" as const, name: s.name, isDefault: s.is_default })),
+    ...(showCreate ? [{ kind: "new" as const, name: value.trim(), isDefault: false }] : []),
+  ];
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    setActive((a) => Math.min(Math.max(a, 0), Math.max(rows.length - 1, 0)));
+  }, [rows.length]);
+
+  function choose(row: { kind: "opt" | "new"; name: string }) {
+    onChange(row.name);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setActive((a) => Math.min(a + 1, rows.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+            } else if (e.key === "Enter") {
+              if (open && rows[active]) {
+                e.preventDefault();
+                choose(rows[active]);
+              }
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          autoComplete="off"
+          placeholder="Pick a station or type a new one…"
+          style={{
+            width: "100%",
+            padding: "10px 36px 10px 12px",
+            fontSize: 14,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg)",
+            color: "var(--text)",
+            minHeight: 44,
+          }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Toggle station list"
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            height: "100%",
+            width: 34,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--muted)",
+            fontSize: 11,
+          }}
+        >
+          ▼
+        </button>
+      </div>
+
+      {open && rows.length > 0 && (
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 60,
+            maxHeight: 240,
+            overflowY: "auto",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+            padding: 4,
+          }}
+        >
+          {rows.map((row, i) => {
+            const isActive = i === active;
+            const isNew = row.kind === "new";
+            return (
+              <div
+                key={`${row.kind}:${row.name}`}
+                role="option"
+                aria-selected={isActive}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(row);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 10px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "var(--text)",
+                  background: isActive ? "var(--gold-soft, rgba(232,197,114,0.18))" : "transparent",
+                }}
+              >
+                {isNew ? (
+                  <>
+                    <span style={{ fontSize: 13 }}>＋</span>
+                    <span>
+                      Use new: <strong style={{ color: "var(--gold-dark)" }}>{row.name}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 13, opacity: 0.7 }}>📦</span>
+                    <span style={{ flex: 1 }}>{row.name}</span>
+                    {row.isDefault && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: "#1d4ed8",
+                          background: "rgba(29,78,216,0.10)",
+                          padding: "2px 6px",
+                          borderRadius: 999,
+                        }}
+                      >
+                        default
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
