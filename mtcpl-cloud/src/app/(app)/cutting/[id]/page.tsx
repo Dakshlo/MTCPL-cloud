@@ -222,7 +222,10 @@ export default async function CuttingDetailPage({
             .eq("slab.status", "planned")
             .eq("slab.stone", blockStone)
             .in("block.status", ["pending_worker", "pending_cut", "cutting"])
-            .neq("cut_session_block_id", id);
+            .neq("cut_session_block_id", id)
+            // Mig 150 — never offer a slab that's already earmarked by another
+            // awaiting-audit block's claim; it would just bounce on submit.
+            .is("pending_transfer_to_csb_id", null);
           // The PostgREST shape for joins can be either a single object
           // or an array — normalise.
           type LinkRow = {
