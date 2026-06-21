@@ -333,9 +333,9 @@ export function FloorViewClient({
               top: 0,
               left: 0,
               right: 0,
-              height: 6,
+              height: 11,
               zIndex: 10000,
-              background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+              background: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)",
               overflow: "hidden",
             }}
           >
