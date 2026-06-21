@@ -384,13 +384,11 @@ export default async function SettingsPage() {
   // Mig 144 — transfer fleet (owner/developer manage). Safe if the
   // table doesn't exist yet (returns null → empty list).
   const canManageTrucks = currentUser.role === "developer" || currentUser.role === "owner";
-  let truckList: Array<{ id: string; name: string; is_active: boolean }> = [];
+  let truckList: Array<{ id: string; name: string; is_active: boolean; driver_name?: string | null }> = [];
   if (canManageTrucks) {
-    const { data: trucks } = await admin
-      .from("trucks")
-      .select("id, name, is_active")
-      .order("name");
-    truckList = (trucks ?? []) as Array<{ id: string; name: string; is_active: boolean }>;
+    // select("*") so this stays safe before migration 147 adds driver_name.
+    const { data: trucks } = await admin.from("trucks").select("*").order("name");
+    truckList = (trucks ?? []) as Array<{ id: string; name: string; is_active: boolean; driver_name?: string | null }>;
   }
 
   return (
@@ -455,6 +453,10 @@ export default async function SettingsPage() {
                     style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, textTransform: "uppercase" }}
                   />
                 </label>
+                <label className="stack" style={{ flex: 1 }}>
+                  <span>Driver name (optional)</span>
+                  <input name="driver_name" placeholder="e.g. Ramesh" />
+                </label>
                 <button type="submit" className="primary-button" style={{ minHeight: 40 }}>
                   Add truck
                 </button>
@@ -478,8 +480,11 @@ export default async function SettingsPage() {
                   >
                     <span style={{ fontSize: 16 }}>🚚</span>
                     <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14 }}>
-                      {t.name}
+                      {t.name.toUpperCase()}
                     </code>
+                    {t.driver_name && (
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>· {t.driver_name}</span>
+                    )}
                     {!t.is_active && (
                       <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", borderRadius: 999, padding: "2px 8px" }}>
                         inactive

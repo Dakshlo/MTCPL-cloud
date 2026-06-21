@@ -203,8 +203,10 @@ export async function addTransferTruckAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "developer"]);
   const admin = createAdminSupabaseClient();
 
-  const name = text(formData, "name").trim();
+  const name = text(formData, "name").trim().toUpperCase();
   if (!name) redirect("/settings?toast=Truck+number+required");
+  // Mig 147 — optional driver name shown when the runner picks the truck.
+  const driver = text(formData, "driver_name").trim() || null;
 
   // Case-insensitive dedupe (the unique index is on lower(name)).
   const { data: existing } = await admin
@@ -214,7 +216,9 @@ export async function addTransferTruckAction(formData: FormData) {
     .maybeSingle();
   if (existing) redirect(`/settings?toast=${encodeURIComponent(`Truck "${name}" already exists`)}`);
 
-  const { error } = await admin.from("trucks").insert({ name, created_by: profile.id });
+  const { error } = await admin
+    .from("trucks")
+    .insert({ name, created_by: profile.id, ...(driver ? { driver_name: driver } : {}) });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
   revalidatePath("/settings");

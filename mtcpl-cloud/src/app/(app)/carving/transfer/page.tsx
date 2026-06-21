@@ -86,7 +86,7 @@ export default async function SlabTransferPage({
       .order("sort_order")
       .order("name"),
     // Mig 144 — active trucks for the claim picker.
-    admin.from("trucks").select("id, name").eq("is_active", true).order("name"),
+    admin.from("trucks").select("*").eq("is_active", true).order("name"),
     // Mig 144 — claims still in flight: their trucks are "busy" (derived).
     admin
       .from("carving_items")
@@ -113,9 +113,10 @@ export default async function SlabTransferPage({
       .map((c) => c.claim_truck_id)
       .filter(Boolean) as string[],
   );
-  const trucks = ((trucksData ?? []) as { id: string; name: string }[]).map((t) => ({
+  const trucks = ((trucksData ?? []) as { id: string; name: string; driver_name?: string | null }[]).map((t) => ({
     id: t.id,
     name: t.name,
+    driver: t.driver_name ?? null,
     busy: busyTruckIds.has(t.id),
   }));
 

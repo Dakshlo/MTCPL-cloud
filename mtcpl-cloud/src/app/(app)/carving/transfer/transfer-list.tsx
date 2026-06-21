@@ -124,7 +124,7 @@ const MOBILE_CSS = `
   }
 `;
 
-export type TruckOption = { id: string; name: string; busy: boolean };
+export type TruckOption = { id: string; name: string; driver?: string | null; busy: boolean };
 
 export function TransferDispatchList({
   rows,
