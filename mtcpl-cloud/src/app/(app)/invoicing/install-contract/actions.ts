@@ -93,6 +93,8 @@ export async function createInstallContractAction(formData: FormData) {
   const vendorId = String(formData.get("install_vendor_id") || "").trim();
   const siteId = String(formData.get("install_site_id") || "").trim();
   const price = Number(formData.get("price"));
+  const unitRaw = String(formData.get("price_unit") || "cft").trim().toLowerCase();
+  const priceUnit = ["cft", "sft", "installation", "piece", "lump"].includes(unitRaw) ? unitRaw : "cft";
   const scope_note = String(formData.get("scope_note") || "").trim() || null;
   const dateRaw = String(formData.get("doc_date") || "").trim();
   const docDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : null;
@@ -139,6 +141,7 @@ export async function createInstallContractAction(formData: FormData) {
     site_project: site.project_name,
     site_location: site.location,
     price,
+    price_unit: priceUnit,
     price_words: numberToIndianWords(price),
     scope_note,
     created_by: profile.id,
@@ -177,4 +180,50 @@ export async function deleteInstallContractAction(formData: FormData) {
   await logAudit(profile.id, "install_contract_deleted", "install_contract", id, {});
   revalidatePath(ROUTE);
   redirect(toastUrl("Contract deleted (kept on record)."));
+}
+
+/** Delete an installation vendor — only when no LIVE (non-cancelled)
+ *  contract references it. Cancelled contracts keep their snapshot (the
+ *  FK is ON DELETE SET NULL). */
+export async function deleteInstallVendorAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
+  const id = String(formData.get("id") || "").trim();
+  if (!id) redirect(toastUrl("Missing vendor."));
+  const admin = createAdminSupabaseClient();
+  const { data: live } = await admin
+    .from("install_contracts")
+    .select("id")
+    .eq("install_vendor_id", id)
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (live) redirect(toastUrl("Can't delete — this vendor has active contracts. Cancel them all first."));
+  const { error } = await admin.from("install_vendors").delete().eq("id", id);
+  if (error) redirect(toastUrl(error.message));
+  await logAudit(profile.id, "install_vendor_deleted", "install_vendor", id, {});
+  revalidatePath(ROUTE);
+  redirect(toastUrl("Vendor deleted."));
+}
+
+/** Delete a project site — same guard as vendor. */
+export async function deleteInstallSiteAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!isAllowed(profile.role)) redirect(toastUrl("Not allowed."));
+  const id = String(formData.get("id") || "").trim();
+  if (!id) redirect(toastUrl("Missing site."));
+  const admin = createAdminSupabaseClient();
+  const { data: live } = await admin
+    .from("install_contracts")
+    .select("id")
+    .eq("install_site_id", id)
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (live) redirect(toastUrl("Can't delete — this site has active contracts. Cancel them all first."));
+  const { error } = await admin.from("install_sites").delete().eq("id", id);
+  if (error) redirect(toastUrl(error.message));
+  await logAudit(profile.id, "install_site_deleted", "install_site", id, {});
+  revalidatePath(ROUTE);
+  redirect(toastUrl("Site deleted."));
 }

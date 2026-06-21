@@ -13,9 +13,11 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   createInstallVendorAction,
   createInstallSiteAction,
-  createInstallContractAction,
   deleteInstallContractAction,
+  deleteInstallVendorAction,
+  deleteInstallSiteAction,
 } from "./actions";
+import { ContractForm } from "./contract-form";
 
 const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
 
@@ -94,41 +96,7 @@ export default async function InstallContractPage({
             Add at least one {vList.length === 0 ? "vendor" : ""}{vList.length === 0 && sList.length === 0 ? " and " : ""}{sList.length === 0 ? "site" : ""} below first.
           </p>
         ) : (
-          <form action={createInstallContractAction} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 240px" }}>
-                <label style={lbl}>Contractor / Vendor</label>
-                <select name="install_vendor_id" required style={{ ...inp, fontWeight: 700 }} defaultValue="">
-                  <option value="" disabled>Select vendor…</option>
-                  {vList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: "1 1 240px" }}>
-                <label style={lbl}>Project / Temple site</label>
-                <select name="install_site_id" required style={{ ...inp, fontWeight: 700 }} defaultValue="">
-                  <option value="" disabled>Select site…</option>
-                  {sList.map((s) => <option key={s.id} value={s.id}>{s.project_name}{s.location ? ` — ${s.location}` : ""}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 200px" }}>
-                <label style={lbl}>Contract price (₹)</label>
-                <input name="price" type="number" min="1" step="0.01" required placeholder="e.g. 250000" style={inp} />
-              </div>
-              <div style={{ flex: "1 1 160px" }}>
-                <label style={lbl}>Contract date</label>
-                <input name="doc_date" type="date" defaultValue={today} style={inp} />
-              </div>
-            </div>
-            <div>
-              <label style={lbl}>Extra scope note (optional)</label>
-              <textarea name="scope_note" rows={2} placeholder="Any specific work detail to add to the Scope of Work clause." style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} />
-            </div>
-            <button type="submit" className="primary-button" style={{ alignSelf: "flex-start", fontSize: 15, padding: "11px 22px", fontWeight: 700 }}>
-              📜 Issue contract
-            </button>
-          </form>
+          <ContractForm vendors={vList} sites={sList} today={today} />
         )}
       </div>
 
@@ -146,6 +114,19 @@ export default async function InstallContractPage({
             <div><label style={lbl}>Address</label><textarea name="address" rows={2} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} /></div>
             <button type="submit" className="ghost-button" style={{ alignSelf: "flex-start", fontSize: 13, padding: "8px 16px" }}>Add vendor</button>
           </form>
+          {vList.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+              {vList.map((v) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{v.name}</span>
+                  <form action={deleteInstallVendorAction}>
+                    <input type="hidden" name="id" value={v.id} />
+                    <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 12, padding: "5px 10px" }}>Delete</button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ ...card, flex: "1 1 320px" }}>
           <h3 style={{ margin: 0, fontSize: 14 }}>➕ Add project site</h3>
@@ -154,6 +135,19 @@ export default async function InstallContractPage({
             <div><label style={lbl}>Site location</label><input name="location" placeholder="e.g. Ahmedabad, Gujarat" style={inp} /></div>
             <button type="submit" className="ghost-button" style={{ alignSelf: "flex-start", fontSize: 13, padding: "8px 16px" }}>Add site</button>
           </form>
+          {sList.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+              {sList.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{s.project_name}{s.location ? ` · ${s.location}` : ""}</span>
+                  <form action={deleteInstallSiteAction}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 12, padding: "5px 10px" }}>Delete</button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

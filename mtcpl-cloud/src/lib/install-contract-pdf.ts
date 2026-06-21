@@ -1,13 +1,13 @@
 // ──────────────────────────────────────────────────────────────────
-// Installation Vendor Contract — letterhead PDF (Invoicing, Mig 148)
+// Installation Vendor Contract — letterhead PDF (Invoicing, Mig 148/149)
 //
-// Standalone formal contract printed on /public/letterhead.pdf. The user
-// picks an installation vendor + project site + contract price; this
-// builds the agreement: header (CONTRACT no + date), a recital line, a
-// bordered Project + Vendor block, the contract value (figures + words),
-// the standard clauses (scope, payment, MATERIAL & DAMAGE liability,
-// quality, labour, timeline, general) with bold headings, and two
-// signature blocks (MTCPL + seal, Vendor). Built with pdf-lib.
+// Formal contract printed on /public/letterhead.pdf. The user picks an
+// installation vendor + project site + a RATE (per CFT / SFT / install /
+// piece, or a lump sum). Flows onto a 2nd letterhead page if the content
+// is long — never overflows. Header (CONTRACT no + date), recital, a
+// bordered Project + Vendor block, the contract rate (figures + words),
+// the standard clauses (scope, value, payment, MATERIAL & DAMAGE,
+// quality, labour, timeline) with bold headings, and two signatures.
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
@@ -25,9 +25,9 @@ export type InstallContractInput = {
   siteProject: string;
   siteLocation: string | null;
   price: number;
+  priceUnit: string | null; // cft | sft | installation | piece | lump
   priceWords: string | null;
   scopeNote: string | null;
-  // Soft-deleted contracts get a red CANCELLED stamp.
   cancelled?: boolean;
 };
 
@@ -35,12 +35,23 @@ const PAGE_W = 612;
 const PAGE_H = 792;
 const MARGIN_X = 54;
 const CONTENT_W = PAGE_W - 2 * MARGIN_X;
+const CONTENT_TOP = 620; // below the letterhead header (continuation pages)
+const CONTENT_BOTTOM = 96; // above the letterhead footer
 
 function san(s: string | null | undefined): string {
   return (s ?? "").replace(/₹/g, "Rs.").replace(/[^\x09\x0a\x0d\x20-\xff]/g, "");
 }
 function rs(n: number) {
   return "Rs. " + (Math.round(n * 100) / 100).toLocaleString("en-IN");
+}
+function unitLabel(u: string | null): string {
+  switch ((u ?? "cft").toLowerCase()) {
+    case "sft": return "per SFT";
+    case "installation": return "per installation";
+    case "piece": return "per piece";
+    case "lump": return "";
+    default: return "per CFT";
+  }
 }
 function fmtDate(iso: string | null) {
   if (!iso) return "-";
@@ -106,15 +117,28 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   const headBg = rgb(0.96, 0.93, 0.88);
   const lineCol = rgb(0.8, 0.78, 0.74);
 
-  const page = pdf.addPage([PAGE_W, PAGE_H]);
-  if (lhEmbed) page.drawPage(lhEmbed, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
+  // ── Page + flow cursor (auto page-break onto a fresh letterhead) ────
+  const drawLh = (p: PDFPage) => {
+    if (lhEmbed) p.drawPage(lhEmbed, { x: 0, y: 0, width: PAGE_W, height: PAGE_H });
+  };
+  let page: PDFPage = pdf.addPage([PAGE_W, PAGE_H]);
+  drawLh(page);
+  let y = CONTENT_TOP;
+  const newPage = () => {
+    page = pdf.addPage([PAGE_W, PAGE_H]);
+    drawLh(page);
+    y = CONTENT_TOP;
+  };
+  const ensure = (h: number) => {
+    if (y - h < CONTENT_BOTTOM) newPage();
+  };
 
-  const text = (s: string, x: number, y: number, size: number, f: PDFFont = font, color = ink) =>
-    page.drawText(san(s), { x, y, size, font: f, color });
-  const ctr = (s: string, cx: number, y: number, size: number, f: PDFFont = font, color = ink) =>
-    page.drawText(san(s), { x: cx - f.widthOfTextAtSize(san(s), size) / 2, y, size, font: f, color });
-  const right = (s: string, xRight: number, y: number, size: number, f: PDFFont = font, color = ink) =>
-    page.drawText(san(s), { x: xRight - f.widthOfTextAtSize(san(s), size), y, size, font: f, color });
+  const text = (s: string, x: number, yy: number, size: number, f: PDFFont = font, color = ink) =>
+    page.drawText(san(s), { x, y: yy, size, font: f, color });
+  const ctr = (s: string, cx: number, yy: number, size: number, f: PDFFont = font, color = ink) =>
+    page.drawText(san(s), { x: cx - f.widthOfTextAtSize(san(s), size) / 2, y: yy, size, font: f, color });
+  const right = (s: string, xR: number, yy: number, size: number, f: PDFFont = font, color = ink) =>
+    page.drawText(san(s), { x: xR - f.widthOfTextAtSize(san(s), size), y: yy, size, font: f, color });
   const strokeBox = (p: PDFPage, x1: number, yTop: number, x2: number, yBot: number, c: RGB, w: number) => {
     p.drawLine({ start: { x: x1, y: yTop }, end: { x: x2, y: yTop }, thickness: w, color: c });
     p.drawLine({ start: { x: x1, y: yBot }, end: { x: x2, y: yBot }, thickness: w, color: c });
@@ -122,13 +146,13 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
     p.drawLine({ start: { x: x2, y: yTop }, end: { x: x2, y: yBot }, thickness: w, color: c });
   };
 
-  // ── Title ───────────────────────────────────────────────────────────
+  // ── Title (page 1, in the gap above the content area) ───────────────
   ctr("INSTALLATION WORK CONTRACT", PAGE_W / 2, 636, 15, bold, accent);
   text(`Contract No: ${san(inp.contractNo) || "-"}`, MARGIN_X, 619, 9.5, bold, ink);
   right(`Date: ${fmtDate(inp.dateIso)}`, PAGE_W - MARGIN_X, 619, 9.5, font, muted);
+  y = 602;
 
   // ── Recital ─────────────────────────────────────────────────────────
-  let y = 602;
   const recital =
     "This Installation Work Contract (\"Contract\") is made on the date stated above between " +
     "Mateshwari Temple Construction Pvt Ltd, Pindwara, Sirohi, Rajasthan (\"the Company\"), and the " +
@@ -172,40 +196,42 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   const boxBottom = Math.min(lyy, ryy) - 4;
   strokeBox(page, MARGIN_X, boxTop + 2, PAGE_W - MARGIN_X, boxBottom, lineCol, 0.8);
 
-  // ── Contract value band ─────────────────────────────────────────────
+  // ── Contract rate band ──────────────────────────────────────────────
+  const isLump = (inp.priceUnit ?? "cft").toLowerCase() === "lump";
+  const uLabel = unitLabel(inp.priceUnit);
   y = boxBottom - 18;
   page.drawRectangle({ x: MARGIN_X, y: y - 7, width: CONTENT_W, height: 22, color: headBg });
-  text("CONTRACT VALUE", MARGIN_X + 8, y, 9.5, bold, accent);
-  right(rs(inp.price), PAGE_W - MARGIN_X - 8, y, 13, bold, accent);
+  text(isLump ? "CONTRACT VALUE" : "CONTRACT RATE", MARGIN_X + 8, y, 9.5, bold, accent);
+  right(isLump ? rs(inp.price) : `${rs(inp.price)} ${uLabel}`, PAGE_W - MARGIN_X - 8, y, 13, bold, accent);
   y -= 20;
   if (inp.priceWords) {
-    for (const ln of wrap(`Rupees ${inp.priceWords} only.`, bold, 8.5, CONTENT_W)) {
+    const wordsLine = `Rupees ${inp.priceWords} only${isLump ? "" : ` ${uLabel}`}.`;
+    for (const ln of wrap(wordsLine, bold, 8.5, CONTENT_W)) {
       text(ln, MARGIN_X, y, 8.5, bold, ink);
       y -= 11;
     }
   }
 
-  // ── Clauses ─────────────────────────────────────────────────────────
-  // Each clause: a bold heading + body. The MATERIAL & DAMAGE clause and
-  // the payment emphasis are rendered bold so they stand out.
+  // ── Clauses (flow onto page 2 if needed) ────────────────────────────
+  const valueClause = isLump
+    ? `The total agreed value for the entire scope of work is ${rs(inp.price)}` +
+      (inp.priceWords ? ` (Rupees ${inp.priceWords} only)` : "") +
+      ", inclusive of the Contractor's labour and charges. Any GST / taxes, if applicable, shall be as per law."
+    : `The agreed rate for the work is ${rs(inp.price)} ${uLabel}` +
+      (inp.priceWords ? ` (Rupees ${inp.priceWords} only ${uLabel})` : "") +
+      ". The final contract value is this rate applied to the actual measured / installed quantity, payable " +
+      "on verified joint measurement. Any GST / taxes, if applicable, shall be as per law.";
+
   const clauses: Array<{ heading: string; body: string; boldBody?: boolean }> = [
     {
       heading: "1. Scope of Work",
       body:
-        (inp.scopeNote && inp.scopeNote.trim()
-          ? inp.scopeNote.trim() + " "
-          : "") +
+        (inp.scopeNote && inp.scopeNote.trim() ? inp.scopeNote.trim() + " " : "") +
         "The Contractor shall carry out the complete installation and fixing of the carved and finished stone " +
         "supplied by the Company at the above project site, strictly as per the Company's drawings, designs and " +
         "on-site instructions, using the Contractor's own skilled labour, tools and tackle.",
     },
-    {
-      heading: "2. Contract Value",
-      body:
-        `The total agreed value for the entire scope of work is ${rs(inp.price)}` +
-        (inp.priceWords ? ` (Rupees ${inp.priceWords} only)` : "") +
-        ", inclusive of the Contractor's labour and charges. Any GST / taxes, if applicable, shall be as per law.",
-    },
+    { heading: "2. Contract Rate & Value", body: valueClause },
     {
       heading: "3. Payment Terms",
       body:
@@ -246,20 +272,23 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   const CS = 8;
   const CLH = 10.5;
   for (const c of clauses) {
+    const bodyFont = c.boldBody ? bold : font;
+    const lines = wrap(c.body, bodyFont, CS, CONTENT_W);
+    ensure(11 + lines.length * CLH + 6);
     text(c.heading, MARGIN_X, y, 8.5, bold, accent);
     y -= 11;
-    const bodyFont = c.boldBody ? bold : font;
-    const bodyColor = c.boldBody ? ink : muted;
-    for (const ln of wrap(c.body, bodyFont, CS, CONTENT_W)) {
-      text(ln, MARGIN_X, y, CS, bodyFont, bodyColor);
+    for (const ln of lines) {
+      text(ln, MARGIN_X, y, CS, bodyFont, c.boldBody ? ink : muted);
       y -= CLH;
     }
     y -= 4;
   }
 
-  // ── Signatures ──────────────────────────────────────────────────────
-  const sigLabelY = 70;
-  const sigLineY = sigLabelY + 16;
+  // ── Signatures (flow with the clauses) ──────────────────────────────
+  ensure(56);
+  y -= 22;
+  const sigLineY = y;
+  const sigLabelY = y - 13;
   page.drawLine({ start: { x: MARGIN_X, y: sigLineY }, end: { x: MARGIN_X + 210, y: sigLineY }, thickness: 0.7, color: ink });
   text("For Mateshwari Temple Construction Pvt Ltd", MARGIN_X, sigLabelY, 8, font, muted);
   text("(Authorised Signatory & Company Seal)", MARGIN_X, sigLabelY - 11, 7.5, font, muted);
@@ -267,14 +296,16 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   text("Contractor / Vendor (Signature)", PAGE_W - MARGIN_X - 210, sigLabelY, 8, font, muted);
   text(san(inp.vendorName), PAGE_W - MARGIN_X - 210, sigLabelY - 11, 7.5, font, muted);
 
-  // ── CANCELLED stamp (soft-deleted) — drawn last, on top ─────────────
+  // ── CANCELLED stamp on every page (soft-deleted) ────────────────────
   if (inp.cancelled) {
     const red = rgb(0.85, 0.12, 0.12);
-    page.drawLine({ start: { x: 28, y: PAGE_H - 28 }, end: { x: PAGE_W - 28, y: 28 }, thickness: 6, color: red, opacity: 0.45 });
-    const big = "CANCELLED";
-    page.drawText(big, { x: (PAGE_W - bold.widthOfTextAtSize(big, 60)) / 2, y: PAGE_H / 2 + 6, size: 60, font: bold, color: red, opacity: 0.5 });
-    const sub = "(NOT VALID)";
-    page.drawText(sub, { x: (PAGE_W - bold.widthOfTextAtSize(sub, 26)) / 2, y: PAGE_H / 2 - 34, size: 26, font: bold, color: red, opacity: 0.5 });
+    for (const p of pdf.getPages()) {
+      p.drawLine({ start: { x: 28, y: PAGE_H - 28 }, end: { x: PAGE_W - 28, y: 28 }, thickness: 6, color: red, opacity: 0.45 });
+      const big = "CANCELLED";
+      p.drawText(big, { x: (PAGE_W - bold.widthOfTextAtSize(big, 60)) / 2, y: PAGE_H / 2 + 6, size: 60, font: bold, color: red, opacity: 0.5 });
+      const sub = "(NOT VALID)";
+      p.drawText(sub, { x: (PAGE_W - bold.widthOfTextAtSize(sub, 26)) / 2, y: PAGE_H / 2 - 34, size: 26, font: bold, color: red, opacity: 0.5 });
+    }
   }
 
   return await pdf.save();
