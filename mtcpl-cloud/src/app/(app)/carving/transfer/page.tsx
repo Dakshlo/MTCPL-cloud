@@ -78,8 +78,9 @@ export default async function SlabTransferPage({
       .order("received_at_vendor_at", { ascending: false })
       .limit(30),
     admin
+      // select("*") so the new phone column (mig 151) is safe pre-migration.
       .from("vendors")
-      .select("id, name, vendor_type, dropoff_location")
+      .select("*")
       .in("vendor_type", ["CNC", "Outsource"]),
     admin
       .from("stone_types")
@@ -180,6 +181,7 @@ export default async function SlabTransferPage({
         name: v.name,
         vendor_type: v.vendor_type as "CNC" | "Outsource",
         dropoff_location: (v as { dropoff_location?: string | null }).dropoff_location ?? null,
+        phone: (v as { phone?: string | null }).phone ?? null,
       },
     ]),
   );
@@ -201,6 +203,7 @@ export default async function SlabTransferPage({
       vendor_name: vendor?.name ?? j.vendor_name,
       vendor_type: vendor?.vendor_type ?? (j.vendor_type as "CNC" | "Outsource"),
       vendor_dropoff: vendor?.dropoff_location ?? null,
+      vendor_phone: vendor?.phone ?? null,
       urgency: (j.urgency === "urgent" ? "urgent" : "normal") as "urgent" | "normal",
       assigned_at: j.assigned_at,
       claimed_by: j.claimed_by ?? null,

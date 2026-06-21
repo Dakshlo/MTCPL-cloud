@@ -57,6 +57,7 @@ export type TransferRow = {
   vendor_name: string;
   vendor_type: "CNC" | "Outsource";
   vendor_dropoff: string | null;
+  vendor_phone: string | null;
   urgency: "normal" | "urgent";
   assigned_at: string;
   claimed_by: string | null;
@@ -248,6 +249,9 @@ export function TransferDispatchList({
   // checkboxes once you hit the cap.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const CLAIM_BATCH_MAX = 10;
+  // Available section — vendor groups are collapsible (tap the header).
+  // Default expanded; collapsing a vendor hides its slab cards.
+  const [collapsedVendors, setCollapsedVendors] = useState<Set<string>>(new Set());
   // Daksh — per-batch "Deliver all" expanded mode. Holds claim_batch_ids
   // currently showing the shared dropoff-note input + confirm button.
   // Multiple batches can be expanded at once (different vendors); the
@@ -831,6 +835,7 @@ export function TransferDispatchList({
           type AvailGroup = {
             vendorName: string;
             vendorDropoff: string | null;
+            vendorPhone: string | null;
             rows: TransferRow[];
           };
           const byVendor = new Map<string, AvailGroup>();
@@ -841,6 +846,7 @@ export function TransferDispatchList({
             else byVendor.set(key, {
               vendorName: r.vendor_name,
               vendorDropoff: r.vendor_dropoff,
+              vendorPhone: r.vendor_phone,
               rows: [r],
             });
           }
@@ -848,80 +854,93 @@ export function TransferDispatchList({
             a.vendorName.localeCompare(b.vendorName),
           );
           return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {groups.map((g) => {
+                const collapsed = collapsedVendors.has(g.vendorName);
                 const selectedInGroup = g.rows.filter((r) => selectedIds.has(r.id)).length;
+                // Oldest-waiting slab → the header's "waiting" summary.
+                const oldest = g.rows.reduce(
+                  (acc, r) => (new Date(r.assigned_at).getTime() < new Date(acc.assigned_at).getTime() ? r : acc),
+                  g.rows[0],
+                );
                 return (
-                  <div
-                    key={g.vendorName}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                    }}
-                  >
-                    <div
+                  <div key={g.vendorName} style={{ border: "1.5px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+                    {/* Collapsible vendor header — name · phone · count · waiting */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCollapsedVendors((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.vendorName)) next.delete(g.vendorName);
+                          else next.add(g.vendorName);
+                          return next;
+                        })
+                      }
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "4px 2px",
-                        borderBottom: "1px solid var(--border)",
-                        marginBottom: 2,
+                        width: "100%", display: "flex", alignItems: "center", gap: 10,
+                        padding: "12px 14px", background: "var(--surface-alt)", border: "none",
+                        cursor: "pointer", textAlign: "left", minHeight: 56,
                       }}
                     >
-                      <span style={{ fontSize: 14 }}>🏭</span>
-                      <strong
-                        style={{
-                          fontSize: 13,
-                          color: "var(--text)",
-                          letterSpacing: "0.01em",
-                        }}
-                      >
-                        {g.vendorName}
-                      </strong>
-                      {g.vendorDropoff && (
-                        <span style={{ fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-                          → {g.vendorDropoff}
-                        </span>
-                      )}
-                      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
-                        {g.rows.length} slab{g.rows.length === 1 ? "" : "s"}
-                        {selectedInGroup > 0 && (
-                          <span style={{ color: "#1d4ed8", marginLeft: 6 }}>· {selectedInGroup} selected</span>
+                      <span style={{ fontSize: 13, color: "var(--muted)", width: 12 }}>{collapsed ? "▶" : "▼"}</span>
+                      <span style={{ fontSize: 18 }}>🏭</span>
+                      <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+                        <strong style={{ fontSize: 15, color: "var(--text)" }}>{g.vendorName}</strong>
+                        {g.vendorPhone && (
+                          <a
+                            href={`tel:${g.vendorPhone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ fontSize: 13, color: "#1d4ed8", fontFamily: "ui-monospace, monospace", textDecoration: "none", fontWeight: 700 }}
+                          >
+                            📞 {g.vendorPhone}
+                          </a>
                         )}
                       </span>
-                    </div>
-                    {g.rows.map((r) => {
-                      const isSelected = selectedIds.has(r.id);
-                      const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
-                      return (
-                        <CompactRow
-                          key={r.id}
-                          row={r}
-                          kind="available"
-                          stoneTypes={stoneTypes}
-                          t={t}
-                          disabledReason={
-                            hasActiveClaim
-                              ? t("Deliver or release your current batch first", "पहले मौजूदा बैच पहुँचाएँ या छोड़ें")
-                              : atCap
-                                ? t(`Max ${CLAIM_BATCH_MAX} per batch — claim what's selected first`, `एक बैच में ज़्यादा से ज़्यादा ${CLAIM_BATCH_MAX} — पहले चुनी हुई क्लेम करें`)
-                                : null
-                          }
-                          selected={isSelected}
-                          selectDisabled={hasActiveClaim || atCap}
-                          onToggleSelect={() => {
-                            setSelectedIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(r.id)) next.delete(r.id);
-                              else if (next.size < CLAIM_BATCH_MAX) next.add(r.id);
-                              return next;
-                            });
-                          }}
-                        />
-                      );
-                    })}
+                      <span style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: selectedInGroup > 0 ? "#1d4ed8" : "var(--text)" }}>
+                          {g.rows.length} {t("slab", "स्लैब")}{g.rows.length === 1 ? "" : t("s", "")}
+                          {selectedInGroup > 0 && <span style={{ color: "#1d4ed8" }}> · {selectedInGroup} {t("selected", "चुनी")}</span>}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: "#b45309", fontWeight: 600 }}>
+                          ⏱ {t("waiting", "रुकी")} {waitLabel(oldest.assigned_at, now)}
+                        </span>
+                      </span>
+                    </button>
+                    {/* Full-detail slab cards */}
+                    {!collapsed && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10 }}>
+                        {g.rows.map((r) => {
+                          const isSelected = selectedIds.has(r.id);
+                          const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
+                          return (
+                            <AvailableSlabCard
+                              key={r.id}
+                              row={r}
+                              stoneTypes={stoneTypes}
+                              t={t}
+                              now={now}
+                              selected={isSelected}
+                              disabled={hasActiveClaim || atCap}
+                              disabledReason={
+                                hasActiveClaim
+                                  ? t("Deliver or release your current batch first", "पहले मौजूदा बैच पहुँचाएँ या छोड़ें")
+                                  : atCap
+                                    ? t(`Max ${CLAIM_BATCH_MAX} per batch`, `एक बैच में ज़्यादा से ज़्यादा ${CLAIM_BATCH_MAX}`)
+                                    : null
+                              }
+                              onToggle={() =>
+                                setSelectedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(r.id)) next.delete(r.id);
+                                  else if (next.size < CLAIM_BATCH_MAX) next.add(r.id);
+                                  return next;
+                                })
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2375,6 +2394,129 @@ function formatRelative(iso: string): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h`;
   return `${Math.floor(hr / 24)}d`;
+}
+
+// Live "how long waiting" label (ticks with the `now` state).
+function waitLabel(iso: string, now: number): string {
+  const min = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ${min % 60}m`;
+  return `${Math.floor(hr / 24)}d ${hr % 24}h`;
+}
+
+// ── Available slab card (Mig — vendor-grouped, full detail) ────────
+// A full-detail card for a slab pending pickup: thumb, code, urgency /
+// lathe badges, how long it's been waiting, temple · label · dims ·
+// stone, and the 📍 stock-location → 🏭 vendor route. Tap to select.
+function AvailableSlabCard({
+  row,
+  stoneTypes,
+  t,
+  now,
+  selected,
+  disabled,
+  disabledReason,
+  onToggle,
+}: {
+  row: TransferRow;
+  stoneTypes: StoneTypeDef[];
+  t: (en: string, hi: string) => string;
+  now: number;
+  selected: boolean;
+  disabled: boolean;
+  disabledReason: string | null;
+  onToggle: () => void;
+}) {
+  const L = row.length_ft;
+  const W = row.width_ft;
+  const T = row.thickness_ft;
+  const clickable = !disabled;
+  const tint = row.batch_id ? batchTint(row.batch_id) : null;
+  return (
+    <div
+      onClick={clickable ? onToggle : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={disabledReason ?? undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle();
+              }
+            }
+          : undefined
+      }
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: selected ? "2px solid #1d4ed8" : "1px solid var(--border)",
+        borderLeft: `5px solid ${selected ? "#1d4ed8" : tint ? tint.border : "var(--border)"}`,
+        background: selected ? "rgba(29,78,216,0.06)" : "var(--surface)",
+        cursor: clickable ? "pointer" : "not-allowed",
+        opacity: disabled ? 0.55 : 1,
+        userSelect: "none",
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: 7,
+          flexShrink: 0,
+          marginTop: 2,
+          border: selected ? "none" : "2px solid var(--border)",
+          background: selected ? "#1d4ed8" : "transparent",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 14,
+          fontWeight: 900,
+        }}
+      >
+        {selected ? "✓" : ""}
+      </span>
+      <div style={{ flexShrink: 0 }}>
+        <SlabThumb l={L} w={W} t={T} stone={row.stone} stoneTypes={stoneTypes} size={52} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 16 }}>{row.slab_id}</code>
+          {row.urgency === "urgent" && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#dc2626", borderRadius: 999, padding: "1px 7px" }}>
+              ⚡ {t("URGENT", "अर्जेंट")}
+            </span>
+          )}
+          {row.is_lathe && (
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", background: "rgba(124,58,237,0.12)", borderRadius: 999, padding: "1px 7px" }}>
+              🌀 {t("LATHE", "लेथ")}
+            </span>
+          )}
+          <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#b45309" }}>
+            ⏱ {waitLabel(row.assigned_at, now)}
+          </span>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text)" }}>
+          🏛 {row.temple}
+          {row.slab_label ? ` · ${row.slab_label}` : ""}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+          {L}×{W}×{T} in · {row.stone ?? "—"}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 12.5 }}>
+          <span style={{ fontWeight: 700, color: "var(--text)" }}>📍 {row.stock_location ?? "—"}</span>
+          <span style={{ color: "var(--muted)" }}>→</span>
+          <span style={{ fontWeight: 700, color: "#1d4ed8" }}>🏭 {row.vendor_name}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Truck pick-or-create combobox (Mig 144) ───────────────────────
