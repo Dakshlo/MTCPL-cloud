@@ -461,20 +461,23 @@ export function TransferDispatchList({
                   groups[idx].rows.push(r);
                 }
               }
-              return groups.map((g, gIdx) => (
+              return groups.map((g, gIdx) => {
+                const multi = g.rows.length > 1;
+                const hasBatch = !!g.batchId;
+                return (
                 <div
                   key={g.batchId ?? `legacy-${gIdx}`}
                   style={{
-                    border: g.rows.length > 1 ? "1.5px solid #1d4ed8" : "none",
-                    background: g.rows.length > 1 ? "rgba(29,78,216,0.04)" : "transparent",
-                    borderRadius: g.rows.length > 1 ? 12 : 0,
-                    padding: g.rows.length > 1 ? "10px 10px 12px" : 0,
+                    border: multi ? "1.5px solid #1d4ed8" : "none",
+                    background: multi ? "rgba(29,78,216,0.04)" : "transparent",
+                    borderRadius: multi ? 12 : 0,
+                    padding: multi ? "10px 10px 12px" : 0,
                     display: "flex",
                     flexDirection: "column",
                     gap: 10,
                   }}
                 >
-                  {g.rows.length > 1 && (
+                  {multi && (
                     <div
                       style={{
                         display: "flex",
@@ -503,13 +506,13 @@ export function TransferDispatchList({
                       )}
                     </div>
                   )}
-                  {/* Daksh — batch-level Release All + Deliver All.
-                      Only rendered when the group has more than one
-                      slab AND a claim_batch_id is set (legacy NULL-batch
-                      rows fall back to per-row controls below). Saves
-                      the runner ten clicks when the whole truck-load
-                      lands at the same shade. */}
-                  {g.rows.length > 1 && g.batchId && (
+                  {/* Daksh — the ONLY claim controls now live at the
+                      batch level: Deliver all / Release all. Shown for
+                      every claim that carries a claim_batch_id (all
+                      current claims — singles get one too). The per-slab
+                      cards below render read-only. Legacy NULL-batch rows
+                      (pre-Mig 065) fall back to per-row controls. */}
+                  {g.batchId && (
                     <div
                       style={{
                         display: "flex",
@@ -546,7 +549,7 @@ export function TransferDispatchList({
                               boxShadow: "0 2px 8px rgba(22,163,74,0.25)",
                             }}
                           >
-                            ✅ {t("Deliver all", "सब पहुँचाएँ")} {g.rows.length}
+                            ✅ {multi ? `${t("Deliver all", "सब पहुँचाएँ")} ${g.rows.length}` : t("Mark delivered", "पहुँचा दिया")}
                           </button>
                           <form
                             action={unclaimSlabTransferBatchAction}
@@ -569,7 +572,7 @@ export function TransferDispatchList({
                               className="ghost-button danger-ghost"
                               style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}
                             >
-                              🛑 {t("Release all", "सब छोड़ें")}
+                              🛑 {multi ? t("Release all", "सब छोड़ें") : t("Release claim", "क्लेम छोड़ें")}
                             </SubmitSpinnerButton>
                           </form>
                         </>
@@ -634,7 +637,7 @@ export function TransferDispatchList({
                               minHeight: 48,
                             }}
                           >
-                            ✅ {t("Deliver all", "सब पहुँचाएँ")} {g.rows.length}
+                            ✅ {multi ? `${t("Deliver all", "सब पहुँचाएँ")} ${g.rows.length}` : t("Done", "हो गया")}
                           </SubmitSpinnerButton>
                           <button
                             type="button"
@@ -662,10 +665,12 @@ export function TransferDispatchList({
                       stoneTypes={stoneTypes}
                       now={now}
                       t={t}
+                      hideActions={hasBatch}
                     />
                   ))}
                 </div>
-              ));
+                );
+              });
             })()}
           </div>
         )}
@@ -1560,6 +1565,7 @@ function TransferCard({
   disabledReason,
   now,
   t,
+  hideActions,
 }: {
   row: TransferRow;
   kind: "mine" | "available" | "others";
@@ -1573,6 +1579,10 @@ function TransferCard({
   /** Wall-clock millis. Drives the live "claimed Xm ago" ticker on
    *  Mine cards. Only required when kind === "mine". */
   now?: number;
+  /** Mine cards: suppress the per-slab Mark-delivered / Release
+   *  buttons. The whole batch is delivered/released as one unit via
+   *  the batch bar above, so individual controls are redundant. */
+  hideActions?: boolean;
 }) {
   const [deliverOpen, setDeliverOpen] = useState(false);
   const dims = `${row.length_ft}×${row.width_ft}×${row.thickness_ft}″`;
@@ -1650,7 +1660,11 @@ function TransferCard({
         active={kind === "mine"}
       />
 
-      {/* Action buttons */}
+      {/* Action buttons. Mine cards hide them when hideActions is set —
+          the batch bar above owns deliver/release for the whole load. */}
+      {(kind === "available" ||
+        (kind === "mine" && !hideActions) ||
+        (kind === "others" && canUnclaim)) && (
       <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
         {kind === "available" && (
           <form action={claimSlabTransferAction} style={{ flex: 1, minWidth: 120 }}>
@@ -1675,7 +1689,7 @@ function TransferCard({
             </button>
           </form>
         )}
-        {kind === "mine" && !deliverOpen && (
+        {kind === "mine" && !hideActions && !deliverOpen && (
           <>
             <button
               type="button"
@@ -1709,7 +1723,7 @@ function TransferCard({
             </form>
           </>
         )}
-        {kind === "mine" && deliverOpen && (
+        {kind === "mine" && !hideActions && deliverOpen && (
           <form
             action={acknowledgeReceiptAction}
             style={{ display: "flex", gap: 6, alignItems: "stretch", flex: 1, flexWrap: "wrap" }}
@@ -1770,6 +1784,7 @@ function TransferCard({
           </form>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -2460,8 +2475,8 @@ function AvailableSlabCard({
         {selected ? "✓" : ""}
       </span>
       <SlabThumb l={L} w={W} t={T} stone={row.stone} stoneTypes={stoneTypes} />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, flex: "1 1 auto", minWidth: 0, whiteSpace: "normal", wordBreak: "break-all", lineHeight: 1.25 }}>
           {row.urgency === "urgent" && "⚡ "}
           {row.slab_id}
         </code>
