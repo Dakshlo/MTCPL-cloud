@@ -117,6 +117,9 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/invoices/new" style={BUTTON_STYLES.secondary}>
               🧾 + New invoice
             </Link>
+            <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
+              📜 Install contract
+            </Link>
           </div>
         }
       />

@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { AccountsHero } from "../../accounts/_ui/components";
+import Link from "next/link";
 import { WorkOrderDocClient, type DocRecord, type FinanceVendor } from "./doc-client";
 
 export const dynamic = "force-dynamic";
@@ -99,6 +100,14 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
       <AccountsHero
         title="🧾 Work Order Document"
         description="Generate a printable work order on the company letterhead. Pick the vendor from Finance; every document you generate is kept below."
+        actions={
+          <Link
+            href="/invoicing/install-contract"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontWeight: 700, fontSize: 13, textDecoration: "none" }}
+          >
+            📜 Installation contract
+          </Link>
+        }
       />
       <WorkOrderDocClient
         records={records}
