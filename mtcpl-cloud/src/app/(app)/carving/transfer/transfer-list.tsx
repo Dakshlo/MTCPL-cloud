@@ -48,6 +48,7 @@ export type TransferRow = {
   slab_id: string;
   temple: string;
   slab_label: string | null;
+  slab_description: string | null;
   stone: string | null;
   length_ft: number;
   width_ft: number;
@@ -397,56 +398,8 @@ export function TransferDispatchList({
         </div>
       )}
 
-      {/* Phase 5 — lane tabs: Cutting→Carving (existing) vs the new
-          Carving→Dispatch bring-in queue. */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {(
-          [
-            { key: "carving", label: t("🚧 Cutting → Carving", "🚧 कटाई → नक्काशी"), count: cncRows.length },
-            { key: "dispatch", label: t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच"), count: dispatchRows.length },
-          ] as const
-        ).map((tab) => {
-          const on = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              style={{
-                flex: "1 1 200px",
-                minHeight: 52,
-                padding: "10px 16px",
-                border: on ? "2px solid #1d4ed8" : "1.5px solid var(--border)",
-                background: on ? "#dbeafe" : "var(--surface)",
-                color: on ? "#1d4ed8" : "var(--text)",
-                borderRadius: 12,
-                fontSize: 17,
-                fontWeight: 800,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-              }}
-            >
-              {tab.label}
-              <span
-                style={{
-                  fontSize: 14,
-                  fontWeight: 800,
-                  background: on ? "#1d4ed8" : "var(--surface-alt)",
-                  color: on ? "#fff" : "var(--muted)",
-                  borderRadius: 999,
-                  padding: "1px 10px",
-                }}
-              >
-                {tab.count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
+      {/* Carving → Dispatch lane is parked for now (will return); only
+          the Cutting → Carving flow renders. activeTab stays "carving". */}
       {activeTab === "carving" && (
         <>
       {/* CLAIMED BY ME — primary actionable section.
@@ -719,23 +672,15 @@ export function TransferDispatchList({
       </SectionShell>
       )}
 
-      {/* AVAILABLE TO CLAIM — compact single-row layout. Each row
-          shows all info inline (thumb + chips + slab id + temple +
-          dims + from → to + Claim) so the runner can scan a long
-          yard list quickly. Big card lives only on Mine where the
-          runner is actively working. Claim buttons go disabled
-          while the runner already has an active claim. */}
-      <SectionShell
-        kind="available"
-        title={t("📦 Available to claim", "📦 उपलब्ध (क्लेम करें)")}
-        subtitle={
-          availableRows.length === 0
-            ? t("Yard is clear — nothing pending.", "यार्ड खाली है — कुछ बाकी नहीं।")
-            : t(`${availableRows.length} slab(s) ready for pickup`, `${availableRows.length} स्लैब उठाने को तैयार`)
-        }
-        collapsible
-        defaultOpen
-      >
+      {/* AVAILABLE — no section header (Daksh): the vendor groups speak
+          for themselves. Pick a shade, select slabs, and the Claim bar
+          appears only once something is selected. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {availableRows.length === 0 && (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            ✓ {t("Yard is clear — nothing pending.", "यार्ड खाली है — कुछ बाकी नहीं।")}
+          </p>
+        )}
         {hasActiveClaim && availableRows.length > 0 && (
           <div
             style={{
@@ -762,38 +707,38 @@ export function TransferDispatchList({
             </span>
           </div>
         )}
-        {/* Mig 065 — batch claim action bar. Select slabs, then Claim
-            opens the truck-pick modal (Mig 144). */}
-        {!hasActiveClaim && availableRows.length > 0 && (
+        {/* Mig 065 — batch claim action bar. Surfaces ONLY once a slab
+            is selected (Daksh) and sticks to the top while the runner
+            scrolls the vendor list. Claim opens the truck-pick modal. */}
+        {!hasActiveClaim && selectedIds.size > 0 && (
           <div
             style={{
+              position: "sticky",
+              top: 8,
+              zIndex: 6,
               display: "flex",
               alignItems: "center",
               gap: 12,
               padding: "10px 14px",
-              marginBottom: 10,
-              background: selectedIds.size > 0 ? "#dbeafe" : "var(--surface-alt)",
-              border: `1.5px solid ${selectedIds.size > 0 ? "#1d4ed8" : "var(--border)"}`,
+              background: "#dbeafe",
+              border: "1.5px solid #1d4ed8",
               borderRadius: 10,
               flexWrap: "wrap",
+              boxShadow: "0 6px 18px rgba(29,78,216,0.18)",
             }}
           >
-            <span style={{ fontSize: 15, fontWeight: 700, color: selectedIds.size > 0 ? "#1d4ed8" : "var(--muted)" }}>
-              {selectedIds.size === 0
-                ? t(`Select up to ${CLAIM_BATCH_MAX} slabs to claim as one batch`, `एक बैच में ${CLAIM_BATCH_MAX} तक स्लैब चुनें`)
-                : t(`${selectedIds.size} / ${CLAIM_BATCH_MAX} selected`, `${selectedIds.size} / ${CLAIM_BATCH_MAX} चुनी`)}
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#1d4ed8" }}>
+              {t(`${selectedIds.size} / ${CLAIM_BATCH_MAX} selected`, `${selectedIds.size} / ${CLAIM_BATCH_MAX} चुनी`)}
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {selectedIds.size > 0 && (
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => setSelectedIds(new Set())}
-                  style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}
-                >
-                  {t("Clear", "हटाएँ")}
-                </button>
-              )}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setSelectedIds(new Set())}
+                style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}
+              >
+                {t("Clear", "हटाएँ")}
+              </button>
               {/* The claim posts via this (button-less) form; the truck
                   modal sets the truck on the hidden input + requestSubmit()s
                   it. onSubmit clears the selection optimistically. */}
@@ -809,18 +754,18 @@ export function TransferDispatchList({
               <button
                 type="button"
                 className="primary-button"
-                disabled={selectedIds.size === 0 || claimSubmitting}
+                disabled={claimSubmitting}
                 onClick={() => setClaimModalOpen(true)}
                 style={{
                   fontSize: 16,
                   padding: "11px 22px",
                   fontWeight: 800,
                   minHeight: 48,
-                  opacity: selectedIds.size === 0 || claimSubmitting ? 0.6 : 1,
-                  cursor: selectedIds.size === 0 ? "not-allowed" : claimSubmitting ? "wait" : "pointer",
+                  opacity: claimSubmitting ? 0.6 : 1,
+                  cursor: claimSubmitting ? "wait" : "pointer",
                 }}
               >
-                {claimSubmitting ? <Spinner /> : <>📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}</>}
+                {claimSubmitting ? <Spinner /> : <>📦 {t("Claim", "क्लेम")} {selectedIds.size}</>}
               </button>
             </div>
           </div>
@@ -958,7 +903,7 @@ export function TransferDispatchList({
             </div>
           );
         })()}
-      </SectionShell>
+      </div>
 
       {/* DELIVERED TODAY — success confirmation, collapsed by default. */}
       {delivered.length > 0 && (
@@ -2546,8 +2491,31 @@ function AvailableSlabCard({
           {row.slab_label}
         </div>
       )}
+      {row.slab_description && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+          }}
+          title={row.slab_description}
+        >
+          {row.slab_description}
+        </div>
+      )}
       <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>
         {L}×{W}×{T}&Prime;
+      </div>
+      {/* Destination vendor (shade) — repeated on the card per Daksh. */}
+      <div
+        style={{ fontSize: 10.5, fontWeight: 700, color: "#1d4ed8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        title={row.vendor_name}
+      >
+        🏭 {row.vendor_name}
       </div>
       {/* Stock-location chip — where the cutter dropped this slab. */}
       {row.stock_location && (

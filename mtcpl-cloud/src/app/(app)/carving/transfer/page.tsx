@@ -135,6 +135,7 @@ export default async function SlabTransferPage({
     {
       temple: string;
       label: string | null;
+      description: string | null;
       stone: string | null;
       length_ft: number;
       width_ft: number;
@@ -146,13 +147,14 @@ export default async function SlabTransferPage({
     const { data: slabs } = await admin
       .from("slab_requirements")
       .select(
-        "id, temple, label, stone, length_ft, width_ft, thickness_ft, stock_location",
+        "id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location",
       )
       .in("id", slabIds);
     for (const s of slabs ?? []) {
       slabInfo.set(s.id, {
         temple: s.temple ?? "—",
         label: (s as { label?: string | null }).label ?? null,
+        description: (s as { description?: string | null }).description ?? null,
         stone: (s as { stone?: string | null }).stone ?? null,
         length_ft: Number(s.length_ft) || 0,
         width_ft: Number(s.width_ft) || 0,
@@ -194,6 +196,7 @@ export default async function SlabTransferPage({
       slab_id: j.slab_requirement_id,
       temple: info?.temple ?? "—",
       slab_label: info?.label ?? null,
+      slab_description: info?.description ?? null,
       stone: info?.stone ?? null,
       length_ft: info?.length_ft ?? 0,
       width_ft: info?.width_ft ?? 0,
@@ -295,7 +298,6 @@ export default async function SlabTransferPage({
       stoneTypes={stoneTypes ?? []}
       trucks={trucks}
       dispatchRows={dispatchRows}
-      initialTab={params.tab === "dispatch" ? "dispatch" : "carving"}
       toast={params.toast ?? null}
     />
   );
