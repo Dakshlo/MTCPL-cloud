@@ -319,6 +319,37 @@ export function FloorViewClient({
           overflow: "hidden", // the slide scales to fit — no page scroll
         } as React.CSSProperties}
       >
+        {/* Reverse rotation countdown — a line that depletes over the
+            rotation duration and resets on every slide change (key=tvIndex).
+            Freezes when the wall is paused. Hidden when there's nothing to
+            rotate (single slide). */}
+        <style>{`@keyframes mtcpl-tv-deplete { from { width: 100%; } to { width: 0%; } }`}</style>
+        {slides.length > 1 && (
+          <div
+            key={tvIndex}
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 6,
+              zIndex: 10000,
+              background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: "100%",
+                background: isDark ? "#fbbf24" : "#b45309",
+                animation: `mtcpl-tv-deplete ${rotateSec}s linear forwards`,
+                animationPlayState: paused ? "paused" : "running",
+              }}
+            />
+          </div>
+        )}
         <TvHeader
           mode={mode}
           setMode={setMode}

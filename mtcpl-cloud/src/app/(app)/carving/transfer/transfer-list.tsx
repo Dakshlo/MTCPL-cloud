@@ -26,6 +26,7 @@
  */
 
 import { useEffect, useState, useRef, useMemo } from "react";
+import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   claimSlabTransferAction,
@@ -119,6 +120,7 @@ const MOBILE_CSS = `
     0%   { background-position: -40px 0; }
     100% { background-position: 40px 0; }
   }
+  @keyframes mtcpl-spin { to { transform: rotate(360deg); } }
   @media (max-width: 600px) {
     .mtcpl-route-grid {
       grid-template-columns: 1fr !important;
@@ -133,6 +135,55 @@ const MOBILE_CSS = `
 `;
 
 export type TruckOption = { id: string; name: string; driver?: string | null; busy: boolean };
+
+// Spinning logo for in-flight actions. `currentColor` so it inherits the
+// button's text colour on any accent.
+function Spinner({ size = 16 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        border: "2px solid currentColor",
+        borderTopColor: "transparent",
+        borderRadius: "50%",
+        animation: "mtcpl-spin 0.7s linear infinite",
+        verticalAlign: "-3px",
+      }}
+    />
+  );
+}
+
+// Submit button that shows a spinner + disables itself while its server
+// action is in flight. Must live INSIDE the <form> (useFormStatus reads
+// the nearest form's pending state).
+function SubmitSpinnerButton({
+  children,
+  className,
+  style,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      className={className}
+      disabled={pending}
+      style={{
+        ...style,
+        opacity: pending ? 0.7 : style?.opacity,
+        cursor: pending ? "wait" : style?.cursor,
+      }}
+    >
+      {pending ? <Spinner /> : children}
+    </button>
+  );
+}
 
 export function TransferDispatchList({
   rows,
@@ -212,11 +263,13 @@ export function TransferDispatchList({
   // Claim-time truck picker. Pressing Claim opens a modal of available
   // trucks (or "claim without truck") instead of an always-on dropdown.
   const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
   const claimFormRef = useRef<HTMLFormElement>(null);
   const claimTruckRef = useRef<HTMLInputElement>(null);
   const submitClaimWithTruck = (truck: string) => {
     if (claimTruckRef.current) claimTruckRef.current.value = truck;
     setClaimModalOpen(false);
+    setClaimSubmitting(true);
     claimFormRef.current?.requestSubmit();
   };
   // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
@@ -552,13 +605,12 @@ export function TransferDispatchList({
                           >
                             <input type="hidden" name="claim_batch_id" value={g.batchId} />
                             <input type="hidden" name="redirect_to" value="/carving/transfer" />
-                            <button
-                              type="submit"
+                            <SubmitSpinnerButton
                               className="ghost-button danger-ghost"
                               style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}
                             >
                               🛑 {t("Release all", "सब छोड़ें")}
-                            </button>
+                            </SubmitSpinnerButton>
                           </form>
                         </>
                       )}
@@ -609,8 +661,7 @@ export function TransferDispatchList({
                               minHeight: 48,
                             }}
                           />
-                          <button
-                            type="submit"
+                          <SubmitSpinnerButton
                             style={{
                               fontSize: 16,
                               padding: "11px 18px",
@@ -624,7 +675,7 @@ export function TransferDispatchList({
                             }}
                           >
                             ✅ {t("Deliver all", "सब पहुँचाएँ")} {g.rows.length}
-                          </button>
+                          </SubmitSpinnerButton>
                           <button
                             type="button"
                             onClick={() =>
@@ -751,18 +802,18 @@ export function TransferDispatchList({
               <button
                 type="button"
                 className="primary-button"
-                disabled={selectedIds.size === 0}
+                disabled={selectedIds.size === 0 || claimSubmitting}
                 onClick={() => setClaimModalOpen(true)}
                 style={{
                   fontSize: 16,
                   padding: "11px 22px",
                   fontWeight: 800,
                   minHeight: 48,
-                  opacity: selectedIds.size === 0 ? 0.5 : 1,
-                  cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                  opacity: selectedIds.size === 0 || claimSubmitting ? 0.6 : 1,
+                  cursor: selectedIds.size === 0 ? "not-allowed" : claimSubmitting ? "wait" : "pointer",
                 }}
               >
-                📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}
+                {claimSubmitting ? <Spinner /> : <>📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}</>}
               </button>
             </div>
           </div>
@@ -1141,12 +1192,14 @@ function DispatchTransferTab({
 
   const [claimedOpen, setClaimedOpen] = useState(false);
   const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
   const claimFormRef = useRef<HTMLFormElement>(null);
   const claimTruckRef = useRef<HTMLInputElement>(null);
   const submitClaimWithTruck = (truck: string) => {
     if (claimTruckRef.current) claimTruckRef.current.value = truck;
     setClaimModalOpen(false);
     setSelected(() => new Set());
+    setClaimSubmitting(true);
     claimFormRef.current?.requestSubmit();
   };
 
@@ -1225,9 +1278,9 @@ function DispatchTransferTab({
                       >
                         <input type="hidden" name="claim_batch_id" value={b.batchId} />
                         <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
-                        <button type="submit" style={{ width: "100%", fontSize: 16, padding: "12px 18px", fontWeight: 800, background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", minHeight: 48 }}>
+                        <SubmitSpinnerButton style={{ width: "100%", fontSize: 16, padding: "12px 18px", fontWeight: 800, background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", minHeight: 48 }}>
                           ✅ {t("Deliver all", "सब पहुँचाएँ")} {b.rows.length}
-                        </button>
+                        </SubmitSpinnerButton>
                       </form>
                       <form
                         action={unclaimDispatchBatchAction}
@@ -1237,9 +1290,9 @@ function DispatchTransferTab({
                       >
                         <input type="hidden" name="claim_batch_id" value={b.batchId} />
                         <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
-                        <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}>
+                        <SubmitSpinnerButton className="ghost-button danger-ghost" style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}>
                           🛑 {t("Release all", "सब छोड़ें")}
-                        </button>
+                        </SubmitSpinnerButton>
                       </form>
                     </div>
                   )}
@@ -1282,8 +1335,8 @@ function DispatchTransferTab({
                 <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
                 <input type="hidden" name="truck_name" ref={claimTruckRef} defaultValue="" />
               </form>
-              <button type="button" className="primary-button" disabled={selected.size === 0} onClick={() => setClaimModalOpen(true)} style={{ fontSize: 16, padding: "11px 22px", fontWeight: 800, minHeight: 48, opacity: selected.size === 0 ? 0.5 : 1, cursor: selected.size === 0 ? "not-allowed" : "pointer" }}>
-                📦 {t("Claim", "क्लेम")} {selected.size > 0 ? selected.size : ""}
+              <button type="button" className="primary-button" disabled={selected.size === 0 || claimSubmitting} onClick={() => setClaimModalOpen(true)} style={{ fontSize: 16, padding: "11px 22px", fontWeight: 800, minHeight: 48, opacity: selected.size === 0 || claimSubmitting ? 0.6 : 1, cursor: selected.size === 0 ? "not-allowed" : claimSubmitting ? "wait" : "pointer" }}>
+                {claimSubmitting ? <Spinner /> : <>📦 {t("Claim", "क्लेम")} {selected.size > 0 ? selected.size : ""}</>}
               </button>
             </div>
           </div>
@@ -1672,13 +1725,12 @@ function TransferCard({
             <form action={unclaimSlabTransferAction}>
               <input type="hidden" name="carving_item_id" value={row.id} />
               <input type="hidden" name="redirect_to" value="/carving/transfer" />
-              <button
-                type="submit"
+              <SubmitSpinnerButton
                 className="ghost-button"
                 style={{ fontSize: 14, padding: "11px 14px", minHeight: 48 }}
               >
                 {t("Release claim", "क्लेम छोड़ें")}
-              </button>
+              </SubmitSpinnerButton>
             </form>
           </>
         )}
@@ -1705,8 +1757,7 @@ function TransferCard({
                 minHeight: 48,
               }}
             />
-            <button
-              type="submit"
+            <SubmitSpinnerButton
               style={{
                 fontSize: 15,
                 padding: "11px 18px",
@@ -1720,7 +1771,7 @@ function TransferCard({
               }}
             >
               ✅ {t("Done", "हो गया")}
-            </button>
+            </SubmitSpinnerButton>
             <button
               type="button"
               onClick={() => setDeliverOpen(false)}
@@ -1735,13 +1786,12 @@ function TransferCard({
           <form action={unclaimSlabTransferAction}>
             <input type="hidden" name="carving_item_id" value={row.id} />
             <input type="hidden" name="redirect_to" value="/carving/transfer" />
-            <button
-              type="submit"
+            <SubmitSpinnerButton
               className="ghost-button danger-ghost"
               style={{ fontSize: 14, padding: "9px 14px" }}
             >
               {t("Release their claim", "उनका क्लेम छोड़ें")}
-            </button>
+            </SubmitSpinnerButton>
           </form>
         )}
       </div>
@@ -1956,13 +2006,12 @@ function CompactRow({
         <form action={unclaimSlabTransferAction} style={{ flexShrink: 0 }}>
           <input type="hidden" name="carving_item_id" value={row.id} />
           <input type="hidden" name="redirect_to" value="/carving/transfer" />
-          <button
-            type="submit"
+          <SubmitSpinnerButton
             className="ghost-button danger-ghost"
             style={{ fontSize: 12, padding: "8px 12px", whiteSpace: "nowrap" }}
           >
             Release
-          </button>
+          </SubmitSpinnerButton>
         </form>
       )}
     </div>

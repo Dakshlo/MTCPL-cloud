@@ -1040,6 +1040,64 @@ export async function deleteVendorAction(formData: FormData) {
 
 // ── Carving job lifecycle ───────────────────────────────────────────
 
+/**
+ * WhatsApp ping to the slab-transfer runner when a slab lands in Pending
+ * stock (awaiting transfer). Fire-and-forget: gated behind the
+ * MSG91_WA_SLAB_TRANSFER_TEMPLATE env (set once the DLT template is
+ * approved), never throws — it can't block an assign.
+ * Template body variables — register them in THIS order:
+ *   {{1}} slab code · {{2}} size · {{3}} from (stock location) · {{4}} to (vendor).
+ */
+async function notifySlabTransferWaiting(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  slabId: string,
+  vendorName: string,
+) {
+  try {
+    const templateName = process.env.MSG91_WA_SLAB_TRANSFER_TEMPLATE;
+    if (!templateName || !process.env.MSG91_AUTH_KEY) return;
+    const { normalizeIndianMobile, sendWhatsAppTemplate } = await import("@/lib/wa-send");
+
+    const { data: people } = await admin
+      .from("profiles")
+      .select("phone")
+      .in("role", ["slab_transfer", "storekeeper"]);
+    const to = [
+      ...new Set(
+        ((people ?? []) as { phone: string | null }[])
+          .map((p) => normalizeIndianMobile(p.phone))
+          .filter(Boolean) as string[],
+      ),
+    ];
+    if (to.length === 0) return;
+
+    const { data: slab } = await admin
+      .from("slab_requirements")
+      .select("length_ft, width_ft, thickness_ft, stock_location")
+      .eq("id", slabId)
+      .maybeSingle();
+    const s = (slab ?? {}) as {
+      length_ft?: number | string; width_ft?: number | string;
+      thickness_ft?: number | string; stock_location?: string | null;
+    };
+    const dims = `${Number(s.length_ft) || 0}×${Number(s.width_ft) || 0}×${Number(s.thickness_ft) || 0} in`;
+    const from = String(s.stock_location || "Yard");
+
+    await sendWhatsAppTemplate({
+      to,
+      templateName,
+      components: {
+        body_1: { type: "text", value: slabId },
+        body_2: { type: "text", value: dims },
+        body_3: { type: "text", value: from },
+        body_4: { type: "text", value: vendorName },
+      },
+    });
+  } catch (e) {
+    console.warn("[notifySlabTransferWaiting] non-fatal", e);
+  }
+}
+
 export async function assignCarvingJobAction(formData: FormData) {
   // Mig 074/076 — anyone who can ACCESS the /carving page can assign
   // (dev/owner/carving_head/senior_incharge/team_head + vendors with
@@ -1279,6 +1337,11 @@ export async function assignCarvingJobAction(formData: FormData) {
     requires_machine_type: finalRequiresMachineType,
   });
 
+  // Pending stock (empty autoReceipt) → ping the transfer runner.
+  if (Object.keys(autoReceipt).length === 0) {
+    await notifySlabTransferWaiting(admin, slabId, (vendor as { name: string }).name);
+  }
+
   refreshAll();
   // Daksh June 2026 — an Outsource assign must return to the Outsource
   // Active view (mode=outsource), not the default CNC Active tab, so the
@@ -1459,6 +1522,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // view on redirect (mode=outsource), mirroring the single-assign fix.
   const modeQ = isOutsourceBatch ? "mode=outsource&" : "";
 
+  const isPendingStockBatch = Object.keys(autoReceiptBatch).length === 0;
+  const pendingStockSlabs: string[] = [];
   for (const slabId of slabIds) {
     // Race-guard the slab transition first.
     const { data: slabRow, error: slabErr } = await admin
@@ -1522,6 +1587,16 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
       `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}${typeTag}${batchTag}`,
     );
     successes.push(item.id);
+    if (isPendingStockBatch) pendingStockSlabs.push(slabId);
+  }
+
+  // Pending stock → ping the transfer runner for each waiting slab.
+  if (pendingStockSlabs.length > 0) {
+    await Promise.all(
+      pendingStockSlabs.map((sid) =>
+        notifySlabTransferWaiting(admin, sid, (vendor as { name: string }).name),
+      ),
+    );
   }
 
   await logAudit(profile.id, "carving_batch_assigned", "carving_item", batchId, {
