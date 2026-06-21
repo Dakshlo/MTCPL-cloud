@@ -251,7 +251,10 @@ export function TransferDispatchList({
   const CLAIM_BATCH_MAX = 10;
   // Available section — vendor groups are collapsible (tap the header).
   // Default expanded; collapsing a vendor hides its slab cards.
-  const [collapsedVendors, setCollapsedVendors] = useState<Set<string>>(new Set());
+  // Vendor sections start COLLAPSED (Daksh) — the runner expands the
+  // shade they're working. Empty set = every vendor collapsed; a name
+  // in the set = that vendor is open.
+  const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
   // Daksh — per-batch "Deliver all" expanded mode. Holds claim_batch_ids
   // currently showing the shared dropoff-note input + confirm button.
   // Multiple batches can be expanded at once (different vendors); the
@@ -856,7 +859,7 @@ export function TransferDispatchList({
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {groups.map((g) => {
-                const collapsed = collapsedVendors.has(g.vendorName);
+                const collapsed = !expandedVendors.has(g.vendorName);
                 const selectedInGroup = g.rows.filter((r) => selectedIds.has(r.id)).length;
                 // Oldest-waiting slab → the header's "waiting" summary.
                 const oldest = g.rows.reduce(
@@ -869,7 +872,7 @@ export function TransferDispatchList({
                     <button
                       type="button"
                       onClick={() =>
-                        setCollapsedVendors((prev) => {
+                        setExpandedVendors((prev) => {
                           const next = new Set(prev);
                           if (next.has(g.vendorName)) next.delete(g.vendorName);
                           else next.add(g.vendorName);
@@ -906,9 +909,17 @@ export function TransferDispatchList({
                         </span>
                       </span>
                     </button>
-                    {/* Full-detail slab cards */}
+                    {/* Full-detail slab cards — same rectangle card grid
+                        as the Carving Jobs › Unassigned tab. */}
                     {!collapsed && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10 }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                          gap: 10,
+                          padding: 10,
+                        }}
+                      >
                         {g.rows.map((r) => {
                           const isSelected = selectedIds.has(r.id);
                           const atCap = selectedIds.size >= CLAIM_BATCH_MAX && !isSelected;
@@ -2433,6 +2444,14 @@ function AvailableSlabCard({
   const T = row.thickness_ft;
   const clickable = !disabled;
   const tint = row.batch_id ? batchTint(row.batch_id) : null;
+  // Waiting tone: fresh (green) → ageing (amber) → stale (red), by hours.
+  const waitMin = Math.max(0, Math.floor((now - new Date(row.assigned_at).getTime()) / 60000));
+  const waitTone =
+    waitMin >= 8 * 60
+      ? { fg: "#991b1b", bg: "rgba(220,38,38,0.08)", icon: "⚠" }
+      : waitMin >= 2 * 60
+        ? { fg: "#b45309", bg: "rgba(217,119,6,0.08)", icon: "⏳" }
+        : { fg: "#15803d", bg: "rgba(22,163,74,0.08)", icon: "⏱" };
   return (
     <div
       onClick={clickable ? onToggle : undefined}
@@ -2450,70 +2469,119 @@ function AvailableSlabCard({
           : undefined
       }
       style={{
+        position: "relative",
         display: "flex",
-        gap: 10,
-        padding: "10px 12px",
-        borderRadius: 10,
-        border: selected ? "2px solid #1d4ed8" : "1px solid var(--border)",
-        borderLeft: `5px solid ${selected ? "#1d4ed8" : tint ? tint.border : "var(--border)"}`,
-        background: selected ? "rgba(29,78,216,0.06)" : "var(--surface)",
+        flexDirection: "column",
+        gap: 6,
+        padding: "8px 10px",
+        borderRadius: 8,
+        border: `2px solid ${
+          selected ? "#1d4ed8" : row.urgency === "urgent" ? "rgba(220,38,38,0.25)" : "var(--border)"
+        }`,
+        borderLeft: tint && !selected ? `5px solid ${tint.border}` : undefined,
+        background: selected
+          ? "rgba(29,78,216,0.06)"
+          : row.urgency === "urgent"
+            ? "rgba(220,38,38,0.04)"
+            : "var(--surface)",
         cursor: clickable ? "pointer" : "not-allowed",
-        opacity: disabled ? 0.55 : 1,
+        opacity: disabled ? 0.5 : 1,
         userSelect: "none",
+        transition: "border-color 0.12s, background 0.12s",
       }}
     >
+      {/* Selection checkbox — top-right overlay (like the Unassigned tab). */}
       <span
         aria-hidden
         style={{
+          position: "absolute",
+          top: 6,
+          right: 6,
           width: 24,
           height: 24,
-          borderRadius: 7,
-          flexShrink: 0,
-          marginTop: 2,
-          border: selected ? "none" : "2px solid var(--border)",
-          background: selected ? "#1d4ed8" : "transparent",
+          borderRadius: 6,
+          zIndex: 1,
+          border: selected ? "2px solid #1d4ed8" : "2px solid var(--border)",
+          background: selected ? "#1d4ed8" : "var(--surface)",
           color: "#fff",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontSize: 14,
           fontWeight: 900,
+          boxShadow: selected ? "0 2px 6px rgba(29,78,216,0.4)" : "none",
         }}
       >
         {selected ? "✓" : ""}
       </span>
-      <div style={{ flexShrink: 0 }}>
-        <SlabThumb l={L} w={W} t={T} stone={row.stone} stoneTypes={stoneTypes} size={52} />
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 16 }}>{row.slab_id}</code>
-          {row.urgency === "urgent" && (
-            <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#dc2626", borderRadius: 999, padding: "1px 7px" }}>
-              ⚡ {t("URGENT", "अर्जेंट")}
-            </span>
-          )}
-          {row.is_lathe && (
-            <span style={{ fontSize: 10, fontWeight: 800, color: "#7c3aed", background: "rgba(124,58,237,0.12)", borderRadius: 999, padding: "1px 7px" }}>
-              🌀 {t("LATHE", "लेथ")}
-            </span>
-          )}
-          <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#b45309" }}>
-            ⏱ {waitLabel(row.assigned_at, now)}
+      <SlabThumb l={L} w={W} t={T} stone={row.stone} stoneTypes={stoneTypes} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {row.urgency === "urgent" && "⚡ "}
+          {row.slab_id}
+        </code>
+        {row.stone && (
+          <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
+            {row.stone}
           </span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+        {row.urgency === "urgent" && (
+          <span style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#dc2626", borderRadius: 4, padding: "1px 6px" }}>
+            ⚡ {t("URGENT", "अर्जेंट")}
+          </span>
+        )}
+        {row.is_lathe && (
+          <span style={{ fontSize: 9.5, fontWeight: 800, color: "#7c3aed", background: "rgba(124,58,237,0.12)", borderRadius: 4, padding: "1px 6px" }}>
+            🌀 {t("LATHE", "लेथ")}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.temple}>
+        🏛 {row.temple}
+      </div>
+      {row.slab_label && (
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.slab_label}>
+          {row.slab_label}
         </div>
-        <div style={{ fontSize: 13, color: "var(--text)" }}>
-          🏛 {row.temple}
-          {row.slab_label ? ` · ${row.slab_label}` : ""}
+      )}
+      <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>
+        {L}×{W}×{T}&Prime;
+      </div>
+      {/* Stock-location chip — where the cutter dropped this slab. */}
+      {row.stock_location && (
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#7c2d12",
+            background: "rgba(180,115,51,0.08)",
+            border: "1px solid rgba(180,115,51,0.25)",
+            padding: "3px 7px",
+            borderRadius: 5,
+            alignSelf: "flex-start",
+            fontFamily: "ui-monospace, monospace",
+          }}
+          title={t("Where the cutter team dropped this slab", "कटर टीम ने यह स्लैब कहाँ रखी")}
+        >
+          📍 {row.stock_location}
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-          {L}×{W}×{T} in · {row.stone ?? "—"}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 12.5 }}>
-          <span style={{ fontWeight: 700, color: "var(--text)" }}>📍 {row.stock_location ?? "—"}</span>
-          <span style={{ color: "var(--muted)" }}>→</span>
-          <span style={{ fontWeight: 700, color: "#1d4ed8" }}>🏭 {row.vendor_name}</span>
-        </div>
+      )}
+      {/* Waiting-since pill — how long this slab has sat in pending stock. */}
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: waitTone.fg,
+          background: waitTone.bg,
+          padding: "3px 7px",
+          borderRadius: 5,
+          alignSelf: "flex-start",
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
+        {waitTone.icon} {t("waiting", "रुकी")} {waitLabel(row.assigned_at, now)}
       </div>
     </div>
   );
