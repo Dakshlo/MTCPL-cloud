@@ -198,6 +198,19 @@ export function TransferDispatchList({
   // pick applies to the whole batch; submitted as `truck_name` (the
   // server find-or-creates). Required before claiming.
   const [truckName, setTruckName] = useState("");
+  // Compact "Claimed by me" — collapsed to a single tappable card by
+  // default; tapping expands the full deliver / release controls.
+  const [claimedOpen, setClaimedOpen] = useState(false);
+  // Claim-time truck picker. Pressing Claim opens a modal of available
+  // trucks (or "claim without truck") instead of an always-on dropdown.
+  const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const claimFormRef = useRef<HTMLFormElement>(null);
+  const claimTruckRef = useRef<HTMLInputElement>(null);
+  const submitClaimWithTruck = (truck: string) => {
+    if (claimTruckRef.current) claimTruckRef.current.value = truck;
+    setClaimModalOpen(false);
+    claimFormRef.current?.requestSubmit();
+  };
   // Live ticker for the "⏱ claimed Xm ago" timer on Mine cards.
   // 15-second cadence keeps the display feel real without spamming
   // re-renders — slab transfers are minute-to-hour scale, not seconds.
@@ -280,16 +293,10 @@ export function TransferDispatchList({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 27 }}>🚧 {t("Slab Transfer", "स्लैब ट्रांसफर")}</h1>
-          <p className="muted" style={{ margin: "5px 0 0", fontSize: 15.5, lineHeight: 1.4 }}>
+          <p className="muted" style={{ margin: "5px 0 0", fontSize: 15.5 }}>
             {activeTab === "carving"
-              ? t(
-                  "Move cut slabs from the yard to each vendor's shade. Pick a truck and claim a slab before pickup.",
-                  "कटी हुई स्लैब को यार्ड से वेंडर की शेड तक ले जाएँ। ट्रक चुनें और उठाने से पहले स्लैब क्लेम करें।",
-                )
-              : t(
-                  "Bring carved-done slabs in to their dispatch station so they can be loaded.",
-                  "तैयार नक्काशी वाली स्लैब को डिस्पैच स्टेशन पर लाएँ ताकि उन्हें लोड किया जा सके।",
-                )}
+              ? t("Yard → vendor shade", "यार्ड → वेंडर शेड")
+              : t("Carving done → dispatch station", "नक्काशी → डिस्पैच स्टेशन")}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -379,17 +386,44 @@ export function TransferDispatchList({
           them inside a single batch wrapper with a small header so the
           truck-load reads as one unit. Single-batch claims (or legacy
           NULL-batch rows from before mig 065) render as a group of 1. */}
+      {mineRows.length > 0 && (
       <SectionShell
         kind="mine"
         title={t("🚧 Claimed by me", "🚧 मेरे क्लेम किए")}
-        subtitle={
-          mineRows.length === 0
-            ? t("Nothing claimed yet — pick something from Available below.", "अभी कुछ नहीं — नीचे उपलब्ध में से चुनें।")
-            : t(`${mineRows.length} slab(s) to deliver`, `${mineRows.length} स्लैब पहुँचानी है`)
-        }
+        subtitle={t(`${mineRows.length} slab(s) to deliver`, `${mineRows.length} स्लैब पहुँचानी है`)}
       >
-        {mineRows.length > 0 && (
+        {!claimedOpen ? (
+          <button
+            type="button"
+            onClick={() => setClaimedOpen(true)}
+            style={{
+              width: "100%", textAlign: "left", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "14px 16px", borderRadius: 12, minHeight: 58,
+              background: "rgba(29,78,216,0.06)", border: "1.5px solid #1d4ed8", color: "var(--text)",
+            }}
+          >
+            <span style={{ fontSize: 24 }}>🚚</span>
+            <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 17, fontWeight: 800, color: "#1d4ed8" }}>
+                {t(`${mineRows.length} slab(s) claimed`, `${mineRows.length} स्लैब क्लेम की`)}
+              </span>
+              <span style={{ fontSize: 13.5, color: "var(--muted)" }}>
+                {t("Tap to deliver or release", "पहुँचाने या छोड़ने के लिए टैप करें")}
+              </span>
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 18, color: "#1d4ed8", fontWeight: 800 }}>▸</span>
+          </button>
+        ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <button
+              type="button"
+              onClick={() => setClaimedOpen(false)}
+              className="ghost-button"
+              style={{ alignSelf: "flex-start", fontSize: 13, padding: "6px 12px" }}
+            >
+              ▾ {t("Collapse", "बंद करें")}
+            </button>
             {(() => {
               // Group mineRows by claim_batch_id (legacy NULL rows
               // become their own per-row "batches").
@@ -617,6 +651,7 @@ export function TransferDispatchList({
           </div>
         )}
       </SectionShell>
+      )}
 
       {/* AVAILABLE TO CLAIM — compact single-row layout. Each row
           shows all info inline (thumb + chips + slab id + temple +
@@ -655,46 +690,14 @@ export function TransferDispatchList({
             <span style={{ fontSize: 18 }}>🏗️</span>
             <span style={{ fontSize: 14 }}>
               {t(
-                "Finish your current batch first — Mark delivered or Release claim on each above before opening a new batch.",
-                "पहले अपना मौजूदा बैच पूरा करें — ऊपर हर स्लैब को पहुँचाएँ या क्लेम छोड़ें, फिर नया बैच लें।",
+                "Finish your current claim first — deliver or release it above.",
+                "पहले मौजूदा क्लेम पूरा करें — ऊपर पहुँचाएँ या छोड़ें।",
               )}
             </span>
           </div>
         )}
-        {/* Mig 144 — truck picker. The runner names the truck they're
-            loading (pick an existing one or type a new name) before
-            claiming. Busy trucks are shown but not pickable. */}
-        {!hasActiveClaim && availableRows.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 14px",
-              marginBottom: 10,
-              background: "var(--surface-alt)",
-              border: `1.5px solid ${truckName.trim() ? "#1d4ed8" : "var(--border)"}`,
-              borderRadius: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ fontSize: 16, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
-              🚚 {t("Truck", "ट्रक")}
-            </span>
-            <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-              <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
-            </div>
-            <span style={{ fontSize: 13, color: "var(--muted)" }}>
-              {truckName.trim()
-                ? t("Carries this whole claim.", "यह पूरा क्लेम इसी ट्रक पर।")
-                : t("Pick or add the truck before claiming.", "क्लेम से पहले ट्रक चुनें या जोड़ें।")}
-            </span>
-          </div>
-        )}
-        {/* Mig 065 — batch claim action bar. Shows the running tally
-            of how many are selected, the 10-cap, and the submit
-            button. Disappears when nothing's selected (or when the
-            runner has an active claim). */}
+        {/* Mig 065 — batch claim action bar. Select slabs, then Claim
+            opens the truck-pick modal (Mig 144). */}
         {!hasActiveClaim && availableRows.length > 0 && (
           <div
             style={{
@@ -725,63 +728,34 @@ export function TransferDispatchList({
                   {t("Clear", "हटाएँ")}
                 </button>
               )}
+              {/* The claim posts via this (button-less) form; the truck
+                  modal sets the truck on the hidden input + requestSubmit()s
+                  it. onSubmit clears the selection optimistically. */}
               <form
+                ref={claimFormRef}
                 action={claimSlabTransferBatchAction}
-                onSubmit={(e) => {
-                  // Mig 144 — truck is required so we know what carried
-                  // the load. Guard before the confirm dialog.
-                  if (!truckName.trim()) {
-                    e.preventDefault();
-                    setToastMsg("Pick or add the truck first.");
-                    return;
-                  }
-                  // Daksh — confirm the truck-load before submitting.
-                  // Once claimed the runner is locked to this batch
-                  // until they deliver or release, so the dialog
-                  // prevents an accidental Enter-keypress claiming
-                  // the wrong selection.
-                  const n = selectedIds.size;
-                  if (
-                    !window.confirm(
-                      t(
-                        `Claim ${n} slab(s) onto truck "${truckName.trim()}"?\n\nYou'll need to deliver or release all of them before you can open a new batch.`,
-                        `${n} स्लैब ट्रक "${truckName.trim()}" पर क्लेम करें?\n\nनया बैच लेने से पहले इन सबको पहुँचाना या छोड़ना होगा।`,
-                      ),
-                    )
-                  ) {
-                    e.preventDefault();
-                    return;
-                  }
-                  // Optimistically clear selection — page reload will
-                  // re-fetch with the freshly claimed rows in Mine.
-                  setSelectedIds(new Set());
+                onSubmit={() => setSelectedIds(new Set())}
+              >
+                <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selectedIds])} />
+                <input type="hidden" name="redirect_to" value="/carving/transfer" />
+                <input type="hidden" name="truck_name" ref={claimTruckRef} defaultValue="" />
+              </form>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={selectedIds.size === 0}
+                onClick={() => setClaimModalOpen(true)}
+                style={{
+                  fontSize: 16,
+                  padding: "11px 22px",
+                  fontWeight: 800,
+                  minHeight: 48,
+                  opacity: selectedIds.size === 0 ? 0.5 : 1,
+                  cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
                 }}
               >
-                <input
-                  type="hidden"
-                  name="carving_item_ids"
-                  value={JSON.stringify([...selectedIds])}
-                />
-                <input type="hidden" name="redirect_to" value="/carving/transfer" />
-                {/* Mig 144 — truck the runner picked above. */}
-                <input type="hidden" name="truck_name" value={truckName.trim()} />
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={selectedIds.size === 0 || !truckName.trim()}
-                  title={!truckName.trim() ? "Pick or add the truck first" : undefined}
-                  style={{
-                    fontSize: 16,
-                    padding: "11px 22px",
-                    fontWeight: 800,
-                    minHeight: 48,
-                    opacity: selectedIds.size === 0 || !truckName.trim() ? 0.5 : 1,
-                    cursor: selectedIds.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
-                  }}
-                >
-                  📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}
-                </button>
-              </form>
+                📦 {t("Claim", "क्लेम")} {selectedIds.size > 0 ? selectedIds.size : ""}
+              </button>
             </div>
           </div>
         )}
@@ -906,11 +880,35 @@ export function TransferDispatchList({
           collapsible
           defaultOpen={false}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {delivered.map((d) => (
-              <DeliveredCard key={d.id} row={d} stoneTypes={stoneTypes} />
-            ))}
-          </div>
+          {(() => {
+            // Group by vendor, like Available — the runner sees what landed
+            // at each shade today.
+            const byVendor = new Map<string, DeliveredRow[]>();
+            for (const d of delivered) {
+              const g = byVendor.get(d.vendor_name);
+              if (g) g.push(d);
+              else byVendor.set(d.vendor_name, [d]);
+            }
+            const groups = [...byVendor.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {groups.map(([vendor, drows]) => (
+                  <div key={vendor} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", borderBottom: "1px solid var(--border)", marginBottom: 2 }}>
+                      <span style={{ fontSize: 14 }}>🏭</span>
+                      <strong style={{ fontSize: 13, color: "var(--text)" }}>{vendor}</strong>
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>
+                        {drows.length} {t("slab", "स्लैब")}{drows.length === 1 ? "" : t("s", "")}
+                      </span>
+                    </div>
+                    {drows.map((d) => (
+                      <DeliveredCard key={d.id} row={d} stoneTypes={stoneTypes} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </SectionShell>
       )}
 
@@ -954,6 +952,131 @@ export function TransferDispatchList({
           t={t}
         />
       )}
+
+      {claimModalOpen && (
+        <TruckPickModal
+          trucks={trucks}
+          t={t}
+          onClose={() => setClaimModalOpen(false)}
+          onPick={submitClaimWithTruck}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Truck-pick modal (Mig 144) — opened from a Claim / Bring-in button.
+// Lists free trucks (uppercase plate + driver) as big tap targets, plus a
+// "without truck" escape hatch. onPick("") = claim without a truck.
+function TruckPickModal({
+  trucks,
+  onPick,
+  onClose,
+  t,
+}: {
+  trucks: TruckOption[];
+  onPick: (truckName: string) => void;
+  onClose: () => void;
+  t: (en: string, hi: string) => string;
+}) {
+  const free = trucks.filter((tr) => !tr.busy);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "center",
+        padding: 14,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 460,
+          background: "var(--surface)",
+          borderRadius: 16,
+          padding: 16,
+          maxHeight: "80vh",
+          overflowY: "auto",
+          boxShadow: "0 -8px 40px rgba(0,0,0,0.3)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 22 }}>🚚</span>
+          <strong style={{ fontSize: 18 }}>{t("Pick the truck", "ट्रक चुनें")}</strong>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ghost-button"
+            style={{ marginLeft: "auto", fontSize: 13, padding: "6px 12px" }}
+          >
+            {t("Cancel", "रद्द")}
+          </button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {free.length === 0 && (
+            <div className="muted" style={{ fontSize: 13, padding: "6px 2px" }}>
+              {t(
+                "No free trucks — add trucks in Settings → Transfer trucks, or claim without one.",
+                "कोई फ्री ट्रक नहीं — सेटिंग → ट्रांसफर ट्रक में जोड़ें, या बिना ट्रक क्लेम करें।",
+              )}
+            </div>
+          )}
+          {free.map((tr) => (
+            <button
+              key={tr.id}
+              type="button"
+              onClick={() => onPick(tr.name)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "14px 14px",
+                minHeight: 58,
+                borderRadius: 12,
+                border: "1.5px solid var(--border)",
+                background: "var(--surface-alt)",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span style={{ fontSize: 20 }}>🚛</span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 16 }}>
+                  {tr.name.toUpperCase()}
+                </code>
+                {tr.driver && <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{tr.driver}</span>}
+              </span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onPick("")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "13px 14px",
+              minHeight: 52,
+              borderRadius: 12,
+              border: "1.5px dashed var(--border)",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--muted)",
+              fontWeight: 700,
+              fontSize: 14,
+            }}
+          >
+            ⏭ {t("Claim without truck", "बिना ट्रक क्लेम करें")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -994,7 +1117,19 @@ function DispatchTransferTab({
   const allIds = rows.map((r) => r.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
+  // Bring-in posts via a button-less form; the truck modal sets the truck
+  // on the hidden input + requestSubmit()s it (mirrors the claim flow).
+  const [bringModalOpen, setBringModalOpen] = useState(false);
+  const bringFormRef = useRef<HTMLFormElement>(null);
+  const bringTruckRef = useRef<HTMLInputElement>(null);
+  const submitBringWithTruck = (truck: string) => {
+    if (bringTruckRef.current) bringTruckRef.current.value = truck;
+    setBringModalOpen(false);
+    bringFormRef.current?.requestSubmit();
+  };
+
   return (
+    <>
     <SectionShell
       kind="available"
       title={t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच")}
@@ -1005,42 +1140,12 @@ function DispatchTransferTab({
       }
     >
       {rows.length === 0 ? (
-        <div className="muted" style={{ fontSize: 15, padding: "8px 2px", lineHeight: 1.5 }}>
-          {t(
-            "When a slab is approved it waits here until you bring it in to its dispatch station. Once brought in, it becomes selectable on the Dispatch board. Slabs the reviewer self-transferred skip this queue.",
-            "स्लैब अप्रूव होने पर यहाँ रहती है जब तक आप उसे डिस्पैच स्टेशन पर न लाएँ। लाने के बाद वह डिस्पैच बोर्ड पर चुनी जा सकती है। जो स्लैब रिव्यूअर ने खुद ट्रांसफर कर दीं वे यह कतार छोड़ देती हैं।",
-          )}
+        <div className="muted" style={{ fontSize: 15, padding: "8px 2px" }}>
+          {t("Nothing waiting to bring in.", "लाने के लिए कुछ बाकी नहीं।")}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Mig 144 — truck picker for the dispatch run. Shares the same
-              fleet + busy state as the cutting→carving claim, so a truck
-              out on a carving claim shows busy here too. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 14px",
-              background: "var(--surface-alt)",
-              border: `1.5px solid ${truckName.trim() ? "#1d4ed8" : "var(--border)"}`,
-              borderRadius: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ fontSize: 16, fontWeight: 800, color: truckName.trim() ? "#1d4ed8" : "#b45309" }}>
-              🚚 {t("Truck", "ट्रक")}
-            </span>
-            <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-              <TruckCombobox value={truckName} onChange={setTruckName} trucks={trucks} />
-            </div>
-            <span style={{ fontSize: 13, color: "var(--muted)" }}>
-              {truckName.trim()
-                ? t("Carries this dispatch run.", "यह डिस्पैच फेरा इसी ट्रक पर।")
-                : t("Pick or add the truck before bringing in.", "लाने से पहले ट्रक चुनें या जोड़ें।")}
-            </span>
-          </div>
-          {/* Bring-in action bar */}
+          {/* Bring-in action bar — Bring in opens the truck-pick modal. */}
           <div
             style={{
               display: "flex",
@@ -1074,41 +1179,30 @@ function DispatchTransferTab({
             </span>
             <div style={{ marginLeft: "auto" }}>
               <form
+                ref={bringFormRef}
                 action={bringInToDispatchBatchAction}
-                onSubmit={(e) => {
-                  if (!truckName.trim()) {
-                    e.preventDefault();
-                    onNeedToast("Pick or add the truck first.");
-                    return;
-                  }
-                  if (selected.size === 0) {
-                    e.preventDefault();
-                    onNeedToast("Select at least one slab.");
-                    return;
-                  }
-                  setSelected(() => new Set());
-                }}
+                onSubmit={() => setSelected(() => new Set())}
               >
                 <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selected])} />
                 <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
-                <input type="hidden" name="truck_name" value={truckName.trim()} />
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={selected.size === 0 || !truckName.trim()}
-                  title={!truckName.trim() ? "Pick or add the truck first" : undefined}
-                  style={{
-                    fontSize: 16,
-                    padding: "11px 22px",
-                    fontWeight: 800,
-                    minHeight: 48,
-                    opacity: selected.size === 0 || !truckName.trim() ? 0.5 : 1,
-                    cursor: selected.size === 0 || !truckName.trim() ? "not-allowed" : "pointer",
-                  }}
-                >
-                  🚚 {t("Bring in to dispatch", "डिस्पैच पर लाएँ")} {selected.size > 0 ? selected.size : ""}
-                </button>
+                <input type="hidden" name="truck_name" ref={bringTruckRef} defaultValue="" />
               </form>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={selected.size === 0}
+                onClick={() => setBringModalOpen(true)}
+                style={{
+                  fontSize: 16,
+                  padding: "11px 22px",
+                  fontWeight: 800,
+                  minHeight: 48,
+                  opacity: selected.size === 0 ? 0.5 : 1,
+                  cursor: selected.size === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                🚚 {t("Bring in to dispatch", "डिस्पैच पर लाएँ")} {selected.size > 0 ? selected.size : ""}
+              </button>
             </div>
           </div>
 
@@ -1151,6 +1245,15 @@ function DispatchTransferTab({
         </div>
       )}
     </SectionShell>
+    {bringModalOpen && (
+      <TruckPickModal
+        trucks={trucks}
+        t={t}
+        onClose={() => setBringModalOpen(false)}
+        onPick={submitBringWithTruck}
+      />
+    )}
+    </>
   );
 }
 
