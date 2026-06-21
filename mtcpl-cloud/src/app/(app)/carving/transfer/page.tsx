@@ -92,13 +92,13 @@ export default async function SlabTransferPage({
       .from("carving_items")
       .select("claim_truck_id")
       .not("claim_truck_id", "is", null)
-      .is("received_at_vendor_at", null),
+      .not("claimed_by", "is", null),
     // Phase 5 (Mig 145/146) — the carving→dispatch queue: approved slabs
     // ready for dispatch that haven't been brought in to the station yet.
     admin
       .from("carving_items")
       .select(
-        "id, slab_requirement_id, vendor_name, ready_to_dispatch_at, dispatch_station_id",
+        "id, slab_requirement_id, vendor_name, ready_to_dispatch_at, dispatch_station_id, claimed_by, claimed_at, claim_batch_id, claim_truck_id",
       )
       .eq("status", "completed")
       .not("ready_to_dispatch_at", "is", null)
@@ -250,12 +250,16 @@ export default async function SlabTransferPage({
     for (const st of stations ?? [])
       stationNames.set((st as { id: string }).id, (st as { name: string }).name);
   }
+  const truckNameById = new Map(trucks.map((tr) => [tr.id, tr.name]));
   const dispatchRows = ((dispatchJobs ?? []) as Array<{
     id: string;
     slab_requirement_id: string;
     vendor_name: string | null;
     ready_to_dispatch_at: string | null;
     dispatch_station_id: string | null;
+    claimed_by: string | null;
+    claim_batch_id: string | null;
+    claim_truck_id: string | null;
   }>).map((j) => {
     const info = slabInfo.get(j.slab_requirement_id);
     return {
@@ -272,6 +276,9 @@ export default async function SlabTransferPage({
         ? stationNames.get(j.dispatch_station_id) ?? null
         : null,
       ready_at: j.ready_to_dispatch_at,
+      claimed_by: j.claimed_by ?? null,
+      claim_batch_id: j.claim_batch_id ?? null,
+      truck_name: j.claim_truck_id ? truckNameById.get(j.claim_truck_id) ?? null : null,
     };
   });
 

@@ -34,7 +34,9 @@ import {
   unclaimSlabTransferBatchAction,
   acknowledgeReceiptAction,
   acknowledgeReceiptBatchAction,
-  bringInToDispatchBatchAction,
+  claimDispatchBatchAction,
+  deliverToDispatchBatchAction,
+  unclaimDispatchBatchAction,
 } from "../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -98,9 +100,15 @@ export type DispatchTransferRow = {
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
+  /** Carving vendor that finished it — the FROM of the dispatch leg. */
   vendor_name: string;
+  /** Dispatch station chosen at approval — the TO of the dispatch leg. */
   station_name: string | null;
   ready_at: string | null;
+  /** Two-step claim (reuses the cutting→carving claim columns). */
+  claimed_by: string | null;
+  claim_batch_id: string | null;
+  truck_name: string | null;
 };
 
 // Single source of truth for the responsive breakpoint. Used by the
@@ -942,13 +950,11 @@ export function TransferDispatchList({
       {activeTab === "dispatch" && (
         <DispatchTransferTab
           rows={dispatchRows}
+          currentUserId={currentUserId}
           selected={dispatchSelected}
           setSelected={setDispatchSelected}
           stoneTypes={stoneTypes}
           trucks={trucks}
-          truckName={dispatchTruckName}
-          setTruckName={setDispatchTruckName}
-          onNeedToast={setToastMsg}
           t={t}
         />
       )}
@@ -1087,172 +1093,240 @@ function TruckPickModal({
 // slab becomes clickable on the Dispatch board.
 function DispatchTransferTab({
   rows,
+  currentUserId,
   selected,
   setSelected,
   stoneTypes,
   trucks,
-  truckName,
-  setTruckName,
-  onNeedToast,
   t,
 }: {
   rows: DispatchTransferRow[];
+  currentUserId: string;
   selected: Set<string>;
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   stoneTypes: StoneTypeDef[];
   trucks: TruckOption[];
-  truckName: string;
-  setTruckName: (v: string) => void;
-  onNeedToast: (m: string) => void;
   t: (en: string, hi: string) => string;
 }) {
-  const byStation = new Map<string, DispatchTransferRow[]>();
-  for (const r of rows) {
-    const key = r.station_name ?? "Unassigned station";
-    const g = byStation.get(key);
-    if (g) g.push(r);
-    else byStation.set(key, [r]);
-  }
-  const groups = [...byStation.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const allIds = rows.map((r) => r.id);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  // Two-step lane (mirrors cutting→carving): claim → deliver.
+  const mineRows = rows.filter((r) => r.claimed_by === currentUserId);
+  const availableRows = rows.filter((r) => !r.claimed_by);
+  const hasActiveClaim = mineRows.length > 0;
 
-  // Bring-in posts via a button-less form; the truck modal sets the truck
-  // on the hidden input + requestSubmit()s it (mirrors the claim flow).
-  const [bringModalOpen, setBringModalOpen] = useState(false);
-  const bringFormRef = useRef<HTMLFormElement>(null);
-  const bringTruckRef = useRef<HTMLInputElement>(null);
-  const submitBringWithTruck = (truck: string) => {
-    if (bringTruckRef.current) bringTruckRef.current.value = truck;
-    setBringModalOpen(false);
-    bringFormRef.current?.requestSubmit();
+  // Available grouped by carving vendor (the FROM); each row shows → station.
+  const byVendor = new Map<string, DispatchTransferRow[]>();
+  for (const r of availableRows) {
+    const g = byVendor.get(r.vendor_name);
+    if (g) g.push(r);
+    else byVendor.set(r.vendor_name, [r]);
+  }
+  const availGroups = [...byVendor.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const availIds = availableRows.map((r) => r.id);
+  const allSelected = availIds.length > 0 && availIds.every((id) => selected.has(id));
+
+  // My claims grouped by claim_batch_id (every claim sets one).
+  type Batch = { batchId: string | null; rows: DispatchTransferRow[] };
+  const mineBatches: Batch[] = [];
+  const idxByKey = new Map<string, number>();
+  for (const r of mineRows) {
+    const key = r.claim_batch_id ?? `legacy::${r.id}`;
+    const idx = idxByKey.get(key);
+    if (idx == null) {
+      idxByKey.set(key, mineBatches.length);
+      mineBatches.push({ batchId: r.claim_batch_id, rows: [r] });
+    } else {
+      mineBatches[idx].rows.push(r);
+    }
+  }
+
+  const [claimedOpen, setClaimedOpen] = useState(false);
+  const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const claimFormRef = useRef<HTMLFormElement>(null);
+  const claimTruckRef = useRef<HTMLInputElement>(null);
+  const submitClaimWithTruck = (truck: string) => {
+    if (claimTruckRef.current) claimTruckRef.current.value = truck;
+    setClaimModalOpen(false);
+    setSelected(() => new Set());
+    claimFormRef.current?.requestSubmit();
   };
 
   return (
     <>
-    <SectionShell
-      kind="available"
-      title={t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच")}
-      subtitle={
-        rows.length === 0
-          ? t("Nothing waiting — carved slabs show here until you bring them in.", "कुछ बाकी नहीं — तैयार स्लैब यहाँ दिखेंगी जब तक आप उन्हें न लाएँ।")
-          : t(`${rows.length} carved slab(s) ready to bring in to dispatch`, `${rows.length} तैयार स्लैब डिस्पैच पर लाने को तैयार`)
-      }
-    >
-      {rows.length === 0 ? (
-        <div className="muted" style={{ fontSize: 15, padding: "8px 2px" }}>
-          {t("Nothing waiting to bring in.", "लाने के लिए कुछ बाकी नहीं।")}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Bring-in action bar — Bring in opens the truck-pick modal. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 14px",
-              background: selected.size > 0 ? "#dbeafe" : "var(--surface-alt)",
-              border: `1.5px solid ${selected.size > 0 ? "#1d4ed8" : "var(--border)"}`,
-              borderRadius: 10,
-              flexWrap: "wrap",
-            }}
-          >
+      {/* CLAIMED FOR DISPATCH — compact card → expand to deliver / release. */}
+      {mineRows.length > 0 && (
+        <SectionShell
+          kind="mine"
+          title={t("🚚 Claimed for dispatch", "🚚 डिस्पैच के लिए क्लेम")}
+          subtitle={t(`${mineRows.length} slab(s) to deliver`, `${mineRows.length} स्लैब पहुँचानी`)}
+        >
+          {!claimedOpen ? (
             <button
               type="button"
-              className="ghost-button"
-              onClick={() =>
-                setSelected(() => (allSelected ? new Set() : new Set(allIds)))
-              }
-              style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}
-            >
-              {allSelected ? t("Clear all", "सब हटाएँ") : t("Select all", "सब चुनें")}
-            </button>
-            <span
+              onClick={() => setClaimedOpen(true)}
               style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: selected.size > 0 ? "#1d4ed8" : "var(--muted)",
+                width: "100%", textAlign: "left", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "14px 16px", borderRadius: 12, minHeight: 58,
+                background: "rgba(29,78,216,0.06)", border: "1.5px solid #1d4ed8", color: "var(--text)",
               }}
             >
-              {selected.size === 0 ? t("Select slabs to bring in", "लाने के लिए स्लैब चुनें") : t(`${selected.size} selected`, `${selected.size} चुनी`)}
-            </span>
-            <div style={{ marginLeft: "auto" }}>
-              <form
-                ref={bringFormRef}
-                action={bringInToDispatchBatchAction}
-                onSubmit={() => setSelected(() => new Set())}
-              >
-                <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selected])} />
-                <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
-                <input type="hidden" name="truck_name" ref={bringTruckRef} defaultValue="" />
-              </form>
+              <span style={{ fontSize: 24 }}>🚚</span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 17, fontWeight: 800, color: "#1d4ed8" }}>
+                  {t(`${mineRows.length} slab(s) claimed`, `${mineRows.length} स्लैब क्लेम की`)}
+                </span>
+                <span style={{ fontSize: 13.5, color: "var(--muted)" }}>
+                  {t("Tap to deliver or release", "पहुँचाने या छोड़ने के लिए टैप करें")}
+                </span>
+              </span>
+              <span style={{ marginLeft: "auto", fontSize: 18, color: "#1d4ed8", fontWeight: 800 }}>▸</span>
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <button
                 type="button"
-                className="primary-button"
-                disabled={selected.size === 0}
-                onClick={() => setBringModalOpen(true)}
-                style={{
-                  fontSize: 16,
-                  padding: "11px 22px",
-                  fontWeight: 800,
-                  minHeight: 48,
-                  opacity: selected.size === 0 ? 0.5 : 1,
-                  cursor: selected.size === 0 ? "not-allowed" : "pointer",
-                }}
+                onClick={() => setClaimedOpen(false)}
+                className="ghost-button"
+                style={{ alignSelf: "flex-start", fontSize: 13, padding: "6px 12px" }}
               >
-                🚚 {t("Bring in to dispatch", "डिस्पैच पर लाएँ")} {selected.size > 0 ? selected.size : ""}
+                ▾ {t("Collapse", "बंद करें")}
+              </button>
+              {mineBatches.map((b, gIdx) => (
+                <div
+                  key={b.batchId ?? `legacy-${gIdx}`}
+                  style={{
+                    border: "1.5px solid #1d4ed8",
+                    background: "rgba(29,78,216,0.04)",
+                    borderRadius: 12,
+                    padding: "10px 10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, fontWeight: 800, color: "#1d4ed8" }}>
+                    <span>🚛 {t(`Batch of ${b.rows.length}`, `${b.rows.length} का बैच`)}</span>
+                    {b.rows[0].truck_name && (
+                      <code style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }}>
+                        {b.rows[0].truck_name.toUpperCase()}
+                      </code>
+                    )}
+                  </div>
+                  {b.batchId && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <form
+                        action={deliverToDispatchBatchAction}
+                        onSubmit={(e) => {
+                          if (!window.confirm(t(`Mark all ${b.rows.length} slab(s) delivered to dispatch?`, `सभी ${b.rows.length} स्लैब डिस्पैच पर पहुँचाई मार्क करें?`))) {
+                            e.preventDefault();
+                          }
+                        }}
+                        style={{ flex: "1 1 180px" }}
+                      >
+                        <input type="hidden" name="claim_batch_id" value={b.batchId} />
+                        <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
+                        <button type="submit" style={{ width: "100%", fontSize: 16, padding: "12px 18px", fontWeight: 800, background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", minHeight: 48 }}>
+                          ✅ {t("Deliver all", "सब पहुँचाएँ")} {b.rows.length}
+                        </button>
+                      </form>
+                      <form
+                        action={unclaimDispatchBatchAction}
+                        onSubmit={(e) => {
+                          if (!window.confirm(t("Release this batch back to the queue?", "यह बैच वापस कतार में छोड़ें?"))) e.preventDefault();
+                        }}
+                      >
+                        <input type="hidden" name="claim_batch_id" value={b.batchId} />
+                        <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
+                        <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 15, padding: "12px 16px", minHeight: 48 }}>
+                          🛑 {t("Release all", "सब छोड़ें")}
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                  {b.rows.map((r) => (
+                    <DispatchBringInRow key={r.id} row={r} stoneTypes={stoneTypes} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionShell>
+      )}
+
+      {/* AVAILABLE — grouped by carving vendor (FROM) → station (TO). */}
+      <SectionShell
+        kind="available"
+        title={t("📦 Carving → Dispatch", "📦 नक्काशी → डिस्पैच")}
+        subtitle={
+          availableRows.length === 0
+            ? t("Nothing waiting to claim.", "क्लेम के लिए कुछ बाकी नहीं।")
+            : t(`${availableRows.length} carved slab(s) to claim`, `${availableRows.length} तैयार स्लैब क्लेम करने को`)
+        }
+      >
+        {hasActiveClaim && availableRows.length > 0 && (
+          <div style={{ padding: "10px 12px", marginBottom: 10, background: "rgba(180,115,51,0.10)", border: "1.5px solid rgba(180,115,51,0.4)", borderRadius: 8, fontSize: 14, color: "#7c2d12", fontWeight: 600 }}>
+            🏗️ {t("Finish your current claim first — deliver or release it above.", "पहले मौजूदा क्लेम पूरा करें — ऊपर पहुँचाएँ या छोड़ें।")}
+          </div>
+        )}
+        {!hasActiveClaim && availableRows.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 10, background: selected.size > 0 ? "#dbeafe" : "var(--surface-alt)", border: `1.5px solid ${selected.size > 0 ? "#1d4ed8" : "var(--border)"}`, borderRadius: 10, flexWrap: "wrap" }}>
+            <button type="button" className="ghost-button" onClick={() => setSelected(() => (allSelected ? new Set() : new Set(availIds)))} style={{ fontSize: 14, padding: "8px 14px", minHeight: 44 }}>
+              {allSelected ? t("Clear all", "सब हटाएँ") : t("Select all", "सब चुनें")}
+            </button>
+            <span style={{ fontSize: 15, fontWeight: 700, color: selected.size > 0 ? "#1d4ed8" : "var(--muted)" }}>
+              {selected.size === 0 ? t("Select slabs to claim", "क्लेम के लिए स्लैब चुनें") : t(`${selected.size} selected`, `${selected.size} चुनी`)}
+            </span>
+            <div style={{ marginLeft: "auto" }}>
+              <form ref={claimFormRef} action={claimDispatchBatchAction}>
+                <input type="hidden" name="carving_item_ids" value={JSON.stringify([...selected])} />
+                <input type="hidden" name="redirect_to" value="/carving/transfer?tab=dispatch" />
+                <input type="hidden" name="truck_name" ref={claimTruckRef} defaultValue="" />
+              </form>
+              <button type="button" className="primary-button" disabled={selected.size === 0} onClick={() => setClaimModalOpen(true)} style={{ fontSize: 16, padding: "11px 22px", fontWeight: 800, minHeight: 48, opacity: selected.size === 0 ? 0.5 : 1, cursor: selected.size === 0 ? "not-allowed" : "pointer" }}>
+                📦 {t("Claim", "क्लेम")} {selected.size > 0 ? selected.size : ""}
               </button>
             </div>
           </div>
-
-          {groups.map(([station, grows]) => (
-            <div key={station} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "4px 2px",
-                  borderBottom: "1px solid var(--border)",
-                  marginBottom: 2,
-                }}
-              >
-                <span style={{ fontSize: 15 }}>📦</span>
-                <strong style={{ fontSize: 15, color: "var(--text)" }}>{station}</strong>
-                <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
-                  {grows.length} {t("slab", "स्लैब")}{grows.length === 1 ? "" : t("s", "")}
-                </span>
+        )}
+        {availableRows.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {availGroups.map(([vendor, grows]) => (
+              <div key={vendor} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", borderBottom: "1px solid var(--border)", marginBottom: 2 }}>
+                  <span style={{ fontSize: 15 }}>🏭</span>
+                  <strong style={{ fontSize: 15, color: "var(--text)" }}>{vendor}</strong>
+                  <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
+                    {grows.length} {t("slab", "स्लैब")}{grows.length === 1 ? "" : t("s", "")}
+                  </span>
+                </div>
+                {grows.map((r) => (
+                  <DispatchBringInRow
+                    key={r.id}
+                    row={r}
+                    stoneTypes={stoneTypes}
+                    selected={!hasActiveClaim && selected.has(r.id)}
+                    onToggle={
+                      hasActiveClaim
+                        ? undefined
+                        : () =>
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.id)) next.delete(r.id);
+                              else next.add(r.id);
+                              return next;
+                            })
+                    }
+                  />
+                ))}
               </div>
-              {grows.map((r) => (
-                <DispatchBringInRow
-                  key={r.id}
-                  row={r}
-                  stoneTypes={stoneTypes}
-                  selected={selected.has(r.id)}
-                  onToggle={() =>
-                    setSelected((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(r.id)) next.delete(r.id);
-                      else next.add(r.id);
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+      </SectionShell>
+
+      {claimModalOpen && (
+        <TruckPickModal trucks={trucks} t={t} onClose={() => setClaimModalOpen(false)} onPick={submitClaimWithTruck} />
       )}
-    </SectionShell>
-    {bringModalOpen && (
-      <TruckPickModal
-        trucks={trucks}
-        t={t}
-        onClose={() => setBringModalOpen(false)}
-        onPick={submitBringWithTruck}
-      />
-    )}
     </>
   );
 }
@@ -1260,28 +1334,33 @@ function DispatchTransferTab({
 function DispatchBringInRow({
   row,
   stoneTypes,
-  selected,
+  selected = false,
   onToggle,
 }: {
   row: DispatchTransferRow;
   stoneTypes: StoneTypeDef[];
-  selected: boolean;
-  onToggle: () => void;
+  selected?: boolean;
+  onToggle?: () => void;
 }) {
   const L = row.length_ft;
   const W = row.width_ft;
   const T = row.thickness_ft;
+  const selectable = !!onToggle;
   return (
     <div
       onClick={onToggle}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onToggle();
-        }
-      }}
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onKeyDown={
+        selectable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle!();
+              }
+            }
+          : undefined
+      }
       style={{
         display: "flex",
         alignItems: "center",
@@ -1290,38 +1369,33 @@ function DispatchBringInRow({
         border: selected ? "2px solid #1d4ed8" : "1px solid var(--border)",
         background: selected ? "rgba(29,78,216,0.06)" : "var(--surface)",
         borderRadius: 10,
-        cursor: "pointer",
+        cursor: selectable ? "pointer" : "default",
         userSelect: "none",
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 7,
-          flexShrink: 0,
-          border: selected ? "none" : "2px solid var(--border)",
-          background: selected ? "#1d4ed8" : "transparent",
-          color: "#fff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 15,
-          fontWeight: 900,
-        }}
-      >
-        {selected ? "✓" : ""}
-      </span>
+      {selectable && (
+        <span
+          aria-hidden
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            flexShrink: 0,
+            border: selected ? "none" : "2px solid var(--border)",
+            background: selected ? "#1d4ed8" : "transparent",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 15,
+            fontWeight: 900,
+          }}
+        >
+          {selected ? "✓" : ""}
+        </span>
+      )}
       <div style={{ flexShrink: 0 }}>
-        <SlabThumb
-          l={L}
-          w={W}
-          t={T}
-          stone={row.stone}
-          stoneTypes={stoneTypes}
-          size={48}
-        />
+        <SlabThumb l={L} w={W} t={T} stone={row.stone} stoneTypes={stoneTypes} size={48} />
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
@@ -1330,7 +1404,18 @@ function DispatchBringInRow({
           </code>
           <span style={{ fontSize: 13.5, color: "var(--muted)" }}>{row.temple}</span>
         </div>
-        <div style={{ fontSize: 13, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+        {/* FROM → TO: carving vendor → dispatch station. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 12.5 }}>
+          <span style={{ fontWeight: 700, color: "var(--text)" }}>🏭 {row.vendor_name}</span>
+          <span style={{ color: "var(--muted)" }}>→</span>
+          <span style={{ fontWeight: 700, color: "#1d4ed8" }}>📦 {row.station_name ?? "—"}</span>
+          {row.truck_name && (
+            <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
+              · 🚚 {row.truck_name.toUpperCase()}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
           {L}×{W}×{T} in · {row.stone ?? "—"}
         </div>
       </div>

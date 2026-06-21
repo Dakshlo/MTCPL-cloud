@@ -5634,6 +5634,138 @@ export async function bringInToDispatchBatchAction(formData: FormData) {
   );
 }
 
+// ── Carving → Dispatch, TWO-STEP claim → deliver (Daksh, Jun 2026) ──
+//
+// Mirrors the cutting→carving claim → deliver flow for the dispatch
+// lane, REUSING the same claim columns (claimed_by / claimed_at /
+// claim_batch_id / claim_truck_id) — they're free again by the time a
+// slab is approved + awaiting dispatch (it was long since delivered to
+// the vendor). Deliver stamps received_at_dispatch_at, the gate that
+// makes the slab clickable on the Dispatch board.
+
+export async function claimDispatchBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+  ]);
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";
+
+  let ids: string[] = [];
+  const raw = txt(formData, "carving_item_ids");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) ids = parsed.map((x) => String(x)).filter(Boolean);
+    } catch { redirect(`${redirectTo}?toast=Bad+payload`); }
+  }
+  if (ids.length === 0) redirect(`${redirectTo}?toast=No+slabs+selected`);
+
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, status, ready_to_dispatch_at, received_at_dispatch_at, claimed_by")
+    .in("id", ids);
+  const eligible = ((items ?? []) as Array<{
+    id: string; status: string; ready_to_dispatch_at: string | null;
+    received_at_dispatch_at: string | null; claimed_by: string | null;
+  }>)
+    .filter((r) => r.status === "completed" && r.ready_to_dispatch_at && !r.received_at_dispatch_at && (!r.claimed_by || r.claimed_by === profile.id))
+    .map((r) => r.id);
+  if (eligible.length === 0) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to claim — refresh and retry.")}`);
+  }
+
+  const now = new Date().toISOString();
+  const claimBatchId = crypto.randomUUID();
+  const claimTruckId = await resolveTruckByName(admin, txt(formData, "truck_name"), profile.id);
+  const { data: updated } = await admin
+    .from("carving_items")
+    .update({ claimed_by: profile.id, claimed_at: now, claim_batch_id: claimBatchId, claim_truck_id: claimTruckId })
+    .in("id", eligible)
+    .is("claimed_by", null)
+    .select("id");
+  const claimed = (updated ?? []) as Array<{ id: string }>;
+  if (claimed.length === 0) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Already claimed — refresh and retry.")}`);
+  }
+
+  await Promise.all(claimed.map((u) =>
+    recordEvent(u.id, "dispatch_claimed", profile.id, `Claimed for dispatch ${claimBatchId.slice(0, 8)}`)));
+  await logAudit(profile.id, "dispatch_claim_batch", "claim_batch", claimBatchId, { count: claimed.length });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Claimed ${claimed.length} slab(s) for dispatch`)}`);
+}
+
+export async function deliverToDispatchBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+  ]);
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";
+  const claimBatchId = txt(formData, "claim_batch_id");
+  if (!claimBatchId) redirect(`${redirectTo}?toast=Missing+batch+id`);
+
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, claimed_by")
+    .eq("claim_batch_id", claimBatchId)
+    .is("received_at_dispatch_at", null);
+  const rows = (items ?? []) as Array<{ id: string; claimed_by: string | null }>;
+  if (rows.length === 0) redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to deliver in that batch.")}`);
+  if ((profile.role === "slab_transfer" || profile.role === "storekeeper") &&
+      rows.some((r) => r.claimed_by && r.claimed_by !== profile.id)) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to deliver.")}`);
+  }
+
+  const now = new Date().toISOString();
+  const ids = rows.map((r) => r.id);
+  await admin
+    .from("carving_items")
+    .update({ received_at_dispatch_at: now, received_at_dispatch_by: profile.id, claimed_by: null, claimed_at: null, claim_batch_id: null })
+    .in("id", ids)
+    .is("received_at_dispatch_at", null);
+
+  await Promise.all(ids.map((id) => recordEvent(id, "received_at_dispatch", profile.id, `Delivered to dispatch ${claimBatchId.slice(0, 8)}`)));
+  await logAudit(profile.id, "dispatch_deliver_batch", "claim_batch", claimBatchId, { carving_item_ids: ids, count: ids.length });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Delivered ${ids.length} slab(s) to dispatch`)}`);
+}
+
+export async function unclaimDispatchBatchAction(formData: FormData) {
+  const { profile } = await requireAuth([
+    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+  ]);
+  const admin = createAdminSupabaseClient();
+  const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";
+  const claimBatchId = txt(formData, "claim_batch_id");
+  if (!claimBatchId) redirect(`${redirectTo}?toast=Missing+batch+id`);
+
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("id, claimed_by")
+    .eq("claim_batch_id", claimBatchId)
+    .is("received_at_dispatch_at", null);
+  const rows = (items ?? []) as Array<{ id: string; claimed_by: string | null }>;
+  if (rows.length === 0) redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to release.")}`);
+  if ((profile.role === "slab_transfer" || profile.role === "storekeeper") &&
+      rows.some((r) => r.claimed_by && r.claimed_by !== profile.id)) {
+    redirect(`${redirectTo}?toast=${encodeURIComponent("Not your batch to release.")}`);
+  }
+
+  const ids = rows.map((r) => r.id);
+  await admin
+    .from("carving_items")
+    .update({ claimed_by: null, claimed_at: null, claim_batch_id: null, claim_truck_id: null })
+    .in("id", ids);
+
+  await Promise.all(ids.map((id) => recordEvent(id, "dispatch_unclaimed", profile.id, `Released dispatch ${claimBatchId.slice(0, 8)}`)));
+  await logAudit(profile.id, "dispatch_unclaim_batch", "claim_batch", claimBatchId, { count: ids.length });
+
+  refreshAll();
+  redirect(`${redirectTo}?toast=${encodeURIComponent(`Released ${ids.length} slab(s)`)}`);
+}
+
 // ── Migration 024: re-tag work-type on an existing job ─────────────
 //
 // Carving head can change a job's requires_machine_type after the
