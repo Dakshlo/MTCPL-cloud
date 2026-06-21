@@ -2510,32 +2510,29 @@ function AvailableSlabCard({
       <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>
         {L}×{W}×{T}&Prime;
       </div>
-      {/* Destination vendor (shade) — repeated on the card per Daksh. */}
+      {/* Route chip — FROM (stock location) → TO (vendor shade), so the
+          runner reads at a glance where to pick up and where to drop. */}
       <div
-        style={{ fontSize: 10.5, fontWeight: 700, color: "#1d4ed8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-        title={row.vendor_name}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          flexWrap: "wrap",
+          fontSize: 10.5,
+          fontWeight: 700,
+          padding: "3px 7px",
+          borderRadius: 5,
+          alignSelf: "flex-start",
+          background: "rgba(180,115,51,0.08)",
+          border: "1px solid rgba(180,115,51,0.25)",
+          fontFamily: "ui-monospace, monospace",
+        }}
+        title={`${row.stock_location ?? "—"} → ${row.vendor_name}`}
       >
-        🏭 {row.vendor_name}
+        <span style={{ color: "#7c2d12" }}>📍 {row.stock_location ?? "—"}</span>
+        <span style={{ color: "var(--muted)" }}>→</span>
+        <span style={{ color: "#1d4ed8" }}>🏭 {row.vendor_name}</span>
       </div>
-      {/* Stock-location chip — where the cutter dropped this slab. */}
-      {row.stock_location && (
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: "#7c2d12",
-            background: "rgba(180,115,51,0.08)",
-            border: "1px solid rgba(180,115,51,0.25)",
-            padding: "3px 7px",
-            borderRadius: 5,
-            alignSelf: "flex-start",
-            fontFamily: "ui-monospace, monospace",
-          }}
-          title={t("Where the cutter team dropped this slab", "कटर टीम ने यह स्लैब कहाँ रखी")}
-        >
-          📍 {row.stock_location}
-        </div>
-      )}
       {/* Waiting-since pill — how long this slab has sat in pending stock. */}
       <div
         style={{
