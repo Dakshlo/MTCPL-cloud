@@ -89,7 +89,7 @@ export default async function CuttingDetailPage({
   const { data: block, error } = await supabase
     .from("cut_session_blocks")
     .select(
-      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, pending_approval_payload, submitted_for_approval_at, submitted_for_approval_by, sent_back_at, sent_back_by, sent_back_note, approval_edited_at, approval_edited_by, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
+      "id, status, block_id, largest_remainder, restocked_block_id, layout, updated_at, cut_session_id, cutting_seq, needs_reprint, reprint_reason, pending_approval_payload, submitted_for_approval_at, submitted_for_approval_by, sent_back_at, sent_back_by, sent_back_note, approval_edited_at, approval_edited_by, cutter_edit_unlocked, cut_sessions(id, session_code, kerf_mm, created_at, planned_by), cut_session_slabs(id, slab_requirement_id, is_filler)"
     )
     .eq("id", id)
     .single();

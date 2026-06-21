@@ -350,7 +350,7 @@ const navEntries: NavEntry[] = [
         href: "/carving/transfer",
         label: "Slab Transfer",
         icon: "🚧",
-        roles: ["developer", "slab_transfer", "storekeeper"],
+        roles: ["developer", "owner", "carving_head", "senior_incharge", "slab_transfer", "storekeeper"],
         department: "production",
       },
       // Daksh (June 2026) — CNC Expenses / Cutter Expenses / Various

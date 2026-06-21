@@ -5041,6 +5041,7 @@ export async function acknowledgeReceiptAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5164,6 +5165,7 @@ export async function claimSlabTransferAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5258,6 +5260,7 @@ export async function claimSlabTransferBatchAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5399,6 +5402,7 @@ export async function unclaimSlabTransferAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5449,6 +5453,7 @@ export async function unclaimSlabTransferBatchAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5509,6 +5514,7 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
     // Mig 083 — storekeeper is the same human as the slab-transfer
     // runner today (Daksh's call), so they share every auth gate.
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5595,6 +5601,7 @@ export async function bringInToDispatchAction(formData: FormData) {
     "carving_head",
     "slab_transfer",
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5646,6 +5653,7 @@ export async function bringInToDispatchBatchAction(formData: FormData) {
     "carving_head",
     "slab_transfer",
     "storekeeper",
+    "senior_incharge",
   ]);
   const admin = createAdminSupabaseClient();
 
@@ -5720,7 +5728,7 @@ export async function bringInToDispatchBatchAction(formData: FormData) {
 
 export async function claimDispatchBatchAction(formData: FormData) {
   const { profile } = await requireAuth([
-    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+    "developer", "owner", "carving_head", "senior_incharge", "slab_transfer", "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
   const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";
@@ -5773,7 +5781,7 @@ export async function claimDispatchBatchAction(formData: FormData) {
 
 export async function deliverToDispatchBatchAction(formData: FormData) {
   const { profile } = await requireAuth([
-    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+    "developer", "owner", "carving_head", "senior_incharge", "slab_transfer", "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
   const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";
@@ -5809,7 +5817,7 @@ export async function deliverToDispatchBatchAction(formData: FormData) {
 
 export async function unclaimDispatchBatchAction(formData: FormData) {
   const { profile } = await requireAuth([
-    "developer", "owner", "carving_head", "slab_transfer", "storekeeper",
+    "developer", "owner", "carving_head", "senior_incharge", "slab_transfer", "storekeeper",
   ]);
   const admin = createAdminSupabaseClient();
   const redirectTo = txt(formData, "redirect_to") || "/carving/transfer?tab=dispatch";

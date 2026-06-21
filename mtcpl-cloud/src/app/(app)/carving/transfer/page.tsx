@@ -36,6 +36,7 @@ export default async function SlabTransferPage({
     "developer",
     "owner",
     "carving_head",
+    "senior_incharge",
     "slab_transfer",
     // Mig 083 — storekeeper merged with slab_transfer.
     "storekeeper",
@@ -287,7 +288,7 @@ export default async function SlabTransferPage({
       rows={rows}
       delivered={deliveredRows}
       currentUserId={profile.id}
-      canUnclaimOthers={["developer", "owner", "carving_head"].includes(profile.role)}
+      canUnclaimOthers={["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)}
       stoneTypes={stoneTypes ?? []}
       trucks={trucks}
       dispatchRows={dispatchRows}
