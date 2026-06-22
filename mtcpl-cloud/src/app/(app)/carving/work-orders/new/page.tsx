@@ -62,11 +62,17 @@ export default async function NewWorkOrderPage() {
     if (data.length < 1000) break;
   }
 
-  // Exclude slabs already on a live (non-cancelled) work-order line.
+  // Exclude slabs that are CURRENTLY committed to a pending (planned, not yet
+  // sent) work-order line — those are spoken for and can't be double-added.
+  // We deliberately do NOT exclude "sent" lines: a sent slab is
+  // carving_assigned (already filtered out by status above), and once its
+  // carving job is cancelled/returned it goes back to cut_done and must
+  // reappear here. Keying on a non-cancelled line instead kept such returned
+  // slabs hidden from the picker even though they showed in CNC-unassigned.
   const { data: liveLines } = await admin
     .from("carving_work_order_items")
     .select("slab_requirement_id, line_status")
-    .neq("line_status", "cancelled")
+    .eq("line_status", "planned")
     .not("slab_requirement_id", "is", null);
   const taken = new Set(
     ((liveLines ?? []) as Array<{ slab_requirement_id: string | null }>)

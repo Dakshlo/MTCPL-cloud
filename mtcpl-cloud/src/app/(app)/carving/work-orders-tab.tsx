@@ -265,8 +265,8 @@ export function WorkOrdersTab({ wos, isOwner }: { wos: WorkOrderTabRow[]; isOwne
                       .map(([s, n]) => {
                         const m = STATUS_META[s] ?? STATUS_META.open;
                         return (
-                          <span key={s} style={{ color: m.fg, fontWeight: 700, padding: "1px 8px", borderRadius: 999, background: m.bg }}>
-                            {m.emoji} {n}
+                          <span key={s} style={{ color: m.fg, fontWeight: 700, padding: "1px 9px", borderRadius: 999, background: m.bg }}>
+                            {m.emoji} {m.label} · {n}
                           </span>
                         );
                       })}

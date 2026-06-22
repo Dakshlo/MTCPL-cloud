@@ -5,6 +5,7 @@ import { createWorkOrderAction } from "../../actions";
 import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
+import { TabletSearchInput } from "@/components/tablet-keyboard";
 
 export type VendorOpt = { id: string; name: string };
 export type PickableSlab = {
@@ -77,10 +78,33 @@ export function NewWorkOrderForm({
       .sort((a, b) => a.temple.localeCompare(b.temple));
   }, [slabs]);
 
+  // Temple codes available in the pool (prefix before the first dash of a slab
+  // id, e.g. OM from OM-0037) — fed to the tablet keyboard as quick chips.
+  const templeCodes = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of slabs) {
+      const code = s.id.split("-")[0]?.trim();
+      if (code) set.add(code.toUpperCase());
+    }
+    return [...set].sort();
+  }, [slabs]);
+
   const templeCards = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return byTemple;
-    return byTemple.filter((t) => t.temple.toLowerCase().includes(q));
+    // Match the temple name OR any slab in it (code / label / dimension) so the
+    // tablet keyboard's code + dimension search narrows to the right temples.
+    const qDim = q.replace(/[×*]/g, "x");
+    return byTemple.filter(
+      (t) =>
+        t.temple.toLowerCase().includes(q) ||
+        t.list.some(
+          (s) =>
+            s.id.toLowerCase().includes(q) ||
+            (s.label ?? "").toLowerCase().includes(q) ||
+            `${s.length_ft}x${s.width_ft}x${s.thickness_ft}`.includes(qDim),
+        ),
+    );
   }, [byTemple, search]);
 
   const openList = useMemo(() => {
@@ -201,7 +225,13 @@ export function NewWorkOrderForm({
         )}
 
         <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍  Search temples…" style={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }} />
+          <TabletSearchInput
+            value={search}
+            onChange={setSearch}
+            templeCodes={templeCodes}
+            placeholder="🔍  Search temple, slab code (OM-0037) or size (53x29x14)…"
+            inputStyle={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }}
+          />
         </div>
 
         <div style={{ padding: 16 }}>
@@ -285,7 +315,13 @@ export function NewWorkOrderForm({
 
             {/* Filter */}
             <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
-              <input value={modalFilter} onChange={(e) => setModalFilter(e.target.value)} placeholder="🔍  Filter — slab id, label, stock loc, or 53x29x14" style={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }} />
+              <TabletSearchInput
+                value={modalFilter}
+                onChange={setModalFilter}
+                templeCodes={templeCodes}
+                placeholder="🔍  Filter — slab id, label, stock loc, or 53x29x14"
+                inputStyle={{ ...inp, width: "100%", fontSize: 14, padding: "11px 14px" }}
+              />
             </div>
 
             {/* Cards */}
