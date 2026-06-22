@@ -1122,13 +1122,19 @@ async function notifyCarvingApprovalBacklog(
     // Byte-for-byte the same predicate as the carving "Done Approval" tab
     // (page.tsx), so the alerted number always matches what the reviewer
     // sees: marked done, not yet approved, not parked in "Still Pending".
-    const { count } = await admin
+    // We pull the rows (not just a count) so the message can list the
+    // pending slab codes grouped by vendor.
+    const { data: pendingRows } = await admin
       .from("carving_items")
-      .select("id", { count: "exact", head: true })
+      .select("slab_requirement_id, vendor_name")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
       .is("pending_work_at", null);
-    const total = count ?? 0;
+    const pending = (pendingRows ?? []) as {
+      slab_requirement_id: string;
+      vendor_name: string | null;
+    }[];
+    const total = pending.length;
 
     const level = backlogLevelFor(total, cfg.threshold, cfg.step);
     const prev = await getBacklogAlertLevel();
@@ -1140,11 +1146,54 @@ async function notifyCarvingApprovalBacklog(
     }
     await setBacklogAlertLevel(level);
 
+    // Group the pending codes by vendor name.
+    const byVendor = new Map<string, string[]>();
+    for (const r of pending) {
+      const name = (r.vendor_name || "—").trim() || "—";
+      const arr = byVendor.get(name) ?? [];
+      arr.push(r.slab_requirement_id);
+      byVendor.set(name, arr);
+    }
+    // Always show every ACTIVE CNC vendor (so a vendor with nothing reads
+    // "No pending", and any NEW CNC vendor appears automatically), plus any
+    // other vendor (e.g. Outsource) that currently has pending slabs.
+    const { data: cncVendors } = await admin
+      .from("vendors")
+      .select("name")
+      .eq("vendor_type", "CNC")
+      .eq("is_active", true);
+    const cncNames = ((cncVendors ?? []) as { name: string | null }[])
+      .map((v) => (v.name || "").trim())
+      .filter(Boolean);
+    const allNames = [...new Set([...cncNames, ...byVendor.keys()])].sort((a, b) =>
+      a.localeCompare(b),
+    );
+
+    // Build the vendor-wise breakdown, capped so the substituted template
+    // body stays under WhatsApp's 1024-char limit.
+    const MAX = 760;
+    let breakdown = "";
+    let cut = false;
+    for (const name of allNames) {
+      const codes = byVendor.get(name) ?? [];
+      const line = codes.length > 0 ? `${name}: ${codes.join(", ")}` : `${name}: No pending`;
+      if (breakdown.length + line.length + 1 > MAX) {
+        cut = true;
+        break;
+      }
+      breakdown += (breakdown ? "\n" : "") + line;
+    }
+    if (cut) breakdown += "\n…(see system for the rest)";
+    if (!breakdown) breakdown = "—";
+
     const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
     await sendWhatsAppTemplate({
       to,
       templateName,
-      components: { body_1: { type: "text", value: String(total) } },
+      components: {
+        body_1: { type: "text", value: breakdown },
+        body_2: { type: "text", value: String(total) },
+      },
     });
   } catch (e) {
     console.warn("[notifyCarvingApprovalBacklog] non-fatal", e);
