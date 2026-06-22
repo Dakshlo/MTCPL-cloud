@@ -236,10 +236,10 @@ function SlabCard({
   onToggle?: () => void;
   onLongPress?: () => void;
 }) {
-  // Phase 5 — a carving slab not yet brought in to the dispatch station
-  // is shown but locked (non-clickable). Direct-dispatch slabs
-  // (hasCarving=false) are exempt. cancelPending still takes precedence.
-  const awaitingTransfer = !!s.hasCarving && !s.receivedAtDispatch;
+  // Daksh (Jun 2026) — the carving→dispatch transfer step is removed: a
+  // carving job that's done + approved (status 'completed') is DIRECTLY
+  // selectable on dispatch, no bring-in needed. (cutting→carving stays.)
+  const awaitingTransfer = false;
   const selectable = !!onToggle && !s.cancelPending && !awaitingTransfer;
   const pressHandlers =
     onLongPress && !s.cancelPending && !awaitingTransfer ? longPressHandlers(onLongPress) : {};
@@ -291,12 +291,6 @@ function SlabCard({
       {s.cancelPending && (
         <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
           🚫 CANCEL REQUESTED — waiting for owner
-        </div>
-      )}
-      {/* Phase 5 — awaiting the carving→dispatch transfer (indigo). */}
-      {awaitingTransfer && !s.cancelPending && (
-        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#4f46e5", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
-          🚚 AWAITING DISPATCH TRANSFER
         </div>
       )}
       <SlabComponentDetail
@@ -803,9 +797,8 @@ function TempleDispatchPeek({
   }
 
   // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
-  const selectableMatched = matched.filter(
-    (s) => !s.cancelPending && !(s.hasCarving && !s.receivedAtDispatch),
-  );
+  // (Carving→dispatch transfer gate removed — carving slabs are selectable.)
+  const selectableMatched = matched.filter((s) => !s.cancelPending);
   const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (

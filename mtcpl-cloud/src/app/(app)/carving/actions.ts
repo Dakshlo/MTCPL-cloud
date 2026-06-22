@@ -4731,13 +4731,13 @@ export async function approveCarvingJobAction(formData: FormData) {
       // surface that doesn't send these fields) never touches them — same
       // safety posture as the depart columns above.
       ...(dispatchStationId ? { dispatch_station_id: dispatchStationId } : {}),
-      ...(selfTransfer
-        ? {
-            dispatch_self_transfer: true,
-            received_at_dispatch_at: now,
-            received_at_dispatch_by: profile.id,
-          }
-        : {}),
+      // Daksh (Jun 2026) — carving→dispatch transfer removed: every approval
+      // marks the slab received at dispatch NOW, so it is immediately
+      // selectable on the Dispatch board (no bring-in step). mig 145 columns
+      // exist in prod, so writing them unconditionally is safe.
+      received_at_dispatch_at: now,
+      received_at_dispatch_by: profile.id,
+      ...(selfTransfer ? { dispatch_self_transfer: true } : {}),
     })
     .eq("id", jobId);
   if (updateErr) {
