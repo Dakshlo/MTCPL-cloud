@@ -7,7 +7,7 @@ import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { EmailSnapshotCard } from "./email-snapshot-card";
-import { MarketNewsCard } from "./market-news-card";
+import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -271,6 +271,8 @@ export default async function DashboardPage() {
         <BlockJourneyEntryCard />
         <VariousCostingEntryCard />
         <TvModeEntryCard />
+        {/* Owner-only market-news brief + chat (liquid-glass page). */}
+        {(profile.role === "owner" || profile.role === "developer") && <MarketNewsEntryCard />}
       </div>
 
       {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked
@@ -280,12 +282,8 @@ export default async function DashboardPage() {
         <EmailSnapshotCard />
       )}
 
-      {/* ── TODAY'S NEWS (June 2026) — owner/dev only. AI-curated pre-market
-          brief (top global + India news that could move the Nifty/Sensex),
-          bilingual EN/हिं, refreshed 8 AM IST weekdays via Vercel cron. */}
-      {(profile.role === "owner" || profile.role === "developer") && (
-        <MarketNewsCard />
-      )}
+      {/* Today's News moved to its own liquid-glass page (/market-news),
+          reached from the owner-only MarketNewsEntryCard above. */}
       {/* Daily WhatsApp work-report controls live in Settings → "Daily
           WhatsApp report" (recipients, preview, send test). */}
 

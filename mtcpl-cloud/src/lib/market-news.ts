@@ -43,6 +43,10 @@ export type DailyNews = {
   items: NewsItem[];
   overviewEn: string | null;
   overviewHi: string | null;
+  /** Owner's headline verdict for the day. */
+  stance: "bullish" | "bearish" | "neutral" | null;
+  stanceNoteEn: string | null;
+  stanceNoteHi: string | null;
   inputTokens: number;
   outputTokens: number;
   webSearches: number;
@@ -100,6 +104,9 @@ Curate the TOP 8–10 items by likely market impact (most important first). For 
 const USER_PROMPT = `Research this morning's market-moving news and return ONLY a JSON object (no prose, no markdown, no code fences) in exactly this shape:
 
 {
+  "stance": "bullish | bearish | neutral (your single best read on whether the Indian market is likely to lean up, down, or sideways/mixed today)",
+  "stance_note_en": "one short sentence justifying the stance",
+  "stance_note_hi": "रुख़ का एक छोटा कारण",
   "overview_en": "one-line read on the likely market mood at the open",
   "overview_hi": "बाज़ार के मूड की एक पंक्ति",
   "items": [
@@ -156,11 +163,19 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
 
   let overviewEn: string | null = null;
   let overviewHi: string | null = null;
+  let stance: DailyNews["stance"] = null;
+  let stanceNoteEn: string | null = null;
+  let stanceNoteHi: string | null = null;
   let items: NewsItem[] = [];
   try {
     const parsed = extractJson(text);
     overviewEn = typeof parsed.overview_en === "string" ? parsed.overview_en.trim() : null;
     overviewHi = typeof parsed.overview_hi === "string" ? parsed.overview_hi.trim() : null;
+    const st = String((parsed as { stance?: unknown }).stance ?? "").toLowerCase().trim();
+    stance = st === "bullish" || st === "bearish" || st === "neutral" ? st : null;
+    const p = parsed as { stance_note_en?: unknown; stance_note_hi?: unknown };
+    stanceNoteEn = typeof p.stance_note_en === "string" ? p.stance_note_en.trim() : null;
+    stanceNoteHi = typeof p.stance_note_hi === "string" ? p.stance_note_hi.trim() : null;
     items = (Array.isArray(parsed.items) ? parsed.items : [])
       .map(sanitizeItem)
       .filter((x): x is NewsItem => x !== null);
@@ -184,6 +199,9 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
     items,
     overviewEn,
     overviewHi,
+    stance,
+    stanceNoteEn,
+    stanceNoteHi,
     inputTokens,
     outputTokens,
     webSearches,
@@ -206,6 +224,9 @@ export async function generateAndStoreMarketNews(
       items: news.items,
       overview_en: news.overviewEn,
       overview_hi: news.overviewHi,
+      stance: news.stance,
+      stance_note_en: news.stanceNoteEn,
+      stance_note_hi: news.stanceNoteHi,
       input_tokens: news.inputTokens,
       output_tokens: news.outputTokens,
       web_searches: news.webSearches,
@@ -234,6 +255,9 @@ function rowToDailyNews(d: Record<string, unknown>): DailyNews {
     items: (Array.isArray(d.items) ? d.items : []) as NewsItem[],
     overviewEn: (d.overview_en as string | null) ?? null,
     overviewHi: (d.overview_hi as string | null) ?? null,
+    stance: (["bullish", "bearish", "neutral"].includes(String(d.stance)) ? d.stance : null) as DailyNews["stance"],
+    stanceNoteEn: (d.stance_note_en as string | null) ?? null,
+    stanceNoteHi: (d.stance_note_hi as string | null) ?? null,
     inputTokens: Number(d.input_tokens) || 0,
     outputTokens: Number(d.output_tokens) || 0,
     webSearches: Number(d.web_searches) || 0,
@@ -263,4 +287,54 @@ export async function getMarketNewsByDate(date: string): Promise<DailyNews | nul
   const admin = createAdminSupabaseClient();
   const { data } = await admin.from("daily_news").select("*").eq("news_date", date).maybeSingle();
   return data ? rowToDailyNews(data as Record<string, unknown>) : null;
+}
+
+/** Owner Q&A about the market / today's brief. Uses the day's brief as context
+ *  and lets Claude web-search for fresh follow-ups. Returns plain text. */
+export async function askMarketQuestion(
+  question: string,
+  lang: "en" | "hi",
+  context: DailyNews | null,
+): Promise<{ answer: string }> {
+  const apiKey = process.env.MTCPL_DAILY_NEWS || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("MTCPL_DAILY_NEWS (Anthropic API key) is not set.");
+  const q = question.trim().slice(0, 1000);
+  if (!q) throw new Error("Please type a question.");
+  const client = new Anthropic({ apiKey });
+
+  const langLine =
+    lang === "hi" ? "Reply in clear, natural Hindi (Devanagari)." : "Reply in clear, concise English.";
+  const ctx = context
+    ? `Today's brief (${context.newsDate}). Stance: ${context.stance ?? "n/a"}. ${context.overviewEn ?? ""}\n` +
+      context.items
+        .map((i) => `- [${i.category}] ${i.headline_en}${i.impact_en ? ` — ${i.impact_en}` : ""}`)
+        .join("\n")
+    : "No market brief is available for today.";
+
+  const system = `You are a market analyst assistant for the owner of an Indian company who follows the Nifty 50 / Sensex. Answer his question helpfully and concisely, in plain language (he is a businessman, not a trader). Use the web_search tool when current data would help (live prices, latest news). Do NOT tell him to buy or sell specific stocks — give context and reasoning and let him decide. ${langLine}
+
+Context — today's market brief:
+${ctx}`;
+
+  const resp = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    thinking: { type: "disabled" },
+    system,
+    messages: [{ role: "user", content: q }],
+    tools: [
+      {
+        type: "web_search_20250305",
+        name: "web_search",
+        max_uses: 4,
+        user_location: { type: "approximate", country: "IN", timezone: "Asia/Kolkata" },
+      },
+    ],
+  });
+  const answer = resp.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+  return { answer: answer || "Sorry — I couldn't find an answer to that." };
 }
