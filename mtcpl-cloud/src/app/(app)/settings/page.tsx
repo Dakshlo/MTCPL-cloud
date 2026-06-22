@@ -227,7 +227,7 @@ export default async function SettingsPage() {
   const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
   const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
 
-  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }] = await Promise.all([
+  const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }, { data: partyRows }] = await Promise.all([
     admin.from("temples").select("*").order("name"),
     // Admin client needed — RLS on profiles only returns the current user's own row.
     // vendor_id pulled so the row's vendor-picker can show the current binding.
@@ -247,7 +247,12 @@ export default async function SettingsPage() {
       .eq("is_active", true)
       .in("vendor_type", ["CNC", "Outsource"])
       .order("name"),
+    // Mig 154 — invoice parties for the temple→customer billing map.
+    // A temple's invoice_party_id decides which customer the auto
+    // dispatch→invoicing challan bills to.
+    admin.from("invoice_parties").select("id, name").order("name"),
   ]);
+  const partyList = (partyRows ?? []) as Array<{ id: string; name: string }>;
   const vendorList = (vendorRows ?? []) as Array<{
     id: string;
     name: string;
@@ -1108,6 +1113,17 @@ export default async function SettingsPage() {
                   }
                 </select>
               </label>
+              {/* Mig 154 — billing customer. When a dispatch for this
+                  temple is approved, an invoicing challan auto-creates
+                  for this party. Optional: unmapped temples just skip
+                  the auto-challan (it can be made by hand later). */}
+              <label className="stack" style={{ flex: 1 }}>
+                <span>💳 Customer (billing)</span>
+                <select name="invoice_party_id" defaultValue="">
+                  <option value="">— None —</option>
+                  {partyList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </label>
             </div>
             {/* Mig 130 — site info, auto-filled onto every dispatch
                 challan for this temple. All optional; editable later. */}
@@ -1270,6 +1286,15 @@ export default async function SettingsPage() {
                       <label className="stack" style={{ flex: "0 0 130px" }}>
                         <span>Installer Mobile</span>
                         <input name="installer_phone" type="tel" defaultValue={(temple as any).installer_phone ?? ""} />
+                      </label>
+                      {/* Mig 154 — billing customer for the auto
+                          dispatch→invoicing challan. */}
+                      <label className="stack" style={{ flex: 1 }}>
+                        <span>💳 Customer (billing)</span>
+                        <select name="invoice_party_id" defaultValue={(temple as any).invoice_party_id ?? ""}>
+                          <option value="">— None —</option>
+                          {partyList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
                       </label>
                       <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
                         <button className="secondary-button" type="submit">Save</button>

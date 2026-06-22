@@ -394,6 +394,91 @@ export async function undoDispatchAction(formData: FormData) {
 // Senior signs off on a provisional dispatch — truck is now cleared to leave.
 // Sets approved_at + approved_by; row moves from Provisional → Out for Delivery.
 
+// Mig 154 — on approval, mirror the dispatch into an Invoicing challan so the
+// invoicing team can convert it to an invoice. The customer party is resolved
+// by mapping the temple → invoice_party (temples.invoice_party_id, set in
+// Settings → Temple Codes). Idempotent (challans.source_dispatch_id unique);
+// silently no-ops when the temple has no party mapped.
+async function createInvoicingChallanFromDispatch(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  dispatchId: string,
+  temple: string,
+  challanNumber: number | null,
+  actorId: string,
+) {
+  const { data: existing } = await admin
+    .from("challans")
+    .select("id")
+    .eq("source_dispatch_id", dispatchId)
+    .maybeSingle();
+  if (existing) return; // already bridged
+
+  const { data: t } = await admin
+    .from("temples")
+    .select("invoice_party_id")
+    .eq("name", temple)
+    .maybeSingle();
+  const partyId = (t as { invoice_party_id?: string | null } | null)?.invoice_party_id ?? null;
+  if (!partyId) return; // no customer mapped — invoicing creates it manually
+
+  const { data: logs } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id")
+    .eq("dispatch_id", dispatchId);
+  const slabIds = [
+    ...new Set(
+      ((logs ?? []) as { slab_requirement_id: string | null }[])
+        .map((l) => l.slab_requirement_id)
+        .filter(Boolean) as string[],
+    ),
+  ];
+  if (slabIds.length === 0) return;
+
+  const { data: slabs } = await admin
+    .from("slab_requirements")
+    .select("id, label, stone, length_ft, width_ft, thickness_ft")
+    .in("id", slabIds);
+
+  // One challan line per distinct label+size, qty = how many.
+  const groups = new Map<string, { description: string; quantity: number }>();
+  for (const s of (slabs ?? []) as Array<Record<string, unknown>>) {
+    const dims = `${Number(s.length_ft) || 0}×${Number(s.width_ft) || 0}×${Number(s.thickness_ft) || 0} in`;
+    const label = (s.label as string) || (s.id as string) || "Slab";
+    const stone = s.stone ? ` · ${s.stone as string}` : "";
+    const desc = `${label} · ${dims}${stone}`.slice(0, 500);
+    const g = groups.get(desc);
+    if (g) g.quantity += 1;
+    else groups.set(desc, { description: desc, quantity: 1 });
+  }
+  if (groups.size === 0) return;
+
+  const chalanLabel =
+    challanNumber != null ? `CHLN-${String(challanNumber).padStart(4, "0")}` : dispatchId.slice(0, 8);
+  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const { data: header, error } = await admin
+    .from("challans")
+    .insert({
+      challan_date: today,
+      invoice_party_id: partyId,
+      notes: `Auto from dispatch ${chalanLabel} · ${temple}`,
+      source_dispatch_id: dispatchId,
+      created_by: actorId,
+    })
+    .select("id")
+    .single();
+  if (error || !header) return;
+
+  const items = [...groups.values()].map((g, i) => ({
+    challan_id: (header as { id: string }).id,
+    description: g.description,
+    quantity: g.quantity,
+    unit: "pcs",
+    position: i,
+  }));
+  await admin.from("challan_items").insert(items);
+}
+
 export async function approveDispatchAction(formData: FormData) {
   const { profile } = await requireAuth([...STATION_ROLES]);
   const admin = createAdminSupabaseClient();
@@ -435,8 +520,19 @@ export async function approveDispatchAction(formData: FormData) {
     targetRoles: ["owner", "team_head", "developer"],
   });
 
+  // Bridge → Invoicing: if this temple maps to a customer party, spawn an
+  // invoicing challan with the delivered slabs so it can be converted to an
+  // invoice. Best-effort — never blocks the approval.
+  try {
+    await createInvoicingChallanFromDispatch(admin, dispatchId, dispatch.temple, dispatch.challan_number ?? null, profile.id);
+  } catch (e) {
+    console.warn("[dispatch→invoicing challan] non-fatal", e);
+  }
+
   revalidatePath("/dispatch");
   revalidatePath("/challan");
+  revalidatePath("/invoicing");
+  revalidatePath("/invoicing/challans");
   redirect(
     `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} approved — ${dispatch.temple}`)}`,
   );

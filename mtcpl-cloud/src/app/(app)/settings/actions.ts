@@ -181,12 +181,15 @@ export async function addTempleAction(formData: FormData) {
   const site_incharge_phone = text(formData, "site_incharge_phone") || null;
   const installer_name = text(formData, "installer_name") || null;
   const installer_phone = text(formData, "installer_phone") || null;
+  // Mig 154 — billing customer (invoice party). Optional.
+  const invoice_party_id = text(formData, "invoice_party_id") || null;
 
   if (!name || !code_prefix) redirect("/settings?toast=Name+and+prefix+required");
 
   const { error } = await admin.from("temples").insert({
     name, code_prefix, default_stone,
     site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
+    invoice_party_id,
   });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
@@ -260,6 +263,8 @@ export async function updateTempleAction(formData: FormData) {
   const site_incharge_phone = text(formData, "site_incharge_phone") || null;
   const installer_name = text(formData, "installer_name") || null;
   const installer_phone = text(formData, "installer_phone") || null;
+  // Mig 154 — billing customer (invoice party). Editable.
+  const invoice_party_id = text(formData, "invoice_party_id") || null;
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
@@ -268,6 +273,7 @@ export async function updateTempleAction(formData: FormData) {
     .update({
       is_active,
       site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
+      invoice_party_id,
     })
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
