@@ -8,6 +8,7 @@ import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { EmailSnapshotCard } from "./email-snapshot-card";
 import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
+import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -272,7 +273,7 @@ export default async function DashboardPage() {
         <VariousCostingEntryCard />
         <TvModeEntryCard />
         {/* Owner-only market-news brief + chat (liquid-glass page). */}
-        {(profile.role === "owner" || profile.role === "developer") && <MarketNewsEntryCard />}
+        {canSeeMarketNews(profile) && <MarketNewsEntryCard />}
       </div>
 
       {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked

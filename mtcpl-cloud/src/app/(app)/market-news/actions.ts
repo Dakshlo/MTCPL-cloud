@@ -5,11 +5,12 @@
 
 import { requireAuth } from "@/lib/auth";
 import { getMarketNewsByDate, askMarketQuestion, type DailyNews } from "@/lib/market-news";
+import { canSeeMarketNews } from "@/lib/market-news-access";
 
 async function ownerOnly(): Promise<boolean> {
   try {
     const { profile } = await requireAuth();
-    return profile.role === "owner" || profile.role === "developer";
+    return canSeeMarketNews(profile);
   } catch {
     return false;
   }

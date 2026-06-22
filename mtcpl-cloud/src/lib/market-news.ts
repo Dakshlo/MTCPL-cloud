@@ -36,11 +36,26 @@ export type NewsItem = {
   sentiment: "positive" | "negative" | "neutral";
 };
 
+// Mig 156 — daily stock / F&O ideas. Ideas only (can be wrong), shown to
+// developer + owner Naresh. conviction = "out of 100, how much to go for it".
+export type StockPick = {
+  symbol: string;
+  name: string;
+  segment: "equity" | "fno";
+  action: "buy" | "sell" | "watch";
+  conviction: number; // 0–100
+  horizon: string; // "Intraday" | "Short-term" | "Positional"
+  reason_en: string;
+  reason_hi: string;
+};
+
 export type DailyNews = {
   newsDate: string; // YYYY-MM-DD (IST)
   generatedAt: string;
   model: string;
   items: NewsItem[];
+  /** Mig 156 — 3–5 actionable stock / F&O ideas for the day. */
+  picks: StockPick[];
   overviewEn: string | null;
   overviewHi: string | null;
   /** Owner's headline verdict for the day. */
@@ -84,8 +99,33 @@ function sanitizeItem(raw: unknown): NewsItem | null {
   };
 }
 
+function sanitizePick(raw: unknown): StockPick | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const s = (k: string) => (typeof r[k] === "string" ? (r[k] as string).trim() : "");
+  const symbol = s("symbol") || s("name");
+  const reason_en = s("reason_en");
+  if (!symbol || !reason_en) return null;
+  const action = ["buy", "sell", "watch"].includes(String(r.action).toLowerCase())
+    ? (String(r.action).toLowerCase() as StockPick["action"])
+    : "watch";
+  const segment = String(r.segment).toLowerCase() === "fno" ? "fno" : "equity";
+  const convRaw = Number(r.conviction);
+  const conviction = Number.isFinite(convRaw) ? Math.max(0, Math.min(100, Math.round(convRaw))) : 50;
+  return {
+    symbol,
+    name: s("name") || symbol,
+    segment,
+    action,
+    conviction,
+    horizon: s("horizon") || "Short-term",
+    reason_en,
+    reason_hi: s("reason_hi") || reason_en,
+  };
+}
+
 /** Pull the JSON object out of Claude's reply (tolerates ``` fences / stray prose). */
-function extractJson(text: string): { overview_en?: string; overview_hi?: string; items?: unknown[] } {
+function extractJson(text: string): { overview_en?: string; overview_hi?: string; items?: unknown[]; picks?: unknown[] } {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) t = fence[1].trim();
@@ -99,7 +139,9 @@ const SYSTEM_PROMPT = `You are a sharp financial-news analyst preparing a pre-ma
 
 Use the web_search tool to gather CURRENT news from the last ~24 hours: overnight US/Asian/European market moves, crude oil, USD/INR, US Fed / RBI signals, FII/DII flows, big Indian corporate or policy news, global risk events, and anything likely to move the Nifty/Sensex at the open. Prefer reputable sources (Reuters, Bloomberg, Mint, Economic Times, Moneycontrol, CNBC, Business Standard).
 
-Curate the TOP 8–10 items by likely market impact (most important first). For each item write BOTH a crisp English version AND a natural Hindi (Devanagari) version. Keep summaries to 1–2 sentences and the "impact" line to a short phrase on why it matters for the Indian market.`;
+Curate the TOP 8–10 items by likely market impact (most important first). For each item write BOTH a crisp English version AND a natural Hindi (Devanagari) version. Keep summaries to 1–2 sentences and the "impact" line to a short phrase on why it matters for the Indian market.
+
+You also run a decisive IDEAS DESK: suggest 3–5 specific Indian stock or F&O trade ideas for TODAY (buy / sell / watch), each with a conviction score from 0 to 100 (how strongly you'd act on it — "out of 100, how much to go for it") and a one-line reason in both English and Hindi. Be specific (real NSE tickers or index option strikes) and willing to take a view — these are ideas for the owner to consider, and it is perfectly fine to be wrong. Rank by conviction.`;
 
 const USER_PROMPT = `Research this morning's market-moving news and return ONLY a JSON object (no prose, no markdown, no code fences) in exactly this shape:
 
@@ -123,10 +165,22 @@ const USER_PROMPT = `Research this morning's market-moving news and return ONLY 
       "source_url": "https://...",
       "sentiment": "positive | negative | neutral (for Indian equities)"
     }
+  ],
+  "picks": [
+    {
+      "symbol": "NSE ticker or instrument, e.g. RELIANCE or NIFTY 24500 CE",
+      "name": "company / instrument name",
+      "segment": "equity | fno",
+      "action": "buy | sell | watch",
+      "conviction": 0-100 (a number — how much, out of 100, you'd go for it),
+      "horizon": "Intraday | Short-term | Positional",
+      "reason_en": "1-2 sentence reason",
+      "reason_hi": "कारण (1-2 वाक्य)"
+    }
   ]
 }
 
-Output the JSON object only.`;
+Provide 3–5 picks, ranked by conviction (highest first). Output the JSON object only.`;
 
 /** Call Claude + web search, parse the digest, and compute the generation cost. */
 export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" | "generatedAt" | "trigger" | "error">> {
@@ -167,6 +221,7 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
   let stanceNoteEn: string | null = null;
   let stanceNoteHi: string | null = null;
   let items: NewsItem[] = [];
+  let picks: StockPick[] = [];
   try {
     const parsed = extractJson(text);
     overviewEn = typeof parsed.overview_en === "string" ? parsed.overview_en.trim() : null;
@@ -179,6 +234,10 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
     items = (Array.isArray(parsed.items) ? parsed.items : [])
       .map(sanitizeItem)
       .filter((x): x is NewsItem => x !== null);
+    picks = (Array.isArray(parsed.picks) ? parsed.picks : [])
+      .map(sanitizePick)
+      .filter((x): x is StockPick => x !== null)
+      .slice(0, 6);
   } catch {
     throw new Error("Could not parse the news digest from the model response.");
   }
@@ -197,6 +256,7 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
   return {
     model: MODEL,
     items,
+    picks,
     overviewEn,
     overviewHi,
     stance,
@@ -222,6 +282,7 @@ export async function generateAndStoreMarketNews(
       generated_at: new Date().toISOString(),
       model: news.model,
       items: news.items,
+      picks: news.picks,
       overview_en: news.overviewEn,
       overview_hi: news.overviewHi,
       stance: news.stance,
@@ -253,6 +314,7 @@ function rowToDailyNews(d: Record<string, unknown>): DailyNews {
     generatedAt: String(d.generated_at),
     model: String(d.model ?? MODEL),
     items: (Array.isArray(d.items) ? d.items : []) as NewsItem[],
+    picks: (Array.isArray(d.picks) ? d.picks : []) as StockPick[],
     overviewEn: (d.overview_en as string | null) ?? null,
     overviewHi: (d.overview_hi as string | null) ?? null,
     stance: (["bullish", "bearish", "neutral"].includes(String(d.stance)) ? d.stance : null) as DailyNews["stance"],

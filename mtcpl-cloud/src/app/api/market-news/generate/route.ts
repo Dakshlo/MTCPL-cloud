@@ -11,6 +11,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { generateAndStoreMarketNews } from "@/lib/market-news";
+import { canSeeMarketNews } from "@/lib/market-news-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ function isCron(req: NextRequest): boolean {
 async function isOwner(): Promise<boolean> {
   try {
     const { profile } = await requireAuth();
-    return profile.role === "owner" || profile.role === "developer";
+    return canSeeMarketNews(profile);
   } catch {
     return false;
   }
