@@ -25,16 +25,21 @@ function fmtTime(iso: string): string {
   return `${String(dt.getUTCHours()).padStart(2, "0")}:${String(dt.getUTCMinutes()).padStart(2, "0")} IST`;
 }
 
-// Dark frosted glass — translucent enough to refract the heat colours behind,
-// dark enough to keep white text readable over bright spots.
+// Dark frosted glass — translucent enough to refract the bright colours
+// behind, dark enough to keep white text readable over them.
 const glass: CSSProperties = {
-  background: "rgba(16,12,28,0.34)",
-  backdropFilter: "blur(26px) saturate(185%)",
-  WebkitBackdropFilter: "blur(26px) saturate(185%)",
-  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(20,13,38,0.52)",
+  backdropFilter: "blur(26px) saturate(190%)",
+  WebkitBackdropFilter: "blur(26px) saturate(190%)",
+  border: "1px solid rgba(255,255,255,0.3)",
   borderRadius: 22,
-  boxShadow: "0 10px 34px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.22)",
+  boxShadow: "0 12px 38px rgba(40,18,64,0.26), inset 0 1px 0 rgba(255,255,255,0.34)",
 };
+
+// Text that sits DIRECTLY on the bright background (titles, labels, footer)
+// — must be dark to stay readable; white only lives inside the glass cards.
+const INK = "#2a1145";
+const INK_MUTED = "rgba(42,17,69,0.66)";
 
 const STANCE: Record<
   NonNullable<DailyNews["stance"]>,
@@ -177,7 +182,7 @@ export function MarketNewsView({
         borderRadius: 24,
         height: "calc(100dvh - 92px)",
         minHeight: 540,
-        background: "#0a0612",
+        background: "#f4e9ff",
       }}
     >
       <style>{`
@@ -191,26 +196,30 @@ export function MarketNewsView({
         .mn-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.34)!important;box-shadow:0 16px 44px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.28)!important}
       `}</style>
 
-      {/* ── FIXED "heat" background — does NOT scroll; cards frost it ── */}
-      <div aria-hidden style={{ position: "absolute", inset: 0, background: "radial-gradient(130% 110% at 50% -10%, #241038 0%, #120726 46%, #070310 100%)", pointerEvents: "none" }}>
-        <div style={{ position: "absolute", top: "-12%", left: "-8%", width: 480, height: 480, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,122,24,0.62), transparent 68%)", filter: "blur(60px)", animation: "mn-f1 16s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", bottom: "-16%", right: "-6%", width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,45,149,0.55), transparent 68%)", filter: "blur(66px)", animation: "mn-f2 19s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", top: "34%", right: "26%", width: 420, height: 420, borderRadius: "50%", background: "radial-gradient(circle, rgba(123,47,247,0.5), transparent 70%)", filter: "blur(64px)", animation: "mn-f3 22s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", top: "8%", right: "2%", width: 340, height: 340, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,193,7,0.42), transparent 70%)", filter: "blur(58px)", animation: "mn-f4 17s ease-in-out infinite" }} />
-        <div style={{ position: "absolute", bottom: "6%", left: "16%", width: 360, height: 360, borderRadius: "50%", background: "radial-gradient(circle, rgba(244,63,94,0.4), transparent 72%)", filter: "blur(62px)", animation: "mn-f1 21s ease-in-out infinite" }} />
+      {/* ── FIXED bright "wallpaper" — does NOT scroll; the frosted cards
+           cross it as you scroll, so the blur refracts a shifting band of
+           vivid colour (the iOS glass effect). Light + high-variety on
+           purpose, so the glass actually reads. ── */}
+      <div aria-hidden style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg, #fef3c7 0%, #fbcfe8 22%, #ddd6fe 44%, #bfdbfe 64%, #a7f3d0 84%, #fde68a 100%)", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: "-12%", left: "-8%", width: 460, height: 460, borderRadius: "50%", background: "radial-gradient(circle, rgba(251,146,60,0.72), transparent 66%)", filter: "blur(54px)", animation: "mn-f1 16s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", bottom: "-16%", right: "-6%", width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(217,70,239,0.6), transparent 66%)", filter: "blur(58px)", animation: "mn-f2 19s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", top: "30%", right: "24%", width: 430, height: 430, borderRadius: "50%", background: "radial-gradient(circle, rgba(34,211,238,0.55), transparent 68%)", filter: "blur(56px)", animation: "mn-f3 22s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", top: "6%", right: "0%", width: 360, height: 360, borderRadius: "50%", background: "radial-gradient(circle, rgba(139,92,246,0.55), transparent 68%)", filter: "blur(52px)", animation: "mn-f4 17s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", bottom: "4%", left: "14%", width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(244,63,94,0.5), transparent 70%)", filter: "blur(56px)", animation: "mn-f1 21s ease-in-out infinite" }} />
+        <div style={{ position: "absolute", top: "46%", left: "1%", width: 300, height: 300, borderRadius: "50%", background: "radial-gradient(circle, rgba(16,185,129,0.46), transparent 70%)", filter: "blur(52px)", animation: "mn-f2 18s ease-in-out infinite" }} />
       </div>
 
       {/* ── SCROLL LAYER — transparent so cards frost the fixed bg ── */}
       <div style={{ position: "relative", height: "100%", overflowY: "auto", padding: "clamp(14px, 2.6vw, 24px)" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, color: "#fff", maxWidth: 980, margin: "0 auto" }}>
-          {/* Header */}
+          {/* Header — title left, the three controls in ONE horizontal row */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Link href="/dashboard" style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.75)", textDecoration: "none" }}>← {t("Dashboard", "डैशबोर्ड")}</Link>
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>📰 {t("Today's News", "आज की ख़बरें")}</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+              <Link href="/dashboard" style={{ fontSize: 13, fontWeight: 700, color: INK_MUTED, textDecoration: "none" }}>← {t("Dashboard", "डैशबोर्ड")}</Link>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.02em", color: INK }}>📰 {t("Today's News", "आज की ख़बरें")}</h1>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.25)", background: "rgba(20,16,40,0.4)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", flexShrink: 0 }}>
+              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.78)" }}>
                 {(["en", "hi"] as const).map((l) => (
                   <button key={l} type="button" onClick={() => setLang(l)} style={pill(lang === l)}>
                     {l === "en" ? "EN" : "हिं"}
@@ -222,21 +231,21 @@ export function MarketNewsView({
                   value={activeDate}
                   onChange={(e) => switchDate(e.target.value)}
                   disabled={busy}
-                  style={{ fontSize: 12.5, padding: "7px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(20,16,40,0.55)", color: "#fff" }}
+                  style={{ fontSize: 12.5, padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.82)", color: "#fff", fontWeight: 600 }}
                 >
                   {dates.map((d) => (
                     <option key={d} value={d} style={{ color: "#111" }}>{fmtDate(d)}</option>
                   ))}
                 </select>
               )}
-              <button type="button" onClick={generateNow} disabled={generating} style={{ fontSize: 12.5, fontWeight: 800, padding: "7px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.14)", color: "#fff", cursor: "pointer" }}>
+              <button type="button" onClick={generateNow} disabled={generating} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.82)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {generating ? "⏳ …" : "↻ " + t("Generate now", "अभी बनाएँ")}
               </button>
             </div>
           </div>
 
-          {msg && <div style={{ fontSize: 13, fontWeight: 700, color: "#6ee7b7" }}>{msg}</div>}
-          {err && <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>⚠ {err}</div>}
+          {msg && <div style={{ fontSize: 13, fontWeight: 800, color: "#047857" }}>{msg}</div>}
+          {err && <div style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>⚠ {err}</div>}
 
           {!configured ? (
             <div style={{ ...glass, padding: 22, fontSize: 14, color: "rgba(255,255,255,0.85)" }}>
@@ -278,8 +287,8 @@ export function MarketNewsView({
               {picks.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: "-0.01em" }}>💹 {t("Today's Ideas", "आज के आइडिया")}</div>
-                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.55)" }}>{t("Stock / F&O focus — ideas only, can be wrong. Not advice.", "स्टॉक / F&O फोकस — सिर्फ़ आइडिया, ग़लत हो सकते हैं। सलाह नहीं।")}</div>
+                    <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: "-0.01em", color: INK }}>💹 {t("Today's Ideas", "आज के आइडिया")}</div>
+                    <div style={{ fontSize: 11.5, color: INK_MUTED, fontWeight: 600 }}>{t("Stock / F&O focus — ideas only, can be wrong. Not advice.", "स्टॉक / F&O फोकस — सिर्फ़ आइडिया, ग़लत हो सकते हैं। सलाह नहीं।")}</div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 320px), 1fr))", gap: 12 }}>
                     {picks.map((p, i) => {
@@ -344,7 +353,7 @@ export function MarketNewsView({
               </div>
 
               {/* footer — generated time + cost */}
-              <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 11.5, color: INK_MUTED, fontWeight: 600, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <span>🕒 {fmtTime(current.generatedAt)}</span>
                 <span>· {current.model}</span>
                 <span>· {current.webSearches} {t("searches", "खोज")}</span>
