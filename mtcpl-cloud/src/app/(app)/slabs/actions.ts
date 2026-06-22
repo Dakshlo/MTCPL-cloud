@@ -8,6 +8,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { fetchUncategorizedOpenSlabs } from "@/lib/uncategorized-slabs";
 import type { AppRole } from "@/lib/types";
 
 
@@ -860,4 +861,54 @@ export async function bulkUpdateSlabsAction(formData: FormData) {
   revalidatePath("/slabs");
   revalidatePath("/planning");
   redirect(`/slabs?toast=${ids.length}+slabs+updated`);
+}
+
+// ── Admin cleanup — uncategorized open slabs (Daksh June 2026) ──────────
+// Soft-archive every OPEN slab of a temple that has NEITHER Category 1 nor
+// Category 2 (the bare rows in the Temple View "Unassigned" group). Archive
+// = status 'rejected', which the Temple View EXCLUDES entirely (so they do
+// NOT show like 'cancelled' does) and is fully recoverable. Export the Excel
+// first (the route shares the same fetch). Admin only.
+export async function archiveUncategorizedOpenSlabsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["owner", "developer", "senior_incharge"]);
+  const supabase = createAdminSupabaseClient();
+
+  const temple = text(formData, "temple");
+  if (!temple) return { ok: false, error: "Temple is required." };
+
+  const slabs = await fetchUncategorizedOpenSlabs(supabase, temple);
+  const ids = slabs.map((s) => s.id);
+  if (ids.length === 0) {
+    return { ok: false, error: "Nothing to remove — no open, fully-uncategorized slabs for this temple." };
+  }
+
+  // Chunked update with a status='open' race guard so anything that advanced
+  // since the page loaded is left untouched.
+  const now = new Date().toISOString();
+  let archived = 0;
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const { data, error } = await supabase
+      .from("slab_requirements")
+      .update({ status: "rejected", updated_by: profile.id, updated_at: now })
+      .in("id", chunk)
+      .eq("status", "open")
+      .select("id");
+    if (error) return { ok: false, error: error.message };
+    archived += (data ?? []).length;
+  }
+
+  await logAudit(profile.id, "slabs_archived_uncategorized", "slab", "batch", {
+    temple,
+    count: archived,
+    matched: ids.length,
+    first_id: ids[0],
+    last_id: ids[ids.length - 1],
+  });
+  revalidatePath("/temples");
+  revalidatePath("/temples/cleanup");
+  revalidatePath("/slabs");
+  return { ok: true, count: archived };
 }

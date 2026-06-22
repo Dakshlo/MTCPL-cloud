@@ -4,6 +4,7 @@
 // rejected) and counts. Click a leaf to see the actual slabs. Read-only;
 // older slabs with no category sit under "Unassigned" — never lost.
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -125,6 +126,8 @@ export default async function TemplesPage() {
   if (!canReadRequiredSizes(profile) && profile.role !== "carving_head" && profile.role !== "tender_manager") redirect("/");
   const canWriteImages = IMAGE_WRITE_ROLES.includes(profile.role);
   const canEditCategories = CATEGORY_EDIT_ROLES.includes(profile.role);
+  // Admin-only cleanup of uncategorized open slabs (soft-archive).
+  const canCleanup = ["owner", "developer", "senior_incharge"].includes(profile.role);
   const admin = createAdminSupabaseClient();
 
   // Paginated fetch of every slab (all statuses) — mirrors the slabs page
@@ -311,7 +314,14 @@ export default async function TemplesPage() {
             <strong>Unassigned</strong>. Add reference photos with <strong>📷 Add image</strong>.
           </p>
         </div>
-        {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {canCleanup && (
+            <Link href="/temples/cleanup" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)", textDecoration: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 12px", whiteSpace: "nowrap" }}>
+              🧹 Clean up uncategorized
+            </Link>
+          )}
+          {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
+        </div>
       </div>
       <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} canEditCategories={canEditCategories} templeCats={templeCats} cancelAlerts={cancelAlerts} />
     </div>
