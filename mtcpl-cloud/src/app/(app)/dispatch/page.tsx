@@ -40,7 +40,14 @@ export default async function DispatchPage({
     dispatch_error?: string;
   }>;
 }) {
-  await requireAuth(["developer", "owner", "carving_head"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "dispatch"]);
+  // The dispatch incharge ("dispatch" role) sees every tab but the Waiting
+  // Approval list is READ-ONLY — only seniors can approve / cancel / edit.
+  const canApprove =
+    profile.role === "developer" ||
+    profile.role === "owner" ||
+    profile.role === "carving_head" ||
+    profile.role === "senior_incharge";
   const { tab: tabParam, dispatch_toast: toastParam, dispatch_error: errorParam } = await searchParams;
   const initialTab: Tab =
     tabParam === "provisional" || tabParam === "out_for_delivery" || tabParam === "delivered"
@@ -400,6 +407,7 @@ export default async function DispatchPage({
       legacyDispatches={legacyDispatches}
       truckHistory={truckHistory}
       initialTab={initialTab}
+      canApprove={canApprove}
       toast={toastParam ?? null}
       error={errorParam ?? null}
     />

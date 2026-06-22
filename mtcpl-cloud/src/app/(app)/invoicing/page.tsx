@@ -120,6 +120,13 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
+            {/* Parties + Work Order Doc moved off the sidebar to here (Daksh). */}
+            <Link href="/invoicing/parties" style={BUTTON_STYLES.secondary}>
+              👤 Parties
+            </Link>
+            <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
+              📝 Work Order Doc
+            </Link>
           </div>
         }
       />

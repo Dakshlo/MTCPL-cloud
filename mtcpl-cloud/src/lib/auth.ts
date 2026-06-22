@@ -35,6 +35,7 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // verification list they don't own.
       return "/slabs/ready/for-carving";
     case "dispatch":
+      return "/dispatch";
     case "block_slab_entry":
     case "block_entry":
       return "/blocks";

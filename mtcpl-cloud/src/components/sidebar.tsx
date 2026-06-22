@@ -293,7 +293,9 @@ const navEntries: NavEntry[] = [
     // sidebar. He doesn't run the dispatch step; keeping it would
     // surface a queue he never acts on.
     icon: "🚚",
-    roles: ["developer", "owner", "carving_head"],
+    // dispatch = the dispatch incharge (their main workspace). senior_incharge
+    // added back (Jun 2026) since they now approve dispatches.
+    roles: ["developer", "owner", "carving_head", "senior_incharge", "dispatch"],
     department: "production",
   },
   {
@@ -514,13 +516,7 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star"],
     department: "invoicing",
   },
-  {
-    href: "/invoicing/parties",
-    label: "Parties",
-    icon: "👤",
-    roles: ["developer", "owner", "accountant_star"],
-    department: "invoicing",
-  },
+  // Parties moved to a dashboard button (Daksh) — no menu entry.
   {
     href: "/invoicing/challans",
     label: "Challans",
@@ -536,12 +532,13 @@ const navEntries: NavEntry[] = [
     department: "invoicing",
   },
   {
-    // Mig 105 — standalone manual Work Order Document generator (not
-    // linked to carving work orders or any incoming logic).
+    // Mig 105 — standalone manual Work Order Document generator. Moved to a
+    // dashboard button for dashboard roles; kept in the menu ONLY for plain
+    // accountant, whose sole invoicing surface this is (no dashboard access).
     href: "/invoicing/work-order-doc",
     label: "Work Order Doc",
     icon: "📝",
-    roles: ["developer", "owner", "accountant_star", "accountant"],
+    roles: ["accountant"],
     department: "invoicing",
   },
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────

@@ -337,6 +337,7 @@ export function DispatchClient({
   legacyDispatches,
   truckHistory,
   initialTab,
+  canApprove,
   toast,
   error,
 }: {
@@ -352,6 +353,10 @@ export function DispatchClient({
   legacyDispatches: LegacyDispatch[];
   truckHistory: TruckTrip[];
   initialTab: Tab;
+  /** Senior (owner / carving_head / senior_incharge / dev) — can approve,
+   *  cancel and edit provisional dispatches. The dispatch incharge gets
+   *  false → the Waiting Approval tab is view-only for them. */
+  canApprove: boolean;
   toast: string | null;
   error: string | null;
 }) {
@@ -486,7 +491,7 @@ export function DispatchClient({
         <ReadyTab slabs={readySlabs} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} />
       )}
       {tab === "provisional" && (
-        <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} />
+        <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
       )}
       {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} />}
       {tab === "delivered" && <DeliveredTab rows={delivered} legacy={legacyDispatches} />}
@@ -1080,11 +1085,13 @@ function ProvisionalTab({
   slabsByDispatch,
   readySlabs,
   truckHistory,
+  canApprove,
 }: {
   rows: ProvisionalRow[];
   slabsByDispatch: Record<string, ReadySlab[]>;
   readySlabs: ReadySlab[];
   truckHistory: TruckTrip[];
+  canApprove: boolean;
 }) {
   const [editing, setEditing] = useState<ProvisionalRow | null>(null);
   const [showTrucks, setShowTrucks] = useState(false);
@@ -1152,6 +1159,7 @@ function ProvisionalTab({
                     <div className="muted" style={{ fontSize: 12, marginTop: 5, fontStyle: "italic" }}>“{r.notes}”</div>
                   )}
                 </div>
+                {canApprove ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button type="button" className="ghost-button" onClick={() => setEditing(r)} style={{ fontSize: 13 }}>
                     📝 Edit slabs
@@ -1175,6 +1183,12 @@ function ProvisionalTab({
                     <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 13 }}>✕ Cancel</button>
                   </form>
                 </div>
+                ) : (
+                  /* Dispatch incharge — read-only: waiting on a senior's approval. */
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#b45309", background: "rgba(217,119,6,0.12)", border: "1px solid rgba(217,119,6,0.3)", borderRadius: 8, padding: "8px 12px", alignSelf: "flex-start", whiteSpace: "nowrap" }}>
+                    ⏳ Waiting for owner / senior approval
+                  </div>
+                )}
               </div>
             </div>
           ))}

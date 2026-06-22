@@ -37,7 +37,12 @@ function fail(path: string, message: string): never {
 // Roles allowed to operate the station — matches the /dispatch page guard
 // (carving_head runs the station day-to-day; previously the actions were
 // developer/owner-only and silently bounced them).
-const STATION_ROLES = ["developer", "owner", "carving_head"] as const;
+// Senior dispatch roles — they APPROVE / cancel / edit / undo a dispatch.
+const STATION_ROLES = ["developer", "owner", "carving_head", "senior_incharge"] as const;
+// Floor roles — the dispatch incharge can CREATE a dispatch and MARK DELIVERED,
+// but not approve it (that's a senior's call). Includes the dedicated
+// "dispatch" (dispatch incharge) role on top of the senior set.
+const FLOOR_ROLES = [...STATION_ROLES, "dispatch"] as const;
 
 // Delivery-proof photo upload (mig 129).
 const PROOF_BUCKET = "dispatch_delivery_proofs";
@@ -51,7 +56,7 @@ function proofExt(mime: string): string {
 // ─── createDispatchAction ────────────────────────────────────────────────
 
 export async function createDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth([...STATION_ROLES]);
+  const { profile } = await requireAuth([...FLOOR_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const temple = String(formData.get("temple") || "").trim();
@@ -231,7 +236,7 @@ export async function createDispatchAction(formData: FormData) {
 // ─── markDeliveredAction ─────────────────────────────────────────────────
 
 export async function markDeliveredAction(formData: FormData) {
-  const { profile } = await requireAuth([...STATION_ROLES]);
+  const { profile } = await requireAuth([...FLOOR_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();

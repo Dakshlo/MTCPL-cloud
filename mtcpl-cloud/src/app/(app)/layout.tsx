@@ -385,6 +385,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (siErr) return null;
     return count ?? 0;
   }
+  // Dispatch Approval — provisional dispatches (created, not yet approved)
+  // awaiting a senior's sign-off before the truck leaves. Owner / developer /
+  // carving_head / senior_incharge.
+  async function fetchDispatchApprovalBadge(): Promise<number | null> {
+    if (!["owner", "developer", "carving_head", "senior_incharge"].includes(profile.role)) return null;
+    const { count, error: dErr } = await supabase
+      .from("dispatches")
+      .select("*", { count: "exact", head: true })
+      .is("approved_at", null)
+      .is("delivered_at", null);
+    if (dErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -401,6 +414,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     workOrderApprovalBadge,
     ownerReviewBadge,
     slabImportBadge,
+    dispatchApprovalBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -416,6 +430,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchWorkOrderApprovalBadge(),
     fetchOwnerReviewBadge(),
     fetchSlabImportBadge(),
+    fetchDispatchApprovalBadge(),
   ]);
 
   // Storekeeper (slab_transfer) — hide the menu by default and serve a
@@ -639,6 +654,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               workOrderApprovalBadge,
               ownerReviewBadge,
               slabImportBadge,
+              dispatchApprovalBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -765,6 +781,9 @@ function buildTopbarTaskItems(counts: {
    *  Owner / developer only; null otherwise. */
   ownerReviewBadge: number | null;
   slabImportBadge: number | null;
+  /** Provisional dispatches awaiting a senior's approval before the truck
+   *  leaves. Owner / developer / carving_head / senior_incharge; null otherwise. */
+  dispatchApprovalBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -928,6 +947,19 @@ function buildTopbarTaskItems(counts: {
       description: "Outsource work orders awaiting your price approval",
       count: counts.workOrderApprovalBadge,
       icon: "🏭",
+      department: "production",
+    });
+  }
+  // Dispatch Approval — provisional dispatches awaiting a senior's sign-off
+  // before the truck leaves. Owner / developer / carving_head / senior_incharge.
+  if (counts.dispatchApprovalBadge !== null) {
+    items.push({
+      id: "dispatch-approval",
+      href: "/dispatch?tab=provisional",
+      label: "Dispatch Approval",
+      description: "Dispatches waiting for your approval before the truck leaves",
+      count: counts.dispatchApprovalBadge,
+      icon: "🚚",
       department: "production",
     });
   }
