@@ -124,6 +124,10 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/parties" style={BUTTON_STYLES.secondary}>
               👤 Parties
             </Link>
+            {/* Mig 154 (relocated) — temple→client billing map lives here now. */}
+            <Link href="/invoicing/temple-clients" style={BUTTON_STYLES.secondary}>
+              🛕 Temple → Client
+            </Link>
             <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
               📝 Work Order Doc
             </Link>

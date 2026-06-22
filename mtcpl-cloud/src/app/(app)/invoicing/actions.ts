@@ -119,6 +119,43 @@ export async function upsertInvoicePartyAction(
   return { ok: true };
 }
 
+/** Mig 154 (relocated) — map a TEMPLE to its billing customer (invoice
+ *  party). The dispatch→invoicing bridge reads temples.invoice_party_id to
+ *  decide which party an approved dispatch's auto-challan bills to. Owned
+ *  here in Invoicing (moved off Settings) so the starred accountant sets
+ *  the mapping. Empty invoice_party_id unmaps the temple. */
+export async function setTempleInvoicePartyAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) {
+    return { ok: false, error: "Invoicing access denied." };
+  }
+  const templeId = txt(formData, "temple_id");
+  if (!templeId) return { ok: false, error: "Missing temple." };
+  const partyId = txt(formData, "invoice_party_id") || null;
+
+  const supabase = createAdminSupabaseClient();
+  const { data: updated, error } = await supabase
+    .from("temples")
+    .update({ invoice_party_id: partyId })
+    .eq("id", templeId)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!updated) return { ok: false, error: "Temple not found." };
+
+  void logAudit(profile.id, "temple_invoice_party_set", "temple", templeId, {
+    invoice_party_id: partyId,
+  });
+  // Settings + the dispatch bridge read the same column — refresh both.
+  revalidatePath("/invoicing");
+  revalidatePath("/invoicing/temple-clients");
+  revalidatePath("/settings");
+  revalidatePath("/dispatch");
+  return { ok: true };
+}
+
 export async function archiveInvoicePartyAction(
   formData: FormData,
 ): Promise<ActionResult> {

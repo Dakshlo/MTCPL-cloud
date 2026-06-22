@@ -116,8 +116,9 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                   <thead>
                     {isExternal ? (
                       <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                        <th style={th}>#</th>
-                        <th style={th}>Label</th><th style={th}>Description</th><th style={th}>📍 Stock Location</th>
+                        <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
+                        <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
+                        <th style={th}>📍 Stock Location</th>
                         <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
                         <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
                       </tr>
@@ -136,8 +137,11 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <td style={{ ...td, color: "var(--muted)", fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>{i + 1}</td>
                         {isExternal ? (
                           <>
+                            <td style={{ ...td, fontWeight: 600 }}>{r.componentSection || "—"}</td>
+                            <td style={td}>{r.componentElement || "—"}</td>
                             <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
                             <td style={td}>{r.description ?? "—"}</td>
+                            <td style={td}>{r.additionalDescription ?? "—"}</td>
                             <td style={td}>{r.stockLocation || "—"}</td>
                           </>
                         ) : (

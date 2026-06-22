@@ -3,13 +3,12 @@
 /**
  * External cut-slab import — client flow (Mig 155, Daksh June 2026).
  *
- * Mirrors the Required Sizes import (download template → fill → upload →
- * review/edit → send for approval) but for slabs cut OUTSIDE our pipeline.
- * Differences:
- *   • A mandatory Stock Location per row (where the slab physically sits).
- *   • A "Send straight to dispatch" toggle — when on, the approver pushes
- *     the slabs onto Dispatch → Make Dispatch (ready-to-dispatch) instead
- *     of into carving's Unassigned tab.
+ * Mirrors the Required Sizes import column-for-column (Category 1 /
+ * Category 2 / Label / Description / Additional Description / L / W / H /
+ * Quantity / Quality) and adds:
+ *   • a Stock Location per row (where the externally-cut slab sits), and
+ *   • a "Send straight to dispatch" toggle — when on, the approver pushes
+ *     the slabs onto Dispatch → Make Dispatch instead of carving Unassigned.
  *
  * Slabs are NOT created here. submitExternalSlabImportBatchAction stores
  * the reviewed rows + the uploaded Excel as a PENDING batch; the slabs
@@ -25,10 +24,17 @@ import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 export type TempleOpt = { name: string; default_stone: string | null };
 
+// Per-temple Category 1 / Category 2 / Label values already in use —
+// powers the review-step suggestion datalists (same shape as Required Sizes).
+export type ExistingCats = Record<string, { cat1: string[]; cat2: string[]; labels: string[] }>;
+
 type Row = {
   key: string;
+  section: string;   // Category 1
+  element: string;   // Category 2
   label: string;
   description: string;
+  additional: string;
   stockLocation: string;
   length: string;
   width: string;
@@ -41,11 +47,13 @@ type Row = {
 const inp = { padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" } as const;
 const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" as const, letterSpacing: "0.06em" };
 
-type RowField = "label" | "description" | "stockLocation" | "length" | "width" | "height" | "quantity";
+// Required = label, description, L, W, H, quantity (same as Required Sizes).
+// Category 1/2, Additional Description, Stock Location, Quality, priority are
+// all optional.
+type RowField = "label" | "description" | "length" | "width" | "height" | "quantity";
 const REQUIRED_FIELDS: { key: RowField; label: string }[] = [
   { key: "label", label: "Label" },
   { key: "description", label: "Description" },
-  { key: "stockLocation", label: "Stock Location" },
   { key: "length", label: "Length" },
   { key: "width", label: "Width" },
   { key: "height", label: "Height" },
@@ -53,7 +61,8 @@ const REQUIRED_FIELDS: { key: RowField; label: string }[] = [
 ];
 function rowHasContent(r: Row): boolean {
   return !!(
-    r.label.trim() || r.description.trim() || r.stockLocation.trim() ||
+    r.section.trim() || r.element.trim() || r.label.trim() || r.description.trim() ||
+    r.additional.trim() || r.stockLocation.trim() ||
     r.length.trim() || r.width.trim() || r.height.trim() || r.quantity.trim()
   );
 }
@@ -62,7 +71,6 @@ function fieldEmpty(r: Row, field: RowField): boolean {
   switch (field) {
     case "label": return !r.label.trim();
     case "description": return !r.description.trim();
-    case "stockLocation": return !r.stockLocation.trim();
     case "length": return !(Number(r.length) > 0);
     case "width": return !(Number(r.width) > 0);
     case "height": return !(Number(r.height) > 0);
@@ -80,7 +88,7 @@ function rowValid(r: Row): boolean {
   return rowHasContent(r) && rowProblems(r).length === 0;
 }
 
-export function ExternalSlabImportClient({ temples, stones }: { temples: TempleOpt[]; stones: string[] }) {
+export function ExternalSlabImportClient({ temples, stones, existingCats = {} }: { temples: TempleOpt[]; stones: string[]; existingCats?: ExistingCats }) {
   const router = useRouter();
   const [temple, setTemple] = useState("");
   const [stone, setStone] = useState("");
@@ -110,16 +118,15 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
     if (def && !stone) setStone(def);
   }
 
-  // Plain template built client-side with SheetJS — temple + stone
-  // pre-filled, the rest blank for the user to fill.
+  // Styled template comes from the server route (exceljs) — same look as
+  // Required Sizes, plus a Stock Location column. Temple + stone pre-filled.
   function downloadTemplate() {
-    const header = ["Sr.No", "Temple", "Stone", "Label", "Description", "Stock Location", "Length (in)", "Width (in)", "Height (in)", "Quantity", "Quality (A/B/Both)"];
-    const sample = ["1", temple, stone, "", "", "", "", "", "", "", ""];
-    const ws = XLSX.utils.aoa_to_sheet([header, sample]);
-    ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 26 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 16 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "External Slabs");
-    XLSX.writeFile(wb, `external-slabs-${temple || "template"}.xlsx`);
+    const url = `/api/carving/external-template?temple=${encodeURIComponent(temple)}&stone=${encodeURIComponent(stone)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setLocked(true);
   }
 
@@ -135,19 +142,24 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
       for (let i = 1; i < aoa.length; i++) {
         const r = (aoa[i] ?? []) as unknown[];
         const cell = (idx: number) => String(r[idx] ?? "").trim();
-        // Columns: Sr.No(0) Temple(1) Stone(2) Label(3) Description(4)
-        // StockLocation(5) Length(6) Width(7) Height(8) Quantity(9) Quality(10).
-        const label = cell(3);
-        const description = cell(4);
-        const stockLocation = cell(5);
-        const length = cell(6);
-        const width = cell(7);
-        const height = cell(8);
-        const quantity = cell(9);
-        const qRaw = cell(10).toUpperCase().replace(/GRADE/g, "").trim();
+        // Columns (must match /api/carving/external-template):
+        // Sr.No(0) Temple(1) Stone(2) Category1(3) Category2(4) Label(5)
+        // Description(6) AdditionalDescription(7) StockLocation(8) Length(9)
+        // Width(10) Height(11) Quantity(12) Quality(13).
+        const section = cell(3);
+        const element = cell(4);
+        const label = cell(5);
+        const description = cell(6);
+        const additional = cell(7);
+        const stockLocation = cell(8);
+        const length = cell(9);
+        const width = cell(10);
+        const height = cell(11);
+        const quantity = cell(12);
+        const qRaw = cell(13).toUpperCase().replace(/GRADE/g, "").trim();
         const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
-        if (!label && !description && !stockLocation && !length && !width && !height && !quantity) continue;
-        parsed.push({ key: crypto.randomUUID(), label, description, stockLocation, length, width, height, quantity, quality, priority: false });
+        if (!section && !element && !label && !description && !additional && !stockLocation && !length && !width && !height && !quantity) continue;
+        parsed.push({ key: crypto.randomUUID(), section, element, label, description, additional, stockLocation, length, width, height, quantity, quality, priority: false });
       }
       if (parsed.length === 0) {
         setError("No filled rows found — add at least one row with size + quantity, then re-upload.");
@@ -170,8 +182,10 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", stockLocation: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), section: "", element: "", label: "", description: "", additional: "", stockLocation: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false }]);
   }
+
+  const suggest = existingCats[temple] ?? { cat1: [], cat2: [], labels: [] };
 
   const validRows = useMemo(() => rows.filter(rowValid), [rows]);
   const issues = useMemo(
@@ -205,6 +219,7 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
         rows.map((r) => ({
           label: r.label,
           description: r.description,
+          additionalDescription: r.additional,
           stockLocation: r.stockLocation,
           length: Number(r.length) || 0,
           width: Number(r.width) || 0,
@@ -212,6 +227,8 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
           quantity: Number(r.quantity) || 1,
           quality: r.quality,
           priority: r.priority,
+          componentSection: r.section,
+          componentElement: r.element,
         })),
       ),
     );
@@ -274,9 +291,9 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · Label · Description · <strong>Stock Location</strong> · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
-          These are slabs cut <strong>outside</strong> our pipeline. Sizes are in <strong>inches</strong>; one row with quantity N becomes N slabs.{" "}
-          After approval they land in <strong>Unassigned</strong> (ready to assign to CNC / outsource / direct dispatch) — or, if you tick <strong>Send straight to dispatch</strong> in the review step, straight onto Dispatch.
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · <strong>Stock Location</strong> · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          These are slabs cut <strong>outside</strong> our pipeline. Category 1 → Category 2 → Label → Description organise them in Temple View. Sizes are in <strong>inches</strong>; one row with quantity N becomes N slabs.{" "}
+          After approval they land in <strong>Unassigned</strong> (assign to CNC / outsource / direct dispatch later) — or, if you tick <strong>Send straight to dispatch</strong> in the review step, straight onto Dispatch.
         </div>
         {error && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>{error}</div>}
       </section>
@@ -295,7 +312,7 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
       {issues.length > 0 && (
         <div style={{ background: "rgba(220,38,38,0.06)", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#991b1b" }}>
-            ⚠ {issues.length} row{issues.length === 1 ? "" : "s"} {issues.length === 1 ? "is" : "are"} incomplete — every field is required. Fix to continue:
+            ⚠ {issues.length} row{issues.length === 1 ? "" : "s"} {issues.length === 1 ? "is" : "are"} incomplete — Label, Description, L, W, H and Quantity are required. Fix to continue:
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "#7f1d1d", lineHeight: 1.6 }}>
             {issues.slice(0, 25).map((x) => (
@@ -320,14 +337,27 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
           </div>
         </div>
 
+        {(suggest.cat1.length > 0 || suggest.cat2.length > 0) && (
+          <div style={{ padding: "8px 18px", fontSize: 12, color: "var(--muted)", background: "var(--surface-alt)", borderBottom: "1px solid var(--border)" }}>
+            💡 Category 1 / 2 and Label show <strong>suggestions already used in {temple}</strong> as you type — pick one to keep the same place from splitting, or type a brand-new value.
+          </div>
+        )}
+
+        <datalist id="ext-dl-cat1">{suggest.cat1.map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="ext-dl-cat2">{suggest.cat2.map((v) => <option key={v} value={v} />)}</datalist>
+        <datalist id="ext-dl-label">{suggest.labels.map((v) => <option key={v} value={v} />)}</datalist>
+
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1480 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={{ ...th, width: 36 }}>#</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 1</th>
+                <th style={{ ...th, minWidth: 140 }}>Category 2</th>
                 <th style={{ ...th, minWidth: 150 }}>Label</th>
-                <th style={{ ...th, minWidth: 190 }}>Description</th>
-                <th style={{ ...th, minWidth: 160 }}>Stock Location</th>
+                <th style={{ ...th, minWidth: 180 }}>Description</th>
+                <th style={{ ...th, minWidth: 170 }}>Additional Desc <span style={{ fontWeight: 600, textTransform: "none" }}>(optional)</span></th>
+                <th style={{ ...th, minWidth: 160 }}>📍 Stock Location</th>
                 <th style={{ ...th, width: 80 }}>Len (in)</th>
                 <th style={{ ...th, width: 80 }}>Wid (in)</th>
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
@@ -344,9 +374,12 @@ export function ExternalSlabImportClient({ temples, stones }: { temples: TempleO
                 return (
                   <tr key={r.key} style={{ borderBottom: "1px solid var(--border)", background: bad ? "rgba(220,38,38,0.05)" : undefined }}>
                     <td style={{ ...td, color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
-                    <td style={td}><input value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={{ ...cell("label"), textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="ext-dl-cat1" value={r.section} onChange={(e) => patch(r.key, "section", e.target.value)} placeholder="e.g. FLOOR" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="ext-dl-cat2" value={r.element} onChange={(e) => patch(r.key, "element", e.target.value)} placeholder="e.g. CLOISTER" style={{ ...cellInp, textTransform: "uppercase" }} /></td>
+                    <td style={td}><input list="ext-dl-label" value={r.label} onChange={(e) => patch(r.key, "label", e.target.value)} placeholder="required" style={{ ...cell("label"), textTransform: "uppercase" }} /></td>
                     <td style={td}><input value={r.description} onChange={(e) => patch(r.key, "description", e.target.value)} placeholder="required" style={cell("description")} /></td>
-                    <td style={td}><input value={r.stockLocation} onChange={(e) => patch(r.key, "stockLocation", e.target.value)} placeholder="required" style={cell("stockLocation")} /></td>
+                    <td style={td}><input value={r.additional} onChange={(e) => patch(r.key, "additional", e.target.value)} placeholder="optional" style={cellInp} /></td>
+                    <td style={td}><input value={r.stockLocation} onChange={(e) => patch(r.key, "stockLocation", e.target.value)} placeholder="optional" style={cellInp} /></td>
                     <td style={td}><input value={r.length} onChange={(e) => patch(r.key, "length", e.target.value)} inputMode="decimal" placeholder="req" style={cell("length")} /></td>
                     <td style={td}><input value={r.width} onChange={(e) => patch(r.key, "width", e.target.value)} inputMode="decimal" placeholder="req" style={cell("width")} /></td>
                     <td style={td}><input value={r.height} onChange={(e) => patch(r.key, "height", e.target.value)} inputMode="decimal" placeholder="req" style={cell("height")} /></td>

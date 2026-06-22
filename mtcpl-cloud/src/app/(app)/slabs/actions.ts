@@ -450,12 +450,8 @@ export async function submitExternalSlabImportBatchAction(
   if (cleaned.length === 0) {
     return { ok: false, error: "No valid rows — each slab needs length, width and height." };
   }
-  // External rows must carry a stock location (mirrors the old form's
-  // mandatory stock_location field).
-  const missingLoc = cleaned.filter((r) => !r.stockLocation).length;
-  if (missingLoc > 0) {
-    return { ok: false, error: `${missingLoc} row${missingLoc === 1 ? "" : "s"} missing a stock location — fill it in for every slab.` };
-  }
+  // Stock location is optional (mirrors the Required Sizes import — only
+  // label/description/size/qty are mandatory); it's kept per row when filled.
   const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
   if (totalSlabs > 10000) {
     return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 10000 — split the file.` };
