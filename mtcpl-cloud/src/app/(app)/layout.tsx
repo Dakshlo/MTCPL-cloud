@@ -13,6 +13,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
+import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
 import { Toast } from "@/components/toast";
 import { Heartbeat } from "@/components/heartbeat";
 import { LoginLocationProbe } from "@/components/login-location-probe";
@@ -707,6 +708,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       {/* Daksh May 2026 — bottom MobileNav removed. The sidebar now
           renders a hamburger trigger on mobile (sidebar.tsx) so all
           navigation lives in the slide-in drawer. */}
+      {/* System-wide tablet keyboard — renders nothing on laptops/desktops;
+          on touch tablets it docks a QWERTY + number pad for every text
+          field (slab codes, dimensions, temple). */}
+      <TabletKeyboardProvider />
       <Toast />
     </div>
   );

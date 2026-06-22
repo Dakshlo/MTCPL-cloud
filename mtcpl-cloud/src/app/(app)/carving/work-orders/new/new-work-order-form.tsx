@@ -177,7 +177,7 @@ export function NewWorkOrderForm({
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={lbl}>Temple (optional)</span>
-            <input value={temple} onChange={(e) => setTemple(e.target.value)} style={inp} />
+            <input value={temple} onChange={(e) => setTemple(e.target.value)} data-temple-codes={templeCodes.join(",")} style={inp} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={lbl}>Rate (optional · owner approves)</span>
