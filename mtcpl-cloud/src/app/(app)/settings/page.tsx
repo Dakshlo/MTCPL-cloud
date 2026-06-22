@@ -18,6 +18,8 @@ import { WaRecipientsEditor } from "./wa-recipients-editor";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { WaVendorCcEditor } from "./wa-vendor-cc-editor";
 import { getVendorCcSetting } from "@/lib/wa-vendor-cc";
+import { WaAlertsEditor } from "./wa-alerts-editor";
+import { getSlabTransferAlert, getCarvingBacklog } from "@/lib/wa-alerts";
 
 // All assignable roles — only shown to developer.
 //
@@ -149,6 +151,13 @@ export default async function SettingsPage() {
   // Vendor-message carbon-copy (developer only).
   const canManageVendorCc = currentUser.role === "developer";
   const vendorCc = canManageVendorCc ? await getVendorCcSetting() : null;
+
+  // WhatsApp operational alerts — slab-transfer ping + carving backlog
+  // (developer only).
+  const canManageWaAlerts = currentUser.role === "developer";
+  const [slabTransferAlert, carvingBacklog] = canManageWaAlerts
+    ? await Promise.all([getSlabTransferAlert(), getCarvingBacklog()])
+    : [null, null];
 
   // Last 5 paid payments — fuel the developer "send test" in the CC card.
   const recentPaidForTest: { id: string; label: string }[] = [];
@@ -426,6 +435,15 @@ export default async function SettingsPage() {
       {canManageVendorCc && vendorCc && (
         <PeekSection icon="📩" title="Vendor message carbon-copy" modalMaxWidth={520}>
           <WaVendorCcEditor initial={vendorCc} recentPaid={recentPaidForTest} />
+        </PeekSection>
+      )}
+
+      {/* WhatsApp operational alerts — DEVELOPER only. On/off + number for
+          the slab-transfer "waiting" ping and the carving-approval backlog
+          alert. Stored in app_settings; no redeploy needed. */}
+      {canManageWaAlerts && slabTransferAlert && carvingBacklog && (
+        <PeekSection icon="🔔" title="WhatsApp alerts" modalMaxWidth={560}>
+          <WaAlertsEditor slabTransfer={slabTransferAlert} backlog={carvingBacklog} />
         </PeekSection>
       )}
 

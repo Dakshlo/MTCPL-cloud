@@ -1056,19 +1056,12 @@ async function notifySlabTransferWaiting(
   try {
     const templateName = process.env.MSG91_WA_SLAB_TRANSFER_TEMPLATE;
     if (!templateName || !process.env.MSG91_AUTH_KEY) return;
-    const { normalizeIndianMobile, sendWhatsAppTemplate } = await import("@/lib/wa-send");
-
-    const { data: people } = await admin
-      .from("profiles")
-      .select("phone")
-      .in("role", ["slab_transfer", "storekeeper"]);
-    const to = [
-      ...new Set(
-        ((people ?? []) as { phone: string | null }[])
-          .map((p) => normalizeIndianMobile(p.phone))
-          .filter(Boolean) as string[],
-      ),
-    ];
+    const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
+    // Recipient + on/off come from the developer "WhatsApp alerts" setting
+    // (app_settings) — not role phones — so it's controllable from the UI.
+    const { getSlabTransferAlert, getSlabTransferRecipients } = await import("@/lib/wa-alerts");
+    if (!(await getSlabTransferAlert()).enabled) return;
+    const to = await getSlabTransferRecipients();
     if (to.length === 0) return;
 
     const { data: slab } = await admin
@@ -1095,6 +1088,66 @@ async function notifySlabTransferWaiting(
     });
   } catch (e) {
     console.warn("[notifySlabTransferWaiting] non-fatal", e);
+  }
+}
+
+/**
+ * WhatsApp alert when the carving "Done Approval" backlog crosses a
+ * milestone. Fires when the pending-approval count first reaches the
+ * configured threshold (default 15) and again every `step` (default 5)
+ * above it — at 15, 20, 25 … — always with the live total in the message.
+ * A stored "last alerted level" means it only pings on a NEW high and
+ * re-arms once the queue drains. Call at the END of any action that moves
+ * a slab into the approval queue. Fire-and-forget; never throws.
+ * Gated behind MSG91_WA_CARVING_BACKLOG_TEMPLATE + the Settings toggle.
+ */
+async function notifyCarvingApprovalBacklog(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+) {
+  try {
+    const templateName = process.env.MSG91_WA_CARVING_BACKLOG_TEMPLATE;
+    if (!templateName || !process.env.MSG91_AUTH_KEY) return;
+    const {
+      getCarvingBacklog,
+      getCarvingBacklogRecipients,
+      getBacklogAlertLevel,
+      setBacklogAlertLevel,
+      backlogLevelFor,
+    } = await import("@/lib/wa-alerts");
+    const cfg = await getCarvingBacklog();
+    if (!cfg.enabled) return;
+    const to = await getCarvingBacklogRecipients();
+    if (to.length === 0) return;
+
+    // Byte-for-byte the same predicate as the carving "Done Approval" tab
+    // (page.tsx), so the alerted number always matches what the reviewer
+    // sees: marked done, not yet approved, not parked in "Still Pending".
+    const { count } = await admin
+      .from("carving_items")
+      .select("id", { count: "exact", head: true })
+      .not("completed_at", "is", null)
+      .is("review_approved_at", null)
+      .is("pending_work_at", null);
+    const total = count ?? 0;
+
+    const level = backlogLevelFor(total, cfg.threshold, cfg.step);
+    const prev = await getBacklogAlertLevel();
+    if (level <= prev) {
+      // Flat or draining — re-arm to the lower level so it can fire again
+      // next time it climbs, but don't ping now.
+      if (level < prev) await setBacklogAlertLevel(level);
+      return;
+    }
+    await setBacklogAlertLevel(level);
+
+    const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
+    await sendWhatsAppTemplate({
+      to,
+      templateName,
+      components: { body_1: { type: "text", value: String(total) } },
+    });
+  } catch (e) {
+    console.warn("[notifyCarvingApprovalBacklog] non-fatal", e);
   }
 }
 
@@ -2837,6 +2890,7 @@ export async function completeAndUnloadAction(formData: FormData) {
     paired_count: idsToComplete.length,
   });
 
+  await notifyCarvingApprovalBacklog(admin);
   refreshAll();
   redirect(
     idsToComplete.length > 1
@@ -3704,6 +3758,7 @@ export async function completeHeldSlabAction(formData: FormData) {
     { temporary_location: temporaryLocation },
   );
 
+  await notifyCarvingApprovalBacklog(admin);
   refreshAll();
   redirect(
     `${redirectTo}?toast=${encodeURIComponent("Marked complete — awaiting team review")}`,
@@ -3807,6 +3862,7 @@ export async function completeReworkSlabAction(formData: FormData) {
     { temporary_location: temporaryLocation },
   );
 
+  await notifyCarvingApprovalBacklog(admin);
   refreshAll();
   redirect(
     `${redirectTo}?toast=${encodeURIComponent("Marked complete — back in review queue")}`,
@@ -6273,6 +6329,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
     temporary_location: tempLocation,
   });
 
+  await notifyCarvingApprovalBacklog(admin);
   refreshAll();
   // Daksh June 2026 — redirect_to already carries a query string
   // (?tab=active&mode=outsource), so the toast MUST be joined with & —
@@ -6356,6 +6413,7 @@ export async function receiveOutsourceCarvingBatchAction(formData: FormData) {
     }
   }
 
+  await notifyCarvingApprovalBacklog(admin);
   refreshAll();
   redirect(
     `${redirectTo}${sep}toast=${encodeURIComponent(
