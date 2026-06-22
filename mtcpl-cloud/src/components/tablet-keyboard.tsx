@@ -13,10 +13,13 @@
 // even touchscreen laptops. When active the input gets inputMode="none" so the
 // native keyboard never appears; on desktop it's an ordinary <input>.
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+// Per-device tally of which temple codes get used, so the chips float the
+// most-used to the left.
+const USAGE_KEY = "mtcpl:tablet-temple-code-usage";
 
 export function TabletSearchInput({
   value,
@@ -33,6 +36,7 @@ export function TabletSearchInput({
 }) {
   const [isTablet, setIsTablet] = useState(false);
   const [open, setOpen] = useState(false);
+  const [usage, setUsage] = useState<Record<string, number>>({});
   const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,7 +45,30 @@ export function TabletSearchInput({
     } catch {
       /* no matchMedia → treat as desktop */
     }
+    try {
+      const raw = window.localStorage.getItem(USAGE_KEY);
+      if (raw) setUsage(JSON.parse(raw) as Record<string, number>);
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  const bump = (code: string) =>
+    setUsage((prev) => {
+      const next = { ...prev, [code]: (prev[code] ?? 0) + 1 };
+      try {
+        window.localStorage.setItem(USAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+
+  // Most-used temple codes first (left), then by count, ties alphabetical.
+  const sortedCodes = useMemo(
+    () => [...templeCodes].sort((a, b) => (usage[b] ?? 0) - (usage[a] ?? 0) || a.localeCompare(b)),
+    [templeCodes, usage],
+  );
 
   const focusBack = () => ref.current?.focus({ preventScroll: true });
   const type = (t: string) => {
@@ -90,11 +117,19 @@ export function TabletSearchInput({
               Temple
             </span>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: 1, paddingBottom: 2 }}>
-              {templeCodes.length === 0 ? (
+              {sortedCodes.length === 0 ? (
                 <span style={{ fontSize: 12, color: "var(--muted-light)" }}>— no codes —</span>
               ) : (
-                templeCodes.map((code) => (
-                  <button key={code} type="button" onClick={() => type(`${code}-`)} style={chip}>
+                sortedCodes.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      type(`${code}-`);
+                      bump(code);
+                    }}
+                    style={chip}
+                  >
                     {code}
                   </button>
                 ))
@@ -125,6 +160,10 @@ export function TabletSearchInput({
                   {d}
                 </button>
               ))}
+              {/* . for decimal sizes (e.g. 25.5) */}
+              <button type="button" onClick={() => type(".")} style={keyNum}>
+                .
+              </button>
               <button type="button" onClick={() => type("0")} style={keyNum}>
                 0
               </button>
@@ -134,7 +173,7 @@ export function TabletSearchInput({
               <button type="button" onClick={back} style={{ ...keyNum, color: "#b45309" }}>
                 ⌫
               </button>
-              <button type="button" onClick={clearAll} style={{ ...ctrl, gridColumn: "span 3" }}>
+              <button type="button" onClick={clearAll} style={{ ...ctrl, gridColumn: "span 2" }}>
                 Clear
               </button>
             </div>
