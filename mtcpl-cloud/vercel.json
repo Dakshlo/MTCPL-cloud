@@ -2,6 +2,7 @@
   "crons": [
     { "path": "/api/email-snapshot/run", "schedule": "30 23 * * *" },
     { "path": "/api/email-snapshot/run", "schedule": "30 8 * * *" },
-    { "path": "/api/whatsapp-report/run", "schedule": "30 4 * * *" }
+    { "path": "/api/whatsapp-report/run", "schedule": "30 4 * * *" },
+    { "path": "/api/market-news/generate", "schedule": "30 2 * * 1-5" }
   ]
 }

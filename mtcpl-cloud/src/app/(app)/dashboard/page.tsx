@@ -7,6 +7,7 @@ import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { EmailSnapshotCard } from "./email-snapshot-card";
+import { MarketNewsCard } from "./market-news-card";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
@@ -277,6 +278,13 @@ export default async function DashboardPage() {
           mailbox link is read-only (IMAP, no SMTP in the codebase). */}
       {(profile.role === "owner" || profile.role === "developer") && (
         <EmailSnapshotCard />
+      )}
+
+      {/* ── TODAY'S NEWS (June 2026) — owner/dev only. AI-curated pre-market
+          brief (top global + India news that could move the Nifty/Sensex),
+          bilingual EN/हिं, refreshed 8 AM IST weekdays via Vercel cron. */}
+      {(profile.role === "owner" || profile.role === "developer") && (
+        <MarketNewsCard />
       )}
       {/* Daily WhatsApp work-report controls live in Settings → "Daily
           WhatsApp report" (recipients, preview, send test). */}
