@@ -421,29 +421,39 @@ export default async function SettingsPage() {
           Stone Types, Temple Codes, etc.). See <MaintenanceCollapsible>
           rendered below the AutoBackup PeekSection. */}
 
-      {/* Daily WhatsApp work-report recipients — owner / developer manage who
-          gets the 6 PM PDF, no redeploy needed (stored in app_settings). */}
-      {canManageWaReport && (
-        <PeekSection icon="📲" title="Daily WhatsApp report" modalMaxWidth={520}>
-          <WaRecipientsEditor initial={waReportRecipients} />
-        </PeekSection>
-      )}
-
-      {/* Vendor-message carbon-copy — DEVELOPER only. Mirrors every WhatsApp
-          sent to a vendor (the payment voucher) to one number, so the owner
-          sees them all. Stored in app_settings; no redeploy needed. */}
-      {canManageVendorCc && vendorCc && (
-        <PeekSection icon="📩" title="Vendor message carbon-copy" modalMaxWidth={520}>
-          <WaVendorCcEditor initial={vendorCc} recentPaid={recentPaidForTest} />
-        </PeekSection>
-      )}
-
-      {/* WhatsApp operational alerts — DEVELOPER only. On/off + number for
-          the slab-transfer "waiting" ping and the carving-approval backlog
-          alert. Stored in app_settings; no redeploy needed. */}
-      {canManageWaAlerts && slabTransferAlert && carvingBacklog && (
-        <PeekSection icon="🔔" title="WhatsApp alerts" modalMaxWidth={560}>
-          <WaAlertsEditor slabTransfer={slabTransferAlert} backlog={carvingBacklog} />
+      {/* ALL WhatsApp settings under ONE section (Daksh) — daily report,
+          vendor carbon-copy, and the operational alerts — so the settings
+          page stays uncluttered. Each group is gated by its own permission
+          (daily report = owner/developer; the rest = developer). Everything
+          lives in app_settings; no redeploy needed. */}
+      {(canManageWaReport || canManageVendorCc || canManageWaAlerts) && (
+        <PeekSection icon="💬" title="WhatsApp" modalMaxWidth={560}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            {canManageWaReport && (
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, margin: "0 0 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  📲 Daily report
+                </div>
+                <WaRecipientsEditor initial={waReportRecipients} />
+              </div>
+            )}
+            {canManageVendorCc && vendorCc && (
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, margin: "0 0 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  📩 Vendor message carbon-copy
+                </div>
+                <WaVendorCcEditor initial={vendorCc} recentPaid={recentPaidForTest} />
+              </div>
+            )}
+            {canManageWaAlerts && slabTransferAlert && carvingBacklog && (
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, margin: "0 0 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  🔔 Operational alerts
+                </div>
+                <WaAlertsEditor slabTransfer={slabTransferAlert} backlog={carvingBacklog} />
+              </div>
+            )}
+          </div>
         </PeekSection>
       )}
 
