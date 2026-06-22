@@ -1119,20 +1119,20 @@ async function notifyCarvingApprovalBacklog(
     const to = await getCarvingBacklogRecipients();
     if (to.length === 0) return;
 
-    // Byte-for-byte the same predicate as the carving "Done Approval" tab
-    // (page.tsx), so the alerted number always matches what the reviewer
-    // sees: marked done, not yet approved, not parked in "Still Pending".
-    // We pull the rows (not just a count) so the message can list the
-    // pending slab codes grouped by vendor.
+    // Same predicate as the carving "Done Approval" tab (page.tsx), so the
+    // alerted number always matches what the reviewer sees: marked done, not
+    // yet approved, not parked in "Still Pending".
     const { data: pendingRows } = await admin
       .from("carving_items")
-      .select("slab_requirement_id, vendor_name")
+      .select("slab_requirement_id, vendor_name, completed_at, temporary_location")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
       .is("pending_work_at", null);
     const pending = (pendingRows ?? []) as {
       slab_requirement_id: string;
       vendor_name: string | null;
+      completed_at: string | null;
+      temporary_location: string | null;
     }[];
     const total = pending.length;
 
@@ -1146,17 +1146,42 @@ async function notifyCarvingApprovalBacklog(
     }
     await setBacklogAlertLevel(level);
 
-    // Group the pending codes by vendor name.
-    const byVendor = new Map<string, string[]>();
-    for (const r of pending) {
-      const name = (r.vendor_name || "—").trim() || "—";
-      const arr = byVendor.get(name) ?? [];
-      arr.push(r.slab_requirement_id);
-      byVendor.set(name, arr);
+    // Hydrate full slab detail + stone palette + the active CNC vendor list
+    // (the latter so every CNC vendor shows, "No pending" if empty, and new
+    // CNC vendors appear automatically).
+    const slabIds = [...new Set(pending.map((p) => p.slab_requirement_id))];
+    const slabInfo = new Map<
+      string,
+      {
+        temple: string;
+        label: string | null;
+        stone: string | null;
+        length_ft: number;
+        width_ft: number;
+        thickness_ft: number;
+        stock_location: string | null;
+      }
+    >();
+    if (slabIds.length > 0) {
+      const { data: slabs } = await admin
+        .from("slab_requirements")
+        .select("id, temple, label, stone, length_ft, width_ft, thickness_ft, stock_location")
+        .in("id", slabIds);
+      for (const s of (slabs ?? []) as Array<Record<string, unknown>>) {
+        slabInfo.set(String(s.id), {
+          temple: (s.temple as string) ?? "—",
+          label: (s.label as string | null) ?? null,
+          stone: (s.stone as string | null) ?? null,
+          length_ft: Number(s.length_ft) || 0,
+          width_ft: Number(s.width_ft) || 0,
+          thickness_ft: Number(s.thickness_ft) || 0,
+          stock_location: (s.stock_location as string | null) ?? null,
+        });
+      }
     }
-    // Always show every ACTIVE CNC vendor (so a vendor with nothing reads
-    // "No pending", and any NEW CNC vendor appears automatically), plus any
-    // other vendor (e.g. Outsource) that currently has pending slabs.
+    const { data: stoneTypesData } = await admin
+      .from("stone_types")
+      .select("name, color_top, color_front, color_side");
     const { data: cncVendors } = await admin
       .from("vendors")
       .select("name")
@@ -1165,34 +1190,70 @@ async function notifyCarvingApprovalBacklog(
     const cncNames = ((cncVendors ?? []) as { name: string | null }[])
       .map((v) => (v.name || "").trim())
       .filter(Boolean);
+
+    const byVendor = new Map<
+      string,
+      Array<{
+        code: string;
+        temple: string;
+        label: string | null;
+        stone: string | null;
+        l: number;
+        w: number;
+        t: number;
+        location: string | null;
+        completedAt: string | null;
+      }>
+    >();
+    for (const p of pending) {
+      const name = (p.vendor_name || "—").trim() || "—";
+      const info = slabInfo.get(p.slab_requirement_id);
+      const arr = byVendor.get(name) ?? [];
+      arr.push({
+        code: p.slab_requirement_id,
+        temple: info?.temple ?? "—",
+        label: info?.label ?? null,
+        stone: info?.stone ?? null,
+        l: info?.length_ft ?? 0,
+        w: info?.width_ft ?? 0,
+        t: info?.thickness_ft ?? 0,
+        location: p.temporary_location ?? info?.stock_location ?? null,
+        completedAt: p.completed_at,
+      });
+      byVendor.set(name, arr);
+    }
     const allNames = [...new Set([...cncNames, ...byVendor.keys()])].sort((a, b) =>
       a.localeCompare(b),
     );
+    const vendors = allNames.map((name) => ({ name, slabs: byVendor.get(name) ?? [] }));
 
-    // Build the vendor-wise breakdown, capped so the substituted template
-    // body stays under WhatsApp's 1024-char limit.
-    const MAX = 760;
-    let breakdown = "";
-    let cut = false;
-    for (const name of allNames) {
-      const codes = byVendor.get(name) ?? [];
-      const line = codes.length > 0 ? `${name}: ${codes.join(", ")}` : `${name}: No pending`;
-      if (breakdown.length + line.length + 1 > MAX) {
-        cut = true;
-        break;
-      }
-      breakdown += (breakdown ? "\n" : "") + line;
-    }
-    if (cut) breakdown += "\n…(see system for the rest)";
-    if (!breakdown) breakdown = "—";
+    // Build the vendor-wise slab-card PDF and upload it to the public bucket
+    // (same one the daily report uses) so MSG91 can fetch it by URL.
+    const { buildCarvingBacklogPdf } = await import("@/lib/carving-backlog-pdf");
+    const pdfBytes = await buildCarvingBacklogPdf({
+      total,
+      vendors,
+      stoneTypes: (stoneTypesData ?? []) as Array<{
+        name: string;
+        color_top: string;
+        color_front: string;
+        color_side: string;
+      }>,
+    });
+    const objPath = `carving-approval/${new Date().toISOString().slice(0, 10)}-${Date.now()}.pdf`;
+    const { error: upErr } = await admin.storage
+      .from("whatsapp_reports")
+      .upload(objPath, Buffer.from(pdfBytes), { contentType: "application/pdf", upsert: false });
+    if (upErr) throw new Error(`Backlog PDF upload failed: ${upErr.message}`);
+    const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objPath).data.publicUrl;
 
     const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
     await sendWhatsAppTemplate({
       to,
       templateName,
       components: {
-        body_1: { type: "text", value: breakdown },
-        body_2: { type: "text", value: String(total) },
+        header_1: { type: "document", value: pdfUrl, filename: "Carving-Approval.pdf" },
+        body_1: { type: "text", value: String(total) },
       },
     });
   } catch (e) {
