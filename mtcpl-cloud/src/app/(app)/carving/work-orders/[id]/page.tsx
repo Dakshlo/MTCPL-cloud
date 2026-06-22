@@ -313,8 +313,24 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
       {lines.length === 0 ? (
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, color: "var(--muted)", fontSize: 13, textAlign: "center" }}>No lines on this work order.</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 9 }}>
-          {lines.map((l) => {
+        (() => {
+          // Group the cards by stage (Daksh): Open together, then At vendor,
+          // then Received (awaiting approval), then Approved.
+          const groupOf = (l: (typeof lines)[number]): "open" | "vendor" | "received" | "approved" => {
+            const gci = l.carving_item_id ? ciMeta.get(l.carving_item_id) : null;
+            const gSent = l.line_status === "sent" || !!l.carving_item_id;
+            if (!gSent) return "open";
+            if (gci?.review_approved_at) return "approved";
+            if (gci?.completed_at) return "received";
+            return "vendor";
+          };
+          const SECTIONS = [
+            { key: "open" as const, label: "Open / not yet sent", icon: "○", tone: "#64748b" },
+            { key: "vendor" as const, label: "At vendor (carving)", icon: "📤", tone: "#1d4ed8" },
+            { key: "received" as const, label: "Received — awaiting approval", icon: "📥", tone: "#b45309" },
+            { key: "approved" as const, label: "Approved", icon: "✓", tone: "#15803d" },
+          ];
+          const renderLine = (l: (typeof lines)[number]) => {
             const slab = l.slab_requirement_id ? slabMeta.get(l.slab_requirement_id) : null;
             const ci = l.carving_item_id ? ciMeta.get(l.carving_item_id) : null;
             const isSent = l.line_status === "sent" || !!l.carving_item_id;
@@ -426,19 +442,38 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
                     <form action={removeWorkOrderLineAction}>
                       <input type="hidden" name="line_id" value={l.id} />
                       <input type="hidden" name="work_order_id" value={id} />
-                      <ConfirmButton
-                        message={`Remove ${l.slab_requirement_id ?? "this line"} from this work order?`}
+                      {/* No confirm — Daksh wants Remove to act immediately. */}
+                      <button
+                        type="submit"
                         style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
                       >
                         Remove
-                      </ConfirmButton>
+                      </button>
                     </form>
                   )}
                 </div>
               </div>
             );
-          })}
-        </div>
+          };
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {SECTIONS.map((sec) => {
+                const groupLines = lines.filter((l) => groupOf(l) === sec.key);
+                if (groupLines.length === 0) return null;
+                return (
+                  <div key={sec.key} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: sec.tone }}>
+                      {sec.icon} {sec.label} <span style={{ color: "var(--muted)" }}>· {groupLines.length}</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 9 }}>
+                      {groupLines.map(renderLine)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()
       )}
 
       {/* Mig 098 — only the owner can cancel a work order. */}
