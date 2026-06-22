@@ -255,6 +255,10 @@ export function TabletKeyboardProvider() {
           <button type="button" onClick={() => insert("0")} style={keyNum}>
             0
           </button>
+          {/* - for codes like OM-0037 */}
+          <button type="button" onClick={() => insert("-")} style={keyNum}>
+            -
+          </button>
           <button type="button" onClick={() => insert("x")} style={{ ...keyNum, color: "#1d4ed8" }}>
             X
           </button>
@@ -264,7 +268,7 @@ export function TabletKeyboardProvider() {
           <button type="button" onClick={clearAll} style={ctrl}>
             Clear
           </button>
-          <button type="button" onClick={hide} style={ctrl}>
+          <button type="button" onClick={hide} style={{ ...ctrl, gridColumn: "span 3" }}>
             ⌄ Hide
           </button>
         </div>
