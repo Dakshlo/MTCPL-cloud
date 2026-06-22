@@ -123,10 +123,13 @@ Output the JSON object only.`;
 
 /** Call Claude + web search, parse the digest, and compute the generation cost. */
 export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" | "generatedAt" | "trigger" | "error">> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is not set in the environment.");
+  // Key is deployed on Vercel as MTCPL_DAILY_NEWS (falls back to the SDK's
+  // default ANTHROPIC_API_KEY if that's ever used instead).
+  const apiKey = process.env.MTCPL_DAILY_NEWS || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("MTCPL_DAILY_NEWS (Anthropic API key) is not set in the environment.");
   }
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey });
 
   const resp = await client.messages.create({
     model: MODEL,
