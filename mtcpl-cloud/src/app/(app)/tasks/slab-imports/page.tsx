@@ -23,12 +23,18 @@ type BatchRow = {
     length: number; width: number; height: number;
     quantity: number; quality: string | null; priority: boolean;
     componentSection?: string | null; componentElement?: string | null;
+    stockLocation?: string | null;
   }> | null;
   row_count: number | null;
   slab_count: number | null;
   file_name: string | null;
   submitted_by: string | null;
   submitted_at: string | null;
+  // Mig 155 — 'external_slab' batches are externally-cut slabs imported
+  // for approval (shown as "External slab add"); to_dispatch sends them
+  // straight to Dispatch on approval instead of carving's Unassigned.
+  batch_type: string | null;
+  to_dispatch: boolean | null;
 };
 
 function fmtWhen(iso: string | null): string {
@@ -48,7 +54,7 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
 
   const { data } = await admin
     .from("slab_import_batches")
-    .select("id, temple, stone, rows, row_count, slab_count, file_name, submitted_by, submitted_at")
+    .select("id, temple, stone, rows, row_count, slab_count, file_name, submitted_by, submitted_at, batch_type, to_dispatch")
     .eq("status", "pending")
     .order("submitted_at", { ascending: true });
   const batches = (data ?? []) as BatchRow[];
@@ -63,7 +69,7 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
         <Link href="/tasks" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>← Tasks</Link>
         <h1 style={{ margin: "6px 0 0", fontSize: 22 }}>🗂 Slab Import Approvals</h1>
         <p className="muted" style={{ margin: "2px 0 0", fontSize: 13 }}>
-          Excel import batches from Required Sizes. Approve to create the slabs (status <strong>open</strong>) — or reject with a note. The uploaded Excel stays on record either way.
+          Excel import batches from Required Sizes (create slabs at status <strong>open</strong>) and <strong>External slab add</strong> (externally-cut slabs → Unassigned, or straight to dispatch). Approve to create the slabs — or reject with a note. The uploaded Excel stays on record either way.
         </p>
       </div>
 
@@ -78,11 +84,23 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
       ) : (
         batches.map((b) => {
           const rows = Array.isArray(b.rows) ? b.rows : [];
+          const isExternal = b.batch_type === "external_slab";
+          const toDispatch = isExternal && b.to_dispatch === true;
+          const accent = isExternal ? "rgba(59,130,246,0.5)" : "rgba(234,179,8,0.5)";
+          const accentBg = isExternal ? "rgba(59,130,246,0.06)" : "rgba(234,179,8,0.06)";
           return (
-            <div key={b.id} style={{ border: "1.5px solid rgba(234,179,8,0.5)", background: "rgba(234,179,8,0.06)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div key={b.id} style={{ border: `1.5px solid ${accent}`, background: accentBg, borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "baseline" }}>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 9px", borderRadius: 999, textTransform: "uppercase", letterSpacing: "0.05em", background: isExternal ? "#2563eb" : "#a16207", color: "#fff" }}>
+                    {isExternal ? "External slab add" : "Required sizes"}
+                  </span>
                   🏛 {b.temple} <span className="muted" style={{ fontWeight: 600, fontSize: 13 }}>· {b.stone}</span>
+                  {toDispatch && (
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#15803d", background: "rgba(22,163,74,0.12)", border: "1px solid rgba(22,163,74,0.35)", borderRadius: 6, padding: "2px 8px" }}>
+                      🚚 straight to dispatch
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 800, color: "#854d0e" }}>
                   {b.row_count ?? rows.length} row{(b.row_count ?? rows.length) === 1 ? "" : "s"} → {b.slab_count ?? "?"} slab{(b.slab_count ?? 0) === 1 ? "" : "s"}
@@ -96,22 +114,41 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
               <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
                   <thead>
-                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
-                      <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
-                      <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
-                      <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
-                    </tr>
+                    {isExternal ? (
+                      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                        <th style={th}>#</th>
+                        <th style={th}>Label</th><th style={th}>Description</th><th style={th}>📍 Stock Location</th>
+                        <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
+                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
+                      </tr>
+                    ) : (
+                      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                        <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
+                        <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
+                        <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
+                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody>
                     {rows.map((r, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                         <td style={{ ...td, color: "var(--muted)", fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>{i + 1}</td>
-                        <td style={{ ...td, fontWeight: 600 }}>{r.componentSection || "—"}</td>
-                        <td style={td}>{r.componentElement || "—"}</td>
-                        <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
-                        <td style={td}>{r.description ?? "—"}</td>
-                        <td style={td}>{r.additionalDescription ?? "—"}</td>
+                        {isExternal ? (
+                          <>
+                            <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
+                            <td style={td}>{r.description ?? "—"}</td>
+                            <td style={td}>{r.stockLocation || "—"}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={{ ...td, fontWeight: 600 }}>{r.componentSection || "—"}</td>
+                            <td style={td}>{r.componentElement || "—"}</td>
+                            <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
+                            <td style={td}>{r.description ?? "—"}</td>
+                            <td style={td}>{r.additionalDescription ?? "—"}</td>
+                          </>
+                        )}
                         <td style={td}>{r.length}</td>
                         <td style={td}>{r.width}</td>
                         <td style={td}>{r.height}</td>

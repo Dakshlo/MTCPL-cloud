@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   addExternalCutSlabAction,
@@ -146,8 +147,6 @@ function ExternalCutSlabsModal({
   assignedExternalSlabs: AssignedExternalSlab[];
   onClose: () => void;
 }) {
-  const [showAddForm, setShowAddForm] = useState(externalSlabs.length === 0);
-
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -265,47 +264,36 @@ function ExternalCutSlabsModal({
 
         {/* Scrollable body */}
         <div style={{ overflowY: "auto", padding: "16px 20px" }}>
-          {/* Add-new toggle + form */}
+          {/* Mig 155 — adding external slabs is now an Excel import with
+              approval (same flow as Required Sizes), not a direct form.
+              The link goes to the import page; the reviewed batch waits in
+              Slab Import Approvals as "External slab add". */}
           <div style={{ marginBottom: 18 }}>
-            <button
-              type="button"
-              onClick={() => setShowAddForm((s) => !s)}
+            <Link
+              href="/carving/external-import"
               style={{
                 width: "100%",
                 padding: "10px 14px",
                 fontSize: 13,
                 fontWeight: 700,
-                background: showAddForm ? "var(--surface-alt)" : "var(--gold-dark)",
-                color: showAddForm ? "var(--text)" : "#fff",
-                border: `1.5px solid ${showAddForm ? "var(--border)" : "var(--gold-dark)"}`,
+                background: "var(--gold-dark)",
+                color: "#fff",
+                border: "1.5px solid var(--gold-dark)",
                 borderRadius: 8,
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
+                textDecoration: "none",
+                boxSizing: "border-box",
               }}
             >
-              {showAddForm ? "✕ Cancel add" : "＋ Add new external cut slab"}
-            </button>
-            {showAddForm && (
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: 14,
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                }}
-              >
-                <AddOrEditForm
-                  mode="add"
-                  temples={temples}
-                  stoneTypes={stoneTypes}
-                  onCancel={() => setShowAddForm(false)}
-                />
-              </div>
-            )}
+              📥 Import external cut slabs from Excel
+            </Link>
+            <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
+              Externally-cut slabs come in by Excel import + approval now. Download the template, fill it, upload &amp; review, then send for approval — owner / senior incharge / carving head sign off. Tick <strong>Send straight to dispatch</strong> in the review step to push them onto Dispatch instead of Unassigned.
+            </p>
           </div>
 
           {/* Existing list, temple-wise */}
@@ -321,8 +309,8 @@ function ExternalCutSlabsModal({
                 borderRadius: 10,
               }}
             >
-              No externally-added slabs yet. Use the button above to add the
-              first one.
+              No externally-added slabs yet. Use <strong>Import external cut
+              slabs from Excel</strong> above — they appear here after approval.
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

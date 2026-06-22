@@ -222,6 +222,10 @@ type CleanImportRow = {
   // Mig 123 — temple-component category (Category 1 / Category 2). Optional.
   componentSection: string | null;
   componentElement: string | null;
+  // Mig 155 — external-slab imports carry a stock location per row
+  // (where the externally-cut slab physically sits). Null for Required
+  // Sizes imports, which don't collect it.
+  stockLocation: string | null;
 };
 
 function cleanImportRows(rows: unknown): CleanImportRow[] {
@@ -230,6 +234,7 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
     length?: number | string | null; width?: number | string | null; height?: number | string | null;
     quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
     componentSection?: string | null; componentElement?: string | null;
+    stockLocation?: string | null;
   };
   // Label + Category 1/2 are stored UPPERCASE so they group consistently
   // no matter how they were typed in Excel ("floor-1" → "FLOOR-1").
@@ -249,6 +254,7 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
       priority: r.priority === true,
       componentSection: upOrNull(r.componentSection),
       componentElement: upOrNull(r.componentElement),
+      stockLocation: (r.stockLocation ?? "").toString().trim() || null,
     }))
     // Every slab needs all three dimensions (stored as inches in *_ft).
     .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
@@ -327,6 +333,176 @@ async function insertApprovedSlabRows(
   }
   if (lastError) return { ok: false, error: lastError };
   return { ok: true, count: inserted, slabBatchId };
+}
+
+// Mig 155 — externally-cut slabs come in through the same import+approval
+// flow, but land DIRECTLY at status 'cut_done' (Unassigned on /carving)
+// with source_block_id NULL — they never went through our cutting. When
+// the batch is flagged to_dispatch, they instead go STRAIGHT to dispatch:
+// status 'completed' + direct_dispatched_at (mirrors carving → Direct
+// Dispatch), so the dispatch incharge can pick them immediately.
+const EXTERNAL_IMPORT_SUBMIT_ROLES: AppRole[] = [
+  "owner", "team_head", "senior_incharge", "carving_head", "tender_manager", "developer",
+];
+
+/** Insert the slabs of an approved EXTERNAL batch. Same id-allocation +
+ *  23505-retry as insertApprovedSlabRows, but status=cut_done (or
+ *  completed when sent straight to dispatch), source_block_id NULL, and a
+ *  per-row stock_location. Returns the slab group id. */
+async function insertApprovedExternalSlabRows(
+  supabase: ReturnType<typeof createAdminSupabaseClient>,
+  actorId: string,
+  temple: string,
+  stone: string,
+  cleaned: CleanImportRow[],
+  toDispatch: boolean,
+): Promise<{ ok: true; count: number; slabBatchId: string } | { ok: false; error: string }> {
+  const { data: templeRow } = await supabase
+    .from("temples")
+    .select("code_prefix")
+    .eq("name", temple)
+    .single();
+  const prefix = (templeRow as { code_prefix?: string } | null)?.code_prefix ?? "SLB";
+
+  const slabBatchId = randomUUID();
+  const now = new Date().toISOString();
+  let inserted = 0;
+  let lastError = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: maxRow } = await supabase
+      .from("slab_requirements")
+      .select("id")
+      .like("id", `${prefix}-%`)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    let cursor = (maxRow as { id?: string } | null)?.id ?? null;
+
+    const insertRows: Array<Record<string, unknown>> = [];
+    for (const r of cleaned) {
+      const baseId = nextSlabCodeFromMaxId(cursor, prefix);
+      for (let i = 0; i < r.quantity; i++) {
+        insertRows.push({
+          id: i === 0 ? baseId : `${baseId}-${i}`,
+          label: r.label || temple,
+          description: r.description,
+          additional_description: r.additionalDescription,
+          temple,
+          stone,
+          quality: r.quality,
+          length_ft: r.length,
+          width_ft: r.width,
+          thickness_ft: r.height,
+          priority: r.priority,
+          component_section: r.componentSection,
+          component_element: r.componentElement,
+          stock_location: r.stockLocation,
+          // External slabs skip our cutting pipeline entirely.
+          source_block_id: null,
+          // to_dispatch → straight onto a truck (Dispatch → Make Dispatch);
+          // otherwise Unassigned (cut_done) for CNC / outsource / direct.
+          status: toDispatch ? "completed" : "cut_done",
+          ...(toDispatch ? { direct_dispatched_at: now, direct_dispatched_by: actorId } : {}),
+          batch_id: slabBatchId,
+          created_by: actorId,
+          updated_by: actorId,
+        });
+      }
+      cursor = baseId;
+    }
+
+    const { error } = await supabase.from("slab_requirements").insert(insertRows);
+    if (!error) {
+      inserted = insertRows.length;
+      lastError = "";
+      break;
+    }
+    lastError = error.message;
+    if (error.code !== "23505") break;
+  }
+  if (lastError) return { ok: false, error: lastError };
+  return { ok: true, count: inserted, slabBatchId };
+}
+
+/** Step 1 (external) — submit an external cut-slab import batch for
+ *  approval. Identical plumbing to submitSlabImportBatchAction but tagged
+ *  batch_type='external_slab' and carrying the to_dispatch flag + per-row
+ *  stock locations. No slab rows are created here. */
+export async function submitExternalSlabImportBatchAction(
+  formData: FormData,
+): Promise<{ ok: true; slabCount: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(EXTERNAL_IMPORT_SUBMIT_ROLES);
+  const supabase = createAdminSupabaseClient();
+
+  const temple = text(formData, "temple");
+  const stone = text(formData, "stone");
+  if (!temple) return { ok: false, error: "Temple is required" };
+  if (!stone) return { ok: false, error: "Stone is required" };
+  const toDispatch = text(formData, "to_dispatch") === "true";
+
+  let rawRows: unknown;
+  try {
+    rawRows = JSON.parse(String(formData.get("rows") ?? "[]"));
+  } catch {
+    return { ok: false, error: "Bad rows payload — re-upload the file." };
+  }
+  const cleaned = cleanImportRows(rawRows);
+  if (cleaned.length === 0) {
+    return { ok: false, error: "No valid rows — each slab needs length, width and height." };
+  }
+  // External rows must carry a stock location (mirrors the old form's
+  // mandatory stock_location field).
+  const missingLoc = cleaned.filter((r) => !r.stockLocation).length;
+  if (missingLoc > 0) {
+    return { ok: false, error: `${missingLoc} row${missingLoc === 1 ? "" : "s"} missing a stock location — fill it in for every slab.` };
+  }
+  const totalSlabs = cleaned.reduce((s, r) => s + r.quantity, 0);
+  if (totalSlabs > 10000) {
+    return { ok: false, error: `Too many slabs in one import (${totalSlabs}). Max 10000 — split the file.` };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "The Excel file is missing — re-upload it." };
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    return { ok: false, error: "Excel file too large (max 4 MB)." };
+  }
+
+  const batchId = randomUUID();
+  const safeName = (file.name || "external-import.xlsx").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
+  const filePath = `${batchId}/${safeName}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { error: upErr } = await supabase.storage
+    .from(IMPORT_FILE_BUCKET)
+    .upload(filePath, buffer, {
+      contentType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      upsert: false,
+    });
+  if (upErr) return { ok: false, error: `Couldn't store the Excel copy: ${upErr.message}` };
+
+  const { error } = await supabase.from("slab_import_batches").insert({
+    id: batchId,
+    temple,
+    stone,
+    rows: cleaned,
+    row_count: cleaned.length,
+    slab_count: totalSlabs,
+    file_path: filePath,
+    file_name: file.name || safeName,
+    status: "pending",
+    batch_type: "external_slab",
+    to_dispatch: toDispatch,
+    submitted_by: profile.id,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "external_slab_import_submitted", "slab_import_batch", batchId, {
+    temple, stone, rows: cleaned.length, slabs: totalSlabs, to_dispatch: toDispatch,
+  });
+  revalidatePath("/carving");
+  revalidatePath("/tasks");
+  return { ok: true, slabCount: totalSlabs };
 }
 
 /** Step 1 — submit an import batch for approval. Stores the reviewed rows
@@ -415,17 +591,27 @@ export async function approveSlabImportBatchAction(formData: FormData) {
 
   const { data: batch } = await supabase
     .from("slab_import_batches")
-    .select("id, temple, stone, rows, status, submitted_by")
+    .select("id, temple, stone, rows, status, submitted_by, batch_type, to_dispatch")
     .eq("id", batchId)
     .maybeSingle();
   if (!batch) toast("/tasks/slab-imports", "Batch not found.");
-  const b = batch as { id: string; temple: string; stone: string; rows: unknown; status: string; submitted_by: string | null };
+  const b = batch as {
+    id: string; temple: string; stone: string; rows: unknown; status: string;
+    submitted_by: string | null; batch_type?: string | null; to_dispatch?: boolean | null;
+  };
   if (b.status !== "pending") toast("/tasks/slab-imports", "This batch was already reviewed.");
 
   const cleaned = cleanImportRows(b.rows);
   if (cleaned.length === 0) toast("/tasks/slab-imports", "Batch has no valid rows — reject it instead.");
 
-  const res = await insertApprovedSlabRows(supabase, profile.id, b.temple, b.stone, cleaned);
+  // Mig 155 — external batches land at cut_done (Unassigned) or, when
+  // flagged, straight to dispatch (completed). Required-sizes batches
+  // create slabs at status 'open' on Required Sizes (existing behaviour).
+  const isExternal = b.batch_type === "external_slab";
+  const toDispatch = isExternal && b.to_dispatch === true;
+  const res = isExternal
+    ? await insertApprovedExternalSlabRows(supabase, profile.id, b.temple, b.stone, cleaned, toDispatch)
+    : await insertApprovedSlabRows(supabase, profile.id, b.temple, b.stone, cleaned);
   if (!res.ok) toast("/tasks/slab-imports", `Approve failed: ${res.error}`);
 
   await supabase
@@ -439,20 +625,24 @@ export async function approveSlabImportBatchAction(formData: FormData) {
     .eq("id", batchId)
     .eq("status", "pending");
 
-  await logAudit(profile.id, "slab_import_approved", "slab_import_batch", batchId, {
-    temple: b.temple, stone: b.stone, slabs: res.count, slab_batch_id: res.slabBatchId,
+  await logAudit(profile.id, isExternal ? "external_slab_import_approved" : "slab_import_approved", "slab_import_batch", batchId, {
+    temple: b.temple, stone: b.stone, slabs: res.count, slab_batch_id: res.slabBatchId, to_dispatch: toDispatch,
   });
   // Record for the team — the submitter sees the status (and reviewer)
   // in the 🗂 Batches modal on Required Sizes.
-  await notify("slab_import_approved", `Slab import approved — ${res.count} slabs for ${b.temple}`, {
+  const landed = isExternal ? (toDispatch ? "sent straight to dispatch" : "added to Unassigned") : "added";
+  await notify(isExternal ? "external_slab_import_approved" : "slab_import_approved", `${isExternal ? "External slab" : "Slab"} import approved — ${res.count} slabs for ${b.temple}`, {
+    message: isExternal ? `Slabs ${landed}.` : undefined,
     entityType: "slab_import_batch",
     entityId: batchId,
     actorId: profile.id,
   });
   revalidatePath("/slabs");
   revalidatePath("/planning");
+  revalidatePath("/carving");
+  revalidatePath("/dispatch");
   revalidatePath("/tasks");
-  toast("/tasks/slab-imports", `Approved — ${res.count} slab${res.count === 1 ? "" : "s"} added to ${b.temple}.`);
+  toast("/tasks/slab-imports", `Approved — ${res.count} slab${res.count === 1 ? "" : "s"} ${isExternal ? landed : `added to ${b.temple}`}.`);
 }
 
 /** Step 2b — reject a pending batch (note optional). No slabs are created. */
