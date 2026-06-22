@@ -6,8 +6,9 @@
 // piece, or a lump sum). Flows onto a 2nd letterhead page if the content
 // is long — never overflows. Header (CONTRACT no + date), recital, a
 // bordered Project + Vendor block, the contract rate (figures + words),
-// the standard clauses (scope, value, payment, MATERIAL & DAMAGE,
-// quality, labour, timeline) with bold headings, and two signatures.
+// the standard clauses in plain, direct language (work, rate, payment,
+// MATERIAL & DAMAGE, quality, labour, SITE SAFETY & ACCIDENT LIABILITY,
+// time) with bold headings, and two signatures. Roomy spacing (Jun 2026).
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
@@ -154,13 +155,12 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
 
   // ── Recital ─────────────────────────────────────────────────────────
   const recital =
-    "This Installation Work Contract (\"Contract\") is made on the date stated above between " +
-    "Mateshwari Temple Construction Pvt Ltd, Pindwara, Sirohi, Rajasthan (\"the Company\"), and the " +
-    "Contractor named below (\"the Contractor\"), for the stone installation work at the project site " +
-    "stated below, on the following terms and conditions:";
-  for (const ln of wrap(recital, font, 9, CONTENT_W)) {
-    text(ln, MARGIN_X, y, 9, font, ink);
-    y -= 12;
+    "This contract is made on the date shown above between Mateshwari Temple Construction Pvt Ltd, " +
+    "Pindwara, Sirohi, Rajasthan (\"the Company\") and the Contractor named below (\"the Contractor\"), " +
+    "for the stone installation work at the site shown below. Both sides agree to the terms below.";
+  for (const ln of wrap(recital, font, 9.5, CONTENT_W)) {
+    text(ln, MARGIN_X, y, 9.5, font, ink);
+    y -= 14;
   }
 
   // ── Project + Vendor block (two columns, bordered) ──────────────────
@@ -214,74 +214,84 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
 
   // ── Clauses (flow onto page 2 if needed) ────────────────────────────
   const valueClause = isLump
-    ? `The total agreed value for the entire scope of work is ${rs(inp.price)}` +
+    ? `The total agreed price for the whole work is ${rs(inp.price)}` +
       (inp.priceWords ? ` (Rupees ${inp.priceWords} only)` : "") +
-      ", inclusive of the Contractor's labour and charges. Any GST / taxes, if applicable, shall be as per law."
-    : `The agreed rate for the work is ${rs(inp.price)} ${uLabel}` +
+      ", including the Contractor's labour and charges. GST or other taxes, if any, are extra as per law."
+    : `The agreed rate is ${rs(inp.price)} ${uLabel}` +
       (inp.priceWords ? ` (Rupees ${inp.priceWords} only ${uLabel})` : "") +
-      ". The final contract value is this rate applied to the actual measured / installed quantity, payable " +
-      "on verified joint measurement. Any GST / taxes, if applicable, shall be as per law.";
+      ". The final amount is this rate multiplied by the actual measured / installed quantity, paid after a " +
+      "joint measurement is checked and agreed. GST or other taxes, if any, are extra as per law.";
 
   const clauses: Array<{ heading: string; body: string; boldBody?: boolean }> = [
     {
-      heading: "1. Scope of Work",
+      heading: "1. Work to be done",
       body:
         (inp.scopeNote && inp.scopeNote.trim() ? inp.scopeNote.trim() + " " : "") +
-        "The Contractor shall carry out the complete installation and fixing of the carved and finished stone " +
-        "supplied by the Company at the above project site, strictly as per the Company's drawings, designs and " +
-        "on-site instructions, using the Contractor's own skilled labour, tools and tackle.",
+        "The Contractor will install and fix all the carved and finished stone supplied by the Company at the " +
+        "site above, exactly as per the Company's drawings, designs and on-site instructions, using the " +
+        "Contractor's own skilled labour, tools and equipment.",
     },
-    { heading: "2. Contract Rate & Value", body: valueClause },
+    { heading: "2. Rate & Amount", body: valueClause },
     {
-      heading: "3. Payment Terms",
+      heading: "3. Payment",
       body:
-        "Payment shall be released against verified progress at the Company's discretion. Part / running payments " +
-        "may be made during the work; the FULL AND FINAL PAYMENT IS RELEASED ONLY AFTER THE WORK IS FULLY COMPLETED " +
-        "AND APPROVED BY THE COMPANY. No payment is due for incomplete, defective or unapproved work.",
+        "The Company pays against checked progress. Part payments may be made while the work is going on. The " +
+        "FULL AND FINAL PAYMENT IS MADE ONLY AFTER THE WORK IS FULLY COMPLETED AND APPROVED BY THE COMPANY. " +
+        "Nothing is paid for incomplete, defective or unapproved work.",
     },
     {
-      heading: "4. Material & Damage Liability",
+      heading: "4. Material & damage",
       boldBody: true,
       body:
-        "All stone and material at the site remains the property of the Company at all times. ANY DAMAGE, BREAKAGE, " +
-        "CHIPPING OR LOSS TO THE STONE OR MATERIAL AT THE SITE, CAUSED DURING HANDLING, SHIFTING OR INSTALLATION, IS " +
-        "SOLELY THE CONTRACTOR'S RESPONSIBILITY, AND ITS COST SHALL BE RECOVERED FROM THE CONTRACTOR'S DUES.",
+        "All stone and material at the site always belongs to the Company. ANY DAMAGE, BREAKAGE, CHIPPING OR LOSS " +
+        "OF STONE OR MATERIAL DURING HANDLING, SHIFTING OR INSTALLATION IS FULLY THE CONTRACTOR'S RESPONSIBILITY, " +
+        "AND ITS COST WILL BE DEDUCTED FROM THE CONTRACTOR'S DUES.",
     },
     {
-      heading: "5. Quality & Workmanship",
+      heading: "5. Quality of work",
       body:
-        "All work shall be executed in a proper, workmanlike manner to the Company's satisfaction and as per " +
-        "temple-construction standards. Any defective work shall be rectified by the Contractor at its own cost.",
+        "All work must be done properly and neatly, to the Company's satisfaction and to temple-construction " +
+        "standards. The Contractor will redo any defective work at its own cost, free of charge.",
     },
     {
-      heading: "6. Labour, Safety & Statutory",
+      heading: "6. Labour & insurance",
       body:
-        "The Contractor is solely responsible for its labour, their wages, safety, insurance and all statutory " +
-        "compliances at the site. The Company shall have no liability whatsoever in this regard.",
+        "The Contractor is fully responsible for its own labour - their wages, safety, insurance and all legal " +
+        "compliances at the site. The Company has no responsibility for any of this.",
     },
     {
-      heading: "7. Timeline & General",
+      heading: "7. Site safety & accident liability",
+      boldBody: true,
       body:
-        "The work shall be completed within the time mutually agreed at the site, and shall not be abandoned or " +
-        "delayed without the Company's written consent. This Contract is governed by the laws of India and subject " +
-        "to the jurisdiction of the courts at Sirohi, Rajasthan.",
+        "The Contractor is fully responsible for keeping the site safe, including putting up all scaffolding, " +
+        "staging, ladders and supports properly, safely and strongly. IF ANY ACCIDENT HAPPENS AT THE SITE BECAUSE " +
+        "OF UNSAFE OR IMPROPER INSTALLATION WORK - SUCH AS SCAFFOLDING FALLING, COLLAPSING OR BREAKING, OR ANY " +
+        "SIMILAR CAUSE - AND ANY INJURY, CASUALTY, LOSS OF LIFE OR DAMAGE HAPPENS, IT IS FULLY THE CONTRACTOR'S " +
+        "LIABILITY AND RESPONSIBILITY. THE COMPANY WILL NOT BE RESPONSIBLE IN ANY WAY.",
+    },
+    {
+      heading: "8. Time & general",
+      body:
+        "The work must be finished within the time agreed at the site, and must not be stopped or delayed without " +
+        "the Company's written permission. This Contract follows the laws of India, under the courts at Sirohi, " +
+        "Rajasthan.",
     },
   ];
 
-  y -= 6;
-  const CS = 8;
-  const CLH = 10.5;
+  y -= 10;
+  const CS = 9.5;       // clause body — bumped for readability / less congestion
+  const CLH = 13;       // clause line height — more breathing room
   for (const c of clauses) {
     const bodyFont = c.boldBody ? bold : font;
     const lines = wrap(c.body, bodyFont, CS, CONTENT_W);
-    ensure(11 + lines.length * CLH + 6);
-    text(c.heading, MARGIN_X, y, 8.5, bold, accent);
-    y -= 11;
+    ensure(15 + lines.length * CLH + 9);
+    text(c.heading, MARGIN_X, y, 10, bold, accent);
+    y -= 15;
     for (const ln of lines) {
       text(ln, MARGIN_X, y, CS, bodyFont, c.boldBody ? ink : muted);
       y -= CLH;
     }
-    y -= 4;
+    y -= 9; // gap between clauses
   }
 
   // ── Signatures (flow with the clauses) ──────────────────────────────
