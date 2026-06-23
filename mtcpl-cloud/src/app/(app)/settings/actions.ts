@@ -315,6 +315,27 @@ export async function deleteTempleAction(formData: FormData) {
   redirect("/settings?toast=Temple+deleted");
 }
 
+// Mig 161 — rename a temple NAME (not the code prefix, which slab IDs embed).
+// The name is denormalised across slabs/dispatches/challans/images/work-orders/
+// site-yards, so the rename_temple() function cascades the change in ONE
+// transaction. Owner/developer only — it's high-impact.
+export async function renameTempleAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+  const id = text(formData, "id");
+  const newName = text(formData, "new_name");
+  if (!id) redirect("/settings?toast=Missing+temple");
+  if (!newName) redirect(`/settings?toast=${encodeURIComponent("Enter a new name")}`);
+  const { error } = await admin.rpc("rename_temple", { p_id: id, p_new: newName });
+  if (error) redirect(`/settings?toast=${encodeURIComponent(`Rename failed: ${error.message}`)}`);
+  void logAudit(profile.id, "temple_renamed", "temple", id, { new_name: newName });
+  revalidatePath("/settings");
+  revalidatePath("/temples");
+  revalidatePath("/dispatch");
+  revalidatePath("/invoicing");
+  redirect(`/settings?toast=${encodeURIComponent(`✓ Renamed to ${newName} (everywhere)`)}`);
+}
+
 export async function updateUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
   const admin = createAdminSupabaseClient();

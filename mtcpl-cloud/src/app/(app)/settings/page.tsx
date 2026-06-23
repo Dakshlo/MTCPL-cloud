@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction } from "./actions";
+import { TempleRenameForm } from "./temple-rename-form";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -395,6 +396,8 @@ export default async function SettingsPage() {
   // Mig 144 — transfer fleet (owner/developer manage). Safe if the
   // table doesn't exist yet (returns null → empty list).
   const canManageTrucks = currentUser.role === "developer" || currentUser.role === "owner" || currentUser.role === "carving_head";
+  // Mig 161 — renaming a temple cascades the name everywhere; owner/dev only.
+  const canRenameTemple = currentUser.role === "developer" || currentUser.role === "owner";
   // Daksh (Jun 2026) — carving_head gets a trimmed Settings page: ONLY Transfer
   // trucks + Temple Codes. Stone Types (otherwise ungated) is hidden from them.
   const isCarvingHead = currentUser.role === "carving_head";
@@ -1187,6 +1190,9 @@ export default async function SettingsPage() {
                     );
                     return null;
                   })()}
+                  {/* Mig 161 — owner/dev can rename the temple NAME (cascades
+                      everywhere); the code prefix stays locked. */}
+                  {canRenameTemple && <TempleRenameForm templeId={temple.id} currentName={temple.name} />}
                   <form action={updateTempleAction}>
                     <div className="settings-form-row">
                     <input type="hidden" name="id" value={temple.id} />
@@ -1287,11 +1293,12 @@ export default async function SettingsPage() {
                     </div>
                   </form>
                   <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
-                    🔒 Temple name, code prefix and stone type are locked
-                    after the temple is first created. Changing them
-                    mid-flow corrupts slab IDs that already reference
-                    this temple. If you genuinely need to rename, mark
-                    this temple Inactive and add a new one.
+                    🔒 Code prefix and stone type stay locked after creation —
+                    slab IDs embed the prefix. The <strong>name</strong> CAN be
+                    changed with <strong>✏️ Rename temple name</strong> above
+                    {canRenameTemple ? "" : " (owner / developer only)"}: it
+                    cascades the new name to every slab, dispatch, challan and
+                    image, so the client name shows correctly on invoices too.
                   </p>
                 </div>
               </details>
