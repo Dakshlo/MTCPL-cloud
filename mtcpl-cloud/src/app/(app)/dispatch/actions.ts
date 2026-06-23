@@ -354,17 +354,23 @@ export async function undoDispatchAction(formData: FormData) {
   }
 
   // Mig 158 — a verified dispatch already spawned an invoicing challan. Undo is
-  // a full reversal, so remove that challan too. But BLOCK the undo if the
-  // accountant has already priced or invoiced it — we never silently drop a bill.
+  // a full reversal, so remove that challan too. BLOCK only when the challan is
+  // a LIVE bill: priced (the challan IS the tax invoice) or converted to a
+  // legacy invoice, AND not cancelled. A cancelled challan is already void — so
+  // "cancel the challan in Invoicing, then undo" works (it no longer blocks),
+  // and any legacy invoice it spawned is cleaned up here too.
   const { data: ch } = await admin
     .from("challans")
-    .select("id, priced_at, converted_invoice_id")
+    .select("id, priced_at, converted_invoice_id, cancelled_at")
     .eq("source_dispatch_id", dispatchId)
     .maybeSingle();
   if (ch) {
-    const chr = ch as { id: string; priced_at: string | null; converted_invoice_id: string | null };
-    if (chr.priced_at || chr.converted_invoice_id) {
-      fail("/dispatch", "This truck's invoice is already priced in Invoicing — remove that invoice there first, then undo.");
+    const chr = ch as { id: string; priced_at: string | null; converted_invoice_id: string | null; cancelled_at: string | null };
+    if (!chr.cancelled_at && (chr.priced_at || chr.converted_invoice_id)) {
+      fail("/dispatch", "This truck's challan is priced as a tax invoice in Invoicing. Cancel that challan in Invoicing first, then undo.");
+    }
+    if (chr.converted_invoice_id) {
+      await admin.from("invoices").delete().eq("id", chr.converted_invoice_id); // invoice_items cascade
     }
     await admin.from("challans").delete().eq("id", chr.id); // challan_items cascade
   }
