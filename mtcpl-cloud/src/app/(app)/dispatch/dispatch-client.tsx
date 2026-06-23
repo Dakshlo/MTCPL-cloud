@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction } from "./actions";
+import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
@@ -116,6 +116,10 @@ export type ReadySlab = {
   component_section: string | null;
   component_element: string | null;
   additional_description: string | null;
+  /** Mig 125 follow-on — set when this slab was pulled into the picker from
+   *  carving storage (cut-done, direct-dispatch) or dispatch storage. Drives a
+   *  distinct card marking so storage slabs are obvious while selecting. */
+  storageSource?: "carving" | "dispatch";
 };
 
 export type ProvisionalRow = {
@@ -251,9 +255,9 @@ function SlabCard({
       tabIndex={selectable ? 0 : undefined}
       onKeyDown={selectable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle!(); } } : undefined}
       style={{
-        background: s.cancelPending ? "rgba(185,28,28,0.07)" : awaitingTransfer ? "rgba(79,70,229,0.06)" : selected ? "rgba(184,115,51,0.1)" : "var(--surface)",
-        border: s.cancelPending ? "2px solid #b91c1c" : awaitingTransfer ? "2px solid #4f46e5" : selected ? "2px solid var(--gold-dark)" : "1px solid var(--border)",
-        borderLeft: s.cancelPending ? "6px solid #b91c1c" : awaitingTransfer ? "6px solid #4f46e5" : selected ? "6px solid var(--gold-dark)" : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
+        background: s.cancelPending ? "rgba(185,28,28,0.07)" : awaitingTransfer ? "rgba(79,70,229,0.06)" : selected ? "rgba(184,115,51,0.1)" : s.storageSource ? (s.storageSource === "carving" ? "rgba(124,58,237,0.07)" : "rgba(37,99,235,0.07)") : "var(--surface)",
+        border: s.cancelPending ? "2px solid #b91c1c" : awaitingTransfer ? "2px solid #4f46e5" : selected ? "2px solid var(--gold-dark)" : s.storageSource ? `1.5px dashed ${s.storageSource === "carving" ? "#7c3aed" : "#2563eb"}` : "1px solid var(--border)",
+        borderLeft: s.cancelPending ? "6px solid #b91c1c" : awaitingTransfer ? "6px solid #4f46e5" : selected ? "6px solid var(--gold-dark)" : s.storageSource ? `6px solid ${s.storageSource === "carving" ? "#7c3aed" : "#2563eb"}` : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
         borderRadius: 12, padding: "10px 12px",
         display: "flex", flexDirection: "column", gap: 5,
         opacity: awaitingTransfer ? 0.82 : 1,
@@ -284,6 +288,11 @@ function SlabCard({
           </span>
         )}
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{s.id}</code>
+        {s.storageSource && (
+          <span title={s.storageSource === "carving" ? "From carving storage (cut-done) — dispatching it skips carving" : "From dispatch storage"} style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.03em" }}>
+            {s.storageSource === "carving" ? "📦 CARVING STORE" : "🗄 STORE"}
+          </span>
+        )}
         {s.priority && <span title="Urgent" style={{ fontSize: 13 }}>⚡</span>}
         <span style={{ marginLeft: "auto" }}><ReadyTimer since={s.readySince} reworked={s.reworked} /></span>
       </div>
@@ -725,15 +734,43 @@ function TempleDispatchPeek({
   // empty string = not entered (stored NULL).
   const [weights, setWeights] = useState<Record<string, string>>({});
 
+  // Mig 125 follow-on — optionally pull this temple's storage slabs into the
+  // picker: carving storage (parked cut-done, direct-dispatch) + dispatch
+  // storage (parked completed). Lazily loaded the first time a toggle is on.
+  const [inclCarving, setInclCarving] = useState(false);
+  const [inclDispatch, setInclDispatch] = useState(false);
+  const [storage, setStorage] = useState<{ carving: ReadySlab[]; dispatch: ReadySlab[] }>({ carving: [], dispatch: [] });
+  const [storageLoaded, setStorageLoaded] = useState(false);
+  const [loadingStorage, setLoadingStorage] = useState(false);
+  async function ensureStorage() {
+    if (storageLoaded || loadingStorage) return;
+    setLoadingStorage(true);
+    try {
+      const res = await fetchTempleStorageSlabsAction(group.temple);
+      setStorage({ carving: res.carving, dispatch: res.dispatch });
+      setStorageLoaded(true);
+    } catch { /* leave empty — user can retry the toggle */ }
+    finally { setLoadingStorage(false); }
+  }
+
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowIso = tomorrow.toISOString().slice(0, 10);
 
-  const matched = useMemo(
-    () => group.slabs.filter((s) => slabMatches(s, query)),
-    [group.slabs, query],
+  // Merge the temple's ready slabs with any toggled-in storage slabs.
+  const allSlabs = useMemo(
+    () => [
+      ...group.slabs,
+      ...(inclCarving ? storage.carving : []),
+      ...(inclDispatch ? storage.dispatch : []),
+    ],
+    [group.slabs, inclCarving, inclDispatch, storage],
   );
-  const selSlabs = group.slabs.filter((s) => selected.has(s.id));
+  const matched = useMemo(
+    () => allSlabs.filter((s) => slabMatches(s, query)),
+    [allSlabs, query],
+  );
+  const selSlabs = allSlabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
 
   // Per-slab weight is entered in KG (blank rows skipped). The challan
@@ -844,6 +881,22 @@ function TempleDispatchPeek({
               >
                 {allMatchedSelected ? "✕ Clear all" : `✓ Select all (${selectableMatched.length})`}
               </button>
+            </div>
+
+            {/* Mig 125 follow-on — pull this temple's storage slabs in too.
+                Carving storage = parked cut-done (dispatching skips carving);
+                dispatch storage = parked completed. Marked distinctly on cards. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", background: "var(--surface)" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Also include from storage:</span>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#6d28d9" }}>
+                <input type="checkbox" checked={inclCarving} onChange={(e) => { setInclCarving(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                📦 Cut-done storage (carving) {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.carving.length}</span>}
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#1d4ed8" }}>
+                <input type="checkbox" checked={inclDispatch} onChange={(e) => { setInclDispatch(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                🗄 Dispatch storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.dispatch.length}</span>}
+              </label>
+              {loadingStorage && <span className="muted" style={{ fontSize: 11.5 }}>Loading…</span>}
             </div>
 
             {/* Cards */}

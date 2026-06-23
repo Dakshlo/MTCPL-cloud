@@ -100,15 +100,19 @@ export async function createDispatchAction(formData: FormData) {
   // POST. `.in()` + `.eq()` together gives an atomic-ish check.
   const { data: slabs, error: slabErr } = await admin
     .from("slab_requirements")
-    .select("id, temple, status, length_ft, width_ft, thickness_ft, cancel_requested_at")
+    .select("id, temple, status, is_parked, length_ft, width_ft, thickness_ft, cancel_requested_at")
     .in("id", slabIds);
   if (slabErr) fail("/dispatch", `Could not verify slabs: ${slabErr.message}`);
   if (!slabs || slabs.length !== slabIds.length) {
     fail("/dispatch", "One or more slabs no longer exist — refresh and retry");
   }
   for (const s of slabs) {
-    if (s.status !== "completed") {
-      fail("/dispatch", `Slab ${s.id} is not in 'completed' status (is '${s.status}'). Refresh and retry.`);
+    // Normal flow = status 'completed'. Mig 125 follow-on — a PARKED cut_done
+    // slab (carving storage) can be dispatched directly (skipping carving) when
+    // the picker's 'cut-done storage' toggle was used to pull it in.
+    const parkedCutDone = s.status === "cut_done" && (s as { is_parked?: boolean }).is_parked === true;
+    if (s.status !== "completed" && !parkedCutDone) {
+      fail("/dispatch", `Slab ${s.id} is not ready to dispatch (status '${s.status}'). Refresh and retry.`);
     }
     if (s.temple !== temple) {
       fail("/dispatch", `Slab ${s.id} belongs to a different temple (${s.temple}). One dispatch = one temple.`);
@@ -204,7 +208,8 @@ export async function createDispatchAction(formData: FormData) {
     .in("slab_requirement_id", slabIds);
   await admin
     .from("slab_requirements")
-    .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
+    // Unpark too — a slab dispatched from carving/dispatch storage leaves storage.
+    .update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now })
     .in("id", slabIds);
 
   // ── Audit + notify. Event name is now "dispatch_created_provisional"
@@ -1180,6 +1185,63 @@ export async function unparkDispatchSlabsAction(
   revalidatePath("/dispatch");
   revalidatePath("/dispatch/storage");
   return { ok: true, count };
+}
+
+// ReadySlab-compatible storage slab (+ which storage it came from) — pulled
+// into the dispatch picker by the "include storage" toggles.
+export type StorageSlab = {
+  id: string; label: string | null; description: string | null; temple: string;
+  stone: string | null; quality: string | null; dimensions: string; cft: number;
+  priority: boolean; isMarble: boolean; readySince: string | null; reworked: boolean;
+  cancelPending: boolean; component_section: string | null; component_element: string | null;
+  additional_description: string | null; storageSource: "carving" | "dispatch";
+};
+
+// Lazily load a temple's storage slabs for the dispatch picker: carving storage
+// = parked cut_done (direct-dispatchable, skips carving); dispatch storage =
+// parked completed.
+export async function fetchTempleStorageSlabsAction(
+  temple: string,
+): Promise<{ carving: StorageSlab[]; dispatch: StorageSlab[] }> {
+  const { profile } = await requireAuth();
+  if (!canDispatchStorage(profile.role)) return { carving: [], dispatch: [] };
+  const t = String(temple || "").trim();
+  if (!t) return { carving: [], dispatch: [] };
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("slab_requirements")
+    .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
+    .eq("temple", t)
+    .eq("is_parked", true)
+    .in("status", ["cut_done", "completed"])
+    .order("id", { ascending: true });
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const map = (s: Record<string, unknown>, source: "carving" | "dispatch"): StorageSlab => {
+    const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, th = Number(s.thickness_ft) || 0;
+    return {
+      id: s.id as string,
+      label: (s.label as string | null) ?? null,
+      description: (s.description as string | null) ?? null,
+      temple: (s.temple as string) ?? t,
+      stone: (s.stone as string | null) ?? null,
+      quality: (s.quality as string | null) ?? null,
+      dimensions: `${l}×${w}×${th} in`,
+      cft: (l * w * th) / 1728,
+      priority: s.priority === true,
+      isMarble: false,
+      readySince: null,
+      reworked: false,
+      cancelPending: !!s.cancel_requested_at,
+      component_section: (s.component_section as string | null) ?? null,
+      component_element: (s.component_element as string | null) ?? null,
+      additional_description: (s.additional_description as string | null) ?? null,
+      storageSource: source,
+    };
+  };
+  return {
+    carving: rows.filter((r) => r.status === "cut_done").map((r) => map(r, "carving")),
+    dispatch: rows.filter((r) => r.status === "completed").map((r) => map(r, "dispatch")),
+  };
 }
 
 export async function parkAllReadyDispatchAction(): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
