@@ -353,6 +353,22 @@ export async function undoDispatchAction(formData: FormData) {
     fail("/dispatch", "Cannot undo a dispatch that has already been marked delivered");
   }
 
+  // Mig 158 — a verified dispatch already spawned an invoicing challan. Undo is
+  // a full reversal, so remove that challan too. But BLOCK the undo if the
+  // accountant has already priced or invoiced it — we never silently drop a bill.
+  const { data: ch } = await admin
+    .from("challans")
+    .select("id, priced_at, converted_invoice_id")
+    .eq("source_dispatch_id", dispatchId)
+    .maybeSingle();
+  if (ch) {
+    const chr = ch as { id: string; priced_at: string | null; converted_invoice_id: string | null };
+    if (chr.priced_at || chr.converted_invoice_id) {
+      fail("/dispatch", "This truck's invoice is already priced in Invoicing — remove that invoice there first, then undo.");
+    }
+    await admin.from("challans").delete().eq("id", chr.id); // challan_items cascade
+  }
+
   // Fetch the slab ids this dispatch carries so we can flip them back.
   const { data: logs } = await admin
     .from("dispatch_logs")
@@ -608,6 +624,87 @@ export async function removeSlabsFromDispatchAction(formData: FormData) {
   redirect(
     `/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent(`Removed ${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} → back in Make Dispatch`)}`,
   );
+}
+
+// ─── addSlabsToDispatchAction ────────────────────────────────────────────
+// Check page "+ Add slab" — pull this temple's completed (available) slabs
+// onto a still-provisional dispatch, staying on the Check page.
+export async function addSlabsToDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  let slabIds: string[] = [];
+  try {
+    slabIds = (JSON.parse(String(formData.get("slab_ids") || "[]")) as string[]).filter(Boolean);
+  } catch {
+    slabIds = [];
+  }
+  if (slabIds.length === 0) redirect(`/dispatch/${dispatchId}/check`);
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, temple, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at || dispatch.delivered_at) {
+    fail("/dispatch", "Can only edit a dispatch that is still waiting for verification");
+  }
+
+  // Only genuinely-available slabs: completed + same temple.
+  const { data: slabs } = await admin
+    .from("slab_requirements")
+    .select("id, status, temple")
+    .in("id", slabIds);
+  const valid = ((slabs ?? []) as Array<{ id: string; status: string; temple: string }>)
+    .filter((s) => s.status === "completed" && s.temple === dispatch.temple)
+    .map((s) => s.id);
+  if (valid.length === 0) {
+    redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("No eligible slabs to add")}`);
+  }
+
+  // carving_item per slab (nullable — direct-dispatch slabs have none).
+  const { data: carving } = await admin
+    .from("carving_items")
+    .select("id, slab_requirement_id")
+    .in("slab_requirement_id", valid);
+  const ciBySlab = new Map<string, string>();
+  for (const ci of (carving ?? []) as Array<{ id: string; slab_requirement_id: string }>) {
+    ciBySlab.set(ci.slab_requirement_id, ci.id);
+  }
+
+  // Don't double-add a slab already on this dispatch.
+  const { data: existingLogs } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id")
+    .eq("dispatch_id", dispatchId)
+    .in("slab_requirement_id", valid);
+  const have = new Set(((existingLogs ?? []) as Array<{ slab_requirement_id: string | null }>).map((l) => l.slab_requirement_id));
+  const toAdd = valid.filter((id) => !have.has(id));
+  if (toAdd.length === 0) redirect(`/dispatch/${dispatchId}/check`);
+
+  const now = new Date().toISOString();
+  await admin.from("dispatch_logs").insert(
+    toAdd.map((slabId) => ({
+      dispatch_id: dispatchId,
+      slab_requirement_id: slabId,
+      carving_item_id: ciBySlab.get(slabId) ?? null,
+      dispatched_by: profile.id,
+    })),
+  );
+  await admin.from("slab_requirements").update({ status: "dispatched", updated_by: profile.id, updated_at: now }).in("id", toAdd);
+  const ciIds = toAdd.map((s) => ciBySlab.get(s)).filter(Boolean) as string[];
+  if (ciIds.length > 0) {
+    await admin.from("carving_items").update({ status: "dispatched" }).in("id", ciIds);
+  }
+
+  revalidatePath(`/dispatch/${dispatchId}/check`);
+  revalidatePath("/dispatch");
+  revalidatePath("/carving");
+  redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent(`Added ${toAdd.length} slab${toAdd.length !== 1 ? "s" : ""}`)}`);
 }
 
 // ─── cancelDispatchAction ────────────────────────────────────────────────

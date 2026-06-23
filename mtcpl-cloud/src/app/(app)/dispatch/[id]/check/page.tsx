@@ -96,6 +96,23 @@ export default async function DispatchCheckPage({
   }
   const groups = groupDispatchSlabs(inputs);
 
+  // Available slabs for this temple that could still be added — completed
+  // (carving-approved, ready) and not yet on any dispatch.
+  const { data: availRows } = await admin
+    .from("slab_requirements")
+    .select("id, label, length_ft, width_ft, thickness_ft")
+    .eq("status", "completed")
+    .eq("temple", dispatch.temple)
+    .order("created_at", { ascending: true })
+    .limit(500);
+  const available = ((availRows ?? []) as Array<Record<string, unknown>>).map((s) => ({
+    id: s.id as string,
+    label: (s.label as string | null) ?? null,
+    length_ft: Number(s.length_ft) || 0,
+    width_ft: Number(s.width_ft) || 0,
+    thickness_ft: Number(s.thickness_ft) || 0,
+  }));
+
   // Temple site + the fixed MTCPL handling man — for the compact header.
   const [{ data: templeRow }, { data: handlingManRow }] = await Promise.all([
     admin
@@ -170,7 +187,7 @@ export default async function DispatchCheckPage({
         ))}
       </div>
 
-      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} />
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} />
     </div>
   );
 }

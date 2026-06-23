@@ -16,14 +16,18 @@ import { groupDispatchSlabs, dash, type DispatchSlabInput, type DispatchGroupRow
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
+type Search = Promise<{ units?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
-export default async function DispatchChallanPrintPage({ params }: { params: Params }) {
+export default async function DispatchChallanPrintPage({ params, searchParams }: { params: Params; searchParams: Search }) {
   await requireAuth(["developer", "owner", "team_head", "senior_incharge", "carving_head", "cutting_operator", "dispatch"]);
   const { id } = await params;
+  // Preview from the Check page passes the current (unsaved) cft/sft toggles so
+  // the grouped challan matches the screen before the dispatch is verified.
+  const { units: unitsParam } = await searchParams;
   const admin = createAdminSupabaseClient();
 
   const { data: dispatch, error } = await admin
@@ -47,6 +51,14 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
     if (!l.slab_requirement_id) continue;
     unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
     weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
+  }
+  if (unitsParam) {
+    try {
+      const override = JSON.parse(unitsParam) as Record<string, string>;
+      for (const [sid, u] of Object.entries(override)) unitBy.set(sid, u === "sft" ? "sft" : "cft");
+    } catch {
+      /* ignore malformed preview override */
+    }
   }
 
   let inputs: DispatchSlabInput[] = [];

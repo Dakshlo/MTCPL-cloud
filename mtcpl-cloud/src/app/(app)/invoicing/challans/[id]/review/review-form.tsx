@@ -68,9 +68,73 @@ export function ReviewForm({
     return JSON.stringify(m);
   }, [rates, items]);
 
-  const cell: React.CSSProperties = { padding: "7px 9px", borderBottom: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
-  const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--surface)" };
+  // Full cell borders → Excel-style grid (column lines + row lines).
+  const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
+  const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
   const numCell: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+
+  const cftItems = items.filter((it) => it.unit !== "sft");
+  const sftItems = items.filter((it) => it.unit === "sft");
+
+  const ItemRow = (it: PriceItem) => (
+    <tr key={it.id}>
+      <td style={{ ...cell, fontFamily: "ui-monospace, monospace", fontWeight: 700, maxWidth: 170 }}>{dash(it.codes)}</td>
+      <td style={cell}>{dash(it.label)}</td>
+      <td style={{ ...cell, maxWidth: 210 }}>{dash(it.description)}</td>
+      <td style={{ ...cell, maxWidth: 190 }}>{dash(it.additional_description)}</td>
+      <td style={cell}>{dash(it.component_section)}</td>
+      <td style={cell}>{dash(it.component_element)}</td>
+      <td style={numCell}>{it.length_ft ?? "-"}</td>
+      <td style={numCell}>{it.width_ft ?? "-"}</td>
+      <td style={numCell}>{it.thickness_ft ?? "-"}</td>
+      <td style={{ ...numCell, fontWeight: 800 }}>{it.qty}</td>
+      <td style={numCell}>{fmt(it.measureQty)}</td>
+      <td style={{ ...cell, textAlign: "right" }}>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          inputMode="decimal"
+          value={rates[it.id] ?? ""}
+          onChange={(e) => setRates((p) => ({ ...p, [it.id]: e.target.value }))}
+          placeholder="0"
+          style={{ width: 90, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+        />
+      </td>
+      <td style={{ ...numCell, fontWeight: 800 }}>{rupee(amountOf(it))}</td>
+    </tr>
+  );
+
+  function Section({ rows, unit }: { rows: PriceItem[]; unit: "cft" | "sft" }) {
+    if (rows.length === 0) return null;
+    const sub = rows.reduce((a, it) => a + amountOf(it), 0);
+    const meas = rows.reduce((a, it) => a + it.measureQty, 0);
+    return (
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ padding: "9px 14px", background: unit === "cft" ? "rgba(37,99,235,0.08)" : "rgba(217,119,6,0.1)", borderBottom: "1px solid var(--border)", fontWeight: 800, fontSize: 13, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <span>{unit === "cft" ? "📦 CFT (volume)" : "🟧 SFT (area)"} · {rows.length} row{rows.length !== 1 ? "s" : ""} · {fmt(meas)} {unit}</span>
+          <span style={{ fontFamily: "ui-monospace, monospace" }}>Subtotal {rupee(sub)}</span>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
+            <thead>
+              <tr>
+                {["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2"].map((c) => (
+                  <th key={c} style={head}>{c}</th>
+                ))}
+                {["L", "W", "H", "Qty", unit.toUpperCase()].map((c) => (
+                  <th key={c} style={{ ...head, textAlign: "right" }}>{c}</th>
+                ))}
+                <th style={{ ...head, textAlign: "right" }}>Rate ₹/{unit}</th>
+                <th style={{ ...head, textAlign: "right" }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>{rows.map(ItemRow)}</tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form action={saveChallanPricingAction}>
@@ -81,58 +145,11 @@ export function ReviewForm({
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
 
-      <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
-            <thead>
-              <tr>
-                {["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2"].map((c) => (
-                  <th key={c} style={head}>{c}</th>
-                ))}
-                {["L", "W", "H", "Qty", "Unit", "Measure"].map((c) => (
-                  <th key={c} style={{ ...head, textAlign: "right" }}>{c}</th>
-                ))}
-                <th style={{ ...head, textAlign: "right" }}>Rate ₹/unit</th>
-                <th style={{ ...head, textAlign: "right" }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it) => (
-                <tr key={it.id}>
-                  <td style={{ ...cell, fontFamily: "ui-monospace, monospace", fontWeight: 700, maxWidth: 170 }}>{dash(it.codes)}</td>
-                  <td style={cell}>{dash(it.label)}</td>
-                  <td style={{ ...cell, maxWidth: 210 }}>{dash(it.description)}</td>
-                  <td style={{ ...cell, maxWidth: 190 }}>{dash(it.additional_description)}</td>
-                  <td style={cell}>{dash(it.component_section)}</td>
-                  <td style={cell}>{dash(it.component_element)}</td>
-                  <td style={numCell}>{it.length_ft ?? "-"}</td>
-                  <td style={numCell}>{it.width_ft ?? "-"}</td>
-                  <td style={numCell}>{it.thickness_ft ?? "-"}</td>
-                  <td style={{ ...numCell, fontWeight: 800 }}>{it.qty}</td>
-                  <td style={{ ...numCell, fontWeight: 700, color: it.unit === "sft" ? "#D97706" : "#2563eb" }}>{it.unit.toUpperCase()}</td>
-                  <td style={numCell}>{fmt(it.measureQty)}</td>
-                  <td style={{ ...cell, textAlign: "right" }}>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      inputMode="decimal"
-                      value={rates[it.id] ?? ""}
-                      onChange={(e) => setRates((p) => ({ ...p, [it.id]: e.target.value }))}
-                      placeholder="0"
-                      style={{ width: 90, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                    />
-                  </td>
-                  <td style={{ ...numCell, fontWeight: 800 }}>{rupee(amountOf(it))}</td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr><td colSpan={14} style={{ ...cell, textAlign: "center", color: "var(--muted)" }}>No items on this challan.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <Section rows={cftItems} unit="cft" />
+      <Section rows={sftItems} unit="sft" />
+      {items.length === 0 && (
+        <div className="muted" style={{ textAlign: "center", padding: "24px 10px", fontSize: 13, border: "1px dashed var(--border)", borderRadius: 12, marginBottom: 16 }}>No items on this challan.</div>
+      )}
 
       {/* GST + totals */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>

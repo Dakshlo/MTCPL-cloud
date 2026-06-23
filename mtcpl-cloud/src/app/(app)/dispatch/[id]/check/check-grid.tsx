@@ -13,8 +13,17 @@ import {
   verifyDispatchAction,
   removeSlabsFromDispatchAction,
   cancelDispatchAction,
+  addSlabsToDispatchAction,
 } from "../../actions";
-import { dash, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+import { dash, cftOf, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+
+export type AvailableSlab = {
+  id: string;
+  label: string | null;
+  length_ft: number;
+  width_ft: number;
+  thickness_ft: number;
+};
 
 const COLS = ["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2", "L", "W", "H", "Qty", "Weight (T)", "", ""] as const;
 
@@ -26,11 +35,24 @@ export function CheckGrid({
   dispatchId,
   groups,
   challanLabel,
+  available,
+  temple,
 }: {
   dispatchId: string;
   groups: DispatchGroupRow[];
   challanLabel: string;
+  available: AvailableSlab[];
+  temple: string;
 }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [addQuery, setAddQuery] = useState("");
+  const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+  const filteredAvail = available.filter((s) => {
+    const q = addQuery.trim().toLowerCase();
+    if (!q) return true;
+    return s.id.toLowerCase().includes(q) || (s.label ?? "").toLowerCase().includes(q);
+  });
   const [unitByKey, setUnitByKey] = useState<Record<string, "cft" | "sft">>(() => {
     const m: Record<string, "cft" | "sft"> = {};
     for (const g of groups) m[g.key] = g.measure_unit;
@@ -57,8 +79,9 @@ export function CheckGrid({
   const cftTotal = cftGroups.reduce((a, g) => a + measureOf(g, "cft"), 0);
   const sftTotal = sftGroups.reduce((a, g) => a + measureOf(g, "sft"), 0);
 
-  const cell: React.CSSProperties = { padding: "7px 9px", borderBottom: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
-  const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--surface)" };
+  // Full cell borders → an Excel-style grid (column lines as well as row lines).
+  const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
+  const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--surface)" };
   const numCell: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
 
   function Section({ rows, unit }: { rows: DispatchGroupRow[]; unit: "cft" | "sft" }) {
@@ -125,7 +148,13 @@ export function CheckGrid({
                       </div>
                     </td>
                     <td style={{ ...cell, textAlign: "center" }}>
-                      <form action={removeSlabsFromDispatchAction} style={{ display: "inline" }}>
+                      <form
+                        action={removeSlabsFromDispatchAction}
+                        style={{ display: "inline" }}
+                        onSubmit={(e) => {
+                          if (!confirm(`Remove ${g.codes.join(", ")} (${g.qty} slab${g.qty !== 1 ? "s" : ""}) from this dispatch? It goes back to Make Dispatch.`)) e.preventDefault();
+                        }}
+                      >
                         <input type="hidden" name="id" value={dispatchId} />
                         <input type="hidden" name="slab_ids" value={JSON.stringify(g.slabIds)} />
                         <button type="submit" title="Remove → back to Make Dispatch" style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
@@ -162,6 +191,59 @@ export function CheckGrid({
         {totalWeight > 0 && <span>⚖ {fmt(totalWeight, 3)} T</span>}
       </div>
 
+      {/* Add more slabs from this temple's available (completed) pool */}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", marginBottom: 16, overflow: "hidden" }}>
+        <button
+          type="button"
+          onClick={() => setShowAdd((s) => !s)}
+          style={{ width: "100%", textAlign: "left", padding: "11px 14px", fontSize: 13.5, fontWeight: 800, background: "transparent", border: "none", cursor: "pointer", color: "var(--text)", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+        >
+          <span>➕ Add slab from {temple} · {available.length} available</span>
+          <span style={{ color: "var(--muted)" }}>{showAdd ? "▲" : "▼"}</span>
+        </button>
+        {showAdd && (
+          <div style={{ padding: "0 14px 14px" }}>
+            {available.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13, padding: "8px 0" }}>No completed slabs waiting for {temple}.</div>
+            ) : (
+              <form action={addSlabsToDispatchAction}>
+                <input type="hidden" name="id" value={dispatchId} />
+                <input type="hidden" name="slab_ids" value={JSON.stringify(pickedIds)} />
+                <input
+                  value={addQuery}
+                  onChange={(e) => setAddQuery(e.target.value)}
+                  placeholder="🔍 Search code / label…"
+                  style={{ width: "100%", maxWidth: 340, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", marginBottom: 10 }}
+                />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+                  {filteredAvail.map((s) => {
+                    const on = !!picked[s.id];
+                    return (
+                      <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", border: `1.5px solid ${on ? "#15803d" : "var(--border)"}`, borderRadius: 8, padding: "7px 9px", cursor: "pointer", background: on ? "rgba(22,101,52,0.06)" : "var(--bg)" }}>
+                        <input type="checkbox" checked={on} onChange={(e) => setPicked((p) => ({ ...p, [s.id]: e.target.checked }))} />
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{s.id}</span>
+                          <span style={{ fontSize: 11.5, color: "var(--muted)", display: "block" }}>
+                            {dash(s.label)} · {s.length_ft}×{s.width_ft}×{s.thickness_ft} · {fmt(cftOf(s.length_ft, s.width_ft, s.thickness_ft))} cft
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <button
+                  type="submit"
+                  disabled={pickedIds.length === 0}
+                  style={{ marginTop: 12, fontSize: 13.5, padding: "10px 18px", fontWeight: 800, color: "#fff", background: pickedIds.length ? "#2563eb" : "var(--border)", border: "none", borderRadius: 10, cursor: pickedIds.length ? "pointer" : "default" }}
+                >
+                  ➕ Add {pickedIds.length || ""} selected slab{pickedIds.length !== 1 ? "s" : ""}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Verify / Cancel */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <form action={verifyDispatchAction} style={{ display: "inline" }}>
@@ -183,8 +265,10 @@ export function CheckGrid({
             ✕ Cancel dispatch — slabs back to Make Dispatch
           </button>
         </form>
+        {/* Preview carries the current (unsaved) cft/sft toggles so the grouped
+            challan matches what's on screen before verifying. */}
         <Link
-          href={`/dispatch/${dispatchId}/print`}
+          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 13, padding: "12px 16px", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 11, textDecoration: "none" }}
