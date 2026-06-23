@@ -450,6 +450,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchTempleCancelAlert(),
   ]);
 
+  // Tablet keyboard quick-chips — every active temple's code, so the chips
+  // show on EVERY field the keyboard attaches to (not just the few with
+  // data-temple-codes). Cheap select; deduped + uppercased.
+  const { data: templeCodeRows } = await supabase
+    .from("temples")
+    .select("code_prefix")
+    .eq("is_active", true);
+  const tabletTempleCodes = [
+    ...new Set(
+      (templeCodeRows ?? [])
+        .map((t) => ((t as { code_prefix?: string | null }).code_prefix ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ];
+
   // Storekeeper (slab_transfer) — hide the menu by default and serve a
   // focused, full-width page; the hamburger drawer opens it to switch
   // pages. (See `.app-shell.storekeeper-drawer` in globals.css.)
@@ -745,7 +760,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       {/* System-wide tablet keyboard — renders nothing on laptops/desktops;
           on touch tablets it docks a QWERTY + number pad for every text
           field (slab codes, dimensions, temple). */}
-      <TabletKeyboardProvider />
+      <TabletKeyboardProvider templeCodes={tabletTempleCodes} />
       <Toast />
     </div>
   );

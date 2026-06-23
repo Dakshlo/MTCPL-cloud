@@ -55,7 +55,7 @@ function setNativeValue(el: Field, value: string) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-export function TabletKeyboardProvider() {
+export function TabletKeyboardProvider({ templeCodes = [] }: { templeCodes?: string[] }) {
   const [isTablet, setIsTablet] = useState(false);
   const [active, setActive] = useState<Field | null>(null);
   const [fieldCodes, setFieldCodes] = useState<string[]>([]);
@@ -142,14 +142,21 @@ export function TabletKeyboardProvider() {
       return next;
     });
 
-  // Chips: this field's codes + the user's learned codes, most-used first.
+  // Daksh — every active temple's code, so the quick chips show on EVERY
+  // field the keyboard attaches to (not just the few with data-temple-codes).
+  const globalCodes = useMemo(
+    () => [...new Set(templeCodes.map((c) => c.trim().toUpperCase()).filter(Boolean))],
+    [templeCodes],
+  );
+  // Chips: every temple's code + this field's codes + the user's learned
+  // codes, most-used first.
   const chips = useMemo(() => {
-    const set = new Set<string>(fieldCodes);
+    const set = new Set<string>([...globalCodes, ...fieldCodes]);
     for (const k of Object.keys(usage)) set.add(k);
     return [...set]
       .sort((a, b) => (usage[b] ?? 0) - (usage[a] ?? 0) || a.localeCompare(b))
       .slice(0, 18);
-  }, [fieldCodes, usage]);
+  }, [globalCodes, fieldCodes, usage]);
 
   const refocus = () => active?.focus({ preventScroll: true });
   const insert = (txt: string) => {
