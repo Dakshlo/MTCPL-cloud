@@ -306,11 +306,25 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   text("Contractor / Vendor (Signature)", PAGE_W - MARGIN_X - 210, sigLabelY, 8, font, muted);
   text(san(inp.vendorName), PAGE_W - MARGIN_X - 210, sigLabelY - 11, 7.5, font, muted);
 
-  // ── CANCELLED stamp on every page (soft-deleted) ────────────────────
+  // ── CANCELLED — unmissable red banners (top + bottom) + a diagonal
+  //    watermark on EVERY page (soft-deleted contract). ─────────────────
   if (inp.cancelled) {
     const red = rgb(0.85, 0.12, 0.12);
+    const white = rgb(1, 1, 1);
+    const banner = "CANCELLED  —  THIS CONTRACT IS NOT VALID";
+    const bannerSize = 13;
+    const bannerW = bold.widthOfTextAtSize(banner, bannerSize);
+    const BAR_H = 26;
+    const drawBar = (p: PDFPage, barBottom: number) => {
+      p.drawRectangle({ x: 0, y: barBottom, width: PAGE_W, height: BAR_H, color: red });
+      p.drawText(banner, { x: (PAGE_W - bannerW) / 2, y: barBottom + 8, size: bannerSize, font: bold, color: white });
+    };
     for (const p of pdf.getPages()) {
-      p.drawLine({ start: { x: 28, y: PAGE_H - 28 }, end: { x: PAGE_W - 28, y: 28 }, thickness: 6, color: red, opacity: 0.45 });
+      // Full-width red bars across the very top and bottom of the page.
+      drawBar(p, PAGE_H - BAR_H);
+      drawBar(p, 0);
+      // Diagonal watermark through the body.
+      p.drawLine({ start: { x: 28, y: PAGE_H - 40 }, end: { x: PAGE_W - 28, y: 40 }, thickness: 6, color: red, opacity: 0.45 });
       const big = "CANCELLED";
       p.drawText(big, { x: (PAGE_W - bold.widthOfTextAtSize(big, 60)) / 2, y: PAGE_H / 2 + 6, size: 60, font: bold, color: red, opacity: 0.5 });
       const sub = "(NOT VALID)";

@@ -8,7 +8,7 @@ import { buildInstallContractPdf } from "@/lib/install-contract-pdf";
 
 export const runtime = "nodejs";
 
-const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
+const ALLOWED = ["developer", "owner", "accountant_star", "accountant", "crosscheck"];
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { profile } = await requireAuth();

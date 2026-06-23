@@ -425,6 +425,16 @@ const navEntries: NavEntry[] = [
     department: "finance",
   },
   {
+    // Daksh (Jun 2026) — the Manager (crosscheck) issues installation
+    // contracts. Direct link to the invoicing install-contract page; they
+    // have no invoicing dashboard, so this entry is their way in.
+    href: "/invoicing/install-contract",
+    label: "Install Contract",
+    icon: "📜",
+    roles: ["developer", "owner", "accountant", "accountant_star", "crosscheck"],
+    department: "finance",
+  },
+  {
     href: "/accounts",
     label: "Due Bills",
     icon: "💰",
