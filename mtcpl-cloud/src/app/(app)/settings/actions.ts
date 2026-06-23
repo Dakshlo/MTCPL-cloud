@@ -10,6 +10,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { hashBulkImportPassword, BULK_IMPORT_PASSWORD_KEY } from "@/lib/bulk-import-password";
+import { DEV_TRANSFER_BUCKET, ensureDevTransferBucket } from "./dev-transfer-shared";
 
 function text(fd: FormData, key: string) {
   const v = fd.get(key);
@@ -334,6 +335,39 @@ export async function renameTempleAction(formData: FormData) {
   revalidatePath("/dispatch");
   revalidatePath("/invoicing");
   redirect(`/settings?toast=${encodeURIComponent(`✓ Renamed to ${newName} (everywhere)`)}`);
+}
+
+// ── Developer file transfer (Mac ↔ tablet) ───────────────────────────────
+// A private "dev_transfers" storage bucket. The dev uploads on one device and
+// downloads on another after logging in — no email/AirDrop needed. Developer
+// only. Upload is client-side via a short-lived signed URL (any file size).
+// (DEV_TRANSFER_BUCKET + ensureDevTransferBucket live in dev-transfer-shared.ts
+// because a "use server" module may only export async functions.)
+
+export async function createDevTransferUploadUrlAction(
+  formData: FormData,
+): Promise<{ ok: true; path: string; token: string } | { ok: false; error: string }> {
+  await requireAuth(["developer"]);
+  const admin = createAdminSupabaseClient();
+  const filename = text(formData, "filename") || "file";
+  const safe = filename.replace(/[^\w.\- ]+/g, "_").trim().slice(0, 120) || "file";
+  const path = `${Date.now()}-${safe}`;
+  await ensureDevTransferBucket(admin);
+  const { data, error } = await admin.storage.from(DEV_TRANSFER_BUCKET).createSignedUploadUrl(path);
+  if (error || !data) return { ok: false, error: error?.message ?? "Could not start upload" };
+  return { ok: true, path: data.path, token: data.token };
+}
+
+export async function deleteDevTransferAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer"]);
+  const admin = createAdminSupabaseClient();
+  const path = text(formData, "path");
+  if (path) {
+    await admin.storage.from(DEV_TRANSFER_BUCKET).remove([path]);
+    void logAudit(profile.id, "dev_transfer_deleted", "storage", path, {});
+  }
+  revalidatePath("/settings");
+  redirect("/settings?toast=File+removed");
 }
 
 export async function updateUserAction(formData: FormData) {

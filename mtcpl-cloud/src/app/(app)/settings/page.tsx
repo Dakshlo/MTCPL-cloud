@@ -1,7 +1,9 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction } from "./actions";
+import { DEV_TRANSFER_BUCKET, ensureDevTransferBucket } from "./dev-transfer-shared";
 import { TempleRenameForm } from "./temple-rename-form";
+import { DevFileTransfer } from "./dev-file-transfer";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -406,6 +408,24 @@ export default async function SettingsPage() {
     // select("*") so this stays safe before migration 147 adds driver_name.
     const { data: trucks } = await admin.from("trucks").select("*").order("name");
     truckList = (trucks ?? []) as Array<{ id: string; name: string; is_active: boolean; driver_name?: string | null }>;
+  }
+
+  // Developer file transfer — the private dev_transfers bucket's files, with
+  // short-lived signed download URLs. Developer only.
+  let devFiles: Array<{ name: string; size: number; createdAt: string | null; url: string | null }> = [];
+  if (currentUser.role === "developer") {
+    await ensureDevTransferBucket(admin);
+    const { data: list } = await admin.storage
+      .from(DEV_TRANSFER_BUCKET)
+      .list("", { limit: 200, sortBy: { column: "created_at", order: "desc" } });
+    for (const f of (list ?? []) as Array<{ name: string; created_at?: string | null; metadata?: { size?: number } | null }>) {
+      if (f.name === ".emptyFolderPlaceholder") continue;
+      // `download` → Content-Disposition: attachment with the clean filename.
+      const { data: signed } = await admin.storage
+        .from(DEV_TRANSFER_BUCKET)
+        .createSignedUrl(f.name, 3600, { download: f.name.replace(/^\d+-/, "") });
+      devFiles.push({ name: f.name, size: f.metadata?.size ?? 0, createdAt: f.created_at ?? null, url: signed?.signedUrl ?? null });
+    }
   }
 
   return (
@@ -1599,6 +1619,40 @@ export default async function SettingsPage() {
               every N hours while this tab is open. Belt-and-braces with
               Supabase Pro snapshot backups. */}
           <AutoBackup />
+        </PeekSection>
+      )}
+
+      {/* File transfer — DEVELOPER ONLY. Upload on one device, download on
+          another after logging in (Mac ↔ tablet, no email/AirDrop). */}
+      {currentUser.role === "developer" && (
+        <PeekSection icon="📁" title="File Transfer" count={devFiles.length} modalMaxWidth={640}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <DevFileTransfer />
+            <div className="settings-card">
+              <h3 className="settings-card-title">Files ({devFiles.length})</h3>
+              {devFiles.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "6px 0" }}>No files yet — upload one above.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {devFiles.map((f) => (
+                    <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 16 }}>📄</span>
+                      <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: 13 }} title={f.name}>{f.name.replace(/^\d+-/, "")}</span>
+                      <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>{(f.size / 1024 / 1024).toFixed(2)} MB</span>
+                      {f.url && (
+                        <a href={f.url} download style={{ fontSize: 12, fontWeight: 700, color: "#15803d", textDecoration: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "4px 10px", whiteSpace: "nowrap" }}>↓ Download</a>
+                      )}
+                      <form action={deleteDevTransferAction}>
+                        <input type="hidden" name="path" value={f.name} />
+                        <button type="submit" title="Delete" style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
+                      </form>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Download links refresh each time you open this page. Delete files when you&apos;re done.</div>
+            </div>
+          </div>
         </PeekSection>
       )}
 
