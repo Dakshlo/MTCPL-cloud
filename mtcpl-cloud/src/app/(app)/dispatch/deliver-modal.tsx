@@ -67,12 +67,14 @@ function PhotoBox({
           <span className="muted" style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4 }}>{hint}</span>
         </>
       )}
+      {/* Daksh (Jun 2026) — no `capture` attribute: that forced the camera
+          only. Plain accept="image/*" lets the user EITHER take a photo OR
+          upload one from the gallery/files (the native picker offers both). */}
       <input
         ref={inputRef}
         type="file"
         name={name}
         accept="image/*"
-        capture="environment"
         onChange={onChange}
         style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
       />
