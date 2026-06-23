@@ -169,9 +169,10 @@ export function MarketNewsView({
   const picks = current?.picks ?? [];
 
   const pill = (active: boolean): CSSProperties => ({
-    fontSize: 12, fontWeight: 800, padding: "6px 12px", border: "none", cursor: "pointer",
-    background: active ? "rgba(255,255,255,0.92)" : "transparent",
-    color: active ? "#0b1026" : "rgba(255,255,255,0.8)",
+    fontSize: 13, fontWeight: 800, padding: "7px 16px", border: "none", cursor: "pointer",
+    background: active ? "#fff" : "transparent",
+    color: active ? "#1a1030" : "#ffffff",
+    minWidth: 44,
   });
 
   return (
@@ -212,17 +213,19 @@ export function MarketNewsView({
       {/* ── SCROLL LAYER — transparent so cards frost the fixed bg ── */}
       <div style={{ position: "relative", height: "100%", overflowY: "auto", padding: "clamp(14px, 2.6vw, 24px)" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, color: "#fff", maxWidth: 980, margin: "0 auto" }}>
-          {/* Header — title left, the three controls in ONE horizontal row */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          {/* Header — title, then the three controls in a full-width
+              horizontal row of their own (so they never clip or stack). */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <Link href="/dashboard" style={{ fontSize: 13, fontWeight: 700, color: INK_MUTED, textDecoration: "none" }}>← {t("Dashboard", "डैशबोर्ड")}</Link>
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.02em", color: INK }}>📰 {t("Today's News", "आज की ख़बरें")}</h1>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap", flexShrink: 0 }}>
-              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.78)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {/* Language toggle — EN / हिंदी */}
+              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.45)", background: "rgba(24,15,44,0.9)", flexShrink: 0 }}>
                 {(["en", "hi"] as const).map((l) => (
                   <button key={l} type="button" onClick={() => setLang(l)} style={pill(lang === l)}>
-                    {l === "en" ? "EN" : "हिं"}
+                    {l === "en" ? "EN" : "हिंदी"}
                   </button>
                 ))}
               </div>
