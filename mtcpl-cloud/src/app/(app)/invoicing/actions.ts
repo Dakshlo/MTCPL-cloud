@@ -180,11 +180,11 @@ export async function upsertInvoicePartyAction(
 }
 
 /** Mig 154 (relocated) — map a TEMPLE to its billing customer (invoice
- *  party). The dispatch→invoicing bridge reads temples.invoice_party_id to
- *  decide which party an approved dispatch's auto-challan bills to. Owned
- *  here in Invoicing (moved off Settings) so the starred accountant sets
- *  the mapping. Empty invoice_party_id unmaps the temple. */
-export async function setTempleInvoicePartyAction(
+ *  client). Mig 158 — the temple IS the client, so instead of mapping to a
+ *  separate party, the accountant fills the temple's own billing fields
+ *  (GSTIN, PAN, address, email, phone). Client name = temple name (read-only).
+ *  One field per call so the grid can save on blur. */
+export async function setTempleBillingAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const { profile } = await requireAuth();
@@ -193,27 +193,66 @@ export async function setTempleInvoicePartyAction(
   }
   const templeId = txt(formData, "temple_id");
   if (!templeId) return { ok: false, error: "Missing temple." };
-  const partyId = txt(formData, "invoice_party_id") || null;
+
+  const FIELDS = ["bill_gstin", "bill_pan", "bill_address", "bill_email", "bill_phone"] as const;
+  const patch: Record<string, string | null> = {};
+  for (const f of FIELDS) {
+    if (formData.has(f)) patch[f] = txt(formData, f) || null;
+  }
+  if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to save." };
 
   const supabase = createAdminSupabaseClient();
   const { data: updated, error } = await supabase
     .from("temples")
-    .update({ invoice_party_id: partyId })
+    .update(patch)
     .eq("id", templeId)
     .select("id")
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!updated) return { ok: false, error: "Temple not found." };
 
-  void logAudit(profile.id, "temple_invoice_party_set", "temple", templeId, {
-    invoice_party_id: partyId,
-  });
-  // Settings + the dispatch bridge read the same column — refresh both.
+  void logAudit(profile.id, "temple_billing_set", "temple", templeId, { fields: Object.keys(patch) });
   revalidatePath("/invoicing");
   revalidatePath("/invoicing/temple-clients");
-  revalidatePath("/settings");
-  revalidatePath("/dispatch");
   return { ok: true };
+}
+
+/** Mig 158 — backfill invoicing challans for approved dispatches that don't
+ *  have one yet (e.g. a truck approved/on-the-road before this flow, or a
+ *  temple that previously had no client mapped). Idempotent. */
+export async function syncDispatchChallansAction() {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const supabase = createAdminSupabaseClient();
+  const { createInvoicingChallanFromDispatch } = await import("@/lib/dispatch-invoicing-bridge");
+
+  // Every dispatch that left the station (approved) — on the road OR delivered.
+  const { data: dispatches } = await supabase
+    .from("dispatches")
+    .select("id, temple, challan_number")
+    .not("approved_at", "is", null);
+  const all = (dispatches ?? []) as Array<{ id: string; temple: string; challan_number: number | null }>;
+
+  // Skip the ones that already have a challan.
+  const { data: existingRows } = await supabase
+    .from("challans")
+    .select("source_dispatch_id")
+    .not("source_dispatch_id", "is", null);
+  const already = new Set(((existingRows ?? []) as Array<{ source_dispatch_id: string | null }>).map((r) => r.source_dispatch_id));
+
+  let made = 0;
+  for (const d of all) {
+    if (already.has(d.id)) continue;
+    try {
+      const res = await createInvoicingChallanFromDispatch(supabase, d.id, d.temple, d.challan_number ?? null, profile.id);
+      if (res === "created") made += 1;
+    } catch (e) {
+      console.warn("[sync dispatch challan] non-fatal", d.id, e);
+    }
+  }
+
+  refreshInvoicingPaths();
+  redirect(`/invoicing/challans?toast=${encodeURIComponent(made > 0 ? `Created ${made} challan${made !== 1 ? "s" : ""} from dispatch` : "All dispatches already billed")}`);
 }
 
 export async function archiveInvoicePartyAction(

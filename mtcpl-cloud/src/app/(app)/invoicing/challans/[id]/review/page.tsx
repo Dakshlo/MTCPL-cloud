@@ -12,6 +12,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
 import { ReviewForm, type PriceItem } from "./review-form";
 
@@ -30,7 +31,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -57,13 +58,21 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     cgst_percent: number | null;
     sgst_percent: number | null;
     priced_at: string | null;
+    temple: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
       | null;
   };
   if (c.cancelled_at) redirect(`/invoicing/challans/${id}`);
+  // Mig 158 — client = temple. Resolve billing from the temple; fall back to a
+  // legacy invoice party for any pre-158 challan.
   const party = c.invoice_parties ? (Array.isArray(c.invoice_parties) ? c.invoice_parties[0] : c.invoice_parties) : null;
+  const billing = c.temple
+    ? await fetchTempleBilling(admin, c.temple)
+    : party
+    ? { name: party.name, gstin: party.gstin, pan: null, address: party.address, email: null, phone: party.phone }
+    : null;
 
   const priceItems: PriceItem[] = ((items ?? []) as Array<Record<string, unknown>>).map((it) => {
     const measureQty =
@@ -105,14 +114,15 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
           <h1 style={{ margin: 0, fontSize: 22 }}>🧾 Review &amp; price</h1>
           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#0f172a", fontSize: 15 }}>{c.challan_number}</span>
-          <span style={{ fontSize: 14, color: "var(--muted)" }}>· {party?.name ?? "—"} · {c.challan_date}</span>
+          <span style={{ fontSize: 14, color: "var(--muted)" }}>· 🛕 {billing?.name ?? c.temple ?? "—"} · {c.challan_date}</span>
           {c.priced_at && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.1)", borderRadius: 999, padding: "2px 10px" }}>PRICED</span>}
         </div>
-        {party && (party.gstin || party.address || party.phone) && (
+        {billing && (billing.gstin || billing.pan || billing.address || billing.phone) && (
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            {party.gstin ? <>GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{party.gstin}</strong> · </> : null}
-            {party.address ? <>{party.address} · </> : null}
-            {party.phone ? <>☎ {party.phone}</> : null}
+            {billing.gstin ? <>GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.gstin}</strong> · </> : null}
+            {billing.pan ? <>PAN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.pan}</strong> · </> : null}
+            {billing.address ? <>{billing.address} · </> : null}
+            {billing.phone ? <>☎ {billing.phone}</> : null}
           </div>
         )}
       </div>

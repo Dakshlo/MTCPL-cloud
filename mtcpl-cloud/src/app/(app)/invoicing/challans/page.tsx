@@ -21,12 +21,13 @@ import {
   VendorIdentity,
 } from "../../accounts/_ui/components";
 import { ChallanStatusPill } from "../_ui/challan-status-pill";
+import { syncDispatchChallansAction } from "../actions";
 
 type SearchParams = Promise<{
-  party?: string;
   status?: "open" | "converted" | "cancelled" | "all";
   from?: string;
   to?: string;
+  toast?: string;
 }>;
 
 export default async function ChallansListPage({
@@ -44,12 +45,11 @@ export default async function ChallansListPage({
   let q = supabase
     .from("challans")
     .select(
-      "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, converted_invoice_id, invoice_parties(name)",
+      "id, challan_number, challan_date, invoice_party_id, temple, notes, cancelled_at, converted_invoice_id, priced_at, invoice_parties(name)",
     )
     .order("challan_date", { ascending: false })
     .limit(500);
 
-  if (sp.party) q = q.eq("invoice_party_id", sp.party);
   if (sp.from) q = q.gte("challan_date", sp.from);
   if (sp.to) q = q.lte("challan_date", sp.to);
 
@@ -69,29 +69,29 @@ export default async function ChallansListPage({
     id: string;
     challan_number: string;
     challan_date: string;
-    invoice_party_id: string;
+    invoice_party_id: string | null;
+    temple: string | null;
     notes: string | null;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
+    priced_at: string | null;
     invoice_parties: { name: string } | { name: string }[] | null;
   }>;
-
-  // Also fetch party list for the filter dropdown.
-  const { data: partiesRaw } = await supabase
-    .from("invoice_parties")
-    .select("id, name")
-    .order("name");
-  const parties = (partiesRaw ?? []) as Array<{ id: string; name: string }>;
 
   return (
     <section className="page-card">
       <AccountsHero
         title="Challans"
-        description="Delivery notes — items + qty, no money. Convert to invoice when ready."
+        description="One per dispatch (client = temple). Review & price each to print a tax invoice."
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/invoicing/challans/new" style={BUTTON_STYLES.primary}>
-              📋 + New challan
+            {/* Mig 158 — pull in any approved/on-road dispatch that doesn't yet
+                have a challan (e.g. a truck verified before this flow). */}
+            <form action={syncDispatchChallansAction}>
+              <button type="submit" style={BUTTON_STYLES.primary}>🔄 Sync from dispatch</button>
+            </form>
+            <Link href="/invoicing/temple-clients" style={BUTTON_STYLES.secondary}>
+              🛕 Client billing
             </Link>
             <Link href="/invoicing" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "none", alignSelf: "center" }}>
               ← Dashboard
@@ -100,6 +100,12 @@ export default async function ChallansListPage({
         }
       />
 
+      {sp.toast && (
+        <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
+          {sp.toast}
+        </div>
+      )}
+
       {/* Filter form — GET-based, same pattern as accounts/page.tsx */}
       <form
         method="get"
@@ -107,22 +113,12 @@ export default async function ChallansListPage({
         style={{
           marginTop: 16,
           display: "grid",
-          gridTemplateColumns: "minmax(180px, 1.4fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto auto",
+          gridTemplateColumns: "minmax(140px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto auto",
           alignItems: "end",
           columnGap: 10,
           marginBottom: 14,
         }}
       >
-        <FilterField label="Party">
-          <select name="party" defaultValue={sp.party ?? ""} style={INPUT_STYLE}>
-            <option value="">All parties</option>
-            {parties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </FilterField>
         <FilterField label="Status">
           <select name="status" defaultValue={status} style={INPUT_STYLE}>
             <option value="all">All</option>
@@ -165,18 +161,19 @@ export default async function ChallansListPage({
               <tr>
                 <th style={TABLE_STYLES.th}>Challan #</th>
                 <th style={TABLE_STYLES.th}>Date</th>
-                <th style={TABLE_STYLES.th}>Party</th>
+                <th style={TABLE_STYLES.th}>Client (temple)</th>
                 <th style={TABLE_STYLES.th}>Status</th>
                 <th style={TABLE_STYLES.th}>Notes</th>
               </tr>
             </thead>
             <tbody>
               {challans.map((c, idx) => {
-                const partyName = c.invoice_parties
+                const legacyParty = c.invoice_parties
                   ? Array.isArray(c.invoice_parties)
-                    ? c.invoice_parties[0]?.name ?? "—"
+                    ? c.invoice_parties[0]?.name ?? null
                     : c.invoice_parties.name
-                  : "—";
+                  : null;
+                const clientName = c.temple ?? legacyParty ?? "—";
                 const s: "open" | "converted" | "cancelled" = c.cancelled_at
                   ? "cancelled"
                   : c.converted_invoice_id
@@ -191,7 +188,7 @@ export default async function ChallansListPage({
                     </td>
                     <td style={TABLE_STYLES.td}>{c.challan_date}</td>
                     <td style={TABLE_STYLES.td}>
-                      <VendorIdentity name={partyName} size={28} href={`/invoicing/parties/${c.invoice_party_id}`} />
+                      <VendorIdentity name={clientName} size={28} />
                     </td>
                     <td style={TABLE_STYLES.td}>
                       <ChallanStatusPill status={s} />

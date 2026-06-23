@@ -11,6 +11,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { PrintBtn } from "./print-btn";
 
@@ -50,7 +51,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, source_dispatch_id, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -74,12 +75,19 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     cgst_percent: number | null;
     sgst_percent: number | null;
     priced_at: string | null;
+    temple: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
       | null;
   };
+  // Mig 158 — bill-to = the temple. Fall back to a legacy party for pre-158 challans.
   const party = c.invoice_parties ? (Array.isArray(c.invoice_parties) ? c.invoice_parties[0] : c.invoice_parties) : null;
+  const billing = c.temple
+    ? await fetchTempleBilling(admin, c.temple)
+    : party
+    ? { name: party.name, gstin: party.gstin, pan: null, address: party.address, email: null, phone: party.phone }
+    : null;
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -204,7 +212,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       `}</style>
 
       <div className="screen-bar">
-        <span className="screen-bar-title">Tax Invoice — {c.challan_number} · {party?.name ?? "—"} · A4 landscape</span>
+        <span className="screen-bar-title">Tax Invoice — {c.challan_number} · {billing?.name ?? c.temple ?? "—"} · A4 landscape</span>
         <PrintBtn />
       </div>
 
@@ -227,10 +235,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         </div>
 
         <div className="info">
-          <div><div className="k">Bill to</div><div className="v big">{dash(party?.name)}</div></div>
-          <div><div className="k">GSTIN</div><div className="v mono">{dash(party?.gstin)}</div></div>
-          <div><div className="k">Phone</div><div className="v mono">{dash(party?.phone)}</div></div>
-          <div><div className="k">Address</div><div className="v">{dash(party?.address)}</div></div>
+          <div><div className="k">Bill to</div><div className="v big">🛕 {dash(billing?.name ?? c.temple)}</div></div>
+          <div><div className="k">GSTIN</div><div className="v mono">{dash(billing?.gstin)}</div></div>
+          <div><div className="k">PAN</div><div className="v mono">{dash(billing?.pan)}</div></div>
+          <div><div className="k">Phone</div><div className="v mono">{dash(billing?.phone)}</div></div>
+          <div style={{ gridColumn: "1 / -1" }}><div className="k">Address</div><div className="v">{dash(billing?.address)}</div></div>
         </div>
 
         {items.length === 0 ? (
@@ -258,7 +267,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         {c.notes && <p style={{ fontSize: 10, color: "#333", marginTop: 8 }}><strong>Notes:</strong> {c.notes}</p>}
 
         <div className="signoff">
-          <div className="sign">Customer Signature<div className="sub">{dash(party?.name)}</div></div>
+          <div className="sign">Customer Signature<div className="sub">{dash(billing?.name ?? c.temple)}</div></div>
           <div className="sign">Remarks<div className="sub">&nbsp;</div></div>
           <div className="sign">For MTCPL<div className="sub">Authorised signatory</div></div>
         </div>

@@ -27,7 +27,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import { groupDispatchSlabs, type DispatchSlabInput } from "@/lib/dispatch-grouping";
+import { createInvoicingChallanFromDispatch } from "@/lib/dispatch-invoicing-bridge";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -398,122 +398,10 @@ export async function undoDispatchAction(formData: FormData) {
 // Senior signs off on a provisional dispatch — truck is now cleared to leave.
 // Sets approved_at + approved_by; row moves from Provisional → Out for Delivery.
 
-// Mig 154 — on approval, mirror the dispatch into an Invoicing challan so the
-// invoicing team can convert it to an invoice. The customer party is resolved
-// by mapping the temple → invoice_party (temples.invoice_party_id, set in
-// Settings → Temple Codes). Idempotent (challans.source_dispatch_id unique);
-// silently no-ops when the temple has no party mapped.
-async function createInvoicingChallanFromDispatch(
-  admin: ReturnType<typeof createAdminSupabaseClient>,
-  dispatchId: string,
-  temple: string,
-  challanNumber: number | null,
-  actorId: string,
-) {
-  const { data: existing } = await admin
-    .from("challans")
-    .select("id")
-    .eq("source_dispatch_id", dispatchId)
-    .maybeSingle();
-  if (existing) return; // already bridged
-
-  const { data: t } = await admin
-    .from("temples")
-    .select("invoice_party_id")
-    .eq("name", temple)
-    .maybeSingle();
-  const partyId = (t as { invoice_party_id?: string | null } | null)?.invoice_party_id ?? null;
-  if (!partyId) return; // no customer mapped — invoicing creates it manually
-
-  // Per-slab logs carry the billing unit (cft/sft, chosen at Check) + weight.
-  const { data: logs } = await admin
-    .from("dispatch_logs")
-    .select("slab_requirement_id, weight_tonnes, measure_unit")
-    .eq("dispatch_id", dispatchId);
-  const logRows = (logs ?? []) as Array<{
-    slab_requirement_id: string | null;
-    weight_tonnes: number | null;
-    measure_unit: string | null;
-  }>;
-  const slabIds = [
-    ...new Set(logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[]),
-  ];
-  if (slabIds.length === 0) return;
-
-  const { data: slabs } = await admin
-    .from("slab_requirements")
-    .select(
-      "id, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft",
-    )
-    .in("id", slabIds);
-
-  const unitBy = new Map<string, "cft" | "sft">();
-  const weightBy = new Map<string, number>();
-  for (const l of logRows) {
-    if (!l.slab_requirement_id) continue;
-    unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
-    weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
-  }
-
-  // Group identical slabs into one priced row (same grid the dispatch team
-  // verified) — codes joined, qty = how many, weight summed, unit preserved.
-  const inputs: DispatchSlabInput[] = ((slabs ?? []) as Array<Record<string, unknown>>).map((s) => ({
-    id: s.id as string,
-    label: (s.label as string | null) ?? null,
-    description: (s.description as string | null) ?? null,
-    additional_description: (s.additional_description as string | null) ?? null,
-    component_section: (s.component_section as string | null) ?? null,
-    component_element: (s.component_element as string | null) ?? null,
-    length_ft: Number(s.length_ft) || 0,
-    width_ft: Number(s.width_ft) || 0,
-    thickness_ft: Number(s.thickness_ft) || 0,
-    weight_tonnes: weightBy.get(s.id as string) ?? null,
-    measure_unit: unitBy.get(s.id as string) ?? "cft",
-  }));
-  const groups = groupDispatchSlabs(inputs);
-  if (groups.length === 0) return;
-
-  const chalanLabel =
-    challanNumber != null ? `CHLN-${String(challanNumber).padStart(4, "0")}` : dispatchId.slice(0, 8);
-  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-
-  const { data: header, error } = await admin
-    .from("challans")
-    .insert({
-      challan_date: today,
-      invoice_party_id: partyId,
-      notes: `Auto from dispatch ${chalanLabel} · ${temple}`,
-      source_dispatch_id: dispatchId,
-      created_by: actorId,
-    })
-    .select("id")
-    .single();
-  if (error || !header) return;
-
-  const items = groups.map((g, i) => {
-    const dims = `${g.length_ft}×${g.width_ft}×${g.thickness_ft} in`;
-    const desc = ([g.label, g.description].filter(Boolean).join(" · ") || dims).slice(0, 500);
-    return {
-      challan_id: (header as { id: string }).id,
-      description: desc || dims,
-      quantity: g.qty,
-      unit: g.measure_unit,
-      position: i,
-      codes: g.codes.join(", "),
-      label: g.label,
-      additional_description: g.additional_description,
-      component_section: g.component_section,
-      component_element: g.component_element,
-      length_ft: g.length_ft,
-      width_ft: g.width_ft,
-      thickness_ft: g.thickness_ft,
-      weight_tonnes: g.weightTonnes,
-      measure_unit: g.measure_unit,
-      measure_qty: g.measureQty,
-    };
-  });
-  await admin.from("challan_items").insert(items);
-}
+// Mig 154/158 — on verify/approve, mirror the dispatch into an Invoicing
+// challan billed to the TEMPLE (the client). Shared bridge lives in
+// @/lib/dispatch-invoicing-bridge (also used by the invoicing "Sync from
+// dispatch" backfill). Idempotent via challans.source_dispatch_id.
 
 export async function approveDispatchAction(formData: FormData) {
   const { profile } = await requireAuth([...STATION_ROLES]);

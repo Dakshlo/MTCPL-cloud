@@ -11,6 +11,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -32,7 +33,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     supabase
       .from("challans")
       .select(
-        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, source_dispatch_id, priced_at, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
+        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, source_dispatch_id, priced_at, temple, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -57,6 +58,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     created_at: string;
     source_dispatch_id: string | null;
     priced_at: string | null;
+    temple: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
@@ -67,6 +69,13 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     ? Array.isArray(c.invoice_parties)
       ? c.invoice_parties[0]
       : c.invoice_parties
+    : null;
+  // Mig 158 — client = temple. Resolve billing from the temple; fall back to a
+  // legacy invoice party for pre-158 challans.
+  const billing = c.temple
+    ? await fetchTempleBilling(supabase, c.temple)
+    : party
+    ? { name: party.name, gstin: party.gstin, pan: null as string | null, address: party.address, email: null, phone: party.phone }
     : null;
   const linkedInvoice = c.invoices
     ? Array.isArray(c.invoices)
@@ -125,12 +134,16 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
               <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.primary}>
                 🧾 Review &amp; price →
               </Link>
-              <Link
-                href={`/invoicing/challans/${c.id}/convert`}
-                style={BUTTON_STYLES.secondary}
-              >
-                Convert to invoice →
-              </Link>
+              {/* Legacy portrait flow only for old party-based challans; the
+                  temple-based ones use Review & price → landscape invoice. */}
+              {!c.temple && (
+                <Link
+                  href={`/invoicing/challans/${c.id}/convert`}
+                  style={BUTTON_STYLES.secondary}
+                >
+                  Convert to invoice →
+                </Link>
+              )}
               <CancelChallanButton challanId={c.id} cancelAction={cancelChallanAction} />
             </>
           )}
@@ -227,20 +240,25 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
             Delivered to
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
-            {party?.name ?? "—"}
+            {billing?.name ?? c.temple ?? "—"}
           </div>
-          {party?.address && (
+          {billing?.address && (
             <div style={{ fontSize: 12, color: "#475569", marginTop: 2, whiteSpace: "pre-wrap" }}>
-              {party.address}
+              {billing.address}
             </div>
           )}
-          <div style={{ fontSize: 11, color: "#475569", marginTop: 4, display: "flex", gap: 12 }}>
-            {party?.gstin && (
+          <div style={{ fontSize: 11, color: "#475569", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {billing?.gstin && (
               <span>
-                GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{party.gstin}</strong>
+                GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.gstin}</strong>
               </span>
             )}
-            {party?.phone && <span>Phone {party.phone}</span>}
+            {billing?.pan && (
+              <span>
+                PAN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.pan}</strong>
+              </span>
+            )}
+            {billing?.phone && <span>Phone {billing.phone}</span>}
           </div>
         </div>
 

@@ -51,10 +51,11 @@ export default async function InvoicingDashboardPage() {
     recentChallansQ,
     recentInvoicesQ,
   ] = await Promise.all([
+    // Mig 158 — "clients" are temples with billing details filled.
     supabase
-      .from("invoice_parties")
+      .from("temples")
       .select("id", { count: "exact", head: true })
-      .eq("is_active", true),
+      .or("bill_gstin.not.is.null,bill_pan.not.is.null,bill_phone.not.is.null,bill_address.not.is.null,bill_email.not.is.null"),
     supabase
       .from("challans")
       .select("id", { count: "exact", head: true })
@@ -70,7 +71,7 @@ export default async function InvoicingDashboardPage() {
       .select("id, total"),
     supabase
       .from("challans")
-      .select("id, challan_number, challan_date, invoice_party_id, cancelled_at, converted_invoice_id, invoice_parties(name)")
+      .select("id, challan_number, challan_date, invoice_party_id, temple, cancelled_at, converted_invoice_id, invoice_parties(name)")
       .order("created_at", { ascending: false })
       .limit(6),
     supabase
@@ -88,7 +89,8 @@ export default async function InvoicingDashboardPage() {
     id: string;
     challan_number: string;
     challan_date: string;
-    invoice_party_id: string;
+    invoice_party_id: string | null;
+    temple: string | null;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
     invoice_parties: { name: string } | { name: string }[] | null;
@@ -120,13 +122,9 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
-            {/* Parties + Work Order Doc moved off the sidebar to here (Daksh). */}
-            <Link href="/invoicing/parties" style={BUTTON_STYLES.secondary}>
-              👤 Parties
-            </Link>
-            {/* Mig 154 (relocated) — temple→client billing map lives here now. */}
+            {/* Mig 158 — the temple IS the client; billing details edited here. */}
             <Link href="/invoicing/temple-clients" style={BUTTON_STYLES.secondary}>
-              🛕 Temple → Client
+              🛕 Client billing
             </Link>
             <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
               📝 Work Order Doc
@@ -146,16 +144,16 @@ export default async function InvoicingDashboardPage() {
         }}
       >
         <KpiCard
-          label="Parties"
+          label="Clients"
           value={
             <span style={{ fontSize: 30, fontWeight: 800, color: ACCOUNTS_TOKENS.accent }}>
               {partyCount ?? 0}
             </span>
           }
-          sublabel="Active customer parties"
+          sublabel="Temples with billing details"
           tone="accent"
-          icon="👤"
-          href="/invoicing/parties"
+          icon="🛕"
+          href="/invoicing/temple-clients"
         />
         <KpiCard
           label="Open challans"
@@ -212,11 +210,12 @@ export default async function InvoicingDashboardPage() {
             }}
           >
             {recentChallans.map((c) => {
-              const partyName = c.invoice_parties
+              const legacyParty = c.invoice_parties
                 ? Array.isArray(c.invoice_parties)
-                  ? c.invoice_parties[0]?.name ?? "—"
+                  ? c.invoice_parties[0]?.name ?? null
                   : c.invoice_parties.name
-                : "—";
+                : null;
+              const partyName = c.temple ?? legacyParty ?? "—";
               const status: "open" | "converted" | "cancelled" = c.cancelled_at
                 ? "cancelled"
                 : c.converted_invoice_id
