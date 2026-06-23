@@ -37,8 +37,11 @@ function fail(path: string, message: string): never {
 // Roles allowed to operate the station — matches the /dispatch page guard
 // (carving_head runs the station day-to-day; previously the actions were
 // developer/owner-only and silently bounced them).
-// Senior dispatch roles — they APPROVE / cancel / edit / undo a dispatch.
+// Senior dispatch roles — they APPROVE / cancel / edit a dispatch.
 const STATION_ROLES = ["developer", "owner", "carving_head", "senior_incharge"] as const;
+// Daksh (Jun 2026) — UNDO on the road (recall an approved truck) is tighter:
+// owner / developer / senior_incharge ONLY (not carving_head, not dispatch).
+const UNDO_ROLES = ["developer", "owner", "senior_incharge"] as const;
 // Floor roles — the dispatch incharge can CREATE a dispatch and MARK DELIVERED,
 // but not approve it (that's a senior's call). Includes the dedicated
 // "dispatch" (dispatch incharge) role on top of the senior set.
@@ -328,7 +331,7 @@ export async function markDeliveredAction(formData: FormData) {
 // ─── undoDispatchAction ──────────────────────────────────────────────────
 
 export async function undoDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth([...STATION_ROLES]);
+  const { profile } = await requireAuth([...UNDO_ROLES]);
   const admin = createAdminSupabaseClient();
 
   const dispatchId = String(formData.get("dispatch_id") || "").trim();

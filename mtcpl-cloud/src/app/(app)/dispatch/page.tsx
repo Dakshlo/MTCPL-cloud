@@ -48,6 +48,12 @@ export default async function DispatchPage({
     profile.role === "owner" ||
     profile.role === "carving_head" ||
     profile.role === "senior_incharge";
+  // Undo (recall an approved truck on the road) is tighter than approve —
+  // owner / developer / senior_incharge only (Daksh). Not carving_head/dispatch.
+  const canUndo =
+    profile.role === "developer" ||
+    profile.role === "owner" ||
+    profile.role === "senior_incharge";
   const { tab: tabParam, dispatch_toast: toastParam, dispatch_error: errorParam } = await searchParams;
   const initialTab: Tab =
     tabParam === "provisional" || tabParam === "out_for_delivery" || tabParam === "delivered"
@@ -408,6 +414,7 @@ export default async function DispatchPage({
       truckHistory={truckHistory}
       initialTab={initialTab}
       canApprove={canApprove}
+      canUndo={canUndo}
       toast={toastParam ?? null}
       error={errorParam ?? null}
     />

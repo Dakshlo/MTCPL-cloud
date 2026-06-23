@@ -332,6 +332,7 @@ export function DispatchClient({
   truckHistory,
   initialTab,
   canApprove,
+  canUndo,
   toast,
   error,
 }: {
@@ -351,6 +352,9 @@ export function DispatchClient({
    *  cancel and edit provisional dispatches. The dispatch incharge gets
    *  false → the Waiting Approval tab is view-only for them. */
   canApprove: boolean;
+  /** Undo (recall an approved truck) — owner / developer / senior_incharge
+   *  only. carving_head + dispatch incharge get false → no Undo button. */
+  canUndo: boolean;
   toast: string | null;
   error: string | null;
 }) {
@@ -487,7 +491,7 @@ export function DispatchClient({
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
       )}
-      {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} />}
+      {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} canUndo={canUndo} />}
       {tab === "delivered" && <DeliveredTab rows={delivered} legacy={legacyDispatches} />}
 
       {/* Mig 130 follow-on — Dispatch Incharge (MTCPL plant side) editor.
@@ -1310,7 +1314,7 @@ function TruckHistoryPeek({ trips, onClose }: { trips: TruckTrip[]; onClose: () 
 
 // ─── Out for delivery tab ────────────────────────────────────────────────
 
-function OutForDeliveryTab({ rows }: { rows: OutForDeliveryRow[] }) {
+function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUndo: boolean }) {
   const [deliverRow, setDeliverRow] = useState<OutForDeliveryRow | null>(null);
 
   if (rows.length === 0) {
@@ -1330,7 +1334,7 @@ function OutForDeliveryTab({ rows }: { rows: OutForDeliveryRow[] }) {
         <div key={g.temple} style={{ marginBottom: 8 }}>
           <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
           {g.rows.map((r) => (
-            <DispatchRow key={r.id} row={r} onMarkDelivered={() => setDeliverRow(r)} />
+            <DispatchRow key={r.id} row={r} canUndo={canUndo} onMarkDelivered={() => setDeliverRow(r)} />
           ))}
         </div>
       ))}
@@ -1348,9 +1352,11 @@ function OutForDeliveryTab({ rows }: { rows: OutForDeliveryRow[] }) {
 
 function DispatchRow({
   row,
+  canUndo,
   onMarkDelivered,
 }: {
   row: OutForDeliveryRow;
+  canUndo: boolean;
   onMarkDelivered: () => void;
 }) {
   // Reliable in-app confirm for Undo (native confirm() can be suppressed
@@ -1440,7 +1446,9 @@ function DispatchRow({
         >
           📸 Reached — mark delivered
         </button>
-        {confirmUndo ? (
+        {/* Undo (recall an approved truck) — owner / developer /
+            senior_incharge only. Hidden for carving_head + dispatch incharge. */}
+        {canUndo && (confirmUndo ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 8, padding: "5px 8px" }}>
             <span style={{ fontSize: 11.5, fontWeight: 700, color: "#b91c1c" }}>Undo &amp; return slabs?</span>
             <form action={undoDispatchAction} style={{ display: "inline" }}>
@@ -1463,7 +1471,7 @@ function DispatchRow({
           >
             Undo
           </button>
-        )}
+        ))}
       </div>
     </div>
   );

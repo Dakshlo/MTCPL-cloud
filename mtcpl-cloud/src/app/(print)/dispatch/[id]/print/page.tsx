@@ -144,7 +144,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           max-width: 900px;
           margin: 0 auto;
           background: #fff;
-          padding: 28px 32px 36px;
+          padding: 20px 28px 22px;
         }
         .screen-bar {
           background: #1a1a1a;
@@ -203,7 +203,7 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           justify-content: space-between;
           align-items: flex-end;
           gap: 16px;
-          margin: 16px 0 18px;
+          margin: 12px 0 10px;
         }
         .doc-title-pill {
           display: inline-block;
@@ -226,22 +226,22 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
         .doc-ref-date { font-size: 11px; color: #888; margin-top: 4px; line-height: 1.5; }
 
         .section-title {
-          font-size: 11px; font-weight: 700; color: #666;
+          font-size: 10.5px; font-weight: 700; color: #666;
           text-transform: uppercase; letter-spacing: 0.1em;
-          margin: 18px 0 8px; padding-bottom: 5px;
+          margin: 11px 0 5px; padding-bottom: 3px;
           border-bottom: 1px solid #ddd;
         }
 
         .meta-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-          gap: 12px 24px;
+          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          gap: 5px 20px;
         }
         .meta-label {
-          font-size: 9px; font-weight: 700; color: #999;
-          text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px;
+          font-size: 8.5px; font-weight: 700; color: #999;
+          text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1px;
         }
-        .meta-val { font-size: 14px; font-weight: 600; color: #1a1a1a; }
+        .meta-val { font-size: 12.5px; font-weight: 600; color: #1a1a1a; }
         .meta-val.mono { font-family: ui-monospace, monospace; }
 
         table.slab-table {
@@ -280,11 +280,11 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
           display: grid;
           grid-template-columns: 1fr 1fr 1fr;
           gap: 20px;
-          margin-top: 46px;
+          margin-top: 26px;
         }
         .signoff-field {
-          display: flex; flex-direction: column; gap: 38px;
-          padding-top: 10px;
+          display: flex; flex-direction: column; gap: 26px;
+          padding-top: 8px;
           border-top: 1.5px solid #888;
         }
         .signoff-label { font-size: 10px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -362,34 +362,31 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
         <div className="section-title">Bill To Party</div>
         <div
           style={{
-            border: "1.5px solid #7c4a1e", borderRadius: 8, padding: "10px 14px",
+            border: "1.5px solid #7c4a1e", borderRadius: 8, padding: "8px 12px",
             display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
             background: "#fdfaf4", marginBottom: 4,
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "#1a1a1a" }}>🏛 {dispatch.temple}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a1a" }}>🏛 {dispatch.temple}</div>
             {site.site_location && (
-              <div style={{ fontSize: 12.5, color: "#444", marginTop: 3, fontWeight: 600 }}>
+              <div style={{ fontSize: 12, color: "#444", marginTop: 2, fontWeight: 600 }}>
                 📍 {site.site_location}
               </div>
             )}
-            <div style={{ fontSize: 10.5, color: "#888", marginTop: 4 }}>
-              Site engineer / receiver to sign below upon receipt.
-            </div>
           </div>
           {loadNumber != null && (
             <div
               style={{
                 alignSelf: "center", textAlign: "center", border: "2px solid #1a1a1a", borderRadius: 8,
-                padding: "8px 18px", minWidth: 120,
+                padding: "5px 16px", minWidth: 110,
               }}
             >
-              <div style={{ fontSize: 9.5, fontWeight: 800, color: "#666", letterSpacing: "0.1em" }}>LOAD NO.</div>
-              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "ui-monospace, monospace", lineHeight: 1.1 }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "#666", letterSpacing: "0.1em" }}>LOAD NO.</div>
+              <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "ui-monospace, monospace", lineHeight: 1.1 }}>
                 {loadNumber}
               </div>
-              <div style={{ fontSize: 8.5, color: "#999", marginTop: 1 }}>temple-wise</div>
+              <div style={{ fontSize: 8, color: "#999", marginTop: 1 }}>temple-wise</div>
             </div>
           )}
         </div>
@@ -572,17 +569,6 @@ export default async function DispatchChallanPrintPage({ params }: { params: Par
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Letterhead footer */}
-        <div className="doc-footer" style={{ flexDirection: "column", gap: 2, textAlign: "center", alignItems: "center" }}>
-          <span style={{ fontWeight: 700, color: "#7c4a1e" }}>
-            Mateshwari Temple Construction Pvt Ltd · NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan
-          </span>
-          <span>☎ +91 94141 52740 / +91 94143 74979 · 🌐 mtcpl.org · mateshwaritemples.com</span>
-          <span>
-            Delivery Challan {shortId} · {slabs.length} slab{slabs.length !== 1 ? "s" : ""} · {totalCft.toFixed(2)} CFT · Computer-generated document
-          </span>
         </div>
       </div>
     </>
