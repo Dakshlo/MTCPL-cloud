@@ -168,7 +168,7 @@ export async function deleteStoneTypeAction(formData: FormData) {
 // in this file includes it; temple actions were the odd one out.
 
 export async function addTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const name = text(formData, "name");
@@ -203,7 +203,7 @@ export async function addTempleAction(formData: FormData) {
 // runner picks one when claiming. `name` IS the plate.
 
 export async function addTransferTruckAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(["owner", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const name = text(formData, "name").trim().toUpperCase();
@@ -230,7 +230,7 @@ export async function addTransferTruckAction(formData: FormData) {
 }
 
 export async function setTransferTruckActiveAction(formData: FormData) {
-  await requireAuth(["owner", "developer"]);
+  await requireAuth(["owner", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -246,7 +246,7 @@ export async function setTransferTruckActiveAction(formData: FormData) {
 }
 
 export async function updateTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -291,7 +291,7 @@ export async function updateTempleAction(formData: FormData) {
 // updateDispatchInchargeAction.)
 
 export async function deleteTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");

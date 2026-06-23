@@ -58,7 +58,10 @@ import { disableDevMaintenanceBypassAction } from "@/app/(app)/settings/system-s
 // dropping senior_incharge into this list surfaces ONLY the
 // ungated sections — Stone Types + Temple Codes — which is exactly
 // what Rajesh needs.
-const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge"];
+// Daksh (Jun 2026) — carving_head added. They get a trimmed Settings page
+// (Transfer trucks + Temple Codes only); Stone Types and every sensitive
+// section stay hidden from them (see settings/page.tsx).
+const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge", "carving_head"];
 // Mig 058 follow-on (Daksh, second pass): the generic notification
 // bell was too cluttered for the accountant context. Reverted to
 // developer-only — the bell stays an internal-debugging surface.

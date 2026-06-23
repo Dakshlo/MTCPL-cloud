@@ -143,7 +143,7 @@ function fmtAuditDate(iso: string) {
 }
 
 export default async function SettingsPage() {
-  const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  const { profile: currentUser } = await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head"]);
   const admin = createAdminSupabaseClient();
 
   // Daily WhatsApp report recipients (owner/developer manage these below).
@@ -394,7 +394,10 @@ export default async function SettingsPage() {
 
   // Mig 144 — transfer fleet (owner/developer manage). Safe if the
   // table doesn't exist yet (returns null → empty list).
-  const canManageTrucks = currentUser.role === "developer" || currentUser.role === "owner";
+  const canManageTrucks = currentUser.role === "developer" || currentUser.role === "owner" || currentUser.role === "carving_head";
+  // Daksh (Jun 2026) — carving_head gets a trimmed Settings page: ONLY Transfer
+  // trucks + Temple Codes. Stone Types (otherwise ungated) is hidden from them.
+  const isCarvingHead = currentUser.role === "carving_head";
   let truckList: Array<{ id: string; name: string; is_active: boolean; driver_name?: string | null }> = [];
   if (canManageTrucks) {
     // select("*") so this stays safe before migration 147 adds driver_name.
@@ -903,6 +906,7 @@ export default async function SettingsPage() {
           needs to add new stone types as new yards come online.
           The destructive sub-actions (recategorise, delete) have
           their own data-presence guards inside the server actions. */}
+      {!isCarvingHead && (
       <PeekSection
         icon="🪨"
         title="Stone Types"
@@ -1069,6 +1073,7 @@ export default async function SettingsPage() {
           )}
         </div>
       </PeekSection>
+      )}
 
       {/* Temple Code Configuration — visible to everyone who can hit
           /settings (developer / owner / team_head / senior_incharge).
