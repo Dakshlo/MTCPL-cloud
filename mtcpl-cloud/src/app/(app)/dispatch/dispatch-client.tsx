@@ -120,6 +120,9 @@ export type ReadySlab = {
    *  carving storage (cut-done, direct-dispatch) or dispatch storage. Drives a
    *  distinct card marking so storage slabs are obvious while selecting. */
   storageSource?: "carving" | "dispatch";
+  /** Mig 160 — "main" (Main Dispatch / direct / outsource) or a vendor shed id.
+   *  Drives the Make Dispatch station filter. */
+  station?: string;
 };
 
 export type ProvisionalRow = {
@@ -331,6 +334,7 @@ function SlabCard({
 
 export function DispatchClient({
   readySlabs,
+  vendorSheds,
   siteInfoByTemple,
   handlingMan,
   incharges,
@@ -348,6 +352,8 @@ export function DispatchClient({
   error,
 }: {
   readySlabs: ReadySlab[];
+  /** Mig 160 — vendor sheds (CNC) for the Make Dispatch station selector. */
+  vendorSheds: { id: string; name: string }[];
   /** Mig 130 — temple name → site info, shown on the dispatch form. */
   siteInfoByTemple: Record<string, SiteInfo>;
   /** Mig 130 — fixed MTCPL site handling man (legacy global fallback). */
@@ -513,7 +519,7 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && (
-        <ReadyTab slabs={readySlabs} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} />
+        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} />
       )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
@@ -536,9 +542,10 @@ export function DispatchClient({
 type TempleGroup = { key: string; temple: string; isMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
-  slabs, truckHistory, siteInfoByTemple, handlingMan,
+  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan,
 }: {
   slabs: ReadySlab[];
+  vendorSheds: { id: string; name: string }[];
   truckHistory: TruckTrip[];
   siteInfoByTemple: Record<string, SiteInfo>;
   handlingMan: { name?: string; phone?: string } | null;
@@ -549,16 +556,30 @@ function ReadyTab({
   // Mig 132 — slab whose cancel-request modal is open (long-press on a
   // card). Everyone with dispatch access can request (dev/owner/carving_head).
   const [cancelTarget, setCancelTarget] = useState<ReadySlab | null>(null);
+  // Mig 160 — which dispatch station to show: "main" (default), a vendor shed
+  // id, or everything when showAll is on. Slabs without a station = "main".
+  const [stationFilter, setStationFilter] = useState<string>("main");
+  const [showAll, setShowAll] = useState(false);
+
+  const stationCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of slabs) { const k = s.station ?? "main"; m.set(k, (m.get(k) ?? 0) + 1); }
+    return m;
+  }, [slabs]);
+  const stationSlabs = useMemo(
+    () => (showAll ? slabs : slabs.filter((s) => (s.station ?? "main") === stationFilter)),
+    [slabs, showAll, stationFilter],
+  );
 
   const groups: TempleGroup[] = useMemo(() => {
     const map = new Map<string, TempleGroup>();
-    for (const s of slabs) {
+    for (const s of stationSlabs) {
       const key = `${s.temple}::${s.isMarble ? "marble" : "sandstone"}`;
       if (!map.has(key)) map.set(key, { key, temple: s.temple, isMarble: s.isMarble, slabs: [] });
       map.get(key)!.slabs.push(s);
     }
     return [...map.values()].sort((a, b) => a.temple.localeCompare(b.temple) || (a.isMarble ? 1 : -1));
-  }, [slabs]);
+  }, [stationSlabs]);
 
   const q = query.trim();
   const visibleGroups = useMemo(() => {
@@ -587,6 +608,34 @@ function ReadyTab({
 
   return (
     <>
+      {/* Mig 160 — station selector: Main Dispatch (+ outsource/direct) vs each
+          CNC vendor shed; the "All dispatch" toggle merges everything. Only
+          shown once there's at least one vendor shed. */}
+      {vendorSheds.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Station:</span>
+          {[{ id: "main", label: "🏭 Main Dispatch" }, ...vendorSheds.map((s) => ({ id: s.id, label: `🏬 ${s.name}` }))].map((st) => {
+            const active = !showAll && stationFilter === st.id;
+            const count = stationCounts.get(st.id) ?? 0;
+            return (
+              <button
+                key={st.id}
+                type="button"
+                disabled={showAll}
+                onClick={() => { setShowAll(false); setStationFilter(st.id); }}
+                style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 800, borderRadius: 9, border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`, background: active ? "var(--gold-dark)" : "var(--bg)", color: active ? "#fff" : "var(--text)", cursor: showAll ? "default" : "pointer", whiteSpace: "nowrap", opacity: showAll ? 0.55 : 1 }}
+              >
+                {st.label} <span style={{ opacity: 0.8 }}>· {count}</span>
+              </button>
+            );
+          })}
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", marginLeft: 4 }}>
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+            🔓 All dispatch (incl. sheds)
+          </label>
+        </div>
+      )}
+
       {/* Search bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: "1 1 300px" }}>
@@ -617,7 +666,7 @@ function ReadyTab({
 
       {visibleGroups.length === 0 ? (
         <div className="muted" style={{ padding: "30px 16px", textAlign: "center", fontSize: 14, background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12 }}>
-          No slab matches “{q}”.
+          {q ? `No slab matches “${q}”.` : stationSlabs.length === 0 ? "No slabs at this station yet." : "Nothing to show."}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

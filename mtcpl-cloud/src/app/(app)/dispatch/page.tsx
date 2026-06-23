@@ -240,25 +240,46 @@ export default async function DispatchPage({
   // they simply never appear in this map. Kept as a SEPARATE query from
   // the timer above so a pre-migration schema only loses the gate
   // (everything stays clickable) rather than breaking the timer too.
-  const dispatchGateBySlab = new Map<string, { receivedAtDispatch: string | null }>();
+  const dispatchGateBySlab = new Map<string, { receivedAtDispatch: string | null; stationId: string | null }>();
   if (readyRows.length > 0) {
     const { data: gateRows } = await admin
       .from("carving_items")
-      .select("slab_requirement_id, ready_to_dispatch_at, received_at_dispatch_at")
+      .select("slab_requirement_id, ready_to_dispatch_at, received_at_dispatch_at, dispatch_station_id")
       .in("slab_requirement_id", readyRows.map((s) => s.id));
     for (const r of (gateRows ?? []) as Array<{
       slab_requirement_id: string;
       ready_to_dispatch_at: string | null;
       received_at_dispatch_at: string | null;
+      dispatch_station_id: string | null;
     }>) {
       // Prefer the approved/ready row for the gate; otherwise take any.
       const prev = dispatchGateBySlab.get(r.slab_requirement_id);
       if (!prev || r.ready_to_dispatch_at) {
         dispatchGateBySlab.set(r.slab_requirement_id, {
           receivedAtDispatch: r.received_at_dispatch_at,
+          stationId: r.dispatch_station_id ?? null,
         });
       }
     }
+  }
+
+  // Mig 160 — dispatch stations: the Main (default) + per-CNC-vendor sheds.
+  // Each ready slab's "station" = its carving_items.dispatch_station_id, mapped
+  // to "main" (default/null/direct/outsource) or a shed id. The Make Dispatch
+  // board filters by this.
+  const { data: stationRows } = await admin
+    .from("dispatch_stations")
+    .select("id, name, is_default, vendor_id")
+    .eq("is_active", true)
+    .order("name");
+  const stations = (stationRows ?? []) as Array<{ id: string; name: string; is_default: boolean; vendor_id: string | null }>;
+  const mainStationId = stations.find((s) => s.is_default)?.id ?? null;
+  const shedIds = new Set(stations.filter((s) => s.vendor_id).map((s) => s.id));
+  const vendorSheds = stations.filter((s) => s.vendor_id).map((s) => ({ id: s.id, name: s.name }));
+  function stationOf(slabId: string): string {
+    const sid = dispatchGateBySlab.get(slabId)?.stationId ?? null;
+    if (sid && shedIds.has(sid) && sid !== mainStationId) return sid;
+    return "main";
   }
 
   function shapeReadySlab(s: {
@@ -291,6 +312,8 @@ export default async function DispatchPage({
       // receivedAtDispatch is stamped (brought in / self-transferred).
       hasCarving: dispatchGateBySlab.has(s.id),
       receivedAtDispatch: dispatchGateBySlab.get(s.id)?.receivedAtDispatch ?? null,
+      // Mig 160 — "main" or a vendor shed id; drives the Make Dispatch filter.
+      station: stationOf(s.id),
       component_section: s.component_section ?? null,
       component_element: s.component_element ?? null,
       additional_description: s.additional_description ?? null,
@@ -419,6 +442,7 @@ export default async function DispatchPage({
   return (
     <DispatchClient
       readySlabs={readySlabs}
+      vendorSheds={vendorSheds}
       siteInfoByTemple={siteInfoByTemple}
       handlingMan={handlingMan}
       incharges={incharges}
