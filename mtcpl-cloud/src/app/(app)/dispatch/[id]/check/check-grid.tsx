@@ -58,8 +58,16 @@ export function CheckGrid({
     for (const g of groups) m[g.key] = g.measure_unit;
     return m;
   });
+  // Editable per-ROW weight (the group total, tonnes). Saved on Verify, split
+  // evenly across the row's slabs.
+  const [weightByKey, setWeightByKey] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {};
+    for (const g of groups) m[g.key] = g.weightTonnes > 0 ? String(g.weightTonnes) : "";
+    return m;
+  });
   const unitOf = (g: DispatchGroupRow): "cft" | "sft" => unitByKey[g.key] ?? g.measure_unit;
   const measureOf = (g: DispatchGroupRow, u: "cft" | "sft") => (u === "sft" ? g.sftEach : g.cftEach) * g.qty;
+  const weightOf = (g: DispatchGroupRow) => Number(weightByKey[g.key]) || 0;
 
   const cftGroups = groups.filter((g) => unitOf(g) === "cft");
   const sftGroups = groups.filter((g) => unitOf(g) === "sft");
@@ -74,8 +82,19 @@ export function CheckGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitByKey, groups]);
 
+  // Per-slab weight = the row total split evenly across its slabs.
+  const weightsJson = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const g of groups) {
+      const per = g.qty > 0 ? (Number(weightByKey[g.key]) || 0) / g.qty : 0;
+      for (const sid of g.slabIds) map[sid] = per;
+    }
+    return JSON.stringify(map);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weightByKey, groups]);
+
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
-  const totalWeight = groups.reduce((a, g) => a + g.weightTonnes, 0);
+  const totalWeight = groups.reduce((a, g) => a + weightOf(g), 0);
   const cftTotal = cftGroups.reduce((a, g) => a + measureOf(g, "cft"), 0);
   const sftTotal = sftGroups.reduce((a, g) => a + measureOf(g, "sft"), 0);
 
@@ -127,7 +146,19 @@ export function CheckGrid({
                     <td style={numCell}>{g.width_ft}</td>
                     <td style={numCell}>{g.thickness_ft}</td>
                     <td style={{ ...numCell, fontWeight: 800 }}>{g.qty}</td>
-                    <td style={numCell}>{g.weightTonnes > 0 ? fmt(g.weightTonnes, 3) : "-"}</td>
+                    <td style={{ ...cell, textAlign: "right" }}>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        inputMode="decimal"
+                        value={weightByKey[g.key] ?? ""}
+                        onChange={(e) => setWeightByKey((p) => ({ ...p, [g.key]: e.target.value }))}
+                        placeholder="-"
+                        title={g.qty > 1 ? "Total weight for all pieces in this row" : "Weight (tonnes)"}
+                        style={{ width: 78, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                      />
+                    </td>
                     <td style={{ ...numCell, fontWeight: 700 }}>{fmt(measureOf(g, cur))}</td>
                     <td style={{ ...cell, textAlign: "center" }}>
                       <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden" }}>
@@ -249,6 +280,7 @@ export function CheckGrid({
         <form action={verifyDispatchAction} style={{ display: "inline" }}>
           <input type="hidden" name="id" value={dispatchId} />
           <input type="hidden" name="units" value={unitsJson} />
+          <input type="hidden" name="weights" value={weightsJson} />
           <button type="submit" style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 11, cursor: "pointer" }}>
             ✅ Verify — create challan &amp; send truck
           </button>
@@ -268,7 +300,7 @@ export function CheckGrid({
         {/* Preview carries the current (unsaved) cft/sft toggles so the grouped
             challan matches what's on screen before verifying. */}
         <Link
-          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}`}
+          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}&weights=${encodeURIComponent(weightsJson)}`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 13, padding: "12px 16px", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 11, textDecoration: "none" }}

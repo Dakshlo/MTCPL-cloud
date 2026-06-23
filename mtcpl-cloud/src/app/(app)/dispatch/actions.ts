@@ -496,6 +496,14 @@ export async function verifyDispatchAction(formData: FormData) {
   } catch {
     units = {};
   }
+  // Per-slab weight (tonnes) edited on the Check grid — already split evenly
+  // across each row's slabs by the client.
+  let weights: Record<string, number | string> = {};
+  try {
+    weights = JSON.parse(String(formData.get("weights") || "{}")) as Record<string, number | string>;
+  } catch {
+    weights = {};
+  }
 
   const { data: dispatch } = await admin
     .from("dispatches")
@@ -520,6 +528,24 @@ export async function verifyDispatchAction(formData: FormData) {
   }
   if (cftIds.length > 0) {
     await admin.from("dispatch_logs").update({ measure_unit: "cft" }).eq("dispatch_id", dispatchId).in("slab_requirement_id", cftIds);
+  }
+
+  // Persist edited weights. Slabs sharing a value (a row's even split) are
+  // updated together → roughly one round-trip per row, not per slab.
+  const byWeight = new Map<number, string[]>();
+  for (const [slabId, raw] of Object.entries(weights)) {
+    if (!slabId) continue;
+    const val = Math.round((Number(raw) || 0) * 1000) / 1000;
+    const arr = byWeight.get(val) ?? [];
+    arr.push(slabId);
+    byWeight.set(val, arr);
+  }
+  for (const [val, ids] of byWeight) {
+    await admin
+      .from("dispatch_logs")
+      .update({ weight_tonnes: val > 0 ? val : null })
+      .eq("dispatch_id", dispatchId)
+      .in("slab_requirement_id", ids);
   }
 
   const { error } = await admin
