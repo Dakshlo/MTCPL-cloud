@@ -900,13 +900,16 @@ function BigSlabCard({
         WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* flexWrap + a non-shrinking code = the slab code is NEVER clipped; if a
+          long status badge (e.g. "READY TO DISPATCH") doesn't fit, it wraps to
+          its own line instead of ellipsizing the code. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         {selectMode && (
           <span style={{ width: 18, height: 18, flexShrink: 0, borderRadius: "50%", border: `2px solid ${selected ? "var(--gold-dark)" : "var(--border)"}`, background: selected ? "var(--gold-dark)" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 }}>
             {selected ? "✓" : ""}
           </span>
         )}
-        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5, whiteSpace: "nowrap", flexShrink: 0 }}>{s.id}</code>
         {s.priority && <span>⚡</span>}
         <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase", whiteSpace: "nowrap" }}>{STAGE_META[bucket].label}</span>
       </div>

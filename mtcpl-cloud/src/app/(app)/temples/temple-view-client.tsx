@@ -77,8 +77,10 @@ function SlabCard({ s, delay = 0, canDecide = false }: { s: TempleSlabCard; dela
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+      {/* flexWrap + a non-shrinking code = the slab code is NEVER clipped; a
+          long status badge wraps to its own line instead of ellipsizing it. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>{s.id}</code>
         {s.priority && <span style={{ fontSize: 12 }}>⚡</span>}
         <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, color: "#fff", background: color, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", whiteSpace: "nowrap" }}>
           {STAGE_META[bucket].label}

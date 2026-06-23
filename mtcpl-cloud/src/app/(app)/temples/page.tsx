@@ -146,6 +146,11 @@ export default async function TemplesPage() {
         .from("slab_requirements")
         .select(cols(withRemark))
         .order("temple", { ascending: true })
+        // Unique tiebreaker → a TOTAL order so paginated .range() pages are
+        // stable. Ordering by `temple` alone (non-unique) let rows at a
+        // 1000-row page boundary appear on two pages (duplicate slab cards) or
+        // none (a slab silently missing from Temple View, e.g. OM-0024).
+        .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (res.error && withRemark && /remark/i.test(res.error.message)) {
         withRemark = false;
@@ -153,6 +158,10 @@ export default async function TemplesPage() {
           .from("slab_requirements")
           .select(cols(false))
           .order("temple", { ascending: true })
+          // Same unique tiebreaker as the primary query above — the
+          // no-remark fallback must order identically or it re-introduces
+          // the page-boundary row-drop bug (OM-0024 missing).
+          .order("id", { ascending: true })
           .range(offset, offset + PAGE - 1);
       }
       if (res.error) throw new Error(res.error.message);
