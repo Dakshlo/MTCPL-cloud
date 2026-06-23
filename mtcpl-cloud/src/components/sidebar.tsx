@@ -425,13 +425,15 @@ const navEntries: NavEntry[] = [
     department: "finance",
   },
   {
-    // Daksh (Jun 2026) — the Manager (crosscheck) issues installation
-    // contracts. Direct link to the invoicing install-contract page; they
-    // have no invoicing dashboard, so this entry is their way in.
+    // Daksh (Jun 2026) — Install Contract belongs to Invoicing (reached from
+    // the Invoicing dashboard). This sidebar link is ONLY for the Manager
+    // (crosscheck): they issue installation contracts but have no Invoicing
+    // room, so it lives in their Finance room as their only way in. Everyone
+    // else uses the Invoicing dashboard button — hence not shown to them here.
     href: "/invoicing/install-contract",
     label: "Install Contract",
     icon: "📜",
-    roles: ["developer", "owner", "accountant", "accountant_star", "crosscheck"],
+    roles: ["crosscheck"],
     department: "finance",
   },
   {
