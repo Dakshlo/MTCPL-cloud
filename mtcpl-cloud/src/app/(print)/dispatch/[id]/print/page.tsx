@@ -20,11 +20,10 @@ function cft(l: number, w: number, t: number): number {
 }
 
 export default async function DispatchChallanPrintPage({ params }: { params: Params }) {
-  // Anyone with owner / team_head / developer / cutting_operator role can
-  // print the challan — they're the people who hand it to the driver.
-  // Previously this was developer-only which silently bounced Naresh
-  // (owner) back to /dashboard whenever he clicked "Print challan".
-  await requireAuth(["developer", "owner", "team_head", "senior_incharge", "cutting_operator"]);
+  // Anyone in the dispatch chain can print the challan — they hand it to the
+  // driver. Daksh (Jun 2026): added carving_head + dispatch (incharge) so they
+  // stop getting bounced to their landing page when they click Download/Print.
+  await requireAuth(["developer", "owner", "team_head", "senior_incharge", "carving_head", "cutting_operator", "dispatch"]);
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 

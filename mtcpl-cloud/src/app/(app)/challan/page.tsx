@@ -19,7 +19,9 @@ function cft(l: number, w: number, t: number): number {
 }
 
 export default async function ChallanPage() {
-  await requireAuth(["developer", "owner"]);
+  // Dispatch chain can browse the challan archive too (Daksh) — they reach it
+  // from the Dispatch page and were bouncing on the owner/dev-only gate.
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "dispatch"]);
   const admin = createAdminSupabaseClient();
 
   // ── Fetch every approved or delivered dispatch. Paginated in 1000-row
