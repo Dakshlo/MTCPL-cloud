@@ -154,7 +154,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
               <th className="r">W</th>
               <th className="r">H</th>
               <th className="r">Qty</th>
-              {hasWeights && <th className="r">Wt (T)</th>}
+              <th className="r">Wt (kg)</th>
               <th className="r">{unit.toUpperCase()}</th>
             </tr>
           </thead>
@@ -172,7 +172,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
                 <td className="r mono">{g.width_ft}</td>
                 <td className="r mono">{g.thickness_ft}</td>
                 <td className="r mono b">{g.qty}</td>
-                {hasWeights && <td className="r mono">{g.weightTonnes > 0 ? fmt(g.weightTonnes, 3) : "-"}</td>}
+                <td className="r mono">{g.weightTonnes > 0 ? Math.round(g.weightTonnes * 1000).toLocaleString("en-IN") : "-"}</td>
                 <td className="r mono b">{fmt(g.measureQty)}</td>
               </tr>
             ))}
@@ -181,7 +181,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
             <tr>
               <td colSpan={10} className="r">Total {unit.toUpperCase()}</td>
               <td className="r mono b">{rows.reduce((a, g) => a + g.qty, 0)}</td>
-              {hasWeights && <td className="r mono">{wt > 0 ? fmt(wt, 3) : "-"}</td>}
+              <td className="r mono">{wt > 0 ? Math.round(wt * 1000).toLocaleString("en-IN") : "-"}</td>
               <td className="r mono b">{fmt(total)}</td>
             </tr>
           </tfoot>

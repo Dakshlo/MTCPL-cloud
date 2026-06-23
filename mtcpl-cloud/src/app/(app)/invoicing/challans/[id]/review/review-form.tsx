@@ -145,8 +145,10 @@ export function ReviewForm({
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
 
-      <Section rows={cftItems} unit="cft" />
-      <Section rows={sftItems} unit="sft" />
+      {/* Called inline (not <Section/>) so editing a Rate input doesn't remount
+          the table and drop focus after one keystroke. */}
+      {Section({ rows: cftItems, unit: "cft" })}
+      {Section({ rows: sftItems, unit: "sft" })}
       {items.length === 0 && (
         <div className="muted" style={{ textAlign: "center", padding: "24px 10px", fontSize: 13, border: "1px dashed var(--border)", borderRadius: 12, marginBottom: 16 }}>No items on this challan.</div>
       )}

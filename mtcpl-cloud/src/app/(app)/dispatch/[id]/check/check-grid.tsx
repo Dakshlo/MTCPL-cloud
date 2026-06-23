@@ -25,7 +25,7 @@ export type AvailableSlab = {
   thickness_ft: number;
 };
 
-const COLS = ["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2", "L", "W", "H", "Qty", "Weight (T)", "", ""] as const;
+const COLS = ["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2", "L", "W", "H", "Qty", "Weight (kg)"] as const;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -58,16 +58,16 @@ export function CheckGrid({
     for (const g of groups) m[g.key] = g.measure_unit;
     return m;
   });
-  // Editable per-ROW weight (the group total, tonnes). Saved on Verify, split
-  // evenly across the row's slabs.
+  // Editable per-ROW weight, entered in KG (the group total). Saved on Verify,
+  // converted to tonnes and split evenly across the row's slabs.
   const [weightByKey, setWeightByKey] = useState<Record<string, string>>(() => {
     const m: Record<string, string> = {};
-    for (const g of groups) m[g.key] = g.weightTonnes > 0 ? String(g.weightTonnes) : "";
+    for (const g of groups) m[g.key] = g.weightTonnes > 0 ? String(Math.round(g.weightTonnes * 1000)) : "";
     return m;
   });
   const unitOf = (g: DispatchGroupRow): "cft" | "sft" => unitByKey[g.key] ?? g.measure_unit;
   const measureOf = (g: DispatchGroupRow, u: "cft" | "sft") => (u === "sft" ? g.sftEach : g.cftEach) * g.qty;
-  const weightOf = (g: DispatchGroupRow) => Number(weightByKey[g.key]) || 0;
+  const weightKgOf = (g: DispatchGroupRow) => Number(weightByKey[g.key]) || 0;
 
   const cftGroups = groups.filter((g) => unitOf(g) === "cft");
   const sftGroups = groups.filter((g) => unitOf(g) === "sft");
@@ -82,19 +82,20 @@ export function CheckGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitByKey, groups]);
 
-  // Per-slab weight = the row total split evenly across its slabs.
+  // Per-slab weight in TONNES = the row's kg total / 1000, split across slabs.
   const weightsJson = useMemo(() => {
     const map: Record<string, number> = {};
     for (const g of groups) {
-      const per = g.qty > 0 ? (Number(weightByKey[g.key]) || 0) / g.qty : 0;
-      for (const sid of g.slabIds) map[sid] = per;
+      const perTonnes = g.qty > 0 ? (Number(weightByKey[g.key]) || 0) / 1000 / g.qty : 0;
+      for (const sid of g.slabIds) map[sid] = perTonnes;
     }
     return JSON.stringify(map);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weightByKey, groups]);
 
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
-  const totalWeight = groups.reduce((a, g) => a + weightOf(g), 0);
+  const totalKg = groups.reduce((a, g) => a + weightKgOf(g), 0);
+  const totalTonnes = totalKg / 1000;
   const cftTotal = cftGroups.reduce((a, g) => a + measureOf(g, "cft"), 0);
   const sftTotal = sftGroups.reduce((a, g) => a + measureOf(g, "sft"), 0);
 
@@ -118,7 +119,7 @@ export function CheckGrid({
             <thead>
               <tr>
                 {COLS.map((c, i) => (
-                  <th key={i} style={{ ...head, textAlign: c === "L" || c === "W" || c === "H" || c === "Qty" || c === "Weight (T)" ? "right" : "left" }}>{c}</th>
+                  <th key={i} style={{ ...head, textAlign: c === "L" || c === "W" || c === "H" || c === "Qty" || c === "Weight (kg)" ? "right" : "left" }}>{c}</th>
                 ))}
                 <th style={{ ...head, textAlign: "right" }}>{unit.toUpperCase()}</th>
                 <th style={{ ...head, textAlign: "center" }}>Unit</th>
@@ -150,14 +151,17 @@ export function CheckGrid({
                       <input
                         type="number"
                         min={0}
-                        step="0.001"
+                        step="1"
                         inputMode="decimal"
                         value={weightByKey[g.key] ?? ""}
                         onChange={(e) => setWeightByKey((p) => ({ ...p, [g.key]: e.target.value }))}
-                        placeholder="-"
-                        title={g.qty > 1 ? "Total weight for all pieces in this row" : "Weight (tonnes)"}
-                        style={{ width: 78, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                        placeholder="kg"
+                        title={g.qty > 1 ? "Total weight in kg for all pieces in this row" : "Weight in kg"}
+                        style={{ width: 84, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
                       />
+                      {weightKgOf(g) > 0 && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>{fmt(weightKgOf(g) / 1000, 3)} T</div>
+                      )}
                     </td>
                     <td style={{ ...numCell, fontWeight: 700 }}>{fmt(measureOf(g, cur))}</td>
                     <td style={{ ...cell, textAlign: "center" }}>
@@ -211,15 +215,17 @@ export function CheckGrid({
 
   return (
     <div>
-      <Section rows={cftGroups} unit="cft" />
-      <Section rows={sftGroups} unit="sft" />
+      {/* Called inline (not <Section/>) so editing the weight input doesn't
+          remount the table and lose focus after one keystroke. */}
+      {Section({ rows: cftGroups, unit: "cft" })}
+      {Section({ rows: sftGroups, unit: "sft" })}
 
       {/* Totals */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, fontWeight: 700, padding: "10px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", marginBottom: 16 }}>
         <span>Σ {totalSlabs} slab{totalSlabs !== 1 ? "s" : ""}</span>
         {cftTotal > 0 && <span style={{ color: "#2563eb" }}>📦 {fmt(cftTotal)} CFT</span>}
         {sftTotal > 0 && <span style={{ color: "#D97706" }}>🟧 {fmt(sftTotal)} SFT</span>}
-        {totalWeight > 0 && <span>⚖ {fmt(totalWeight, 3)} T</span>}
+        {totalKg > 0 && <span>⚖ {fmt(totalTonnes, 3)} T <span style={{ color: "var(--muted)", fontWeight: 600 }}>({totalKg.toLocaleString("en-IN")} kg)</span></span>}
       </div>
 
       {/* Add more slabs from this temple's available (completed) pool */}
