@@ -32,7 +32,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     supabase
       .from("challans")
       .select(
-        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
+        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, source_dispatch_id, priced_at, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -55,6 +55,8 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     converted_invoice_id: string | null;
     converted_at: string | null;
     created_at: string;
+    source_dispatch_id: string | null;
+    priced_at: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
@@ -109,11 +111,23 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
           <ChallanStatusPill status={status} />
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {/* Mig 157 — landscape tax invoice (priced challan). Always offered
+              once priced; the review screen is the primary path for open
+              challans. The legacy portrait "Convert to invoice" stays as a
+              secondary option. */}
+          {c.priced_at && (
+            <Link href={`/invoicing/challan/${c.id}/print`} target="_blank" rel="noopener noreferrer" style={BUTTON_STYLES.secondary}>
+              🖨 Tax invoice →
+            </Link>
+          )}
           {status === "open" && (
             <>
+              <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.primary}>
+                🧾 Review &amp; price →
+              </Link>
               <Link
                 href={`/invoicing/challans/${c.id}/convert`}
-                style={BUTTON_STYLES.primary}
+                style={BUTTON_STYLES.secondary}
               >
                 Convert to invoice →
               </Link>

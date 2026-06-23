@@ -44,6 +44,66 @@ function refreshInvoicingPaths(opts?: { partyId?: string; challanId?: string; in
 }
 
 // ════════════════════════════════════════════════════════════════
+// Mig 157 — Price a (dispatch-sourced) challan: per-row rate + GST.
+// The priced challan IS the tax invoice (prints landscape) — no separate
+// invoices row, keeping the dispatch→invoicing grid intact end to end.
+// ════════════════════════════════════════════════════════════════
+export async function saveChallanPricingAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/challans");
+
+  let rates: Record<string, number | string> = {};
+  try {
+    rates = JSON.parse(txt(formData, "rates") || "{}") as Record<string, number | string>;
+  } catch {
+    rates = {};
+  }
+  const gstModeRaw = txt(formData, "gst_mode");
+  const gstMode = gstModeRaw === "igst" || gstModeRaw === "cgst_sgst" ? gstModeRaw : null;
+  const igst = Number(txt(formData, "igst_percent")) || 0;
+  const cgst = Number(txt(formData, "cgst_percent")) || 0;
+  const sgst = Number(txt(formData, "sgst_percent")) || 0;
+
+  // Amount = rate × billable measure (cft/sft qty) — falls back to the line
+  // quantity for legacy challans that have no measure snapshot.
+  const { data: items } = await admin
+    .from("challan_items")
+    .select("id, quantity, measure_qty")
+    .eq("challan_id", challanId);
+  for (const it of (items ?? []) as Array<{ id: string; quantity: number | null; measure_qty: number | null }>) {
+    const rate = Number(rates[it.id]) || 0;
+    const qty = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
+    const amount = Math.round(rate * qty * 100) / 100;
+    await admin.from("challan_items").update({ rate, amount }).eq("id", it.id);
+  }
+
+  await admin
+    .from("challans")
+    .update({
+      gst_mode: gstMode,
+      igst_percent: gstMode === "igst" ? igst : null,
+      cgst_percent: gstMode === "cgst_sgst" ? cgst : null,
+      sgst_percent: gstMode === "cgst_sgst" ? sgst : null,
+      priced_at: new Date().toISOString(),
+      priced_by: profile.id,
+    })
+    .eq("id", challanId);
+
+  await logAudit(profile.id, "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });
+  refreshInvoicingPaths({ challanId });
+  const goPrint = txt(formData, "go") === "print";
+  redirect(
+    goPrint
+      ? `/invoicing/challan/${challanId}/print`
+      : `/invoicing/challans/${challanId}/review?toast=${encodeURIComponent("Saved")}`,
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
 // Parties (customer master)
 // ════════════════════════════════════════════════════════════════
 
