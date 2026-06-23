@@ -407,13 +407,34 @@ export async function buildCncVariousCostReport(
   // — still count.
   // Each row joins to slab_requirements for the dimensions. Per
   // earlier embedded-join issues, do two queries + a lookup map.
-  const { data: items, error: itemsErr } = await admin
-    .from("carving_items")
-    .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides, vendor_type")
-    .gte("review_approved_at", startIso)
-    .lt("review_approved_at", endIso)
-    .not("review_approved_at", "is", null);
-  if (itemsErr) throw new Error(`carving_items query failed: ${itemsErr.message}`);
+  // Daksh (Jun 2026) — PAGINATED. This was uncapped + unordered, so a month
+  // with >1000 approved carving_items hit PostgREST's 1000-row default and
+  // truncated to an arbitrary 1000 (heap order), silently understating the
+  // monthly CFT/SFT totals + per-vendor output. Page through everything.
+  type CarvingItemRow = {
+    vendor_id: string | null;
+    vendor_name: string | null;
+    slab_requirement_id: string;
+    review_approved_at: string | null;
+    carving_sides: number | null;
+    vendor_type: string | null;
+  };
+  const ITEM_PAGE = 1000;
+  const items: CarvingItemRow[] = [];
+  for (let offset = 0; offset < 500_000; offset += ITEM_PAGE) {
+    const { data, error: itemsErr } = await admin
+      .from("carving_items")
+      .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides, vendor_type")
+      .gte("review_approved_at", startIso)
+      .lt("review_approved_at", endIso)
+      .not("review_approved_at", "is", null)
+      .order("review_approved_at", { ascending: true })
+      .range(offset, offset + ITEM_PAGE - 1);
+    if (itemsErr) throw new Error(`carving_items query failed: ${itemsErr.message}`);
+    const pageRows = (data ?? []) as CarvingItemRow[];
+    items.push(...pageRows);
+    if (pageRows.length < ITEM_PAGE) break;
+  }
 
   const slabIds = Array.from(
     new Set((items ?? []).map((r) => r.slab_requirement_id as string)),

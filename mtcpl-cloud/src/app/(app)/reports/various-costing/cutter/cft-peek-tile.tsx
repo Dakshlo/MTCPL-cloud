@@ -858,16 +858,16 @@ function bucketSlabs(
     let hint: string;
     let isToday = false;
     if (kind === "yearly") {
-      const m = row.date.getMonth();
-      const y = row.date.getFullYear();
-      label = `${MONTH_SHORT[m]} ${y}`;
+      // Label from the IST key (YYYY-MM), NOT the host-local row.date.
+      const [y, m] = row.key.split("-");
+      label = `${MONTH_SHORT[Number(m) - 1]} ${y}`;
       hint = "";
       isToday = row.key === todayMonthKey;
     } else {
-      // Daksh — numeric DD/MM/YYYY (date / month / year), no weekday.
-      const d = String(row.date.getDate()).padStart(2, "0");
-      const m = String(row.date.getMonth() + 1).padStart(2, "0");
-      const y = row.date.getFullYear();
+      // Daksh (Jun 2026) — numeric DD/MM/YYYY built from the IST key.
+      // (row.date is an IST-midnight instant; on a UTC server its getDate()
+      // returns the PRIOR day, which shifted every label −1 day.)
+      const [y, m, d] = row.key.split("-");
       label = `${d}/${m}/${y}`;
       hint = "";
       isToday = row.key === todayKey;

@@ -268,17 +268,10 @@ export async function buildCutterCostReport(
   // PostgREST caps single .select() at 1000; if there are weeks
   // with > 1000 slabs we'll need pagination. For now slabs/week
   // sits well under that ceiling.
-  const { data: slabsRaw, error: slabsErr } = await admin
-    .from("slab_requirements")
-    .select(
-      "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, updated_at, source_block_id",
-    )
-    .in("status", POST_CUT_STATUSES as unknown as string[])
-    .gte("updated_at", startIso)
-    .lt("updated_at", endIso)
-    .order("updated_at", { ascending: false });
-  if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
-
+  // Daksh (Jun 2026) — PAGINATED. A month easily exceeds PostgREST's 1000-row
+  // default; with `order(updated_at desc)` that cap kept the NEWEST 1000 rows
+  // and silently DROPPED the oldest, so the monthly view lost its older days.
+  // Page through every matching row instead.
   type SlabRow = {
     id: string;
     label: string | null;
@@ -292,10 +285,28 @@ export async function buildCutterCostReport(
     updated_at: string;
     source_block_id: string | null;
   };
+  const PAGE = 1000;
+  const slabsRaw: SlabRow[] = [];
+  for (let offset = 0; offset < 500_000; offset += PAGE) {
+    const { data, error: slabsErr } = await admin
+      .from("slab_requirements")
+      .select(
+        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, updated_at, source_block_id",
+      )
+      .in("status", POST_CUT_STATUSES as unknown as string[])
+      .gte("updated_at", startIso)
+      .lt("updated_at", endIso)
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + PAGE - 1);
+    if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
+    const pageRows = (data ?? []) as SlabRow[];
+    slabsRaw.push(...pageRows);
+    if (pageRows.length < PAGE) break;
+  }
 
   const contributingSlabs: CutterContributingSlab[] = [];
   let totalCft = 0;
-  for (const r of (slabsRaw ?? []) as SlabRow[]) {
+  for (const r of slabsRaw) {
     const l = Number(r.length_ft) || 0;
     const w = Number(r.width_ft) || 0;
     const t = Number(r.thickness_ft) || 0;

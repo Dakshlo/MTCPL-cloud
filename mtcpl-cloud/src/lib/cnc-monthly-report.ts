@@ -502,14 +502,33 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
   // cockpit stat. The carving machine (completed_on_cnc_machine_id)
   // persists through approval, so the per-machine attribution is
   // unchanged.
-  const { data: items, error: itemsErr } = await admin
-    .from("carving_items")
-    .select("id, completed_on_cnc_machine_id, review_approved_at, slab_requirement_id, carving_sides")
-    .gte("review_approved_at", startIso)
-    .lt("review_approved_at", endIso)
-    .not("completed_on_cnc_machine_id", "is", null)
-    .not("review_approved_at", "is", null);
-  if (itemsErr) throw new Error(`carving_items: ${itemsErr.message}`);
+  // Daksh (Jun 2026) — PAGINATED. Uncapped, this hit PostgREST's 1000-row
+  // default and dropped rows for a busy month, so the per-day grid blanked
+  // out older days at scale. Page through all rows before day-bucketing.
+  type CncItemRow = {
+    id: string;
+    completed_on_cnc_machine_id: string | null;
+    review_approved_at: string | null;
+    slab_requirement_id: string;
+    carving_sides: number | null;
+  };
+  const ITEM_PAGE = 1000;
+  const items: CncItemRow[] = [];
+  for (let offset = 0; offset < 500_000; offset += ITEM_PAGE) {
+    const { data, error: itemsErr } = await admin
+      .from("carving_items")
+      .select("id, completed_on_cnc_machine_id, review_approved_at, slab_requirement_id, carving_sides")
+      .gte("review_approved_at", startIso)
+      .lt("review_approved_at", endIso)
+      .not("completed_on_cnc_machine_id", "is", null)
+      .not("review_approved_at", "is", null)
+      .order("review_approved_at", { ascending: true })
+      .range(offset, offset + ITEM_PAGE - 1);
+    if (itemsErr) throw new Error(`carving_items: ${itemsErr.message}`);
+    const pageRows = (data ?? []) as CncItemRow[];
+    items.push(...pageRows);
+    if (pageRows.length < ITEM_PAGE) break;
+  }
 
   const slabIds = [
     ...new Set(((items ?? []) as { slab_requirement_id: string }[]).map((i) => i.slab_requirement_id)),
