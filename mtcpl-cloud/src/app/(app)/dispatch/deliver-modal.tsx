@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { markDeliveredAction } from "./actions";
+import { CameraCaptureModal } from "@/components/camera-capture-modal";
 
 function PhotoBox({
   name, title, hint, onPicked,
@@ -24,14 +25,14 @@ function PhotoBox({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
-  function onChange() {
-    const f = inputRef.current?.files?.[0];
+  function apply(file: File | null) {
     if (preview) URL.revokeObjectURL(preview);
-    if (f) {
-      setPreview(URL.createObjectURL(f));
+    if (file) {
+      setPreview(URL.createObjectURL(file));
       onPicked(true);
     } else {
       setPreview(null);
@@ -39,46 +40,78 @@ function PhotoBox({
     }
   }
 
+  // Daksh (Jun 2026) — tapping the box opens the IN-BROWSER camera
+  // (getUserMedia via CameraCaptureModal), same as Carving Done Approval.
+  // The native file/camera picker is blocked inside the kiosk; this isn't.
+  // The captured File is injected into the hidden input so the form submits
+  // it like an uploaded file. A small "upload from files" link is the
+  // fallback for non-kiosk devices.
+  function onCameraCapture(file: File) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      if (inputRef.current) inputRef.current.files = dt.files;
+    } catch {
+      /* very old browser without DataTransfer — preview still shows */
+    }
+    apply(file);
+    setCameraOpen(false);
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => inputRef.current?.click()}
-      style={{
-        flex: "1 1 170px",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
-        minHeight: 130, padding: 10, cursor: "pointer",
-        background: preview ? "var(--surface)" : "rgba(184,115,51,0.05)",
-        border: `2px dashed ${preview ? "#15803d" : "var(--gold-dark)"}`,
-        borderRadius: 14, color: "var(--text)", position: "relative", overflow: "hidden",
-      }}
-    >
-      {preview ? (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt={title} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
-          <span style={{ position: "relative", fontSize: 12.5, fontWeight: 800, color: "#fff", background: "rgba(21,128,61,0.9)", borderRadius: 999, padding: "4px 12px" }}>
-            ✓ {title} — tap to change
-          </span>
-        </>
-      ) : (
-        <>
-          <span style={{ fontSize: 30 }}>📷</span>
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>{title}</span>
-          <span className="muted" style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4 }}>{hint}</span>
-        </>
-      )}
-      {/* Daksh (Jun 2026) — no `capture` attribute: that forced the camera
-          only. Plain accept="image/*" lets the user EITHER take a photo OR
-          upload one from the gallery/files (the native picker offers both). */}
+    <div style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: 5 }}>
+      <button
+        type="button"
+        onClick={() => setCameraOpen(true)}
+        style={{
+          width: "100%",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
+          minHeight: 130, padding: 10, cursor: "pointer",
+          background: preview ? "var(--surface)" : "rgba(184,115,51,0.05)",
+          border: `2px dashed ${preview ? "#15803d" : "var(--gold-dark)"}`,
+          borderRadius: 14, color: "var(--text)", position: "relative", overflow: "hidden",
+        }}
+      >
+        {preview ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt={title} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
+            <span style={{ position: "relative", fontSize: 12.5, fontWeight: 800, color: "#fff", background: "rgba(21,128,61,0.9)", borderRadius: 999, padding: "4px 12px" }}>
+              ✓ {title} — tap to recapture
+            </span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 30 }}>📷</span>
+            <span style={{ fontSize: 13.5, fontWeight: 800 }}>{title}</span>
+            <span className="muted" style={{ fontSize: 11.5, textAlign: "center", lineHeight: 1.4 }}>{hint}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--gold-dark)", marginTop: 2 }}>Tap to open camera</span>
+          </>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", background: "transparent", border: "none", cursor: "pointer", alignSelf: "center" }}
+      >
+        📁 or upload from files
+      </button>
       <input
         ref={inputRef}
         type="file"
         name={name}
         accept="image/*"
-        onChange={onChange}
+        onChange={() => apply(inputRef.current?.files?.[0] ?? null)}
         style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
       />
-    </button>
+      {cameraOpen && (
+        <CameraCaptureModal
+          filenamePrefix={name}
+          onCapture={onCameraCapture}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
+    </div>
   );
 }
 
