@@ -224,6 +224,10 @@ export default async function CarvingDashboardPage({
       // Mig 097 — slabs marked "Still Pending Work" leave the approval
       // queue into their own tab; keep them out of Carving Done Approval.
       .is("pending_work_at", null)
+      // Daksh (Jun 2026) — a cancelled slab's carving job (status set to
+      // 'cancelled' on cancel-approval) keeps its completed_at, so it was
+      // lingering in Carving Done Approval. Exclude it.
+      .neq("status", "cancelled")
       .order("completed_at", { ascending: false }),
     admin
       .from("carving_items")

@@ -239,6 +239,8 @@ export async function resolveSlabCancelAction(formData: FormData) {
   revalidatePath("/tasks");
   revalidatePath("/temples");
   revalidatePath("/slabs");
+  // Re-render the (app) layout so the Temple View nav item starts blinking.
+  revalidatePath("/", "layout");
   back(`✓ ${slabId} cancelled — Temple View now asks whether to create a replacement`);
 }
 
@@ -281,6 +283,9 @@ export async function decideCancelledSlabAction(
       if ((done ?? []).length === 0) throw new Error("Already resolved by someone else. Refresh.");
       void logAudit(profile.id, "slab_cancel_no_replacement", "slab", slabId, { temple: slab.temple });
       revalidatePath("/temples");
+      // Re-render the (app) layout so the blinking Temple View nav item +
+      // its alert clear (the count lives in the layout, not the page).
+      revalidatePath("/", "layout");
       return { ok: true };
     }
 
@@ -365,6 +370,8 @@ export async function decideCancelledSlabAction(
 
     revalidatePath("/temples");
     revalidatePath("/slabs");
+    // Re-render the (app) layout so the blinking Temple View nav item clears.
+    revalidatePath("/", "layout");
     return { ok: true, newId };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
