@@ -52,6 +52,11 @@ export default async function SlabsPage() {
         .in("status", ["open", "planned"])
         .order("priority", { ascending: false })
         .order("created_at", { ascending: false })
+        // Unique tiebreaker → total order so paginated .range() pages are
+        // stable. priority + created_at are both non-unique (bulk imports
+        // share a created_at), which without this could drop/duplicate slabs
+        // at a 1000-row page boundary (same class of bug as Temple View).
+        .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (isEntryRole) q = q.eq("created_by", profile.id);
       const { data, error: pageErr } = await q;
