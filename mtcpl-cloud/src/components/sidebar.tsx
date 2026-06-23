@@ -629,10 +629,15 @@ export function Sidebar({
   themePreference,
   activeDepartment,
   canAssignCarving = false,
+  cancelledSlabAlert = false,
 }: {
   role: AppRole;
   displayName?: string;
   themePreference?: "light" | "dark" | null;
+  /** Daksh (Jun 2026) — TRUE when ≥1 cancelled slab is awaiting a
+   *  replace / no-replace decision. Blinks the Temple View nav item so
+   *  the decision can't be missed. */
+  cancelledSlabAlert?: boolean;
   /** Migration 036 — the user's current active_department from
    *  profiles. For developer + owner this controls which entries are
    *  shown (filtered to one department at a time); for every other
@@ -1114,15 +1119,18 @@ export function Sidebar({
 
           const item = entry as NavItem;
           const active = isActive(item.href);
+          // Daksh — blink Temple View while a cancelled slab needs a decision.
+          const alertBlink = item.href === "/temples" && cancelledSlabAlert;
 
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`nav-link${active ? " nav-link-active" : ""}`}
+              className={`nav-link${active ? " nav-link-active" : ""}${alertBlink ? " nav-link-alert" : ""}`}
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
+              {alertBlink && <span className="nav-alert-dot" title="A cancelled slab needs a decision">🚫</span>}
               {active && <span className="nav-active-dot" />}
             </Link>
           );

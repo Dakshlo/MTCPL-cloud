@@ -340,6 +340,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (scErr) return null;
     return count ?? 0;
   }
+  // Mig 132 — cancelled slabs still awaiting a replace / no-replace decision
+  // (status 'cancelled' + cancel_resolution NULL). Drives the BLINKING Temple
+  // View nav item + banner (Daksh). Same condition as the Temple View page's
+  // cancelAlerts strip.
+  async function fetchTempleCancelAlert(): Promise<boolean> {
+    const TV_ROLES = ["developer", "owner", "team_head", "senior_incharge", "slab_entry", "block_slab_entry", "carving_head", "tender_manager"];
+    if (!TV_ROLES.includes(profile.role)) return false;
+    const { count, error } = await supabase
+      .from("slab_requirements")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "cancelled")
+      .is("cancel_resolution", null);
+    if (error) return false;
+    return (count ?? 0) > 0;
+  }
   // Mig 090 — Bank Decline approval queue. Owner / developer only —
   // they approve an accountant's request to bank-decline a payment
   // that's already in a downloaded HDFC file (→ bill back to due).
@@ -415,6 +430,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     ownerReviewBadge,
     slabImportBadge,
     dispatchApprovalBadge,
+    templeCancelAlert,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -431,6 +447,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchOwnerReviewBadge(),
     fetchSlabImportBadge(),
     fetchDispatchApprovalBadge(),
+    fetchTempleCancelAlert(),
   ]);
 
   // Storekeeper (slab_transfer) — hide the menu by default and serve a
@@ -500,6 +517,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         themePreference={profile.theme_preference ?? null}
         activeDepartment={effectiveDepartment(profile.role, profile.active_department ?? null)}
         canAssignCarving={profile.can_assign_carving === true}
+        cancelledSlabAlert={templeCancelAlert}
       />
 
       <main className="main-shell">

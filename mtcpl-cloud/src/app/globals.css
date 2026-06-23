@@ -309,6 +309,35 @@ input, select, textarea, button {
   flex-shrink: 0;
 }
 
+/* Daksh (Jun 2026) — blink the Temple View nav item + the cancelled-slab
+   banner while a cancelled slab still needs a replace / no-replace decision. */
+@keyframes mtcpl-alert-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes mtcpl-nav-alert {
+  0%, 100% { background-color: rgba(220, 38, 38, 0.08); }
+  50% { background-color: rgba(220, 38, 38, 0.30); }
+}
+.nav-link-alert {
+  animation: mtcpl-nav-alert 1.05s ease-in-out infinite;
+  border-radius: 8px;
+}
+.nav-alert-dot {
+  margin-left: auto;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  animation: mtcpl-alert-blink 1.05s ease-in-out infinite;
+}
+.mtcpl-blink {
+  animation: mtcpl-alert-blink 1.05s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-link-alert, .nav-alert-dot, .mtcpl-blink { animation: none; }
+  .nav-link-alert { background-color: rgba(220, 38, 38, 0.18); }
+}
+
 .sidebar-footer {
   padding: 14px 18px;
   border-top: 1px solid rgba(255,255,255,0.07);

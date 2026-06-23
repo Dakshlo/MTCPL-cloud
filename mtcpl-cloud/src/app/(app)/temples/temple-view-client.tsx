@@ -408,7 +408,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
           awaiting the replace / no-replace decision; tap one to jump to it
           in the tree. */}
       {cancelAlerts.length > 0 && (
-        <div style={{ background: "rgba(127,29,29,0.07)", border: "1.5px solid rgba(127,29,29,0.45)", borderRadius: 12, padding: "11px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="mtcpl-blink" style={{ background: "rgba(127,29,29,0.07)", border: "1.5px solid rgba(127,29,29,0.45)", borderRadius: 12, padding: "11px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontSize: 13.5, fontWeight: 800, color: "#7f1d1d" }}>
             🚫 {cancelAlerts.length} cancelled slab{cancelAlerts.length === 1 ? "" : "s"} need a decision — create a replacement or close it out
           </div>
