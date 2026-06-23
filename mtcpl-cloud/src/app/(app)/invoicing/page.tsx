@@ -113,12 +113,8 @@ export default async function InvoicingDashboardPage() {
         description="Customer parties · delivery challans · invoices. The starred-accountant workflow."
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/invoicing/challans/new" style={BUTTON_STYLES.primary}>
-              📋 + New challan
-            </Link>
-            <Link href="/invoicing/invoices/new" style={BUTTON_STYLES.secondary}>
-              🧾 + New invoice
-            </Link>
+            {/* New challan / New invoice live in the sidebar menu — kept off the
+                dashboard hero to avoid duplication (Daksh). */}
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
