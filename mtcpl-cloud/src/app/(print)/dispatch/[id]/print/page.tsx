@@ -33,7 +33,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { data: dispatch, error } = await admin
     .from("dispatches")
     .select(
-      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, delivered_at, delivered_by, receiver_name, delivery_note",
+      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, approved_at, delivered_at, delivered_by, receiver_name, delivery_note",
     )
     .eq("id", id)
     .maybeSingle();
@@ -127,6 +127,9 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const shortId = challanNum != null ? `CHLN-${String(challanNum).padStart(4, "0")}` : `DISP-${String(dispatch.id).slice(0, 8).toUpperCase()}`;
   const dispatchedDate = new Date(dispatch.dispatched_at);
   const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  // A not-yet-verified dispatch (the Check-page preview) prints an APPROVAL
+  // PENDING banner so a preview is never mistaken for a valid challan.
+  const pending = !(dispatch as { approved_at?: string | null }).approved_at;
 
   const contact = (name?: string | null, phone?: string | null) => (name ? `${name}${phone ? ` · ${phone}` : ""}` : "-");
 
@@ -196,6 +199,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
 
+        .pending-banner { background: #b45309; color: #fff; text-align: center; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; }
+
         .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #7c4a1e; padding-bottom: 8px; }
         .brand-logo { height: 40px; width: auto; display: block; }
         .company-name { font-size: 13.5px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.02em; }
@@ -243,6 +248,9 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
       </div>
 
       <div className="print-wrap">
+        {pending && (
+          <div className="pending-banner">⚠ Approval pending — preview only · not valid for dispatch until verified</div>
+        )}
         <div className="head">
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
