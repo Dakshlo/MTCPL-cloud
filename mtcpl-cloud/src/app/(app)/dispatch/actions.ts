@@ -27,6 +27,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { groupDispatchSlabs, type DispatchSlabInput } from "@/lib/dispatch-grouping";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -424,36 +425,53 @@ async function createInvoicingChallanFromDispatch(
   const partyId = (t as { invoice_party_id?: string | null } | null)?.invoice_party_id ?? null;
   if (!partyId) return; // no customer mapped — invoicing creates it manually
 
+  // Per-slab logs carry the billing unit (cft/sft, chosen at Check) + weight.
   const { data: logs } = await admin
     .from("dispatch_logs")
-    .select("slab_requirement_id")
+    .select("slab_requirement_id, weight_tonnes, measure_unit")
     .eq("dispatch_id", dispatchId);
+  const logRows = (logs ?? []) as Array<{
+    slab_requirement_id: string | null;
+    weight_tonnes: number | null;
+    measure_unit: string | null;
+  }>;
   const slabIds = [
-    ...new Set(
-      ((logs ?? []) as { slab_requirement_id: string | null }[])
-        .map((l) => l.slab_requirement_id)
-        .filter(Boolean) as string[],
-    ),
+    ...new Set(logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[]),
   ];
   if (slabIds.length === 0) return;
 
   const { data: slabs } = await admin
     .from("slab_requirements")
-    .select("id, label, stone, length_ft, width_ft, thickness_ft")
+    .select(
+      "id, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft",
+    )
     .in("id", slabIds);
 
-  // One challan line per distinct label+size, qty = how many.
-  const groups = new Map<string, { description: string; quantity: number }>();
-  for (const s of (slabs ?? []) as Array<Record<string, unknown>>) {
-    const dims = `${Number(s.length_ft) || 0}×${Number(s.width_ft) || 0}×${Number(s.thickness_ft) || 0} in`;
-    const label = (s.label as string) || (s.id as string) || "Slab";
-    const stone = s.stone ? ` · ${s.stone as string}` : "";
-    const desc = `${label} · ${dims}${stone}`.slice(0, 500);
-    const g = groups.get(desc);
-    if (g) g.quantity += 1;
-    else groups.set(desc, { description: desc, quantity: 1 });
+  const unitBy = new Map<string, "cft" | "sft">();
+  const weightBy = new Map<string, number>();
+  for (const l of logRows) {
+    if (!l.slab_requirement_id) continue;
+    unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
+    weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
   }
-  if (groups.size === 0) return;
+
+  // Group identical slabs into one priced row (same grid the dispatch team
+  // verified) — codes joined, qty = how many, weight summed, unit preserved.
+  const inputs: DispatchSlabInput[] = ((slabs ?? []) as Array<Record<string, unknown>>).map((s) => ({
+    id: s.id as string,
+    label: (s.label as string | null) ?? null,
+    description: (s.description as string | null) ?? null,
+    additional_description: (s.additional_description as string | null) ?? null,
+    component_section: (s.component_section as string | null) ?? null,
+    component_element: (s.component_element as string | null) ?? null,
+    length_ft: Number(s.length_ft) || 0,
+    width_ft: Number(s.width_ft) || 0,
+    thickness_ft: Number(s.thickness_ft) || 0,
+    weight_tonnes: weightBy.get(s.id as string) ?? null,
+    measure_unit: unitBy.get(s.id as string) ?? "cft",
+  }));
+  const groups = groupDispatchSlabs(inputs);
+  if (groups.length === 0) return;
 
   const chalanLabel =
     challanNumber != null ? `CHLN-${String(challanNumber).padStart(4, "0")}` : dispatchId.slice(0, 8);
@@ -472,13 +490,28 @@ async function createInvoicingChallanFromDispatch(
     .single();
   if (error || !header) return;
 
-  const items = [...groups.values()].map((g, i) => ({
-    challan_id: (header as { id: string }).id,
-    description: g.description,
-    quantity: g.quantity,
-    unit: "pcs",
-    position: i,
-  }));
+  const items = groups.map((g, i) => {
+    const dims = `${g.length_ft}×${g.width_ft}×${g.thickness_ft} in`;
+    const desc = ([g.label, g.description].filter(Boolean).join(" · ") || dims).slice(0, 500);
+    return {
+      challan_id: (header as { id: string }).id,
+      description: desc || dims,
+      quantity: g.qty,
+      unit: g.measure_unit,
+      position: i,
+      codes: g.codes.join(", "),
+      label: g.label,
+      additional_description: g.additional_description,
+      component_section: g.component_section,
+      component_element: g.component_element,
+      length_ft: g.length_ft,
+      width_ft: g.width_ft,
+      thickness_ft: g.thickness_ft,
+      weight_tonnes: g.weightTonnes,
+      measure_unit: g.measure_unit,
+      measure_qty: g.measureQty,
+    };
+  });
   await admin.from("challan_items").insert(items);
 }
 
@@ -538,6 +571,154 @@ export async function approveDispatchAction(formData: FormData) {
   revalidatePath("/invoicing/challans");
   redirect(
     `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} approved — ${dispatch.temple}`)}`,
+  );
+}
+
+// ─── verifyDispatchAction ────────────────────────────────────────────────
+// The "Check & verify" page's primary action (replaces the inline Approve).
+// Persists each slab's billing unit (cft/sft) chosen on the grid, then signs
+// off exactly like approve: truck cleared to leave + the invoicing challan is
+// spawned carrying the same priced grid.
+export async function verifyDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  let units: Record<string, string> = {};
+  try {
+    units = JSON.parse(String(formData.get("units") || "{}")) as Record<string, string>;
+  } catch {
+    units = {};
+  }
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, temple, challan_number, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at) fail("/dispatch", "Dispatch already verified");
+  if (dispatch.delivered_at) fail("/dispatch", "Dispatch already delivered");
+
+  // Persist the per-slab billing unit. Default cft; only the explicitly-toggled
+  // sft slabs flip. Two bulk updates keep it to a couple of round-trips.
+  const sftIds: string[] = [];
+  const cftIds: string[] = [];
+  for (const [slabId, u] of Object.entries(units)) {
+    if (!slabId) continue;
+    if (u === "sft") sftIds.push(slabId);
+    else cftIds.push(slabId);
+  }
+  if (sftIds.length > 0) {
+    await admin.from("dispatch_logs").update({ measure_unit: "sft" }).eq("dispatch_id", dispatchId).in("slab_requirement_id", sftIds);
+  }
+  if (cftIds.length > 0) {
+    await admin.from("dispatch_logs").update({ measure_unit: "cft" }).eq("dispatch_id", dispatchId).in("slab_requirement_id", cftIds);
+  }
+
+  const { error } = await admin
+    .from("dispatches")
+    .update({ approved_at: new Date().toISOString(), approved_by: profile.id })
+    .eq("id", dispatchId);
+  if (error) fail(`/dispatch/${dispatchId}/check`, `Failed to verify: ${error.message}`);
+
+  const chalanLabel = dispatch.challan_number != null
+    ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
+    : dispatchId.slice(0, 8);
+
+  await logAudit(profile.id, "dispatch_verified", "dispatch", dispatchId, {
+    temple: dispatch.temple,
+    challan_number: dispatch.challan_number,
+    sft_slabs: sftIds.length,
+  });
+  await notify("dispatch_approved", `${chalanLabel} verified for ${dispatch.temple}`, {
+    message: `Dispatch verified — truck cleared to leave`,
+    entityType: "dispatch",
+    entityId: dispatchId,
+    actorId: profile.id,
+    targetRoles: ["owner", "team_head", "developer"],
+  });
+
+  try {
+    await createInvoicingChallanFromDispatch(admin, dispatchId, dispatch.temple, dispatch.challan_number ?? null, profile.id);
+  } catch (e) {
+    console.warn("[dispatch→invoicing challan] non-fatal", e);
+  }
+
+  revalidatePath("/dispatch");
+  revalidatePath("/challan");
+  revalidatePath("/invoicing");
+  revalidatePath("/invoicing/challans");
+  redirect(
+    `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} verified — ${dispatch.temple}`)}`,
+  );
+}
+
+// ─── removeSlabsFromDispatchAction ───────────────────────────────────────
+// Per-row Remove on the Check page — drop slab(s) from a still-provisional
+// dispatch and send them back to Make Dispatch, staying on the Check page. If
+// it empties the dispatch, the dispatch is cancelled and we bounce to Make
+// Dispatch (same as a full cancel).
+export async function removeSlabsFromDispatchAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+
+  let slabIds: string[] = [];
+  try {
+    slabIds = (JSON.parse(String(formData.get("slab_ids") || "[]")) as string[]).filter(Boolean);
+  } catch {
+    slabIds = [];
+  }
+  if (slabIds.length === 0) redirect(`/dispatch/${dispatchId}/check`);
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select("id, approved_at, delivered_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!dispatch) fail("/dispatch", "Dispatch not found");
+  if (dispatch.approved_at || dispatch.delivered_at) {
+    fail("/dispatch", "Can only edit a dispatch that is still waiting for verification");
+  }
+
+  const now = new Date().toISOString();
+  const { data: logs } = await admin
+    .from("dispatch_logs")
+    .select("carving_item_id")
+    .eq("dispatch_id", dispatchId)
+    .in("slab_requirement_id", slabIds);
+  const carvingIds = (logs ?? []).map((l) => l.carving_item_id).filter(Boolean) as string[];
+
+  await admin
+    .from("slab_requirements")
+    .update({ status: "completed", updated_by: profile.id, updated_at: now })
+    .in("id", slabIds);
+  if (carvingIds.length > 0) {
+    await admin.from("carving_items").update({ status: "completed" }).in("id", carvingIds);
+  }
+  await admin.from("dispatch_logs").delete().eq("dispatch_id", dispatchId).in("slab_requirement_id", slabIds);
+
+  const { count } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id", { count: "exact", head: true })
+    .eq("dispatch_id", dispatchId);
+  if ((count ?? 0) === 0) {
+    await admin.from("dispatches").delete().eq("id", dispatchId);
+    revalidatePath("/dispatch");
+    revalidatePath("/carving");
+    redirect(`/dispatch?tab=ready&dispatch_toast=${encodeURIComponent("Dispatch emptied — all slabs back in Make Dispatch")}`);
+  }
+
+  revalidatePath(`/dispatch/${dispatchId}/check`);
+  revalidatePath("/dispatch");
+  revalidatePath("/carving");
+  redirect(
+    `/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent(`Removed ${slabIds.length} slab${slabIds.length !== 1 ? "s" : ""} → back in Make Dispatch`)}`,
   );
 }
 

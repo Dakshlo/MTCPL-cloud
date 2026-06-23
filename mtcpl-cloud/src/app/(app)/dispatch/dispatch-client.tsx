@@ -25,8 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { EditSlabsModal } from "./edit-slabs-modal";
-import { createDispatchAction, undoDispatchAction, approveDispatchAction, cancelDispatchAction, updateDispatchInchargeAction } from "./actions";
+import { createDispatchAction, undoDispatchAction, updateDispatchInchargeAction } from "./actions";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
 // the owner approves/rejects on /tasks/slab-cancels.
@@ -1090,7 +1089,6 @@ function ProvisionalTab({
   truckHistory: TruckTrip[];
   canApprove: boolean;
 }) {
-  const [editing, setEditing] = useState<ProvisionalRow | null>(null);
   const [showTrucks, setShowTrucks] = useState(false);
 
   return (
@@ -1158,27 +1156,16 @@ function ProvisionalTab({
                 </div>
                 {canApprove ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button type="button" className="ghost-button" onClick={() => setEditing(r)} style={{ fontSize: 13 }}>
-                    📝 Edit slabs
-                  </button>
-                  <form action={approveDispatchAction} style={{ display: "inline" }}>
-                    <input type="hidden" name="id" value={r.id} />
-                    <button type="submit" style={{ fontSize: 13.5, padding: "10px 18px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 10, cursor: "pointer" }}>
-                      ✅ Approve — truck can leave
-                    </button>
-                  </form>
-                  <form
-                    action={cancelDispatchAction}
-                    style={{ display: "inline" }}
-                    onSubmit={(e) => {
-                      if (!confirm(`Cancel ${chalanLabel(r.challan_number, r.id)}? Slabs will return to Make Dispatch.`)) {
-                        e.preventDefault();
-                      }
-                    }}
+                  {/* One consolidated "Check & verify" flow (replaces the old
+                      Edit / Approve / Cancel trio) — opens the full-page Excel
+                      review where slabs are checked, billed cft/sft, then
+                      verified (→ challan + truck leaves) or cancelled. */}
+                  <Link
+                    href={`/dispatch/${r.id}/check`}
+                    style={{ fontSize: 13.5, padding: "10px 20px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 10, cursor: "pointer", textDecoration: "none", whiteSpace: "nowrap" }}
                   >
-                    <input type="hidden" name="id" value={r.id} />
-                    <button type="submit" className="ghost-button danger-ghost" style={{ fontSize: 13 }}>✕ Cancel</button>
-                  </form>
+                    🔍 Check &amp; verify →
+                  </Link>
                 </div>
                 ) : (
                   /* Dispatch incharge — read-only: waiting on a senior's approval. */
@@ -1192,17 +1179,6 @@ function ProvisionalTab({
           </div>
           ))}
         </div>
-      )}
-
-      {editing && (
-        <EditSlabsModal
-          dispatchId={editing.id}
-          challanLabel={chalanLabel(editing.challan_number, editing.id)}
-          temple={editing.temple}
-          currentSlabs={slabsByDispatch[editing.id] ?? []}
-          availableToAdd={readySlabs.filter((s) => s.temple === editing.temple)}
-          onClose={() => setEditing(null)}
-        />
       )}
 
       {showTrucks && <TruckHistoryPeek trips={truckHistory} onClose={() => setShowTrucks(false)} />}

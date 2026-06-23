@@ -1,0 +1,176 @@
+/**
+ * Dispatch "Check & verify" — full-page Excel-style review that replaces the
+ * inline Approve / Cancel / Edit-slabs buttons on the Waiting-approval tab.
+ *
+ * Shows every slab grouped (identical label+desc+dims collapse into one row
+ * with a quantity + all their codes), each row billed in CFT (default) or SFT
+ * in two separate groups. Verifying creates the challan + sends the truck on
+ * the road; Cancel returns every slab to Make Dispatch.
+ */
+
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { groupDispatchSlabs, dash, type DispatchSlabInput } from "@/lib/dispatch-grouping";
+import { CheckGrid } from "./check-grid";
+
+export const dynamic = "force-dynamic";
+
+// Only senior dispatch roles verify (the dispatch incharge is read-only and
+// never reaches this page — they wait for a senior).
+const ALLOWED = ["developer", "owner", "carving_head", "senior_incharge"];
+
+type Params = Promise<{ id: string }>;
+type Search = Promise<{ [k: string]: string | string[] | undefined }>;
+
+export default async function DispatchCheckPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: Search;
+}) {
+  const { profile } = await requireAuth();
+  if (!ALLOWED.includes(profile.role)) redirect("/dispatch");
+  const { id } = await params;
+  const sp = await searchParams;
+  const toast = typeof sp.dispatch_toast === "string" ? sp.dispatch_toast : null;
+  const admin = createAdminSupabaseClient();
+
+  const { data: dispatch } = await admin
+    .from("dispatches")
+    .select(
+      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, approved_at, delivered_at",
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!dispatch) notFound();
+  // Already verified / delivered → nothing to check; bounce to the live tab.
+  if (dispatch.approved_at) redirect("/dispatch?tab=out_for_delivery");
+  if (dispatch.delivered_at) redirect("/dispatch?tab=delivered");
+
+  const { data: logs } = await admin
+    .from("dispatch_logs")
+    .select("slab_requirement_id, weight_tonnes, measure_unit")
+    .eq("dispatch_id", id);
+  const logRows = (logs ?? []) as Array<{
+    slab_requirement_id: string | null;
+    weight_tonnes: number | null;
+    measure_unit: string | null;
+  }>;
+  const slabIds = [...new Set(logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
+
+  const unitBy = new Map<string, "cft" | "sft">();
+  const weightBy = new Map<string, number>();
+  for (const l of logRows) {
+    if (!l.slab_requirement_id) continue;
+    unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
+    weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
+  }
+
+  let inputs: DispatchSlabInput[] = [];
+  if (slabIds.length > 0) {
+    const { data: slabRows } = await admin
+      .from("slab_requirements")
+      .select(
+        "id, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft",
+      )
+      .in("id", slabIds);
+    const order = new Map(slabIds.map((sid, i) => [sid, i]));
+    inputs = ((slabRows ?? []) as Array<Record<string, unknown>>)
+      .map((s) => ({
+        id: s.id as string,
+        label: (s.label as string | null) ?? null,
+        description: (s.description as string | null) ?? null,
+        additional_description: (s.additional_description as string | null) ?? null,
+        component_section: (s.component_section as string | null) ?? null,
+        component_element: (s.component_element as string | null) ?? null,
+        length_ft: Number(s.length_ft) || 0,
+        width_ft: Number(s.width_ft) || 0,
+        thickness_ft: Number(s.thickness_ft) || 0,
+        weight_tonnes: weightBy.get(s.id as string) ?? null,
+        measure_unit: unitBy.get(s.id as string) ?? "cft",
+      }))
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  }
+  const groups = groupDispatchSlabs(inputs);
+
+  // Temple site + the fixed MTCPL handling man — for the compact header.
+  const [{ data: templeRow }, { data: handlingManRow }] = await Promise.all([
+    admin
+      .from("temples")
+      .select("site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone")
+      .eq("name", dispatch.temple)
+      .maybeSingle(),
+    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
+  ]);
+  const site = (templeRow ?? {}) as {
+    site_location?: string | null;
+    site_incharge_name?: string | null;
+    site_incharge_phone?: string | null;
+    installer_name?: string | null;
+    installer_phone?: string | null;
+  };
+  const handlingMan = ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
+
+  const challanLabel = dispatch.challan_number != null
+    ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
+    : `DISP-${id.slice(0, 8).toUpperCase()}`;
+  const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
+
+  const meta: Array<[string, string]> = [
+    ["Vehicle", dash(dispatch.vehicle_no)],
+    ["Driver", dash(dispatch.driver_name)],
+    ["Driver phone", dash(dispatch.driver_phone)],
+    ["Site", dash(site.site_location)],
+    ["Site incharge", site.site_incharge_name ? `${site.site_incharge_name}${site.site_incharge_phone ? ` · ${site.site_incharge_phone}` : ""}` : "-"],
+    ["Installation by", site.installer_name ? `${site.installer_name}${site.installer_phone ? ` · ${site.installer_phone}` : ""}` : "-"],
+    ["MTCPL incharge", handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "-"],
+    ["Load no.", loadNumber != null ? String(loadNumber) : "-"],
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 40, maxWidth: 1280 }}>
+      <div>
+        <Link href="/dispatch?tab=provisional" style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>
+          ← Waiting approval
+        </Link>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
+          <h1 style={{ margin: 0, fontSize: 22 }}>🔍 Check &amp; verify</h1>
+          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#D97706", fontSize: 15 }}>{challanLabel}</span>
+          <span style={{ fontSize: 14, color: "var(--muted)" }}>· 🏛 {dispatch.temple}</span>
+        </div>
+      </div>
+
+      {toast && (
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
+          {toast}
+        </div>
+      )}
+
+      {/* Compact header — all the info that prints on the (landscape) challan,
+          shown tightly so the grid gets the room. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+          gap: "6px 18px",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "12px 14px",
+          background: "var(--surface)",
+        }}
+      >
+        {meta.map(([label, val]) => (
+          <div key={label} style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--muted)" }}>{label}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={val}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} />
+    </div>
+  );
+}
