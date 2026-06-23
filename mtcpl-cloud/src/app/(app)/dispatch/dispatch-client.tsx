@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction } from "./actions";
+import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
@@ -422,6 +422,17 @@ export function DispatchClient({
             <span style={{ opacity: 0.6 }}>⚙</span>
           </button>
           <Link
+            href="/dispatch/storage"
+            style={{
+              textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "10px 16px", background: "var(--bg)", border: "1.5px solid var(--border)",
+              borderRadius: 10, color: "var(--text)", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap",
+            }}
+            title="Park ready slabs out of Make Dispatch to declutter — bring them back when loading"
+          >
+            🗄 Dispatch storage →
+          </Link>
+          <Link
             href="/challan"
             style={{
               textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6,
@@ -701,10 +712,12 @@ function TempleDispatchPeek({
   handlingMan: { name?: string; phone?: string } | null;
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [parking, setParking] = useState(false);
   const [vehicleNo, setVehicleNo] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
@@ -849,6 +862,24 @@ function TempleDispatchPeek({
             {/* Footer */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
               <button type="button" className="ghost-button" onClick={onClose} style={{ fontSize: 14 }}>Cancel</button>
+              {/* Park selected ready slabs into Dispatch Storage (declutter). */}
+              <button
+                type="button"
+                disabled={selected.size === 0 || parking}
+                onClick={async () => {
+                  if (selected.size === 0) return;
+                  if (!window.confirm(`Send ${selected.size} slab${selected.size !== 1 ? "s" : ""} to Dispatch Storage (out of Make Dispatch)?`)) return;
+                  setParking(true);
+                  try {
+                    const res = await parkDispatchSlabsAction([...selected]);
+                    if (res.ok) { onClose(); router.refresh(); }
+                    else window.alert(res.error);
+                  } finally { setParking(false); }
+                }}
+                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: selected.size === 0 ? "var(--muted)" : "var(--text)", cursor: selected.size === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+              >
+                {parking ? "Moving…" : `🗄 Send ${selected.size || ""} → storage`}
+              </button>
               <button
                 type="button"
                 disabled={selected.size === 0}

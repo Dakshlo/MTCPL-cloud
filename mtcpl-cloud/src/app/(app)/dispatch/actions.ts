@@ -1126,3 +1126,77 @@ export async function setDispatchInchargeAction(formData: FormData) {
   revalidatePath(`/dispatch/${dispatchId}/check`);
   redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("✓ Incharge updated for this dispatch")}`);
 }
+
+// ── Dispatch storage (Mig 125 follow-on) ─────────────────────────────────
+// Park "ready to dispatch" (status=completed) slabs OUT of Make Dispatch, to
+// declutter — mirrors carving's cut-done storage. Same `is_parked` column,
+// distinguished by status (completed = dispatch storage; cut_done = carving).
+// Result-returning (not redirect) so the storage client can call them directly.
+function canDispatchStorage(role: string): boolean {
+  return ["owner", "developer", "carving_head", "senior_incharge", "dispatch"].includes(role);
+}
+
+export async function parkDispatchSlabsAction(
+  ids: string[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canDispatchStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(ids) ? ids : []).map((s) => String(s).trim()).filter(Boolean);
+  if (list.length === 0) return { ok: false, error: "No slabs selected." };
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: true, parked_at: new Date().toISOString(), parked_by: profile.id })
+    .in("id", list)
+    .eq("status", "completed")
+    .eq("is_parked", false)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "dispatch_slabs_parked", "slab", "batch", { count });
+  revalidatePath("/dispatch");
+  revalidatePath("/dispatch/storage");
+  return { ok: true, count };
+}
+
+export async function unparkDispatchSlabsAction(
+  ids: string[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canDispatchStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(ids) ? ids : []).map((s) => String(s).trim()).filter(Boolean);
+  if (list.length === 0) return { ok: false, error: "No slabs selected." };
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: false, parked_at: null, parked_by: null })
+    .in("id", list)
+    .eq("status", "completed")
+    .eq("is_parked", true)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "dispatch_slabs_unparked", "slab", "batch", { count });
+  revalidatePath("/dispatch");
+  revalidatePath("/dispatch/storage");
+  return { ok: true, count };
+}
+
+export async function parkAllReadyDispatchAction(): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canDispatchStorage(profile.role)) return { ok: false, error: "Not allowed." };
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ is_parked: true, parked_at: new Date().toISOString(), parked_by: profile.id })
+    .eq("status", "completed")
+    .eq("is_parked", false)
+    .is("cancel_requested_at", null)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, "dispatch_slabs_parked_all", "slab", "batch", { count });
+  revalidatePath("/dispatch");
+  revalidatePath("/dispatch/storage");
+  return { ok: true, count };
+}

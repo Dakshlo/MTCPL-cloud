@@ -73,11 +73,13 @@ export default async function DispatchPage({
     { data: handlingManRow },
     { data: inchargeRows },
   ] = await Promise.all([
-    // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
+    // Ready ("Make Dispatch") = status=completed slabs waiting to be packed.
+    // Mig 125 follow-on — parked (dispatch storage) slabs are hidden here.
     admin
       .from("slab_requirements")
       .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
       .eq("status", "completed")
+      .eq("is_parked", false)
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
     // Provisional = dispatch created but senior hasn't approved yet.
