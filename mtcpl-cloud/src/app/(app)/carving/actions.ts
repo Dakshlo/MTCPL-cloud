@@ -4536,6 +4536,37 @@ async function resolveDispatchStationByName(
   }
 }
 
+// Mig 160 — get-or-create a CNC vendor's "shed" dispatch station (one per
+// vendor, named "<Vendor> Shed", linked via vendor_id).
+async function ensureVendorShedStation(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  vendorId: string,
+  vendorName: string,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const { data: existing } = await admin
+      .from("dispatch_stations")
+      .select("id")
+      .eq("vendor_id", vendorId)
+      .maybeSingle();
+    if (existing) return (existing as { id: string }).id;
+    const name = `${(vendorName || "Vendor").trim()} Shed`;
+    const { data: created } = await admin
+      .from("dispatch_stations")
+      .insert({ name, vendor_id: vendorId, created_by: userId })
+      .select("id")
+      .maybeSingle();
+    if (created) return (created as { id: string }).id;
+    // Name collided (lower(name) unique) but vendor link missing — find by name.
+    const { data: byName } = await admin.from("dispatch_stations").select("id").ilike("name", name).maybeSingle();
+    return byName ? (byName as { id: string }).id : null;
+  } catch (e) {
+    console.warn("[ensureVendorShedStation] non-fatal", e);
+    return null;
+  }
+}
+
 /**
  * Mig 145 — active dispatch stations for the Carving-Done approval
  * picker. Fetched on mount by ApproveRejectForms so the list needn't be
@@ -4692,12 +4723,24 @@ export async function approveCarvingJobAction(formData: FormData) {
   // immediately clickable on the Dispatch board. A normal approval
   // leaves received_at_dispatch_at NULL until the transfer person brings
   // it in (Phase 5 gate).
-  const dispatchStationId = await resolveDispatchStationByName(
-    admin,
-    txt(formData, "dispatch_station_name"),
-    profile.id,
-  );
-  const selfTransfer = txt(formData, "self_transfer") === "1";
+  // Mig 160 — the reviewer routes the slab to Main Dispatch (default) or, for a
+  // CNC job, the vendor's own shed. Both go straight to dispatch (received now);
+  // the station just records WHERE the slab sits so the Dispatch board filters.
+  const dispatchTarget = txt(formData, "dispatch_target");
+  const jv = job as { vendor_id?: string | null; vendor_name?: string | null };
+  let dispatchStationId: string | null = null;
+  let toShed = false;
+  if (dispatchTarget === "shed" && jv.vendor_id) {
+    dispatchStationId = await ensureVendorShedStation(admin, jv.vendor_id, jv.vendor_name ?? "Vendor", profile.id);
+    toShed = !!dispatchStationId;
+  } else {
+    dispatchStationId = await resolveDispatchStationByName(
+      admin,
+      txt(formData, "dispatch_station_name") || "Main Dispatch",
+      profile.id,
+    );
+  }
+  const selfTransfer = toShed;
 
   // Surface the actual error if the update fails (could be a
   // missing column on prod schema if migration 014 wasn't run).

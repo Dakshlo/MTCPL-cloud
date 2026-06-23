@@ -4131,6 +4131,7 @@ function JobDetailPeek({
               jobId={job.id}
               slabId={job.slab_requirement_id}
               isOutsource={job.vendor_type === "Outsource"}
+              vendorName={job.vendor_name}
               ownerReviewStatus={job.owner_review_status ?? null}
               ownerReviewKind={job.owner_review_kind ?? null}
               ownerReviewNote={job.owner_review_note ?? null}
@@ -4304,7 +4305,7 @@ function OwnerInvolveSection({
   );
 }
 
-function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewStatus, ownerReviewKind, ownerReviewNote }: { jobId: string; slabId: string; isOutsource: boolean; onDone: () => void; ownerReviewStatus?: string | null; ownerReviewKind?: string | null; ownerReviewNote?: string | null }) {
+function ApproveRejectForms({ jobId, slabId, isOutsource, vendorName, onDone, ownerReviewStatus, ownerReviewKind, ownerReviewNote }: { jobId: string; slabId: string; isOutsource: boolean; vendorName?: string | null; onDone: () => void; ownerReviewStatus?: string | null; ownerReviewKind?: string | null; ownerReviewNote?: string | null }) {
   const router = useRouter();
   // Mig 080 — three outcomes. The selected mode drives which form
   // is open and which server action gets called on submit. Image
@@ -4360,30 +4361,12 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
   // Mig 088 — optional carved-sides correction at approval. "" = keep
   // whatever was set at assign (post nothing); "1"/"2" = override.
   const [sidesOverride, setSidesOverride] = useState<"" | "1" | "2">("");
-  // Mig 145 — dispatch station + self-transfer (Approve mode only).
-  // Stations are fetched on mount via a server action so the list isn't
-  // threaded through the whole dashboard tree; the default pre-selects.
-  // Self-transfer bypasses the carving→dispatch runner (the slab is
-  // received at dispatch immediately and is clickable there at once).
-  const [dispatchStations, setDispatchStations] = useState<
-    { id: string; name: string; is_default: boolean }[]
-  >([]);
-  const [dispatchStation, setDispatchStation] = useState("");
-  const [selfTransfer, setSelfTransfer] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    getDispatchStationsAction()
-      .then((res) => {
-        if (!alive || !res.ok) return;
-        setDispatchStations(res.stations);
-        const def = res.stations.find((s) => s.is_default) ?? res.stations[0];
-        if (def) setDispatchStation((cur) => cur || def.name);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Mig 160 — route the finished slab to Main Dispatch (default) or, for a CNC
+  // job, the vendor's own shed (so it's dispatched from the shade itself). Both
+  // go straight to dispatch; the station records WHERE the slab sits so the
+  // Dispatch board can filter. A vendor shed only applies to CNC jobs.
+  const canShed = !isOutsource && !!(vendorName && vendorName.trim());
+  const [dispatchTarget, setDispatchTarget] = useState<"main" | "shed">("main");
   // Mig 081 follow-on — option metadata for the custom picker.
   // Each row drives icon + label + subtitle + accent tint on the
   // popup card. Keep the value strings in lock-step with the
@@ -4523,8 +4506,7 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
     }
     // Mig 145 — dispatch station routing + optional self-transfer.
     if (mode === "approve") {
-      if (dispatchStation.trim()) fd.set("dispatch_station_name", dispatchStation.trim());
-      if (selfTransfer) fd.set("self_transfer", "1");
+      fd.set("dispatch_target", dispatchTarget === "shed" && canShed ? "shed" : "main");
     }
     // Mig 132 — the old hard-Reject is replaced by the slab-cancel
     // REQUEST flow: reason + photo go to the owner's task panel; the
@@ -4904,64 +4886,6 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
             would add no value). */}
         {mode === "approve" ? (
           <div>
-            {/* Mig 145 — dispatch station routing + self-transfer.
-                The finished slab heads to this station for loading.
-                Self-transfer bypasses the carving→dispatch runner so the
-                slab is dispatchable immediately; otherwise it joins the
-                carving→dispatch queue until a runner brings it in.
-                Hidden until stations load — pre-migration the list comes
-                back empty, and we must NOT post these fields then. */}
-            {dispatchStations.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 800,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.07em",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  marginBottom: 6,
-                }}
-              >
-                <span aria-hidden>📦</span>
-                Dispatch station
-              </div>
-              <DispatchStationCombobox
-                value={dispatchStation}
-                onChange={setDispatchStation}
-                stations={dispatchStations}
-              />
-              <label
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "flex-start",
-                  marginTop: 8,
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selfTransfer}
-                  onChange={(e) => setSelfTransfer(e.target.checked)}
-                  style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", accentColor: "#1d4ed8" }}
-                />
-                <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>
-                    Self-transfer to dispatch now
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                    Skip the transfer runner — the slab is received at dispatch
-                    immediately and can be loaded right away. Leave off to send
-                    it to the carving→dispatch queue.
-                  </span>
-                </span>
-              </label>
-            </div>
-            )}
             {/* Mig 088 — confirm / correct carved sides right before it
                 counts. "Keep" leaves whatever was set at assign. */}
             <div style={{ marginBottom: 14 }}>
@@ -5285,6 +5209,38 @@ function ApproveRejectForms({ jobId, slabId, isOutsource, onDone, ownerReviewSta
               Tracks common quality issues so we can spot vendor
               patterns over time. Leave on the default if the slab
               was clean.
+            </div>
+
+            {/* Mig 160 — where does the finished slab go: Main Dispatch (default)
+                or, for a CNC job, this vendor's own shed (dispatched from the
+                shade itself). Two buttons replace the old station dropdown. */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <span aria-hidden>📦</span> Dispatch to
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {([
+                  { v: "main" as const, label: "🏭 Main Dispatch" },
+                  ...(canShed ? [{ v: "shed" as const, label: `🏬 ${vendorName} Shed` }] : []),
+                ]).map((o) => {
+                  const active = dispatchTarget === o.v;
+                  return (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => setDispatchTarget(o.v)}
+                      style={{ flex: 1, padding: "10px 12px", fontSize: 12.5, fontWeight: 800, border: `1.5px solid ${active ? "#1d4ed8" : "var(--border)"}`, background: active ? "rgba(29,78,216,0.10)" : "var(--surface)", color: active ? "#1d4ed8" : "var(--text)", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
+                {dispatchTarget === "shed" && canShed
+                  ? `Stays at ${vendorName}'s shed — dispatched from there.`
+                  : "Goes to the Main Dispatch board with outsource + direct slabs."}
+              </div>
             </div>
             {/* Inline keyframes for the popup fade/slide. Plain
                 <style> tag so it doesn't depend on styled-jsx. */}
