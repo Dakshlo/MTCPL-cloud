@@ -33,7 +33,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-type Phase = "out" | "signing" | "done";
+type Phase = "out" | "confirm" | "signing" | "done";
 
 /** SignOutController — the singleton state. Lives at module scope so
  *  multiple buttons can call the same flourish without each mounting
@@ -41,24 +41,36 @@ type Phase = "out" | "signing" | "done";
 let setSharedPhase: ((p: Phase) => void) | null = null;
 
 export function useSignOut() {
+  // Daksh (Jun 2026) — pressing Sign out now ASKS first (the system's own
+  // confirm card, not the browser dialog). Only on confirm does the flourish
+  // + sign-out fire. (Auto-logouts — idle / TV kiosk — sign out directly and
+  // never call this, so they're unaffected.)
   return function startSignOut() {
     if (!setSharedPhase) {
-      // Overlay not mounted yet (shouldn't happen — root layout
-      // mounts the host). Fall back to a plain sign-out.
-      void plainSignOut();
+      // Overlay host not mounted (shouldn't happen — root layout mounts it).
+      // Fall back to a plain confirm + sign-out.
+      if (typeof window !== "undefined" && !window.confirm("Sign out of MTCPL?")) return;
+      void plainSignOut().then(() => {
+        window.location.href = "/login";
+      });
       return;
     }
-    setSharedPhase("signing");
-    void plainSignOut().then(() => {
-      setSharedPhase?.("done");
-    });
-    // Hard redirect after the flourish has had time to play. Using
-    // window.location.href (not router.push) so server cookies are
-    // fresh on the new page.
-    setTimeout(() => {
-      window.location.href = "/login";
-    }, 1600);
+    setSharedPhase("confirm");
   };
+}
+
+/** The actual sign-out flourish — fired only after the user confirms. */
+function executeSignOut() {
+  setSharedPhase?.("signing");
+  void plainSignOut().then(() => {
+    setSharedPhase?.("done");
+  });
+  // Hard redirect after the flourish has had time to play. Using
+  // window.location.href (not router.push) so server cookies are
+  // fresh on the new page.
+  setTimeout(() => {
+    window.location.href = "/login";
+  }, 1600);
 }
 
 async function plainSignOut() {
@@ -89,7 +101,79 @@ export function SignOutOverlayHost() {
   if (!mounted) return null;
   if (phase === "out") return null;
 
+  if (phase === "confirm") {
+    return createPortal(
+      <SignOutConfirm onConfirm={executeSignOut} onCancel={() => setPhase("out")} />,
+      document.body,
+    );
+  }
   return createPortal(<SignOutOverlay phase={phase} />, document.body);
+}
+
+/** Confirmation card shown when a user presses Sign out (manual only). */
+function SignOutConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+      else if (e.key === "Enter") onConfirm();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onConfirm, onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm sign out"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 99999,
+        background: "rgba(15, 12, 6, 0.72)",
+        backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+        animation: "mtcpl-signout-fade 0.18s ease-out both",
+      }}
+    >
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes mtcpl-signout-fade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes mtcpl-signout-confirm-pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+      ` }} />
+      <div
+        style={{
+          width: "100%", maxWidth: 380,
+          background: "var(--surface, #fff)", color: "var(--text, #1a1a1a)",
+          border: "1px solid var(--border, #e5e5e5)", borderRadius: 18,
+          boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+          padding: 24, textAlign: "center",
+          animation: "mtcpl-signout-confirm-pop 0.2s cubic-bezier(0.34,1.56,0.64,1) both",
+        }}
+      >
+        <div style={{ width: 56, height: 56, borderRadius: 16, margin: "0 auto 14px", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #d4a017 0%, #a16207 60%, #78350f 100%)", fontSize: 28 }}>👋</div>
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.01em" }}>Sign out?</div>
+        <div style={{ fontSize: 13.5, color: "var(--muted, #666)", marginTop: 6, lineHeight: 1.5 }}>
+          You&apos;ll be returned to the login screen.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{ flex: 1, padding: "11px 16px", fontSize: 14, fontWeight: 700, borderRadius: 10, border: "1px solid var(--border, #ddd)", background: "var(--surface-alt, #f5f5f5)", color: "var(--text, #1a1a1a)", cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={onConfirm}
+            style={{ flex: 1, padding: "11px 16px", fontSize: 14, fontWeight: 800, borderRadius: 10, border: "none", background: "#b91c1c", color: "#fff", cursor: "pointer" }}
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SignOutOverlay({ phase }: { phase: Phase }) {
