@@ -307,6 +307,13 @@ export async function buildCutterCostReport(
   const contributingSlabs: CutterContributingSlab[] = [];
   let totalCft = 0;
   for (const r of slabsRaw) {
+    // Daksh (Jun 2026) — a 'rejected' slab with NO source block was never
+    // actually cut by us. In particular the Temple-View "clean up
+    // uncategorized" tool bulk-archives never-cut OPEN slabs to
+    // status='rejected' with updated_at=now, which was wrongly piling
+    // thousands of phantom slabs onto "today". Genuinely cut-then-broken
+    // slabs keep their source_block_id and still count.
+    if (r.status === "rejected" && !r.source_block_id) continue;
     const l = Number(r.length_ft) || 0;
     const w = Number(r.width_ft) || 0;
     const t = Number(r.thickness_ft) || 0;
