@@ -44,6 +44,13 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered]);
 
+  // Collapsible temple groups (match the Unassigned UI) — default collapsed so
+  // a 1800-slab storage isn't one giant wall; a live search auto-expands.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  function toggleOpen(temple: string) {
+    setOpen((prev) => { const n = new Set(prev); n.has(temple) ? n.delete(temple) : n.add(temple); return n; });
+  }
+
   function toggle(id: string) {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
@@ -108,6 +115,12 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search parked slabs — code, label, temple, stone, size (e.g. 64x61x19)…" style={{ flex: "1 1 280px", padding: "9px 12px", fontSize: 13.5, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }} />
         <span className="muted" style={{ fontSize: 12.5 }}>{parked.length} in storage · {filtered.length} shown</span>
+        {groups.length > 1 && (
+          <>
+            <button type="button" onClick={() => setOpen(new Set(groups.map(([t]) => t)))} className="ghost-button" style={{ fontSize: 12 }}>⊞ Expand all</button>
+            <button type="button" onClick={() => setOpen(new Set())} className="ghost-button" style={{ fontSize: 12 }}>⊟ Collapse all</button>
+          </>
+        )}
         {selected.size > 0 && (
           <button type="button" disabled={busy} onClick={() => bringBack([...selected])} style={btn("#15803d")}>↩ Bring back {selected.size} selected</button>
         )}
@@ -118,18 +131,22 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
       ) : filtered.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>No parked slabs match “{q}”.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {groups.map(([temple, slabs]) => {
             const allOn = slabs.every((s) => selected.has(s.id));
+            const expanded = q.trim() !== "" || open.has(temple);
             return (
               <div key={temple} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", overflow: "hidden" }}>
-                <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 800, fontSize: 14 }}>
-                    <input type="checkbox" checked={allOn} onChange={() => toggleTemple(slabs)} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                    🏛 {temple}
+                <div style={{ padding: "10px 14px", borderBottom: expanded ? "1px solid var(--border)" : "none", display: "flex", alignItems: "center", gap: 10, background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
+                  <input type="checkbox" checked={allOn} onChange={() => toggleTemple(slabs)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} title="Select all in this temple" />
+                  <button type="button" onClick={() => toggleOpen(temple)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", flex: 1, textAlign: "left", color: "var(--text)", fontWeight: 800, fontSize: 14, minWidth: 0 }}>
+                    <span style={{ color: "var(--muted)", fontSize: 12, width: 12 }}>{expanded ? "▾" : "▸"}</span>
+                    🏛 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{temple}</span>
                     <span className="muted" style={{ fontWeight: 600, fontSize: 12 }}>· {slabs.length}</span>
-                  </label>
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => bringBack(slabs.map((s) => s.id))} style={{ fontSize: 11.5, fontWeight: 700, color: "#15803d", background: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>↩ Bring all back</button>
                 </div>
+                {expanded && (
                 <div style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
                   {slabs.map((s) => {
                     const on = selected.has(s.id);
@@ -146,6 +163,7 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
                     );
                   })}
                 </div>
+                )}
               </div>
             );
           })}

@@ -1077,6 +1077,8 @@ export default async function CarvingDashboardPage({
           stoneTypes={stoneTypes ?? []}
           // Mig 132 — who can long-press a slab to request a cancel.
           canRequestCancel={["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)}
+          // Mig 125 follow-on — who can park selected slabs to storage.
+          canManageStorage={canManageStorage}
         />
       )}
     </div>

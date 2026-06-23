@@ -32,6 +32,7 @@ import {
   markCarvingStartedManuallyAction,
   getJobEvents,
   getSignedReviewMediaUrl,
+  parkSlabsAction,
   type JobEvent,
 } from "./actions";
 import { SlabThumb } from "@/components/slab-thumb";
@@ -226,6 +227,7 @@ export function CarvingDashboardClient({
   templeFilter,
   stoneTypes,
   canRequestCancel = false,
+  canManageStorage = false,
 }: {
   tab: "unassigned" | "active" | "review" | "done" | "pending";
   /** Daksh June 2026 — CNC vs Outsource view. Drives assign-vendor
@@ -248,6 +250,8 @@ export function CarvingDashboardClient({
   /** Mig 132 — long-press a slab card to request a cancel (broken slab).
    *  carving_head / senior_incharge / owner / developer. */
   canRequestCancel?: boolean;
+  /** Mig 125 follow-on — can park selected slabs to Temporary Storage. */
+  canManageStorage?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1191,6 +1195,22 @@ export function CarvingDashboardClient({
             >
               Clear
             </button>
+            {canManageStorage && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (bulkSelected.size === 0) return;
+                  if (!window.confirm(`Send ${bulkSelected.size} slab${bulkSelected.size !== 1 ? "s" : ""} to Temporary Storage?`)) return;
+                  const res = await parkSlabsAction([...bulkSelected]);
+                  if (res.ok) { setBulkSelected(new Set()); setBulkMode(false); router.refresh(); }
+                  else window.alert(res.error);
+                }}
+                title="Park the selected slabs in Temporary Storage (hidden from Unassigned)"
+                style={{ background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.4)", padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                🗄 Send {bulkSelected.size} → storage
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setBulkOpen(true)}
