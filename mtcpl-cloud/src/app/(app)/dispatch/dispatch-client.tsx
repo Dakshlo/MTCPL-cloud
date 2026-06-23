@@ -25,7 +25,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction, updateDispatchInchargeAction } from "./actions";
+import { createDispatchAction, undoDispatchAction } from "./actions";
+import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
 // the owner approves/rejects on /tasks/slab-cancels.
@@ -323,6 +324,8 @@ export function DispatchClient({
   readySlabs,
   siteInfoByTemple,
   handlingMan,
+  incharges,
+  inchargeTemples,
   provisional,
   provisionalSlabsByDispatch,
   outForDelivery,
@@ -338,8 +341,11 @@ export function DispatchClient({
   readySlabs: ReadySlab[];
   /** Mig 130 — temple name → site info, shown on the dispatch form. */
   siteInfoByTemple: Record<string, SiteInfo>;
-  /** Mig 130 — fixed MTCPL site handling man (Settings-editable). */
+  /** Mig 130 — fixed MTCPL site handling man (legacy global fallback). */
   handlingMan: { name?: string; phone?: string } | null;
+  /** Mig 159 — incharge roster + the temple→incharge links, for the manager. */
+  incharges: { id: string; name: string; phone: string | null }[];
+  inchargeTemples: { id: string; name: string; inchargeId: string | null }[];
   provisional: ProvisionalRow[];
   provisionalSlabsByDispatch: Record<string, ReadySlab[]>;
   outForDelivery: OutForDeliveryRow[];
@@ -368,7 +374,9 @@ export function DispatchClient({
   const [, startNav] = useTransition();
   // Mig 130 follow-on — edit the Dispatch Incharge (MTCPL plant side)
   // right here on the dispatch page (moved out of Settings).
-  const [editIncharge, setEditIncharge] = useState(false);
+  // Auto-open the incharge manager when an incharge action redirected back
+  // with ?open=incharges (so linking several temples keeps it open).
+  const [editIncharge, setEditIncharge] = useState(searchParams.get("open") === "incharges");
 
   function setTab(next: Tab) {
     setTabState(next); // instant highlight + content switch
@@ -407,11 +415,11 @@ export function DispatchClient({
               padding: "10px 16px", background: "var(--bg)", border: "1.5px solid var(--border)",
               borderRadius: 10, color: "var(--text)", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer",
             }}
-            title="The MTCPL plant-side dispatch incharge printed on every challan — tap to change"
+            title="Manage dispatch incharges and link each to its temples — printed on every challan"
           >
-            🧑‍✈️ Incharge: <strong>{handlingMan?.name ?? "—"}</strong>
-            {handlingMan?.phone ? <span className="muted" style={{ fontWeight: 500 }}>· {handlingMan.phone}</span> : null}
-            <span style={{ opacity: 0.6 }}>✎</span>
+            🧑‍✈️ Incharges
+            <span style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 8px", fontSize: 12, fontWeight: 800 }}>{incharges.length}</span>
+            <span style={{ opacity: 0.6 }}>⚙</span>
           </button>
           <Link
             href="/challan"
@@ -493,38 +501,9 @@ export function DispatchClient({
       {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} canUndo={canUndo} />}
       {tab === "delivered" && <DeliveredTab rows={delivered} legacy={legacyDispatches} />}
 
-      {/* Mig 130 follow-on — Dispatch Incharge (MTCPL plant side) editor.
-          Printed on every challan; one global value. */}
+      {/* Mig 159 — multiple dispatch incharges, each linked to its temples. */}
       {editIncharge && (
-        <div style={peekOverlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setEditIncharge(false); }}>
-          <div style={{ ...peekPanel, maxWidth: 440 }} role="dialog" aria-modal="true" aria-label="Dispatch incharge">
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-              <div>
-                <div style={{ fontSize: 17, fontWeight: 800 }}>🧑‍✈️ Dispatch Incharge (MTCPL)</div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                  Plant-side incharge printed on every delivery challan.
-                </div>
-              </div>
-              <button type="button" onClick={() => setEditIncharge(false)} aria-label="Close" style={{ marginLeft: "auto", background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)" }}>×</button>
-            </div>
-            <form action={updateDispatchInchargeAction} style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <label className="stack">
-                <span style={{ fontSize: 13, fontWeight: 700 }}>Name <span style={{ color: "#DC2626" }}>*</span></span>
-                <input name="incharge_name" required defaultValue={handlingMan?.name ?? "POSA RAM"} style={{ fontSize: 14.5, padding: "10px 12px" }} />
-              </label>
-              <label className="stack">
-                <span style={{ fontSize: 13, fontWeight: 700 }}>Mobile</span>
-                <input name="incharge_phone" type="tel" defaultValue={handlingMan?.phone ?? "8949783579"} style={{ fontSize: 14.5, padding: "10px 12px" }} />
-              </label>
-              <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-                <button type="submit" className="primary-button" style={{ flex: 1, fontSize: 14, padding: "11px 12px" }}>
-                  ✓ Save — applies to all future challans
-                </button>
-                <button type="button" className="ghost-button" onClick={() => setEditIncharge(false)}>Cancel</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <IncharcesPanel incharges={incharges} temples={inchargeTemples} onClose={() => setEditIncharge(false)} />
       )}
     </section>
   );

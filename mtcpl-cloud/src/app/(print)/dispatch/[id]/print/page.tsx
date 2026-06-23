@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { resolveDispatchIncharge } from "@/lib/dispatch-incharge";
 import { groupDispatchSlabs, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
 import { PrintBtn } from "./print-btn";
 
@@ -33,7 +34,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { data: dispatch, error } = await admin
     .from("dispatches")
     .select(
-      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, approved_at, delivered_at, delivered_by, receiver_name, delivery_note",
+      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, approved_at, delivered_at, delivered_by, receiver_name, delivery_note, incharge_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -101,13 +102,14 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
   const hasWeights = totalTonnes > 0;
 
-  const [{ data: templeRow }, { data: handlingManRow }] = await Promise.all([
+  const [{ data: templeRow }, handlingMan] = await Promise.all([
     admin
       .from("temples")
       .select("site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone")
       .eq("name", dispatch.temple)
       .maybeSingle(),
-    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
+    // Mig 159 — dispatch override → temple's linked incharge → legacy global.
+    resolveDispatchIncharge(admin, { inchargeId: (dispatch as { incharge_id?: string | null }).incharge_id ?? null, temple: dispatch.temple }),
   ]);
   const site = (templeRow ?? {}) as {
     site_location?: string | null;
@@ -116,7 +118,6 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
     installer_name?: string | null;
     installer_phone?: string | null;
   };
-  const handlingMan = ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
   const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
 
   const profilesMap = await getProfilesMap();

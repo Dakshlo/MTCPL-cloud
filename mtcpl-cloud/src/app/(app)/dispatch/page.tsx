@@ -71,6 +71,7 @@ export default async function DispatchPage({
     { data: stoneTypeRows },
     { data: templeRows },
     { data: handlingManRow },
+    { data: inchargeRows },
   ] = await Promise.all([
     // Ready ("Make Dispatch") = status=completed slabs waiting to be packed
     admin
@@ -116,12 +117,16 @@ export default async function DispatchPage({
     // Stone categories — needed to render marble separately in the UI
     admin.from("stone_types").select("name, stone_category"),
     // Mig 130 — temple site info (Bill-To location, client incharge,
-    // installer). Auto-fills the dispatch form + challan.
+    // installer). Auto-fills the dispatch form + challan. Mig 159 — id +
+    // dispatch_incharge_id power the incharge↔temple manager.
     admin
       .from("temples")
-      .select("name, site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone"),
-    // Mig 130 — fixed MTCPL site handling man (Settings-editable).
+      .select("id, name, site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone, dispatch_incharge_id")
+      .order("name"),
+    // Mig 130 — fixed MTCPL site handling man (legacy global fallback).
     admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
+    // Mig 159 — the dispatch incharge roster (name + phone, linkable to temples).
+    admin.from("dispatch_incharges").select("id, name, phone, is_active").eq("is_active", true).order("name"),
   ]);
 
   const profilesMap = await getProfilesMap();
@@ -201,6 +206,14 @@ export default async function DispatchPage({
   }
   const handlingMan =
     ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
+
+  // Mig 159 — incharge roster + the temple→incharge links, for the manager.
+  const incharges = ((inchargeRows ?? []) as Array<{ id: string; name: string; phone: string | null }>).map((r) => ({
+    id: r.id, name: r.name, phone: r.phone,
+  }));
+  const inchargeTemples = ((templeRows ?? []) as Array<{ id: string; name: string; dispatch_incharge_id: string | null }>).map((t) => ({
+    id: t.id, name: t.name, inchargeId: t.dispatch_incharge_id ?? null,
+  }));
 
   // Ready-since timer source: carving review approval time — or, if the
   // slab went through the Rework Tunnel, the moment the hold was cleared.
@@ -406,6 +419,8 @@ export default async function DispatchPage({
       readySlabs={readySlabs}
       siteInfoByTemple={siteInfoByTemple}
       handlingMan={handlingMan}
+      incharges={incharges}
+      inchargeTemples={inchargeTemples}
       provisional={provisional}
       provisionalSlabsByDispatch={provisionalSlabsByDispatch}
       outForDelivery={outForDelivery}

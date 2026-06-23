@@ -13,7 +13,9 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { groupDispatchSlabs, dash, type DispatchSlabInput } from "@/lib/dispatch-grouping";
+import { resolveDispatchIncharge, fetchInchargeOptions } from "@/lib/dispatch-incharge";
 import { CheckGrid } from "./check-grid";
+import { InchargePicker } from "./incharge-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +43,7 @@ export default async function DispatchCheckPage({
   const { data: dispatch } = await admin
     .from("dispatches")
     .select(
-      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, approved_at, delivered_at",
+      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, approved_at, delivered_at, incharge_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -113,14 +115,17 @@ export default async function DispatchCheckPage({
     thickness_ft: Number(s.thickness_ft) || 0,
   }));
 
-  // Temple site + the fixed MTCPL handling man — for the compact header.
-  const [{ data: templeRow }, { data: handlingManRow }] = await Promise.all([
+  // Temple site + the resolved dispatch incharge — for the compact header.
+  const overrideInchargeId = (dispatch as { incharge_id?: string | null }).incharge_id ?? null;
+  const [{ data: templeRow }, handlingMan, inchargeOptions] = await Promise.all([
     admin
       .from("temples")
       .select("site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone")
       .eq("name", dispatch.temple)
       .maybeSingle(),
-    admin.from("app_settings").select("value").eq("key", "dispatch_handling_man").maybeSingle(),
+    // Mig 159 — dispatch override → temple's linked incharge → legacy global.
+    resolveDispatchIncharge(admin, { inchargeId: overrideInchargeId, temple: dispatch.temple }),
+    fetchInchargeOptions(admin),
   ]);
   const site = (templeRow ?? {}) as {
     site_location?: string | null;
@@ -129,7 +134,6 @@ export default async function DispatchCheckPage({
     installer_name?: string | null;
     installer_phone?: string | null;
   };
-  const handlingMan = ((handlingManRow as { value?: { name?: string; phone?: string } } | null)?.value) ?? null;
 
   const challanLabel = dispatch.challan_number != null
     ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`
@@ -186,6 +190,15 @@ export default async function DispatchCheckPage({
           </div>
         ))}
       </div>
+
+      {/* Mig 159 — change the dispatch incharge for THIS truck (overrides the
+          temple's default); the new name/phone prints on the challan. */}
+      <InchargePicker
+        dispatchId={id}
+        options={inchargeOptions.map((o) => ({ id: o.id ?? "", name: o.name, phone: o.phone }))}
+        overrideId={overrideInchargeId}
+        resolvedLabel={handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "—"}
+      />
 
       <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} />
     </div>

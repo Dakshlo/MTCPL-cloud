@@ -1054,3 +1054,75 @@ export async function updateDispatchInchargeAction(formData: FormData) {
   revalidatePath("/dispatch");
   redirect(`/dispatch?dispatch_toast=${encodeURIComponent(`✓ Dispatch incharge updated — ${name}${phone ? ` (${phone})` : ""}`)}`);
 }
+
+// ── Mig 159 — multiple dispatch incharges, linked to temples ─────────────
+
+export async function addInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const name = String(formData.get("name") || "").trim();
+  const phone = String(formData.get("phone") || "").trim() || null;
+  if (!name) fail("/dispatch", "Incharge name is required");
+  const { error } = await admin.from("dispatch_incharges").insert({ name, phone, created_by: profile.id });
+  if (error) fail("/dispatch", `Failed to add incharge: ${error.message}`);
+  await logAudit(profile.id, "dispatch_incharge_added", "dispatch_incharge", name, { phone });
+  revalidatePath("/dispatch");
+  redirect(`/dispatch?open=incharges&dispatch_toast=${encodeURIComponent(`✓ Added incharge ${name}`)}`);
+}
+
+export async function editInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const id = String(formData.get("id") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+  const phone = String(formData.get("phone") || "").trim() || null;
+  if (!id || !name) fail("/dispatch", "Incharge id + name are required");
+  const { error } = await admin.from("dispatch_incharges").update({ name, phone }).eq("id", id);
+  if (error) fail("/dispatch", `Failed to update incharge: ${error.message}`);
+  await logAudit(profile.id, "dispatch_incharge_edited", "dispatch_incharge", id, { name, phone });
+  revalidatePath("/dispatch");
+  redirect(`/dispatch?open=incharges&dispatch_toast=${encodeURIComponent(`✓ Updated ${name}`)}`);
+}
+
+export async function deleteInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const id = String(formData.get("id") || "").trim();
+  if (!id) fail("/dispatch", "Incharge id is required");
+  // FK is ON DELETE SET NULL → any linked temples / dispatches just lose the link.
+  const { error } = await admin.from("dispatch_incharges").delete().eq("id", id);
+  if (error) fail("/dispatch", `Failed to delete incharge: ${error.message}`);
+  await logAudit(profile.id, "dispatch_incharge_deleted", "dispatch_incharge", id, {});
+  revalidatePath("/dispatch");
+  redirect(`/dispatch?open=incharges&dispatch_toast=${encodeURIComponent("✓ Incharge removed")}`);
+}
+
+// Link / unlink a temple to an incharge (a temple has one incharge; an incharge
+// covers many temples). Empty incharge_id unlinks the temple.
+export async function linkTempleInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const templeId = String(formData.get("temple_id") || "").trim();
+  const inchargeId = String(formData.get("incharge_id") || "").trim() || null;
+  if (!templeId) fail("/dispatch", "Temple id is required");
+  const { error } = await admin.from("temples").update({ dispatch_incharge_id: inchargeId }).eq("id", templeId);
+  if (error) fail("/dispatch", `Failed to link temple: ${error.message}`);
+  await logAudit(profile.id, "temple_incharge_linked", "temple", templeId, { incharge_id: inchargeId });
+  revalidatePath("/dispatch");
+  redirect(`/dispatch?open=incharges&dispatch_toast=${encodeURIComponent("✓ Temple link saved")}`);
+}
+
+// Per-dispatch incharge override, set on the Check & verify page. Empty clears
+// it → the challan falls back to the temple's incharge. Stays on the Check page.
+export async function setDispatchInchargeAction(formData: FormData) {
+  const { profile } = await requireAuth([...STATION_ROLES]);
+  const admin = createAdminSupabaseClient();
+  const dispatchId = String(formData.get("id") || "").trim();
+  const inchargeId = String(formData.get("incharge_id") || "").trim() || null;
+  if (!dispatchId) fail("/dispatch", "Dispatch id is required");
+  const { error } = await admin.from("dispatches").update({ incharge_id: inchargeId }).eq("id", dispatchId);
+  if (error) fail(`/dispatch/${dispatchId}/check`, `Failed to set incharge: ${error.message}`);
+  await logAudit(profile.id, "dispatch_incharge_set", "dispatch", dispatchId, { incharge_id: inchargeId });
+  revalidatePath(`/dispatch/${dispatchId}/check`);
+  redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("✓ Incharge updated for this dispatch")}`);
+}
