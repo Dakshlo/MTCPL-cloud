@@ -1409,12 +1409,12 @@ export async function assignCarvingJobAction(formData: FormData) {
     }
   }
 
-  // Daksh June 2026 — Outsource jobs AUTO-START on assign: the slab is
-  // physically sent out to the vendor's facility, so there is no
-  // separate "Mark started" step. CNC stays at carving_assigned and is
-  // started later by loadSlabOnMachineAction (byte-identical for CNC).
+  // Daksh (Jun 2026) — Outsource now routes through the cutting→carving
+  // transfer too: an assigned slab waits at carving_assigned (In Transit)
+  // until the transfer runner delivers it to the vendor; receipt then flips
+  // it to carving_in_progress (Active). CNC works the same way.
   const isOutsource = vendorType === "Outsource";
-  const assignedStatus = isOutsource ? "carving_in_progress" : "carving_assigned";
+  const assignedStatus = "carving_assigned";
 
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
@@ -1433,10 +1433,10 @@ export async function assignCarvingJobAction(formData: FormData) {
   // (transfer in-progress) tray. Reverting the flag to false
   // restores the regular yard→shade flow.
   const nowIso = new Date().toISOString();
-  // Outsource jobs auto-start (carving_in_progress) and have no
-  // runner/receive lifecycle, so they ALWAYS auto-receive — only CNC
-  // assignments route through the Pending stock tray.
-  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE || receiveNow || isOutsource
+  // Both CNC and Outsource route through the Pending stock tray now — the
+  // transfer runner delivers and stamps receipt. (The global skip flag or a
+  // per-slab "receive now" still bypasses the tray.)
+  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE || receiveNow
     ? {
         received_at_vendor_at: nowIso,
         received_at_vendor_by: profile.id,
@@ -1453,10 +1453,11 @@ export async function assignCarvingJobAction(formData: FormData) {
       // (CNC). Stays null forever for Manual vendors.
       cnc_machine_id: null,
       note,
-      status: assignedStatus,
-      // Outsource auto-start: stamp loaded_at/by at assign so the Active
-      // card shows it as carving (no separate Mark-started step).
-      ...(isOutsource ? { loaded_at: nowIso, loaded_by: profile.id } : {}),
+      // Outsource received immediately (skip-flag / receive-now) auto-starts
+      // → in_progress + loaded. Otherwise it sits at carving_assigned (In
+      // Transit) until the runner delivers it.
+      status: isOutsource && Object.keys(autoReceipt).length > 0 ? "carving_in_progress" : assignedStatus,
+      ...(isOutsource && Object.keys(autoReceipt).length > 0 ? { loaded_at: nowIso, loaded_by: profile.id } : {}),
       // Mig 094 — snapshot the jobwork rate (Outsource only, if given).
       ...(isOutsource && jobworkRate != null
         ? { jobwork_rate: jobworkRate, jobwork_unit: jobworkUnit }
@@ -1506,12 +1507,13 @@ export async function assignCarvingJobAction(formData: FormData) {
   }
 
   refreshAll();
-  // Daksh June 2026 — an Outsource assign must return to the Outsource
-  // Active view (mode=outsource), not the default CNC Active tab, so the
-  // user isn't dragged out of the Outsource flow after every assign.
+  // Outsource assigns stay in the Outsource flow. A normal assign lands in
+  // the new In Transit tab (waiting for the runner); a received-now bypass
+  // lands straight in Active.
+  const outsourceLanded = isOutsource && Object.keys(autoReceipt).length === 0 ? "in_transit" : "active";
   redirect(
     isOutsource
-      ? "/carving?tab=active&mode=outsource&toast=Job+queued"
+      ? `/carving?tab=${outsourceLanded}&mode=outsource&toast=${outsourceLanded === "in_transit" ? "Sent+for+transfer" : "Job+queued"}`
       : "/carving?tab=active&toast=Job+queued",
   );
 }
@@ -1667,9 +1669,9 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // group slabs sharing a batch_id with the same colour stripe.
   const batchId = crypto.randomUUID();
   const now = new Date().toISOString();
-  // Daksh May 2026 — see SKIP_SLAB_TRANSFER_STAGE comment at the
-  // top of this file. Same auto-receipt as the single-slab path.
-  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE || receiveNow || vendorType === "Outsource"
+  // Daksh (Jun 2026) — Outsource routes through the transfer too now, so it
+  // no longer auto-receives. Only the skip-flag / receive-now bypass the tray.
+  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE || receiveNow
     ? {
         received_at_vendor_at: now,
         received_at_vendor_by: profile.id,
@@ -1678,9 +1680,9 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const successes: string[] = [];
   const failures: Array<{ slab: string; reason: string }> = [];
 
-  // Outsource jobs auto-start on assign (see single-assign note above).
+  // Both types wait at carving_assigned (In Transit) until receipt.
   const isOutsourceBatch = vendorType === "Outsource";
-  const assignedStatusBatch = isOutsourceBatch ? "carving_in_progress" : "carving_assigned";
+  const assignedStatusBatch = "carving_assigned";
   // Daksh June 2026 — keep Outsource batch assigns inside the Outsource
   // view on redirect (mode=outsource), mirroring the single-assign fix.
   const modeQ = isOutsourceBatch ? "mode=outsource&" : "";
@@ -1713,8 +1715,10 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
         vendor_type: vendorType,
         cnc_machine_id: null,
         note,
-        status: assignedStatusBatch,
-        ...(isOutsourceBatch ? { loaded_at: now, loaded_by: profile.id } : {}),
+        // Outsource received-now auto-starts; otherwise In Transit until the
+        // runner delivers it.
+        status: isOutsourceBatch && !isPendingStockBatch ? "carving_in_progress" : assignedStatusBatch,
+        ...(isOutsourceBatch && !isPendingStockBatch ? { loaded_at: now, loaded_by: profile.id } : {}),
         ...(isOutsourceBatch && jobworkRateBatch != null
           ? { jobwork_rate: jobworkRateBatch, jobwork_unit: jobworkUnitBatch }
           : {}),
@@ -1775,6 +1779,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   });
 
   refreshAll();
+  // Outsource batches that went to the transfer tray land in In Transit.
+  const landTab = isOutsourceBatch && isPendingStockBatch ? "in_transit" : "active";
   if (successes.length === 0) {
     redirect(
       `/carving?${modeQ}toast=${encodeURIComponent(
@@ -1784,14 +1790,14 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   }
   if (failures.length > 0) {
     redirect(
-      `/carving?tab=active&${modeQ}toast=${encodeURIComponent(
+      `/carving?tab=${landTab}&${modeQ}toast=${encodeURIComponent(
         `Assigned ${successes.length} of ${slabIds.length} · ${failures.length} failed (${failures[0]?.reason ?? "see log"})`,
       )}`,
     );
   }
   redirect(
-    `/carving?tab=active&${modeQ}toast=${encodeURIComponent(
-      `📦 Batch of ${successes.length} queued`,
+    `/carving?tab=${landTab}&${modeQ}toast=${encodeURIComponent(
+      `📦 Batch of ${successes.length} ${landTab === "in_transit" ? "sent for transfer" : "queued"}`,
     )}`,
   );
 }
@@ -5220,13 +5226,14 @@ export async function acknowledgeReceiptAction(formData: FormData) {
   const { data: ci } = await admin
     .from("carving_items")
     .select(
-      "id, vendor_id, vendor_type, vendor_name, status, received_at_vendor_at, claimed_by",
+      "id, slab_requirement_id, vendor_id, vendor_type, vendor_name, status, received_at_vendor_at, claimed_by",
     )
     .eq("id", carvingItemId)
     .maybeSingle();
   if (!ci) redirect(`${redirectTo}?toast=Job+not+found`);
   const item = ci as {
     id: string;
+    slab_requirement_id: string;
     vendor_id: string;
     vendor_type: string;
     vendor_name: string;
@@ -5235,9 +5242,8 @@ export async function acknowledgeReceiptAction(formData: FormData) {
     claimed_by: string | null;
   };
 
-  if (item.vendor_type !== "CNC") {
-    redirect(`${redirectTo}?toast=Receipt+step+is+CNC-only`);
-  }
+  // Daksh (Jun 2026) — receipt now handles BOTH CNC and Outsource. (Outsource
+  // routes through the transfer too; on receipt it auto-starts — see below.)
   if (item.received_at_vendor_at) {
     redirect(`${redirectTo}?toast=Already+marked+received`);
   }
@@ -5254,6 +5260,10 @@ export async function acknowledgeReceiptAction(formData: FormData) {
   }
 
   const now = new Date().toISOString();
+  // Outsource auto-starts on arrival (no separate load step) → in_progress
+  // + loaded. CNC stays carving_assigned ("Ready to load") until the vendor
+  // loads it on a machine.
+  const isOutsourceReceipt = item.vendor_type === "Outsource";
   await admin
     .from("carving_items")
     .update({
@@ -5263,12 +5273,19 @@ export async function acknowledgeReceiptAction(formData: FormData) {
       claimed_by: null,
       claimed_at: null,
       claim_batch_id: null,
+      ...(isOutsourceReceipt ? { status: "carving_in_progress", loaded_at: now, loaded_by: profile.id } : {}),
       // Only overwrite dropoff_note if the form supplied one — don't
       // wipe a previously-set note.
       ...(dropoffNote ? { dropoff_note: dropoffNote } : {}),
     })
     .eq("id", carvingItemId)
     .is("received_at_vendor_at", null);
+  if (isOutsourceReceipt) {
+    await admin
+      .from("slab_requirements")
+      .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
+      .eq("id", item.slab_requirement_id);
+  }
 
   const noteSuffix = dropoffNote ? ` · left at ${dropoffNote}` : "";
   await recordEvent(
@@ -5691,11 +5708,12 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
 
   const { data: items } = await admin
     .from("carving_items")
-    .select("id, vendor_id, vendor_type, claimed_by, received_at_vendor_at")
+    .select("id, slab_requirement_id, vendor_id, vendor_type, claimed_by, received_at_vendor_at")
     .eq("claim_batch_id", claimBatchId)
     .is("received_at_vendor_at", null);
   const rows = (items ?? []) as Array<{
     id: string;
+    slab_requirement_id: string;
     vendor_id: string;
     vendor_type: string;
     claimed_by: string | null;
@@ -5704,11 +5722,8 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
   if (rows.length === 0) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Nothing to deliver in that batch.")}`);
   }
-  // Refuse if the batch contains non-CNC slabs (Manual vendors don't
-  // need a receipt step in this app).
-  if (rows.some((r) => r.vendor_type !== "CNC")) {
-    redirect(`${redirectTo}?toast=${encodeURIComponent("Batch contains non-CNC slabs — deliver individually.")}`);
-  }
+  // Daksh (Jun 2026) — outsource batches are allowed now; the outsource rows
+  // auto-start on receipt (see below). CNC rows stay at Ready-to-load.
   if (profile.role === "slab_transfer" || profile.role === "storekeeper") {
     const anyForeign = rows.some((r) => r.claimed_by && r.claimed_by !== profile.id);
     if (anyForeign) {
@@ -5730,6 +5745,22 @@ export async function acknowledgeReceiptBatchAction(formData: FormData) {
     })
     .in("id", ids)
     .is("received_at_vendor_at", null);
+
+  // Outsource rows auto-start on arrival → in_progress + loaded (CNC stays
+  // Ready-to-load). Flip both the carving job and the slab.
+  const outsourceRows = rows.filter((r) => r.vendor_type === "Outsource");
+  if (outsourceRows.length > 0) {
+    const outIds = outsourceRows.map((r) => r.id);
+    const outSlabIds = outsourceRows.map((r) => r.slab_requirement_id);
+    await admin
+      .from("carving_items")
+      .update({ status: "carving_in_progress", loaded_at: now, loaded_by: profile.id })
+      .in("id", outIds);
+    await admin
+      .from("slab_requirements")
+      .update({ status: "carving_in_progress", updated_by: profile.id, updated_at: now })
+      .in("id", outSlabIds);
+  }
 
   const noteSuffix = dropoffNote ? ` · left at ${dropoffNote}` : "";
   await Promise.all(
@@ -6731,11 +6762,14 @@ async function sendSlabToOutsourceVendor(
   const nowIso = new Date().toISOString();
   const { data: slabRow } = await admin
     .from("slab_requirements")
-    .update({ status: "carving_in_progress", updated_by: opts.profileId, updated_at: nowIso })
+    .update({ status: "carving_assigned", updated_by: opts.profileId, updated_at: nowIso })
     .eq("id", opts.slabId)
     .eq("status", "cut_done")
     .select("id");
   if (!slabRow?.length) return { ok: false, reason: "Slab is not cut-done yet" };
+  // Daksh (Jun 2026) — work-order sends route through the cutting→carving
+  // transfer too: the slab waits at carving_assigned (In Transit) until the
+  // runner delivers it to the vendor; receipt flips it to in_progress.
   const { data: item, error } = await admin
     .from("carving_items")
     .insert({
@@ -6744,13 +6778,9 @@ async function sendSlabToOutsourceVendor(
       vendor_name: opts.vendorName,
       vendor_type: "Outsource",
       cnc_machine_id: null,
-      status: "carving_in_progress",
-      loaded_at: nowIso,
-      loaded_by: opts.profileId,
+      status: "carving_assigned",
       urgency: "normal",
       assigned_by: opts.profileId,
-      received_at_vendor_at: nowIso,
-      received_at_vendor_by: opts.profileId,
       ...(opts.rate != null ? { jobwork_rate: opts.rate, jobwork_unit: opts.unit } : {}),
     })
     .select("id")
@@ -6766,8 +6796,10 @@ async function sendSlabToOutsourceVendor(
     item.id,
     "assigned",
     opts.profileId,
-    `Work-order send → ${opts.vendorName} (started) · 🏭 outsource`,
+    `Work-order send → ${opts.vendorName} (sent for transfer) · 🏭 outsource`,
   );
+  // Ping the transfer runner — the slab is waiting to be carried to the vendor.
+  await notifySlabTransferWaiting(admin, opts.slabId, opts.vendorName);
   return { ok: true, id: item.id };
 }
 

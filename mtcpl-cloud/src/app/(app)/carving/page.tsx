@@ -11,6 +11,7 @@ import { CarvingDashboardClient } from "./dashboard-client";
 import { DirectDispatchTab } from "./direct-dispatch-tab";
 import { getProfilesMap } from "@/lib/profiles";
 import { WorkOrdersTab, type WorkOrderRow, type WorkOrderLineCounts, type WorkOrderTabRow, type WorkOrderLineChip } from "./work-orders-tab";
+import { InTransitTab } from "./in-transit-tab";
 import { VendorsManagerPeek } from "./vendors-manager-peek";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import {
@@ -18,7 +19,7 @@ import {
   type ExternalSlab,
 } from "./add-external-cut-slab";
 
-type Tab = "unassigned" | "active" | "review" | "done" | "pending" | "workorders";
+type Tab = "unassigned" | "active" | "review" | "done" | "pending" | "workorders" | "in_transit";
 
 export default async function CarvingDashboardPage({
   searchParams,
@@ -71,6 +72,8 @@ export default async function CarvingDashboardPage({
   if (tab === "pending" && (mode !== "outsource" || !reviewAccess)) tab = "unassigned";
   // Mig 098 — the Work Orders tab is Outsource-only.
   if (tab === "workorders" && (mode !== "outsource" || !canUseOutsource)) tab = "unassigned";
+  // In Transit (outsource transfer wait) is Outsource-only too.
+  if (tab === "in_transit" && mode !== "outsource") tab = "unassigned";
   // Mig 098 — Outsource has NO Unassigned tab: work orders are the only way
   // to give a vendor work, so its home tab is Work Orders.
   if (mode === "outsource" && tab === "unassigned") tab = "workorders";
@@ -470,6 +473,17 @@ export default async function CarvingDashboardPage({
   const doneForMode = doneJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
   const pendingForMode = pendingJobsEnriched.filter((j) => j.vendor_type === wantVendorType);
 
+  // Daksh (Jun 2026) — Outsource: slabs assigned but not yet delivered by the
+  // transfer runner (carving_assigned + no receipt) sit in their own In
+  // Transit tab, NOT in Active. CNC keeps its existing Active view unchanged.
+  const inTransitForMode = mode === "outsource"
+    ? activeForMode.filter((j) => j.status === "carving_assigned" && !j.received_at_vendor_at)
+    : [];
+  const inTransitIds = new Set(inTransitForMode.map((j) => j.slab_requirement_id));
+  const activeForTab = mode === "outsource"
+    ? activeForMode.filter((j) => !inTransitIds.has(j.slab_requirement_id))
+    : activeForMode;
+
   // Build list of all temples across every dataset for the filter dropdown.
   const templeSet = new Set<string>();
   for (const s of unassignedSlabsAll ?? []) if (s.temple) templeSet.add(s.temple);
@@ -756,11 +770,12 @@ export default async function CarvingDashboardPage({
 
   const counts = {
     unassigned: (unassignedSlabsAll ?? []).length,
-    active: activeForMode.length,
+    active: activeForTab.length,
     review: reviewForMode.length,
     done: doneForMode.length,
     pending: pendingForMode.length,
     workorders: workOrdersLiveCount,
+    inTransit: inTransitForMode.length,
   };
 
   return (
@@ -959,6 +974,11 @@ export default async function CarvingDashboardPage({
             ...(canUseOutsource && mode === "outsource"
               ? [{ key: "workorders" as const, label: "🏭 Work Orders", count: counts.workorders }]
               : []),
+            // Mig (Jun 2026) — Outsource: slabs assigned but not yet delivered
+            // by the transfer runner. Sits between Work Orders and Active.
+            ...(mode === "outsource"
+              ? [{ key: "in_transit" as const, label: "🚚 In Transit", count: counts.inTransit }]
+              : []),
             { key: "active", label: "Active", count: counts.active },
             // Mig 074 — hide Carving Done Approval for vendor-with-flag
             // users; they don't sign off on their own work.
@@ -1035,12 +1055,14 @@ export default async function CarvingDashboardPage({
         />
       ) : tab === "workorders" ? (
         <WorkOrdersTab wos={workOrdersForTab} isOwner={isOwner} />
+      ) : tab === "in_transit" ? (
+        <InTransitTab jobs={inTransitForMode} />
       ) : (
         <CarvingDashboardClient
           tab={tab}
           mode={mode}
           unassignedSlabs={unassignedSlabsAll ?? []}
-          activeJobs={activeForMode}
+          activeJobs={activeForTab}
           reviewJobs={reviewAccess ? reviewForMode : []}
           doneJobs={doneForMode}
           pendingJobs={mode === "outsource" && reviewAccess ? pendingForMode : []}
