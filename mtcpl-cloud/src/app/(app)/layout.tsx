@@ -465,11 +465,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     ),
   ];
 
-  // Storekeeper (slab_transfer) — hide the menu by default and serve a
-  // focused, full-width page; the hamburger drawer opens it to switch
-  // pages. (See `.app-shell.storekeeper-drawer` in globals.css.)
+  // Storekeeper (slab_transfer) + dispatch incharge — hide the menu by
+  // default and serve a focused, full-width page; the hamburger drawer opens
+  // it to switch pages. (See `.app-shell.storekeeper-drawer` in globals.css.)
   const storekeeperDrawer =
-    profile.role === "slab_transfer" || profile.role === "storekeeper";
+    profile.role === "slab_transfer" || profile.role === "storekeeper" || profile.role === "dispatch";
 
   return (
     <div className={`app-shell${storekeeperDrawer ? " storekeeper-drawer" : ""}`}>
