@@ -181,6 +181,10 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
       // The panel is portaled out of the wrapper — clicks inside it are
       // "inside", not outside.
       if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
+      // Taps on the global tablet keyboard must NOT close the lookup (it drives
+      // this search box now). preventDefault on the keyboard keeps focus, but
+      // this document mousedown still fires, so exclude it explicitly.
+      if (e.target instanceof Element && e.target.closest("[data-tablet-keyboard]")) return;
       setOpen(false);
     }
     function onEsc(e: KeyboardEvent) {
@@ -402,18 +406,13 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 onFocus={() => setKeypadCollapsed(false)}
                 onClick={() => setKeypadCollapsed(false)}
                 placeholder={domainConfig.placeholder}
-                /* Daksh May 2026 — hint mobile/tablet OSes to suggest
-                   uppercase-from-the-start, no autocorrect, no
-                   autocapitalisation-after-dash. IDs are always
-                   uppercase here.
-                   inputMode="none" when our touch keypad is on
-                   suppresses the device soft keyboard on tablets
-                   (desktop ignores it — physical typing still works).
-                   That's the answer to "two keyboards stacking". */
+                /* Daksh — IDs are uppercase here. inputMode is left to the
+                   global tablet keyboard (it sets inputMode="none" on focus
+                   to suppress the device soft keyboard); desktop physical
+                   typing is unaffected. */
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                inputMode={keypadShown ? "none" : "text"}
                 style={{
                   flex: 1,
                   padding: "9px 12px",
@@ -448,24 +447,24 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               </button>
             </form>
 
-            {/* Daksh May 2026 — custom touch keypad for tablets.
-                Slab/block IDs mix LETTERS + NUMBERS + DASH, and the
-                native on-screen keyboard makes you switch modes
-                three times to type "MT-B-090". A single-screen
-                keypad with 0-9 + A-Z + dash + backspace fixes that.
-                Toggle-on so desktop users with a real keyboard
-                aren't bothered; persisted in localStorage. */}
-            <FindIdKeypad
-              value={query}
-              onChange={(v) => setQuery(v)}
-              onSubmit={() => void runSearch()}
-              shown={keypadShown}
-              expanded={!keypadCollapsed}
-              onToggle={() => {
-                setKeypadShownPersisted(!keypadShown);
-                setKeypadCollapsed(false);
-              }}
-            />
+            {/* Daksh (Jun 2026) — the legacy Find-ID touch keypad is RETIRED.
+                The global tablet keyboard (QWERTY + dash + quick temple-code
+                chips) now drives this search box like every other field, so
+                two keyboards no longer stack. Gated off (not deleted) to keep
+                the surrounding code stable. */}
+            {false && (
+              <FindIdKeypad
+                value={query}
+                onChange={(v) => setQuery(v)}
+                onSubmit={() => void runSearch()}
+                shown={keypadShown}
+                expanded={!keypadCollapsed}
+                onToggle={() => {
+                  setKeypadShownPersisted(!keypadShown);
+                  setKeypadCollapsed(false);
+                }}
+              />
+            )}
 
             {/* Result */}
             {error && (

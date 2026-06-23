@@ -207,7 +207,9 @@ export function TabletKeyboardProvider({ templeCodes = [] }: { templeCodes?: str
   if (!isTablet || !active) return null;
 
   return (
-    <div onMouseDown={(e) => e.preventDefault()} style={panel}>
+    // data-tablet-keyboard — lets dropdowns/modals with outside-click-close
+    // (e.g. Find ID) ignore taps on this keyboard so they don't dismiss.
+    <div data-tablet-keyboard="1" onMouseDown={(e) => e.preventDefault()} style={panel}>
       {/* Temple-code chips */}
       {chips.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
