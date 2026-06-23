@@ -259,6 +259,10 @@ export async function lookupId(query: string): Promise<LookupResult> {
     "crosscheck",
     "carving_head",
     "vendor",
+    // Daksh June 2026 — Dispatch Incharge walks the loading floor and
+    // looks up slab / block IDs as trucks load; without this their
+    // topbar Find-ID pill would render but every search bounced to /.
+    "dispatch",
   ]);
   const admin = createAdminSupabaseClient();
 

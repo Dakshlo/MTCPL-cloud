@@ -634,6 +634,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   // they work across cutting + carving + slabs.
                   role === "senior_incharge" ||
                   role === "crosscheck" ||
+                  // Daksh June 2026 — the Dispatch Incharge works the
+                  // dispatch floor (a production dept) and needs to look
+                  // up slab / block IDs as trucks load.
+                  role === "dispatch" ||
                   role === "carving_head");
               // Daksh May 2026 — vendors also walk the shop floor
               // and stencilled slabs land in their shade; they need

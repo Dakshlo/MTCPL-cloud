@@ -121,12 +121,34 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
     .eq("status", "cut_done")
     .order("created_at", { ascending: false })
     .limit(300);
+  // A slab is "taken" only by a live line on a live work order. A rejected /
+  // cancelled / dismissed order can carry leftover non-cancelled lines (e.g. a
+  // 'planned' line a rejected order never cleared) — those must NOT keep the
+  // slab out of this picker. Resolve the parent order and drop dead ones, the
+  // same way the New-work-order picker does. (Daksh June 2026.)
   const { data: liveLineRows } = await admin
     .from("carving_work_order_items")
-    .select("slab_requirement_id, line_status")
+    .select("slab_requirement_id, work_order_id")
     .neq("line_status", "cancelled")
     .not("slab_requirement_id", "is", null);
-  const taken = new Set(((liveLineRows ?? []) as Array<{ slab_requirement_id: string | null }>).map((r) => r.slab_requirement_id).filter(Boolean) as string[]);
+  const liveLineList = (liveLineRows ?? []) as Array<{ slab_requirement_id: string | null; work_order_id: string | null }>;
+  const lineWoIds = Array.from(new Set(liveLineList.map((r) => r.work_order_id).filter(Boolean) as string[]));
+  const deadWo = new Set<string>();
+  if (lineWoIds.length > 0) {
+    const { data: woStatusRows } = await admin
+      .from("carving_work_orders")
+      .select("id, status, dismissed_at")
+      .in("id", lineWoIds);
+    for (const w of (woStatusRows ?? []) as Array<{ id: string; status: string | null; dismissed_at: string | null }>) {
+      if (w.status === "rejected" || w.status === "cancelled" || w.dismissed_at) deadWo.add(w.id);
+    }
+  }
+  const taken = new Set(
+    liveLineList
+      .filter((r) => r.slab_requirement_id && (!r.work_order_id || !deadWo.has(r.work_order_id)))
+      .map((r) => r.slab_requirement_id)
+      .filter(Boolean) as string[],
+  );
   const availableSlabs = ((availRows ?? []) as Array<{ id: string; label: string | null; temple: string }>).filter((s) => !taken.has(s.id));
 
   // Stone palettes for the 3D thumbnails.

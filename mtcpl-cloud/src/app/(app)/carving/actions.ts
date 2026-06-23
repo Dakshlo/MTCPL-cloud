@@ -6981,6 +6981,16 @@ export async function rejectWorkOrderAction(formData: FormData) {
     .update({ status: "rejected", rejected_at: now, rejected_by: profile.id, reject_reason: reason, updated_at: now, updated_by: profile.id })
     .eq("id", woId)
     .eq("status", "pending_approval");
+  // Daksh June 2026 — release the slabs. A rejected work order's lines were
+  // still 'planned', which kept every slab on it hostage: hidden from the
+  // New-work-order picker (it skips slabs with a planned line) even though
+  // they were back in the cut_done pool and visible in CNC-unassigned. Cancel
+  // the lines, mirroring cancelWorkOrderAction, so the slabs are free again.
+  await admin
+    .from("carving_work_order_items")
+    .update({ line_status: "cancelled" })
+    .eq("work_order_id", woId)
+    .eq("line_status", "planned");
   await logAudit(profile.id, "work_order_rejected", "carving_work_order", woId, { reason });
   refreshAll();
   redirect(`/carving/work-orders?toast=${encodeURIComponent("Work order rejected")}`);

@@ -69,14 +69,45 @@ export default async function NewWorkOrderPage() {
   // carving job is cancelled/returned it goes back to cut_done and must
   // reappear here. Keying on a non-cancelled line instead kept such returned
   // slabs hidden from the picker even though they showed in CNC-unassigned.
+  //
+  // Daksh June 2026 — a planned line only counts if its WORK ORDER is still
+  // alive. A rejected / cancelled / dismissed order can leave its lines at
+  // 'planned' (historically rejectWorkOrderAction never cancelled them), which
+  // kept the slab hostage forever — invisible in this picker yet still showing
+  // in CNC-unassigned. Resolve the parent order's status and ignore dead ones,
+  // so those slabs become selectable again with no data migration.
   const { data: liveLines } = await admin
     .from("carving_work_order_items")
-    .select("slab_requirement_id, line_status")
+    .select("slab_requirement_id, work_order_id")
     .eq("line_status", "planned")
     .not("slab_requirement_id", "is", null);
+  const plannedLines = (liveLines ?? []) as Array<{
+    slab_requirement_id: string | null;
+    work_order_id: string | null;
+  }>;
+  const woIds = Array.from(
+    new Set(plannedLines.map((l) => l.work_order_id).filter(Boolean) as string[]),
+  );
+  const deadWo = new Set<string>();
+  if (woIds.length > 0) {
+    const { data: woRows } = await admin
+      .from("carving_work_orders")
+      .select("id, status, dismissed_at")
+      .in("id", woIds);
+    for (const w of (woRows ?? []) as Array<{
+      id: string;
+      status: string | null;
+      dismissed_at: string | null;
+    }>) {
+      if (w.status === "rejected" || w.status === "cancelled" || w.dismissed_at) {
+        deadWo.add(w.id);
+      }
+    }
+  }
   const taken = new Set(
-    ((liveLines ?? []) as Array<{ slab_requirement_id: string | null }>)
-      .map((r) => r.slab_requirement_id)
+    plannedLines
+      .filter((l) => l.slab_requirement_id && (!l.work_order_id || !deadWo.has(l.work_order_id)))
+      .map((l) => l.slab_requirement_id)
       .filter(Boolean) as string[],
   );
 
