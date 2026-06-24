@@ -124,21 +124,57 @@ export default async function DispatchCheckPage({
   const groups = groupDispatchSlabs(inputs);
 
   // Available slabs for this temple that could still be added — completed
-  // (carving-approved, ready) and not yet on any dispatch.
+  // (carving-approved, ready), NOT parked (storage is pulled in via the picker's
+  // toggles), and not yet on any dispatch.
   const { data: availRows } = await admin
     .from("slab_requirements")
     .select("id, label, length_ft, width_ft, thickness_ft")
     .eq("status", "completed")
+    .eq("is_parked", false)
     .eq("temple", dispatch.temple)
     .order("created_at", { ascending: true })
     .limit(500);
-  const available = ((availRows ?? []) as Array<Record<string, unknown>>).map((s) => ({
-    id: s.id as string,
-    label: (s.label as string | null) ?? null,
-    length_ft: Number(s.length_ft) || 0,
-    width_ft: Number(s.width_ft) || 0,
-    thickness_ft: Number(s.thickness_ft) || 0,
-  }));
+  const availIds = ((availRows ?? []) as Array<{ id: string }>).map((s) => s.id);
+
+  // Mig 160 — each ready slab's dispatch station (Main vs a vendor shed), from
+  // its carving_items.dispatch_station_id, so the picker can filter by station.
+  const availStationBy = new Map<string, string>();
+  if (availIds.length > 0) {
+    const { data: ciRows } = await admin
+      .from("carving_items")
+      .select("slab_requirement_id, dispatch_station_id, ready_to_dispatch_at")
+      .in("slab_requirement_id", availIds);
+    for (const r of (ciRows ?? []) as Array<{ slab_requirement_id: string; dispatch_station_id: string | null; ready_to_dispatch_at: string | null }>) {
+      const prev = availStationBy.get(r.slab_requirement_id);
+      if (!prev || r.ready_to_dispatch_at) availStationBy.set(r.slab_requirement_id, r.dispatch_station_id ?? "");
+    }
+  }
+  const { data: stationRows } = await admin
+    .from("dispatch_stations")
+    .select("id, name, is_default, vendor_id")
+    .eq("is_active", true)
+    .order("name");
+  const stations = (stationRows ?? []) as Array<{ id: string; name: string; is_default: boolean; vendor_id: string | null }>;
+  const mainStationId = stations.find((s) => s.is_default)?.id ?? null;
+  const shedIds = new Set(stations.filter((s) => s.vendor_id).map((s) => s.id));
+  const vendorSheds = stations.filter((s) => s.vendor_id).map((s) => ({ id: s.id, name: s.name }));
+  const stationOf = (slabId: string): string => {
+    const sid = availStationBy.get(slabId) || null;
+    return sid && shedIds.has(sid) && sid !== mainStationId ? sid : "main";
+  };
+
+  const available = ((availRows ?? []) as Array<Record<string, unknown>>).map((s) => {
+    const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, t = Number(s.thickness_ft) || 0;
+    return {
+      id: s.id as string,
+      label: (s.label as string | null) ?? null,
+      dimensions: `${l}×${w}×${t} in`,
+      cft: (l * w * t) / 1728,
+      station: stationOf(s.id as string),
+    };
+  });
+  // Same roster as canDispatchStorage() in dispatch/actions.ts.
+  const canUseStorage = ["owner", "developer", "carving_head", "senior_incharge", "dispatch"].includes(profile.role);
 
   // Temple site + the resolved dispatch incharge — for the compact header.
   const overrideInchargeId = (dispatch as { incharge_id?: string | null }).incharge_id ?? null;
@@ -225,7 +261,7 @@ export default async function DispatchCheckPage({
         resolvedLabel={handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "—"}
       />
 
-      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} vendorSheds={vendorSheds} canUseStorage={canUseStorage} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
     </div>
   );
 }

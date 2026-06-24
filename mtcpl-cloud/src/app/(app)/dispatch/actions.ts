@@ -736,13 +736,18 @@ export async function addSlabsToDispatchAction(formData: FormData) {
     fail("/dispatch", "Can only edit a dispatch that is still waiting for verification");
   }
 
-  // Only genuinely-available slabs: completed + same temple.
+  // Eligible slabs: completed (ready or dispatch-storage) OR a parked cut_done
+  // slab pulled in from carving storage (direct-dispatch, skips carving) —
+  // same rule as createDispatchAction. Must be the same temple.
   const { data: slabs } = await admin
     .from("slab_requirements")
-    .select("id, status, temple")
+    .select("id, status, temple, is_parked")
     .in("id", slabIds);
-  const valid = ((slabs ?? []) as Array<{ id: string; status: string; temple: string }>)
-    .filter((s) => s.status === "completed" && s.temple === dispatch.temple)
+  const valid = ((slabs ?? []) as Array<{ id: string; status: string; temple: string; is_parked?: boolean }>)
+    .filter((s) => {
+      const eligible = s.status === "completed" || (s.status === "cut_done" && s.is_parked === true);
+      return eligible && s.temple === dispatch.temple;
+    })
     .map((s) => s.id);
   if (valid.length === 0) {
     redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("No eligible slabs to add")}`);
@@ -777,7 +782,8 @@ export async function addSlabsToDispatchAction(formData: FormData) {
       dispatched_by: profile.id,
     })),
   );
-  await admin.from("slab_requirements").update({ status: "dispatched", updated_by: profile.id, updated_at: now }).in("id", toAdd);
+  // Unpark too — a slab added from carving/dispatch storage leaves storage.
+  await admin.from("slab_requirements").update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now }).in("id", toAdd);
   const ciIds = toAdd.map((s) => ciBySlab.get(s)).filter(Boolean) as string[];
   if (ciIds.length > 0) {
     await admin.from("carving_items").update({ status: "dispatched" }).in("id", ciIds);
@@ -925,7 +931,7 @@ export async function editDispatchSlabsAction(formData: FormData) {
   if (addIds.length > 0) {
     const { data: addSlabs } = await admin
       .from("slab_requirements")
-      .select("id, temple, status, cancel_requested_at")
+      .select("id, temple, status, is_parked, cancel_requested_at")
       .in("id", addIds);
     if (!addSlabs || addSlabs.length !== addIds.length) {
       fail("/dispatch", "One or more slabs to add no longer exist");
@@ -934,8 +940,11 @@ export async function editDispatchSlabsAction(formData: FormData) {
       if (s.temple !== dispatch.temple) {
         fail("/dispatch", `Slab ${s.id} belongs to ${s.temple}, not ${dispatch.temple}. One dispatch = one temple.`);
       }
-      if (s.status !== "completed") {
-        fail("/dispatch", `Slab ${s.id} is not in 'completed' status (is '${s.status}')`);
+      // completed (ready / dispatch-storage) OR parked cut_done (carving storage,
+      // direct-dispatch) — same rule as create / addSlabsToDispatchAction.
+      const eligible = s.status === "completed" || (s.status === "cut_done" && (s as { is_parked?: boolean }).is_parked === true);
+      if (!eligible) {
+        fail("/dispatch", `Slab ${s.id} is not ready to dispatch (status '${s.status}')`);
       }
       // Mig 132 — pending-cancel slabs are locked out of dispatch.
       if ((s as { cancel_requested_at?: string | null }).cancel_requested_at) {
@@ -1005,7 +1014,8 @@ export async function editDispatchSlabsAction(formData: FormData) {
     await admin.from("dispatch_logs").insert(newLogs);
     await admin
       .from("slab_requirements")
-      .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
+      // Unpark — a slab added from carving/dispatch storage leaves storage.
+      .update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now })
       .in("id", addIds);
     await admin
       .from("carving_items")

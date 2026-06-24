@@ -14,15 +14,20 @@ import {
   removeSlabsFromDispatchAction,
   cancelDispatchAction,
   addSlabsToDispatchAction,
+  fetchTempleStorageSlabsAction,
 } from "../../actions";
-import { dash, cftOf, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+import { dash, type DispatchGroupRow } from "@/lib/dispatch-grouping";
 
 export type AvailableSlab = {
   id: string;
   label: string | null;
-  length_ft: number;
-  width_ft: number;
-  thickness_ft: number;
+  /** Pre-formatted "L×W×T in". */
+  dimensions: string;
+  cft: number;
+  /** "main" or a vendor-shed station id (Mig 160). Undefined for storage slabs. */
+  station?: string;
+  /** Set when the slab was pulled in from storage via a toggle. */
+  storageSource?: "carving" | "dispatch";
 };
 
 // Daksh: Category 2 is shown BEFORE Category 1 across the challan + invoice.
@@ -38,6 +43,8 @@ export function CheckGrid({
   challanLabel,
   available,
   temple,
+  vendorSheds = [],
+  canUseStorage = false,
   initialWeightMode = "slab",
   initialLoadTonnes = 0,
 }: {
@@ -46,6 +53,10 @@ export function CheckGrid({
   challanLabel: string;
   available: AvailableSlab[];
   temple: string;
+  /** Mig 160 — vendor sheds for the "All dispatch" station filter. */
+  vendorSheds?: { id: string; name: string }[];
+  /** Whether the role can pull carving/dispatch storage slabs into the picker. */
+  canUseStorage?: boolean;
   /** Mig 163 — saved weight mode + whole-truck weight (for undo→re-check). */
   initialWeightMode?: "slab" | "truck";
   initialLoadTonnes?: number;
@@ -54,11 +65,59 @@ export function CheckGrid({
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [addQuery, setAddQuery] = useState("");
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
-  const filteredAvail = available.filter((s) => {
+  // Station filter (Mig 160) — main only by default; "All dispatch" includes sheds.
+  const [allDispatch, setAllDispatch] = useState(false);
+  const shedName = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const v of vendorSheds) m[v.id] = v.name;
+    return m;
+  }, [vendorSheds]);
+  // Storage inclusion (Mig 125 follow-on) — lazily loaded the first time a
+  // toggle is flipped on, then merged into the picker.
+  const [inclCarving, setInclCarving] = useState(false);
+  const [inclDispatch, setInclDispatch] = useState(false);
+  const [storage, setStorage] = useState<{ carving: AvailableSlab[]; dispatch: AvailableSlab[] }>({ carving: [], dispatch: [] });
+  const [storageLoaded, setStorageLoaded] = useState(false);
+  const [loadingStorage, setLoadingStorage] = useState(false);
+  async function ensureStorage() {
+    if (storageLoaded || loadingStorage) return;
+    setLoadingStorage(true);
+    try {
+      const res = await fetchTempleStorageSlabsAction(temple);
+      const map = (s: { id: string; label: string | null; dimensions: string; cft: number }, src: "carving" | "dispatch"): AvailableSlab =>
+        ({ id: s.id, label: s.label, dimensions: s.dimensions, cft: s.cft, storageSource: src });
+      setStorage({
+        carving: res.carving.map((s) => map(s, "carving")),
+        dispatch: res.dispatch.map((s) => map(s, "dispatch")),
+      });
+      setStorageLoaded(true);
+    } catch {
+      /* leave empty — user can retry the toggle */
+    } finally {
+      setLoadingStorage(false);
+    }
+  }
+
+  // Base ready slabs, station-filtered, plus any toggled-in storage; then search.
+  const mergedAvail = useMemo(() => {
+    const base = allDispatch ? available : available.filter((s) => (s.station ?? "main") === "main");
+    return [
+      ...base,
+      ...(inclCarving ? storage.carving : []),
+      ...(inclDispatch ? storage.dispatch : []),
+    ];
+  }, [available, allDispatch, inclCarving, inclDispatch, storage]);
+  const filteredAvail = mergedAvail.filter((s) => {
     const q = addQuery.trim().toLowerCase();
     if (!q) return true;
     return s.id.toLowerCase().includes(q) || (s.label ?? "").toLowerCase().includes(q);
   });
+  // Only currently-visible picks are submitted — a slab picked from a storage
+  // source/station that's since been toggled off is NOT silently added (matches
+  // the Make Dispatch board). Search-filtering does NOT drop picks, only the
+  // station/storage toggles do.
+  const visibleIds = useMemo(() => new Set(mergedAvail.map((s) => s.id)), [mergedAvail]);
+  const submitIds = pickedIds.filter((id) => visibleIds.has(id));
   const [unitByKey, setUnitByKey] = useState<Record<string, "cft" | "sft">>(() => {
     const m: Record<string, "cft" | "sft"> = {};
     for (const g of groups) m[g.key] = g.measure_unit;
@@ -346,55 +405,92 @@ export function CheckGrid({
           : totalKg > 0 && <span>⚖ {fmt(totalTonnes, 3)} T <span style={{ color: "var(--muted)", fontWeight: 600 }}>({totalKg.toLocaleString("en-IN")} kg)</span></span>}
       </div>
 
-      {/* Add more slabs from this temple's available (completed) pool */}
+      {/* Add more slabs — ready pool + (toggle) carving / dispatch storage, and
+          a station filter for Main vs vendor sheds. */}
       <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", marginBottom: 16, overflow: "hidden" }}>
         <button
           type="button"
           onClick={() => setShowAdd((s) => !s)}
           style={{ width: "100%", textAlign: "left", padding: "11px 14px", fontSize: 13.5, fontWeight: 800, background: "transparent", border: "none", cursor: "pointer", color: "var(--text)", display: "flex", justifyContent: "space-between", alignItems: "center" }}
         >
-          <span>➕ Add slab from {temple} · {available.length} available</span>
+          <span>➕ Add slab from {temple} · {mergedAvail.length} available</span>
           <span style={{ color: "var(--muted)" }}>{showAdd ? "▲" : "▼"}</span>
         </button>
         {showAdd && (
           <div style={{ padding: "0 14px 14px" }}>
-            {available.length === 0 ? (
-              <div className="muted" style={{ fontSize: 13, padding: "8px 0" }}>No completed slabs waiting for {temple}.</div>
-            ) : (
-              <form action={addSlabsToDispatchAction}>
-                <input type="hidden" name="id" value={dispatchId} />
-                <input type="hidden" name="slab_ids" value={JSON.stringify(pickedIds)} />
-                <input
-                  value={addQuery}
-                  onChange={(e) => setAddQuery(e.target.value)}
-                  placeholder="🔍 Search code / label…"
-                  style={{ width: "100%", maxWidth: 340, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", marginBottom: 10 }}
-                />
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+            {/* Source toggles — vendor-shed station + carving/dispatch storage. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "8px 0 10px", marginBottom: 8, borderBottom: "1px solid var(--border)" }}>
+              {vendorSheds.length > 0 && (
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "var(--gold-dark)" }}>
+                  <input type="checkbox" checked={allDispatch} onChange={(e) => setAllDispatch(e.target.checked)} />
+                  🔓 All dispatch (Main + sheds)
+                </label>
+              )}
+              {canUseStorage && (
+                <>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#6d28d9" }}>
+                    <input type="checkbox" checked={inclCarving} onChange={(e) => { setInclCarving(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                    📦 Carving storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.carving.length}</span>}
+                  </label>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#1d4ed8" }}>
+                    <input type="checkbox" checked={inclDispatch} onChange={(e) => { setInclDispatch(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                    🗄 Dispatch storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.dispatch.length}</span>}
+                  </label>
+                  {loadingStorage && <span className="muted" style={{ fontSize: 11.5 }}>Loading…</span>}
+                </>
+              )}
+            </div>
+
+            <form action={addSlabsToDispatchAction}>
+              <input type="hidden" name="id" value={dispatchId} />
+              <input type="hidden" name="slab_ids" value={JSON.stringify(submitIds)} />
+              <input
+                value={addQuery}
+                onChange={(e) => setAddQuery(e.target.value)}
+                placeholder="🔍 Search code / label…"
+                style={{ width: "100%", maxWidth: 340, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", marginBottom: 10 }}
+              />
+              {filteredAvail.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "8px 0" }}>
+                  No slabs to add{addQuery ? ` matching “${addQuery}”` : ` for ${temple}`}{!allDispatch && vendorSheds.length > 0 ? " — try “All dispatch”." : "."}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8, maxHeight: 300, overflowY: "auto" }}>
                   {filteredAvail.map((s) => {
                     const on = !!picked[s.id];
+                    const shed = s.station && s.station !== "main" ? shedName[s.station] : null;
                     return (
-                      <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", border: `1.5px solid ${on ? "#15803d" : "var(--border)"}`, borderRadius: 8, padding: "7px 9px", cursor: "pointer", background: on ? "rgba(22,101,52,0.06)" : "var(--bg)" }}>
+                      <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", border: `1.5px solid ${on ? "#15803d" : s.storageSource ? (s.storageSource === "carving" ? "#7c3aed" : "#2563eb") : "var(--border)"}`, borderRadius: 8, padding: "7px 9px", cursor: "pointer", background: on ? "rgba(22,101,52,0.06)" : s.storageSource ? (s.storageSource === "carving" ? "rgba(124,58,237,0.06)" : "rgba(37,99,235,0.06)") : "var(--bg)" }}>
                         <input type="checkbox" checked={on} onChange={(e) => setPicked((p) => ({ ...p, [s.id]: e.target.checked }))} />
                         <span style={{ minWidth: 0 }}>
-                          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{s.id}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{s.id}</span>
+                            {s.storageSource && (
+                              <span style={{ fontSize: 8.5, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 5px", letterSpacing: "0.02em" }}>
+                                {s.storageSource === "carving" ? "📦 CARVING STORE" : "🗄 STORE"}
+                              </span>
+                            )}
+                            {shed && (
+                              <span style={{ fontSize: 8.5, fontWeight: 800, color: "#fff", background: "var(--gold-dark)", borderRadius: 3, padding: "1px 5px" }}>🏬 {shed}</span>
+                            )}
+                          </span>
                           <span style={{ fontSize: 11.5, color: "var(--muted)", display: "block" }}>
-                            {dash(s.label)} · {s.length_ft}×{s.width_ft}×{s.thickness_ft} · {fmt(cftOf(s.length_ft, s.width_ft, s.thickness_ft))} cft
+                            {dash(s.label)} · {s.dimensions} · {fmt(s.cft)} cft
                           </span>
                         </span>
                       </label>
                     );
                   })}
                 </div>
-                <button
-                  type="submit"
-                  disabled={pickedIds.length === 0}
-                  style={{ marginTop: 12, fontSize: 13.5, padding: "10px 18px", fontWeight: 800, color: "#fff", background: pickedIds.length ? "#2563eb" : "var(--border)", border: "none", borderRadius: 10, cursor: pickedIds.length ? "pointer" : "default" }}
-                >
-                  ➕ Add {pickedIds.length || ""} selected slab{pickedIds.length !== 1 ? "s" : ""}
-                </button>
-              </form>
-            )}
+              )}
+              <button
+                type="submit"
+                disabled={submitIds.length === 0}
+                style={{ marginTop: 12, fontSize: 13.5, padding: "10px 18px", fontWeight: 800, color: "#fff", background: submitIds.length ? "#2563eb" : "var(--border)", border: "none", borderRadius: 10, cursor: submitIds.length ? "pointer" : "default" }}
+              >
+                ➕ Add {submitIds.length || ""} selected slab{submitIds.length !== 1 ? "s" : ""}
+              </button>
+            </form>
           </div>
         )}
       </div>
