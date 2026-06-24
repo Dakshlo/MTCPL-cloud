@@ -338,20 +338,27 @@ export async function renameTempleAction(formData: FormData) {
 }
 
 // ── Developer file transfer (Mac ↔ tablet) ───────────────────────────────
-// A private "dev_transfers" storage bucket. The dev uploads on one device and
-// downloads on another after logging in — no email/AirDrop needed. Developer
-// only. Upload is client-side via a short-lived signed URL (any file size).
-// (DEV_TRANSFER_BUCKET + ensureDevTransferBucket live in dev-transfer-shared.ts
-// because a "use server" module may only export async functions.)
+// A private "dev_transfers" storage bucket. Upload on one device and download on
+// another after logging in — no email/AirDrop needed. Developer + owner. Upload
+// is client-side via a short-lived signed URL (any file size, any type). Files
+// are stored under `${uploaderId}/…` so the UI can group them into per-person
+// baskets. (DEV_TRANSFER_BUCKET + ensureDevTransferBucket live in
+// dev-transfer-shared.ts — a "use server" module may only export async functions.)
+
+const TRANSFER_ROLES = ["developer", "owner"] as const;
 
 export async function createDevTransferUploadUrlAction(
   formData: FormData,
 ): Promise<{ ok: true; path: string; token: string } | { ok: false; error: string }> {
-  await requireAuth(["developer"]);
+  const { profile } = await requireAuth([...TRANSFER_ROLES]);
   const admin = createAdminSupabaseClient();
+  // `filename` is the file name OR a folder-relative path (folder upload).
   const filename = text(formData, "filename") || "file";
-  const safe = filename.replace(/[^\w.\- ]+/g, "_").trim().slice(0, 120) || "file";
-  const path = `${Date.now()}-${safe}`;
+  const safe = filename.replace(/[^\w.\- ]+/g, "_").trim().slice(0, 180) || "file";
+  // Stored under the uploader's id → the page groups files into baskets by
+  // who sent them. The rand keeps same-millisecond uploads from colliding.
+  const rand = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  const path = `${profile.id}/${Date.now()}-${rand}-${safe}`;
   await ensureDevTransferBucket(admin);
   const { data, error } = await admin.storage.from(DEV_TRANSFER_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return { ok: false, error: error?.message ?? "Could not start upload" };
@@ -359,7 +366,7 @@ export async function createDevTransferUploadUrlAction(
 }
 
 export async function deleteDevTransferAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer"]);
+  const { profile } = await requireAuth([...TRANSFER_ROLES]);
   const admin = createAdminSupabaseClient();
   const path = text(formData, "path");
   if (path) {
@@ -368,6 +375,24 @@ export async function deleteDevTransferAction(formData: FormData) {
   }
   revalidatePath("/settings");
   redirect("/settings?toast=File+removed");
+}
+
+// Remove every file in a basket (one person's uploads) in one go.
+export async function deleteAllDevTransferAction(formData: FormData) {
+  const { profile } = await requireAuth([...TRANSFER_ROLES]);
+  const admin = createAdminSupabaseClient();
+  let paths: string[] = [];
+  try {
+    paths = (JSON.parse(text(formData, "paths") || "[]") as string[]).filter(Boolean);
+  } catch {
+    paths = [];
+  }
+  if (paths.length > 0) {
+    await admin.storage.from(DEV_TRANSFER_BUCKET).remove(paths);
+    void logAudit(profile.id, "dev_transfer_deleted_all", "storage", "batch", { count: paths.length });
+  }
+  revalidatePath("/settings");
+  redirect(`/settings?toast=${encodeURIComponent(`Removed ${paths.length} file${paths.length !== 1 ? "s" : ""}`)}`);
 }
 
 export async function updateUserAction(formData: FormData) {

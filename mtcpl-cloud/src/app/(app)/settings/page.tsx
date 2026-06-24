@@ -1,9 +1,11 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction } from "./actions";
-import { DEV_TRANSFER_BUCKET, ensureDevTransferBucket } from "./dev-transfer-shared";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction, deleteAllDevTransferAction } from "./actions";
+import { ensureDevTransferBucket } from "./dev-transfer-shared";
+import { listDevTransferBaskets, type DevBasket } from "./dev-transfer-list";
 import { TempleRenameForm } from "./temple-rename-form";
 import { DevFileTransfer } from "./dev-file-transfer";
+import { DevTransferRemoveAll } from "./dev-transfer-remove-all";
 import {
   takeSystemDownAction,
   bringSystemUpAction,
@@ -425,22 +427,19 @@ export default async function SettingsPage() {
     truckList = (trucks ?? []) as Array<{ id: string; name: string; is_active: boolean; driver_name?: string | null }>;
   }
 
-  // Developer file transfer — the private dev_transfers bucket's files, with
-  // short-lived signed download URLs. Developer only.
-  let devFiles: Array<{ name: string; size: number; createdAt: string | null; url: string | null }> = [];
-  if (currentUser.role === "developer") {
+  // File transfer — the private dev_transfers bucket, grouped into per-uploader
+  // baskets (each file a fresh 1-hour signed download URL). Developer + owner.
+  const canTransfer = currentUser.role === "developer" || currentUser.role === "owner";
+  let transferBaskets: DevBasket[] = [];
+  let transferFileCount = 0;
+  if (canTransfer) {
     await ensureDevTransferBucket(admin);
-    const { data: list } = await admin.storage
-      .from(DEV_TRANSFER_BUCKET)
-      .list("", { limit: 200, sortBy: { column: "created_at", order: "desc" } });
-    for (const f of (list ?? []) as Array<{ name: string; created_at?: string | null; metadata?: { size?: number } | null }>) {
-      if (f.name === ".emptyFolderPlaceholder") continue;
-      // `download` → Content-Disposition: attachment with the clean filename.
-      const { data: signed } = await admin.storage
-        .from(DEV_TRANSFER_BUCKET)
-        .createSignedUrl(f.name, 3600, { download: f.name.replace(/^\d+-/, "") });
-      devFiles.push({ name: f.name, size: f.metadata?.size ?? 0, createdAt: f.created_at ?? null, url: signed?.signedUrl ?? null });
+    const nameById = new Map<string, string>();
+    for (const u of (users ?? []) as Array<{ id: string; full_name: string | null }>) {
+      if (u.full_name) nameById.set(u.id, u.full_name);
     }
+    transferBaskets = await listDevTransferBaskets(admin, (id) => nameById.get(id));
+    transferFileCount = transferBaskets.reduce((a, b) => a + b.files.length, 0);
   }
 
   return (
@@ -1665,34 +1664,48 @@ export default async function SettingsPage() {
 
       {/* File transfer — DEVELOPER ONLY. Upload on one device, download on
           another after logging in (Mac ↔ tablet, no email/AirDrop). */}
-      {currentUser.role === "developer" && (
-        <PeekSection icon="📁" title="File Transfer" count={devFiles.length} modalMaxWidth={640}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {canTransfer && (
+        <PeekSection icon="📁" title="File Transfer" count={transferFileCount} subtitle="Send files between your devices — upload here, download after logging in elsewhere." modalMaxWidth={700}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <DevFileTransfer />
-            <div className="settings-card">
-              <h3 className="settings-card-title">Files ({devFiles.length})</h3>
-              {devFiles.length === 0 ? (
-                <div className="muted" style={{ fontSize: 13, padding: "6px 0" }}>No files yet — upload one above.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {devFiles.map((f) => (
-                    <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 16 }}>📄</span>
-                      <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: 13 }} title={f.name}>{f.name.replace(/^\d+-/, "")}</span>
-                      <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>{(f.size / 1024 / 1024).toFixed(2)} MB</span>
-                      {f.url && (
-                        <a href={f.url} download style={{ fontSize: 12, fontWeight: 700, color: "#15803d", textDecoration: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "4px 10px", whiteSpace: "nowrap" }}>↓ Download</a>
-                      )}
-                      <form action={deleteDevTransferAction}>
-                        <input type="hidden" name="path" value={f.name} />
-                        <button type="submit" title="Delete" style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
-                      </form>
+
+            {transferBaskets.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13, textAlign: "center", padding: "18px 0", border: "1px dashed var(--border)", borderRadius: 10 }}>
+                No files yet — upload above.
+              </div>
+            ) : (
+              transferBaskets.map((basket) => (
+                <div key={basket.uploaderId ?? "legacy"} className="settings-card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <span style={{ fontSize: 16 }}>🧺</span>
+                      <span style={{ fontWeight: 800, fontSize: 14.5 }}>{basket.uploaderName}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, fontFamily: "ui-monospace, monospace", background: "var(--gold-subtle)", color: "var(--gold-dark)", border: "1px solid var(--gold-border)", borderRadius: 999, padding: "1px 8px" }}>{basket.files.length}</span>
+                      <span className="muted" style={{ fontSize: 11.5, fontWeight: 600 }}>{(basket.totalSize / 1024 / 1024).toFixed(2)} MB</span>
                     </div>
-                  ))}
+                    <DevTransferRemoveAll paths={basket.files.map((f) => f.path)} label={basket.uploaderName} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {basket.files.map((f) => (
+                      <div key={f.path} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 15 }}>📄</span>
+                        <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: 13 }} title={f.name}>{f.name}</span>
+                        <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>{(f.size / 1024 / 1024).toFixed(2)} MB</span>
+                        {f.url && (
+                          <a href={f.url} download style={{ fontSize: 12, fontWeight: 700, color: "#15803d", textDecoration: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "4px 10px", whiteSpace: "nowrap" }}>↓ Download</a>
+                        )}
+                        <form action={deleteDevTransferAction}>
+                          <input type="hidden" name="path" value={f.path} />
+                          <button type="submit" title="Delete" style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
+                        </form>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              )}
-              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Download links refresh each time you open this page. Delete files when you&apos;re done.</div>
-            </div>
+              ))
+            )}
+
+            <div className="muted" style={{ fontSize: 11 }}>Download links refresh each time you open this page. Remove files when you&apos;re done — they count toward storage.</div>
           </div>
         </PeekSection>
       )}
