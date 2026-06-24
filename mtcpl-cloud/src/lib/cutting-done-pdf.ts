@@ -42,6 +42,11 @@ export type DoneBlockSection = {
      *  Required Sizes. */
     label?: string | null;
     description?: string | null;
+    /** Category 1 = component_section, Category 2 = component_element.
+     *  Shown on the slab sub-line as "Cat <element> / <section>" (Cat 2
+     *  before Cat 1, per the challan/invoice convention). */
+    section?: string | null;
+    element?: string | null;
   }>;
 };
 
@@ -314,9 +319,15 @@ export async function generateCuttingDonePdf(
       block.slabs.forEach((s, i) => {
         const hasLabel = !!(s.label && s.label.trim());
         const hasDesc = !!(s.description && s.description.trim());
+        // Category 2 / Category 1 (element / section), blanks dropped.
+        const cat = [s.element, s.section]
+          .map((x) => (x ?? "").trim())
+          .filter(Boolean)
+          .join(" / ");
+        const hasCat = !!cat;
         // Total row height = 13 (main line) + 10 (sub line, only
-        // when there's a label or description) + 2 (gap).
-        const hasSub = hasLabel || hasDesc;
+        // when there's a label, description or category) + 2 (gap).
+        const hasSub = hasLabel || hasDesc || hasCat;
         const rowHeight = 13 + (hasSub ? 10 : 0) + 2;
         ensureSpace(rowHeight + 2);
 
@@ -375,6 +386,9 @@ export async function generateCuttingDonePdf(
           }
           if (hasDesc) {
             parts.push({ text: `“${s.description!.trim()}”`, font: fontReg, color: COLOR_NOTE });
+          }
+          if (hasCat) {
+            parts.push({ text: `[Cat ${cat}]`, font: fontReg, color: COLOR_ACCENT });
           }
           // Draw each part inline, starting at COL_ID. fontReg approx
           // 0.5em per char at size 8.5 — track the cursor manually.

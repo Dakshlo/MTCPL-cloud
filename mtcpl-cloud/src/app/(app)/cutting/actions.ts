@@ -1356,7 +1356,14 @@ export async function approveCutAction(
       syncSessionStatus(block.cut_session_id),
     ]);
 
-    await refreshPaths();
+    // Cutting-approved WhatsApp (operator + block + slabs + codes + location,
+    // PDF attached). Never throws; dormant unless MSG91_WA_CUTTING_TEMPLATE is
+    // set. Dynamic import keeps pdf-lib off the hot path for other actions.
+    const { sendCuttingApprovedWhatsApp } = await import("@/lib/wa-cutting-alert");
+    await Promise.all([
+      refreshPaths(),
+      sendCuttingApprovedWhatsApp(sessionBlockId, profile.id),
+    ]);
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

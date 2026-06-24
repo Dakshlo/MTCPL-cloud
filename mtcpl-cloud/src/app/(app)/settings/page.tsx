@@ -19,6 +19,8 @@ import { MaintenanceCollapsible } from "./maintenance-collapsible";
 import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 import { WaRecipientsEditor } from "./wa-recipients-editor";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
+import { WaCuttingEditor } from "./wa-cutting-editor";
+import { getCuttingAlertRecipients } from "@/lib/wa-cutting-alert";
 import { WaVendorCcEditor } from "./wa-vendor-cc-editor";
 import { getVendorCcSetting } from "@/lib/wa-vendor-cc";
 import { WaAlertsEditor } from "./wa-alerts-editor";
@@ -154,6 +156,10 @@ export default async function SettingsPage() {
   // Daily WhatsApp report recipients (owner/developer manage these below).
   const canManageWaReport = currentUser.role === "owner" || currentUser.role === "developer";
   const waReportRecipients = canManageWaReport ? await getReportRecipientNumbers() : [];
+
+  const canManageWaCutting = currentUser.role === "owner" || currentUser.role === "developer";
+  const waCuttingRecipients = canManageWaCutting ? await getCuttingAlertRecipients() : [];
+  const waCuttingConfigured = !!process.env.MSG91_WA_CUTTING_TEMPLATE;
 
   // Vendor-message carbon-copy (developer only).
   const canManageVendorCc = currentUser.role === "developer";
@@ -458,7 +464,7 @@ export default async function SettingsPage() {
           page stays uncluttered. Each group is gated by its own permission
           (daily report = owner/developer; the rest = developer). Everything
           lives in app_settings; no redeploy needed. */}
-      {(canManageWaReport || canManageVendorCc || canManageWaAlerts) && (
+      {(canManageWaReport || canManageVendorCc || canManageWaAlerts || canManageWaCutting) && (
         <PeekSection icon="💬" title="WhatsApp" modalMaxWidth={560}>
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             {canManageWaReport && (
@@ -483,6 +489,14 @@ export default async function SettingsPage() {
                   🔔 Operational alerts
                 </div>
                 <WaAlertsEditor slabTransfer={slabTransferAlert} backlog={carvingBacklog} />
+              </div>
+            )}
+            {canManageWaCutting && (
+              <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, margin: "0 0 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  ✂️ Cutting-approved alert
+                </div>
+                <WaCuttingEditor initial={waCuttingRecipients} configured={waCuttingConfigured} />
               </div>
             )}
           </div>

@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
         ? admin
             .from("slab_requirements")
             .select(
-              "id, temple, length_ft, width_ft, thickness_ft, label, description, source_block_id, status",
+              "id, temple, length_ft, width_ft, thickness_ft, label, description, component_section, component_element, source_block_id, status",
             )
             .in("source_block_id", blockIds)
             .in("status", [
@@ -198,6 +198,8 @@ export async function GET(req: NextRequest) {
       thickness_ft: number;
       label: string | null;
       description: string | null;
+      section: string | null;
+      element: string | null;
     };
     const slabsByBlock = new Map<string, SlabRow[]>();
     const slabById = new Map<string, SlabRow>();
@@ -209,6 +211,8 @@ export async function GET(req: NextRequest) {
       thickness_ft: number | string | null;
       label: string | null;
       description: string | null;
+      component_section: string | null;
+      component_element: string | null;
       source_block_id: string | null;
     }>) {
       const row: SlabRow = {
@@ -219,6 +223,8 @@ export async function GET(req: NextRequest) {
         thickness_ft: Number(raw.thickness_ft) || 0,
         label: raw.label,
         description: raw.description,
+        section: raw.component_section,
+        element: raw.component_element,
       };
       slabById.set(raw.id, row);
       if (raw.source_block_id) {
@@ -297,6 +303,8 @@ export async function GET(req: NextRequest) {
           dims: `${s.length_ft}×${s.width_ft}×${s.thickness_ft}″`,
           label: s.label,
           description: s.description,
+          section: s.section,
+          element: s.element,
         })),
       };
     });
