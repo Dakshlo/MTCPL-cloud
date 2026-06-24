@@ -57,6 +57,44 @@ function proofExt(mime: string): string {
   return mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
 }
 
+// Return provisional/recalled-dispatch slabs to their pre-dispatch home.
+//
+// We keep a slab's `is_parked` flag through the whole dispatch (a dispatched
+// slab is invisible to every storage view, which all filter on status), so on
+// revert the flag still tells us it came from STORAGE:
+//   • parked + NO carving_item  → carving storage (cut_done, direct-dispatch) → cut_done
+//   • parked + HAS carving_item → dispatch storage (completed)                 → completed
+//   • not parked                → normal ready                                 → completed
+// is_parked is left untouched, so storage slabs reappear in their own storage.
+async function returnSlabsFromDispatch(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  logRows: Array<{ slab_requirement_id: string | null; carving_item_id: string | null }>,
+  actorId: string,
+  now: string,
+): Promise<void> {
+  const slabIds = logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[];
+  if (slabIds.length === 0) return;
+  const hasCarving = new Map<string, boolean>();
+  for (const l of logRows) {
+    if (l.slab_requirement_id) hasCarving.set(l.slab_requirement_id, !!l.carving_item_id);
+  }
+  const { data: rows } = await admin.from("slab_requirements").select("id, is_parked").in("id", slabIds);
+  const toCutDone: string[] = [];
+  const toCompleted: string[] = [];
+  for (const r of (rows ?? []) as Array<{ id: string; is_parked?: boolean }>) {
+    if (r.is_parked === true && !hasCarving.get(r.id)) toCutDone.push(r.id);
+    else toCompleted.push(r.id);
+  }
+  // Any slab the read missed (shouldn't happen) still gets reverted to completed.
+  for (const id of slabIds) if (!toCutDone.includes(id) && !toCompleted.includes(id)) toCompleted.push(id);
+  if (toCutDone.length > 0) {
+    await admin.from("slab_requirements").update({ status: "cut_done", updated_by: actorId, updated_at: now }).in("id", toCutDone);
+  }
+  if (toCompleted.length > 0) {
+    await admin.from("slab_requirements").update({ status: "completed", updated_by: actorId, updated_at: now }).in("id", toCompleted);
+  }
+}
+
 // ─── createDispatchAction ────────────────────────────────────────────────
 
 export async function createDispatchAction(formData: FormData) {
@@ -208,8 +246,9 @@ export async function createDispatchAction(formData: FormData) {
     .in("slab_requirement_id", slabIds);
   await admin
     .from("slab_requirements")
-    // Unpark too — a slab dispatched from carving/dispatch storage leaves storage.
-    .update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now })
+    // Keep is_parked as-is — a storage slab stays "parked" (invisible to storage
+    // views while dispatched) so a later cancel returns it to its own storage.
+    .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
     .in("id", slabIds);
 
   // ── Audit + notify. Event name is now "dispatch_created_provisional"
@@ -388,14 +427,9 @@ export async function undoDispatchAction(formData: FormData) {
   const slabIds = (logs ?? []).map((l) => l.slab_requirement_id).filter(Boolean) as string[];
   const carvingIds = (logs ?? []).map((l) => l.carving_item_id).filter(Boolean) as string[];
 
-  // Revert statuses first.
+  // Revert statuses first. Storage slabs go back to their storage.
   const now = new Date().toISOString();
-  if (slabIds.length > 0) {
-    await admin
-      .from("slab_requirements")
-      .update({ status: "completed", updated_by: profile.id, updated_at: now })
-      .in("id", slabIds);
-  }
+  await returnSlabsFromDispatch(admin, logs ?? [], profile.id, now);
   if (carvingIds.length > 0) {
     await admin
       .from("carving_items")
@@ -675,15 +709,13 @@ export async function removeSlabsFromDispatchAction(formData: FormData) {
   const now = new Date().toISOString();
   const { data: logs } = await admin
     .from("dispatch_logs")
-    .select("carving_item_id")
+    .select("slab_requirement_id, carving_item_id")
     .eq("dispatch_id", dispatchId)
     .in("slab_requirement_id", slabIds);
   const carvingIds = (logs ?? []).map((l) => l.carving_item_id).filter(Boolean) as string[];
 
-  await admin
-    .from("slab_requirements")
-    .update({ status: "completed", updated_by: profile.id, updated_at: now })
-    .in("id", slabIds);
+  // Storage slabs return to their storage; others to Make Dispatch.
+  await returnSlabsFromDispatch(admin, logs ?? [], profile.id, now);
   if (carvingIds.length > 0) {
     await admin.from("carving_items").update({ status: "completed" }).in("id", carvingIds);
   }
@@ -782,8 +814,9 @@ export async function addSlabsToDispatchAction(formData: FormData) {
       dispatched_by: profile.id,
     })),
   );
-  // Unpark too — a slab added from carving/dispatch storage leaves storage.
-  await admin.from("slab_requirements").update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now }).in("id", toAdd);
+  // Keep is_parked — a storage slab stays parked while dispatched so a later
+  // cancel/remove returns it to its own storage (see returnSlabsFromDispatch).
+  await admin.from("slab_requirements").update({ status: "dispatched", updated_by: profile.id, updated_at: now }).in("id", toAdd);
   const ciIds = toAdd.map((s) => ciBySlab.get(s)).filter(Boolean) as string[];
   if (ciIds.length > 0) {
     await admin.from("carving_items").update({ status: "dispatched" }).in("id", ciIds);
@@ -829,12 +862,8 @@ export async function cancelDispatchAction(formData: FormData) {
   const carvingIds = (logs ?? []).map((l) => l.carving_item_id).filter(Boolean) as string[];
 
   const now = new Date().toISOString();
-  if (slabIds.length > 0) {
-    await admin
-      .from("slab_requirements")
-      .update({ status: "completed", updated_by: profile.id, updated_at: now })
-      .in("id", slabIds);
-  }
+  // Storage slabs return to their storage; others to Make Dispatch.
+  await returnSlabsFromDispatch(admin, logs ?? [], profile.id, now);
   if (carvingIds.length > 0) {
     await admin
       .from("carving_items")
@@ -969,7 +998,7 @@ export async function editDispatchSlabsAction(formData: FormData) {
   if (removeIds.length > 0) {
     const { data: removedLogs } = await admin
       .from("dispatch_logs")
-      .select("carving_item_id")
+      .select("slab_requirement_id, carving_item_id")
       .eq("dispatch_id", dispatchId)
       .in("slab_requirement_id", removeIds);
     const removedCarvingIds = (removedLogs ?? [])
@@ -981,10 +1010,8 @@ export async function editDispatchSlabsAction(formData: FormData) {
       .delete()
       .eq("dispatch_id", dispatchId)
       .in("slab_requirement_id", removeIds);
-    await admin
-      .from("slab_requirements")
-      .update({ status: "completed", updated_by: profile.id, updated_at: now })
-      .in("id", removeIds);
+    // Storage slabs return to their storage; others to Make Dispatch.
+    await returnSlabsFromDispatch(admin, removedLogs ?? [], profile.id, now);
     if (removedCarvingIds.length > 0) {
       await admin
         .from("carving_items")
@@ -1014,8 +1041,9 @@ export async function editDispatchSlabsAction(formData: FormData) {
     await admin.from("dispatch_logs").insert(newLogs);
     await admin
       .from("slab_requirements")
-      // Unpark — a slab added from carving/dispatch storage leaves storage.
-      .update({ status: "dispatched", is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: now })
+      // Keep is_parked — storage slabs stay parked while dispatched so a later
+      // remove/cancel returns them to storage (see returnSlabsFromDispatch).
+      .update({ status: "dispatched", updated_by: profile.id, updated_at: now })
       .in("id", addIds);
     await admin
       .from("carving_items")

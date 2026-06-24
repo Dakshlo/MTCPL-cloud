@@ -56,6 +56,9 @@ export type SlabResult = {
      *  the slab is mid-flight (in transit, on a machine, etc) and
      *  the cutter never set it. */
     stock_location: string | null;
+    /** Mig 125 — parked in storage. cut_done+parked = carving storage;
+     *  completed+parked = dispatch storage. */
+    is_parked: boolean;
     /** Mig 123 / 128 — component hierarchy: Category 1 = component_section,
      *  Category 2 = component_element, Additional = additional_description.
      *  Nullable; older slabs predate these and come back null. */
@@ -292,7 +295,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
         const { data } = await admin
           .from("slab_requirements")
           .select(
-            "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, component_section, component_element, additional_description",
+            "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, is_parked, component_section, component_element, additional_description",
           )
           .eq("id", only.id)
           .maybeSingle();
@@ -335,7 +338,7 @@ export async function lookupId(query: string): Promise<LookupResult> {
   const { data: slabRows } = await admin
     .from("slab_requirements")
     .select(
-      "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, component_section, component_element, additional_description",
+      "id, label, description, temple, stone, length_ft, width_ft, thickness_ft, source_block_id, status, priority, deadline, priority_note, created_at, updated_at, stock_location, is_parked, component_section, component_element, additional_description",
     )
     .in("id", variants)
     .limit(200);
@@ -468,6 +471,7 @@ async function loadSlabContext(
     created_at: string;
     updated_at: string;
     stock_location: string | null;
+    is_parked?: boolean;
     // Mig 123 / 128 — may be absent from a caller's SELECT, defensive cast.
     component_section?: string | null;
     component_element?: string | null;
@@ -643,11 +647,18 @@ async function loadSlabContext(
   // Compose a single "where is it now per system" line. Most
   // specific signal wins (dispatch > carving > stock_location >
   // yard > unknown). This is what production/vendor scan first.
+  const isParked = slab.is_parked === true;
   let currentLocation = "Unknown — no location signal in the system";
   if (dispatch?.delivered_at) {
     currentLocation = `Delivered to ${dispatch.receiver_name ?? dispatch.temple ?? "—"}`;
   } else if (dispatch?.dispatched_at) {
     currentLocation = `On vehicle ${dispatch.vehicle_no ?? "—"} (dispatched ${new Date(dispatch.dispatched_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })})`;
+  } else if (isParked && slab.status === "cut_done") {
+    // Mig 125 — parked cut-done = carving storage (ready for direct dispatch).
+    currentLocation = `📦 In CARVING storage${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
+  } else if (isParked && slab.status === "completed") {
+    // Mig 125 — parked completed = dispatch storage.
+    currentLocation = `🗄 In DISPATCH storage${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
   } else if (carving?.status === "carving_in_progress") {
     currentLocation = `On a CNC at ${carving.vendor_name}`;
   } else if (carving?.status === "completed") {
@@ -683,6 +694,7 @@ async function loadSlabContext(
       created_at: slab.created_at,
       updated_at: slab.updated_at,
       stock_location: slab.stock_location ?? null,
+      is_parked: slab.is_parked === true,
       component_section: slab.component_section ?? null,
       component_element: slab.component_element ?? null,
       additional_description: slab.additional_description ?? null,
