@@ -50,6 +50,11 @@ export async function createMarbleTruckAction(formData: FormData) {
   if (!Number.isFinite(numBlocks) || numBlocks < 1 || numBlocks > 50 || !Number.isInteger(numBlocks)) {
     redirect(`/blocks?marble_error=${encodeURIComponent("Number of blocks must be 1–50")}`);
   }
+  // Logistics are mandatory for fresh stock; "Existing stock" is the escape hatch.
+  const existingStock = String(formData.get("existing_stock") || "") === "1";
+  if (!existingStock && !(truckNo && vendorName && billNo)) {
+    redirect(`/blocks?marble_error=${encodeURIComponent("Truck No., Vendor and Bill No. are required. Turn on “Existing stock” to add without them.")}`);
+  }
 
   // Verify the stone exists AND is marble-category.
   const { data: stoneRow } = await supabase

@@ -42,6 +42,13 @@ export async function addBlockAction(formData: FormData) {
   const truck_no = textValue(formData, "truck_no") || null;
   const vendor_name = textValue(formData, "vendor_name") || null;
   const bill_no = textValue(formData, "bill_no") || null;
+  const existingStock = textValue(formData, "existing_stock") === "1";
+
+  // Logistics are mandatory for fresh stock; the "Existing stock" toggle on the
+  // form is the explicit escape hatch for old blocks with no bill/truck record.
+  if (!existingStock && !(truck_no && vendor_name && bill_no)) {
+    redirectWithToast("/blocks", "Truck No., Vendor and Bill No. are required. Turn on “Existing stock” to add without them.");
+  }
 
   const quality = textValue(formData, "quality") || null;
 
@@ -53,60 +60,85 @@ export async function addBlockAction(formData: FormData) {
     );
   }
 
-  const payload = {
+  // Multi-block: the form posts blocks_json = [{l,w,h}, …]. Fall back to the
+  // legacy single length_in/width_in/height_in fields if it's absent.
+  type Dim = { l: number; w: number; h: number };
+  let dims: Dim[] = [];
+  const blocksJson = textValue(formData, "blocks_json");
+  if (blocksJson) {
+    // New multi-block form. Require at least one fully-dimensioned block — do
+    // NOT silently fall back to the legacy single path (that would insert a
+    // 0×0×0 junk block if every row was left blank).
+    try {
+      const arr = JSON.parse(blocksJson) as Array<{ l?: unknown; w?: unknown; h?: unknown }>;
+      dims = arr
+        .map((d) => ({ l: Number(d.l) || 0, w: Number(d.w) || 0, h: Number(d.h) || 0 }))
+        .filter((d) => d.l > 0 && d.w > 0 && d.h > 0);
+    } catch {
+      dims = [];
+    }
+    if (dims.length === 0) {
+      redirectWithToast("/blocks", "Enter dimensions for at least one block.");
+    }
+  } else {
+    // Legacy single-block fallback (older clients / other callers).
+    dims = [{ l: numValue(formData, "length_in", 0), w: numValue(formData, "width_in", 0), h: numValue(formData, "height_in", 0) }];
+  }
+
+  const payloadBase = {
     stone: textValue(formData, "stone") || "PinkStone",
     yard: yardRaw,
     category: "Fresh" as const,
     quality,
-    length_ft: numValue(formData, "length_in", 0),
-    width_ft: numValue(formData, "width_in", 0),
-    height_ft: numValue(formData, "height_in", 0),
     status: "available" as const,
     ...(truck_no ? { truck_no } : {}),
     ...(vendor_name ? { vendor_name } : {}),
     ...(bill_no ? { bill_no } : {}),
     created_by: profile.id,
-    updated_by: profile.id
+    updated_by: profile.id,
   };
 
-  let nextId = requestedId || generateNextCode(existingIds);
-  let attempt = 0;
-  let lastError: string | null = null;
+  const idPool = [...existingIds];
+  const created: string[] = [];
 
-  while (attempt < 5) {
-    if (existingIds.includes(nextId)) {
-      nextId = generateNextCode([...existingIds, nextId]);
+  for (let i = 0; i < dims.length; i++) {
+    // First block honours the operator's typed starting code; the rest are
+    // auto-generated so every block gets a distinct id.
+    let nextId = i === 0 && requestedId ? requestedId : generateNextCode(idPool);
+    let inserted = false;
+
+    for (let attempt = 0; attempt < 6 && !inserted; attempt++) {
+      if (idPool.includes(nextId)) nextId = generateNextCode(idPool);
+      const { error } = await supabase
+        .from("blocks")
+        .insert({ ...payloadBase, id: nextId, length_ft: dims[i].l, width_ft: dims[i].w, height_ft: dims[i].h });
+      if (!error) {
+        inserted = true;
+        idPool.push(nextId);
+        created.push(nextId);
+      } else if (error.code === "23505") {
+        idPool.push(nextId);
+        nextId = generateNextCode(idPool);
+      } else {
+        console.error("[addBlockAction] insert failed:", { code: error.code, message: error.message, details: error.details });
+        redirectWithToast("/blocks", `Could not add block: ${error.message}`);
+      }
     }
-
-    const { error } = await supabase.from("blocks").insert({ ...payload, id: nextId });
-
-    if (!error) {
-      await logAudit(profile.id, "create", "block", nextId, { stone: payload.stone, yard: payload.yard, status: payload.status });
-      await notify("blocks_added", `New block ${nextId} added (${payload.stone})`, {
-        message: `${yardLabel(payload.yard)} · ${payload.length_ft}" × ${payload.width_ft}" × ${payload.height_ft}"`,
-        entityType: "block",
-        entityId: nextId,
-        actorId: profile.id,
-      });
-      revalidatePath("/blocks");
-      revalidatePath("/dashboard");
-      redirect("/blocks?toast=Block+added+successfully");
+    if (!inserted) {
+      redirectWithToast("/blocks", created.length ? `Added ${created.length}, then hit a duplicate ID. Refresh and retry the rest.` : "Unable to generate a unique block ID. Please try again.");
     }
-
-    lastError = error.message;
-    // Duplicate-ID (unique-constraint): auto-retry with next generated code
-    if (error.code === "23505") {
-      existingIds.push(nextId);
-      nextId = generateNextCode(existingIds);
-      attempt++;
-      continue;
-    }
-    // Any other error: surface the real message to the user via toast
-    console.error("[addBlockAction] insert failed:", { code: error.code, message: error.message, details: error.details, payload });
-    redirectWithToast("/blocks", `Could not add block: ${error.message}`);
   }
 
-  redirectWithToast("/blocks", lastError || "Unable to generate a unique block ID. Please try again.");
+  await logAudit(profile.id, "create", "block", created[0], { stone: payloadBase.stone, yard: payloadBase.yard, count: created.length, ids: created });
+  await notify("blocks_added", created.length > 1 ? `${created.length} blocks added (${payloadBase.stone})` : `New block ${created[0]} added (${payloadBase.stone})`, {
+    message: `${yardLabel(payloadBase.yard)} · ${created.join(", ")}`,
+    entityType: "block",
+    entityId: created[0],
+    actorId: profile.id,
+  });
+  revalidatePath("/blocks");
+  revalidatePath("/dashboard");
+  redirect(`/blocks?toast=${encodeURIComponent(created.length > 1 ? `${created.length} blocks added` : "Block added successfully")}`);
 }
 
 export async function updateBlockAction(formData: FormData) {

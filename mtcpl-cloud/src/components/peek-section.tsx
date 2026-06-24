@@ -20,7 +20,7 @@
  * the rest of the settings page.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 export function PeekSection({
   title,
@@ -29,6 +29,7 @@ export function PeekSection({
   icon,
   children,
   modalMaxWidth = 880,
+  triggerStyle,
 }: {
   /** Card heading — also rendered as the modal h2. */
   title: string;
@@ -42,6 +43,8 @@ export function PeekSection({
   children: ReactNode;
   /** Max width for the modal dialog (px). Defaults to 880 for tables. */
   modalMaxWidth?: number;
+  /** Extra style merged into the collapsed card (e.g. `flex` for card rows). */
+  triggerStyle?: CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -81,6 +84,7 @@ export function PeekSection({
           gap: 12,
           padding: "16px 18px",
           transition: "background 0.12s, border-color 0.12s",
+          ...triggerStyle,
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "var(--surface-alt)";

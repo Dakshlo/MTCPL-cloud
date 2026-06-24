@@ -21,11 +21,9 @@ type SearchParams = Promise<{ cat?: string; marble_toast?: string; marble_error?
 export default async function BlocksPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "slab_entry", "block_entry"]);
   const { cat: catParam, marble_toast: marbleToast, marble_error: marbleError } = await searchParams;
-  // Default landing = Sandstone (the everyday tab). "All" and "Marble"
-  // need an explicit URL param. Users who want the combined view can
-  // either click "All" in the tab strip or hit /blocks?cat=all.
-  const activeCat: "all" | "sandstone" | "marble" =
-    catParam === "all" || catParam === "marble" ? catParam : "sandstone";
+  // Two tabs only — Sandstone (default) and Marble. The combined "All" view
+  // was removed (Daksh): operators always work one category at a time.
+  const activeCat: "sandstone" | "marble" = catParam === "marble" ? "marble" : "sandstone";
 
   const admin = createAdminSupabaseClient();
   const isEntryRole = (BLOCK_ENTRY_ROLES as readonly string[]).includes(profile.role);
@@ -98,16 +96,14 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       .eq("status", "consumed")
       .order("updated_at", { ascending: false })
       .limit(30),
-    // Block suppliers are saved as vendor_type = 'block_vendor' in prod.
-    // Carving vendors (CNC / Manual) don't belong in this dropdown —
-    // filter them out so operators don't accidentally pick a carving
-    // vendor as the block's supplier. Accept 'Outsource' too for
-    // compat with older rows if anyone added a vendor that way.
+    // Block suppliers ONLY (vendor_type = 'block_vendor'). Carving vendors
+    // (CNC / Outsource) are a different roster and must NOT appear here — the
+    // operator picks the stone supplier, never a carving workshop.
     admin
       .from("vendors")
       .select("name")
       .eq("is_active", true)
-      .in("vendor_type", ["block_vendor", "Outsource"])
+      .eq("vendor_type", "block_vendor")
       .order("name"),
     admin
       .from("stone_types")
@@ -334,8 +330,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       })),
     }));
 
-  const blockList =
-    activeCat === "sandstone" ? sandstoneBlocks : activeCat === "marble" ? marbleBlocks : allBlocks;
+  const blockList = activeCat === "marble" ? marbleBlocks : sandstoneBlocks;
   const totalBlocks = blockList.length;
 
   function fmtDate(iso: string | null) {
@@ -397,7 +392,6 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
           }}
         >
           {([
-            { key: "all", label: "All", count: allBlocks.length },
             { key: "sandstone", label: "Sandstone", count: sandstoneBlocks.length },
             { key: "marble", label: "🗿 Marble", count: marbleBlocks.length },
           ] as const).map((tab) => {
@@ -456,23 +450,6 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
         />
       ) : null}
 
-      {/* Marble Cutting Log stays near the top (active log the cutter
-          uses daily). Only on Marble / All tabs. Block Report moved to
-          the bottom — just above Block History — per Daksh. */}
-      {canViewReport && (activeCat === "marble" || activeCat === "all") && (
-        <div
-          style={{
-            margin: "28px 0 4px",
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            alignItems: "stretch",
-          }}
-        >
-          <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
-        </div>
-      )}
-
       {/* Search bar — same UX as the slab page. Click to expand a
           center-peek modal that searches across id, stone, yard,
           vendor, truck no, dimensions, status. Click outside / Esc
@@ -485,12 +462,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       <div className="section-heading">
         <div>
           <h2>
-            {totalBlocks} Blocks
-            {activeCat !== "all" && (
-              <span style={{ fontSize: 14, fontWeight: 500, color: "var(--muted)", marginLeft: 8 }}>
-                ({activeCat === "marble" ? "Marble" : "Sandstone"} only)
-              </span>
-            )}
+            {totalBlocks} {activeCat === "marble" ? "Marble" : "Sandstone"} Blocks
           </h2>
           <p>
             {isEntryRole
@@ -520,34 +492,30 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
         />
       )}
 
-      {/* Block Report — moved here (bottom, just above Block History)
-          per Daksh. Opens in a center-peek iframe over
-          /embed/blocks/report; the standalone /blocks/report route
-          still works for direct nav. */}
-      {canViewReport && (
-        <div style={{ marginTop: 24, display: "flex" }}>
-          <PeekIframe
-            url="/embed/blocks/report"
-            triggerIcon="📊"
-            triggerLabel="Block Report"
-            modalTitle="Block Report"
-            triggerStyle={{ flex: 1 }}
-          />
-        </div>
-      )}
+      {/* Bottom card row — Block Report + Block History side-by-side (2-up).
+          On the Marble tab the Marble Cutting Log joins them (3-up). */}
+      {(canViewReport || consumedList.length > 0) && (
+        <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
+          {canViewReport && (
+            <PeekIframe
+              url="/embed/blocks/report"
+              triggerIcon="📊"
+              triggerLabel="Block Report"
+              modalTitle="Block Report"
+              triggerStyle={{ flex: "1 1 280px" }}
+            />
+          )}
 
-      {/* Block Usage History — center-peek modal so the page stays
-          short. Same content as before, just hosted in the modal. */}
-      {consumedList.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <PeekSection
-            icon="📜"
-            title="Block History"
-            count={consumedList.length}
-            subtitle="Recently consumed blocks — click to view the full list."
-            modalMaxWidth={1100}
-          >
-            <div className="records-stack">
+          {consumedList.length > 0 && (
+            <PeekSection
+              icon="📜"
+              title="Block History"
+              count={consumedList.length}
+              subtitle="Recently consumed blocks — click to view the full list."
+              modalMaxWidth={1100}
+              triggerStyle={{ flex: "1 1 280px" }}
+            >
+              <div className="records-stack">
               {consumedList.map((blk) => {
                 const isMarbleBlock = stoneCategoryMap[blk.stone ?? ""] === "marble";
                 const cft =
@@ -580,8 +548,14 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
                   </div>
                 );
               })}
-            </div>
-          </PeekSection>
+              </div>
+            </PeekSection>
+          )}
+
+          {/* Marble Cutting Log — third card, marble tab only. */}
+          {canViewReport && activeCat === "marble" && (
+            <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
+          )}
         </div>
       )}
     </>

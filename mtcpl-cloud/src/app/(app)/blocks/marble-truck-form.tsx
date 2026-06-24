@@ -10,7 +10,7 @@
  * marble-only stone list.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { createMarbleTruckAction } from "./marble-actions";
 import { VendorSelect } from "./vendor-select";
 import { stoneDisplayName } from "@/lib/stone-utils";
@@ -18,6 +18,12 @@ import { FACILITIES, YARDS_BY_FACILITY, facilityLabel, yardLabel, type Facility 
 import { cftEquivFromTonnes } from "@/lib/stone-categories";
 
 type StoneType = { name: string; color_top: string };
+
+function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
+  const track: CSSProperties = { width: 42, height: 24, borderRadius: 999, background: on ? "var(--gold-dark)" : "var(--border)", position: "relative", transition: "background .15s", flex: "0 0 auto", cursor: "pointer" };
+  const knob: CSSProperties = { position: "absolute", top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" };
+  return <div role="switch" aria-checked={on} onClick={onClick} style={track}><span style={knob} /></div>;
+}
 
 export function MarbleTruckForm({
   marbleStones,
@@ -39,6 +45,8 @@ export function MarbleTruckForm({
   const [notes, setNotes] = useState("");
   const [totalTonnes, setTotalTonnes] = useState("");
   const [numBlocks, setNumBlocks] = useState("");
+  const [existingStock, setExistingStock] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const yardsForFacility = YARDS_BY_FACILITY[facility];
   function pickFacility(f: Facility) {
@@ -95,8 +103,23 @@ export function MarbleTruckForm({
     parseInt(numBlocks, 10) >= 1 &&
     parseInt(numBlocks, 10) <= 50;
 
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (!existingStock) {
+      const fd = new FormData(e.currentTarget);
+      const truck = String(fd.get("truck_no") || "").trim();
+      const vend = String(fd.get("vendor_name") || "").trim();
+      const bill = String(fd.get("bill_no") || "").trim();
+      if (!truck || !vend || !bill) {
+        e.preventDefault();
+        setFormError("Truck No., Vendor and Bill No. are required. Turn on “Existing stock” to add without them.");
+        return;
+      }
+    }
+    setFormError(null);
+  }
+
   return (
-    <form action={createMarbleTruckAction} className="add-panel">
+    <form action={createMarbleTruckAction} onSubmit={onSubmit} className="add-panel">
       <div className="add-panel-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
           <p className="add-panel-title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -132,8 +155,7 @@ export function MarbleTruckForm({
             </span>
           </p>
           <p className="add-panel-subtitle">
-            Log one truck = N blocks. Each block&apos;s tonnage = total ÷ N.
-            No dimensions needed — marble is cut manually per piece.
+            One truck = N blocks · each block&apos;s tonnage = total ÷ N.
           </p>
         </div>
       </div>
@@ -259,60 +281,45 @@ export function MarbleTruckForm({
         )}
       </div>
 
-      {/* Logistics Info — collapsed by default, same pattern as the
-          sandstone AddBlockForm. Optional metadata; doesn't need to be
-          visible for the fast path. */}
-      <details style={{ marginTop: 4 }}>
-        <summary
-          style={{
-            cursor: "pointer",
-            fontSize: 13,
-            color: "var(--muted)",
-            padding: "4px 0",
-            userSelect: "none",
-          }}
-        >
-          + Logistics Info (Truck No., Vendor, Bill No., Notes)
-        </summary>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <label className="stack" style={{ flex: "1 1 140px" }}>
-            <span>Truck No.</span>
-            <input
-              type="text"
-              name="truck_no"
-              value={truckNo}
-              onChange={(e) => setTruckNo(e.target.value)}
-
-            />
-          </label>
-
-          <div className="stack" style={{ flex: "2 1 180px" }}>
-            <span>Vendor / Supplier</span>
-            <VendorSelect name="vendor_name" vendors={vendors} />
-          </div>
-
-          <label className="stack" style={{ flex: "1 1 140px" }}>
-            <span>Bill No.</span>
-            <input
-              type="text"
-              name="bill_no"
-              value={billNo}
-              onChange={(e) => setBillNo(e.target.value)}
-
-            />
+      {/* Logistics — mandatory unless "Existing stock" is on */}
+      <input type="hidden" name="existing_stock" value={existingStock ? "1" : "0"} />
+      <div style={{ border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden", marginTop: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "9px 12px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>
+            🚚 Logistics {existingStock ? <span style={{ color: "var(--muted)", fontWeight: 600 }}>(optional)</span> : <span style={{ color: "#b45309", fontWeight: 700 }}>· required</span>}
+          </span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+            <Switch on={existingStock} onClick={() => { setExistingStock((v) => !v); setFormError(null); }} />
+            📦 Existing stock (no bill/truck)
           </label>
         </div>
-        <label className="stack" style={{ marginTop: 8 }}>
-          <span>Notes</span>
-          <input
-            type="text"
-            name="notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+        <div style={{ padding: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label className="stack" style={{ flex: "1 1 140px" }}>
+              <span>Truck No.{!existingStock && <em style={{ color: "#b45309", fontStyle: "normal" }}> *</em>}</span>
+              <input type="text" name="truck_no" value={truckNo} onChange={(e) => setTruckNo(e.target.value)} />
+            </label>
+            <div className="stack" style={{ flex: "2 1 180px" }}>
+              <span>Vendor / Supplier{!existingStock && <em style={{ color: "#b45309", fontStyle: "normal" }}> *</em>}</span>
+              <VendorSelect name="vendor_name" vendors={vendors} />
+            </div>
+            <label className="stack" style={{ flex: "1 1 140px" }}>
+              <span>Bill No.{!existingStock && <em style={{ color: "#b45309", fontStyle: "normal" }}> *</em>}</span>
+              <input type="text" name="bill_no" value={billNo} onChange={(e) => setBillNo(e.target.value)} />
+            </label>
+          </div>
+          <label className="stack" style={{ marginTop: 8 }}>
+            <span>Notes</span>
+            <input type="text" name="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
+        </div>
+      </div>
 
-          />
-        </label>
-      </details>
+      {formError && (
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", background: "rgba(220,38,38,0.07)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, padding: "8px 12px" }}>
+          ⚠ {formError}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8 }}>
         <button
