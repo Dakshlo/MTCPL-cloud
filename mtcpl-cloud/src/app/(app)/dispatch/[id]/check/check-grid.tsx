@@ -38,12 +38,17 @@ export function CheckGrid({
   challanLabel,
   available,
   temple,
+  initialWeightMode = "slab",
+  initialLoadTonnes = 0,
 }: {
   dispatchId: string;
   groups: DispatchGroupRow[];
   challanLabel: string;
   available: AvailableSlab[];
   temple: string;
+  /** Mig 163 — saved weight mode + whole-truck weight (for undo→re-check). */
+  initialWeightMode?: "slab" | "truck";
+  initialLoadTonnes?: number;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -66,6 +71,12 @@ export function CheckGrid({
     for (const g of groups) m[g.key] = g.weightTonnes > 0 ? String(Math.round(g.weightTonnes * 1000)) : "";
     return m;
   });
+  // Mig 163 — weigh per slab (default) OR enter ONE whole-truck weight. In truck
+  // mode the per-row weight cells go "—" and a single load-weight (kg) is used.
+  const [weightMode, setWeightMode] = useState<"slab" | "truck">(initialWeightMode);
+  const [truckKg, setTruckKg] = useState<string>(initialLoadTonnes > 0 ? String(Math.round(initialLoadTonnes * 1000)) : "");
+  const truckKgNum = Number(truckKg) || 0;
+  const truckTonnes = truckKgNum / 1000;
   // Edit Description / Additional for the challan + invoice ONLY (never the
   // slab / Temple View). Locked behind a toggle so a normal verify can't change
   // text by accident; the edited rows are saved as per-slab overrides on Verify.
@@ -99,15 +110,19 @@ export function CheckGrid({
   }, [unitByKey, groups]);
 
   // Per-slab weight in TONNES = the row's kg total / 1000, split across slabs.
+  // In whole-truck mode every per-slab weight is cleared to 0 (the load weight
+  // lives on the dispatch, not slab-wise).
   const weightsJson = useMemo(() => {
     const map: Record<string, number> = {};
     for (const g of groups) {
-      const perTonnes = g.qty > 0 ? (Number(weightByKey[g.key]) || 0) / 1000 / g.qty : 0;
+      const perTonnes = weightMode === "truck"
+        ? 0
+        : g.qty > 0 ? (Number(weightByKey[g.key]) || 0) / 1000 / g.qty : 0;
       for (const sid of g.slabIds) map[sid] = perTonnes;
     }
     return JSON.stringify(map);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weightByKey, groups]);
+  }, [weightByKey, groups, weightMode]);
 
   // Per-slab description overrides — ONLY rows the user actually changed. A null
   // field means "unchanged → fall back to the slab's own value" on the server.
@@ -191,19 +206,25 @@ export function CheckGrid({
                     <td style={numCell}>{g.thickness_ft}</td>
                     <td style={{ ...numCell, fontWeight: 800 }}>{g.qty}</td>
                     <td style={{ ...cell, textAlign: "right" }}>
-                      <input
-                        type="number"
-                        min={0}
-                        step="1"
-                        inputMode="decimal"
-                        value={weightByKey[g.key] ?? ""}
-                        onChange={(e) => setWeightByKey((p) => ({ ...p, [g.key]: e.target.value }))}
-                        placeholder="kg"
-                        title={g.qty > 1 ? "Total weight in kg for all pieces in this row" : "Weight in kg"}
-                        style={{ width: 84, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
-                      />
-                      {weightKgOf(g) > 0 && (
-                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>{fmt(weightKgOf(g) / 1000, 3)} T</div>
+                      {weightMode === "truck" ? (
+                        <span style={{ color: "var(--muted)" }} title="Whole-truck weight is entered once above">—</span>
+                      ) : (
+                        <>
+                          <input
+                            type="number"
+                            min={0}
+                            step="1"
+                            inputMode="decimal"
+                            value={weightByKey[g.key] ?? ""}
+                            onChange={(e) => setWeightByKey((p) => ({ ...p, [g.key]: e.target.value }))}
+                            placeholder="kg"
+                            title={g.qty > 1 ? "Total weight in kg for all pieces in this row" : "Weight in kg"}
+                            style={{ width: 84, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                          />
+                          {weightKgOf(g) > 0 && (
+                            <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>{fmt(weightKgOf(g) / 1000, 3)} T</div>
+                          )}
+                        </>
                       )}
                     </td>
                     <td style={{ ...numCell, fontWeight: 700 }}>{fmt(measureOf(g, cur))}</td>
@@ -271,6 +292,45 @@ export function CheckGrid({
         {hasDescEdits && <span style={{ fontSize: 11.5, fontWeight: 800, color: "#2563eb" }}>● edits will save on Verify</span>}
       </div>
 
+      {/* Weight mode (Mig 163) — weigh per slab, or enter ONE whole-truck weight. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12, padding: "9px 13px", border: `1.5px solid ${weightMode === "truck" ? "#0d9488" : "var(--border)"}`, borderRadius: 10, background: weightMode === "truck" ? "rgba(13,148,136,0.07)" : "var(--surface)" }}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>⚖ Weight</span>
+        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+          {([["slab", "Per slab"], ["truck", "Whole truck"]] as const).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setWeightMode(m)}
+              style={{
+                padding: "6px 13px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", border: "none",
+                background: weightMode === m ? (m === "truck" ? "#0d9488" : "#2563eb") : "var(--bg)",
+                color: weightMode === m ? "#fff" : "var(--muted)",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {weightMode === "truck" ? (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700 }}>
+            🚚 Truck load weight
+            <input
+              type="number"
+              min={0}
+              step="1"
+              inputMode="decimal"
+              value={truckKg}
+              onChange={(e) => setTruckKg(e.target.value)}
+              placeholder="kg"
+              style={{ width: 120, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "7px 9px", borderRadius: 8, border: "1.5px solid #0d9488", background: "var(--bg)", color: "var(--text)" }}
+            />
+            <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{truckKgNum > 0 ? `= ${fmt(truckTonnes, 3)} T` : "kg"}</span>
+          </label>
+        ) : (
+          <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>Weighing each slab — fill the Weight column. Switch to “Whole truck” to enter a single load weight instead.</span>
+        )}
+      </div>
+
       {/* Called inline (not <Section/>) so editing the weight input doesn't
           remount the table and lose focus after one keystroke. */}
       {Section({ rows: cftGroups, unit: "cft" })}
@@ -281,7 +341,9 @@ export function CheckGrid({
         <span>Σ {totalSlabs} slab{totalSlabs !== 1 ? "s" : ""}</span>
         {cftTotal > 0 && <span style={{ color: "#2563eb" }}>📦 {fmt(cftTotal)} CFT</span>}
         {sftTotal > 0 && <span style={{ color: "#D97706" }}>🟧 {fmt(sftTotal)} SFT</span>}
-        {totalKg > 0 && <span>⚖ {fmt(totalTonnes, 3)} T <span style={{ color: "var(--muted)", fontWeight: 600 }}>({totalKg.toLocaleString("en-IN")} kg)</span></span>}
+        {weightMode === "truck"
+          ? truckKgNum > 0 && <span style={{ color: "#0d9488" }}>🚚 {fmt(truckTonnes, 3)} T <span style={{ color: "var(--muted)", fontWeight: 600 }}>(whole truck · {truckKgNum.toLocaleString("en-IN")} kg)</span></span>
+          : totalKg > 0 && <span>⚖ {fmt(totalTonnes, 3)} T <span style={{ color: "var(--muted)", fontWeight: 600 }}>({totalKg.toLocaleString("en-IN")} kg)</span></span>}
       </div>
 
       {/* Add more slabs from this temple's available (completed) pool */}
@@ -344,6 +406,8 @@ export function CheckGrid({
           <input type="hidden" name="units" value={unitsJson} />
           <input type="hidden" name="weights" value={weightsJson} />
           <input type="hidden" name="descs" value={descsJson} />
+          <input type="hidden" name="weight_mode" value={weightMode} />
+          <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
           <button type="submit" style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 11, cursor: "pointer" }}>
             ✅ Verify — create challan &amp; send truck
           </button>
@@ -363,7 +427,7 @@ export function CheckGrid({
         {/* Preview carries the current (unsaved) cft/sft toggles so the grouped
             challan matches what's on screen before verifying. */}
         <Link
-          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}&weights=${encodeURIComponent(weightsJson)}${hasDescEdits ? `&descs=${encodeURIComponent(descsJson)}` : ""}`}
+          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}&weights=${encodeURIComponent(weightsJson)}${hasDescEdits ? `&descs=${encodeURIComponent(descsJson)}` : ""}${weightMode === "truck" ? `&weight_mode=truck&truck_weight=${encodeURIComponent(String(truckTonnes))}` : ""}`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 13, padding: "12px 16px", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 11, textDecoration: "none" }}

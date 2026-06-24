@@ -508,13 +508,16 @@ export async function verifyDispatchAction(formData: FormData) {
     units = {};
   }
   // Per-slab weight (tonnes) edited on the Check grid — already split evenly
-  // across each row's slabs by the client.
+  // across each row's slabs by the client. In whole-truck mode these are all 0.
   let weights: Record<string, number | string> = {};
   try {
     weights = JSON.parse(String(formData.get("weights") || "{}")) as Record<string, number | string>;
   } catch {
     weights = {};
   }
+  // Mig 163 — whole-truck weight mode. truck → one load weight on the dispatch.
+  const weightMode = String(formData.get("weight_mode") || "slab") === "truck" ? "truck" : "slab";
+  const truckTonnes = Math.max(0, Math.round((Number(formData.get("truck_weight")) || 0) * 1000) / 1000);
 
   const { data: dispatch } = await admin
     .from("dispatches")
@@ -592,6 +595,20 @@ export async function verifyDispatchAction(formData: FormData) {
     .update({ approved_at: new Date().toISOString(), approved_by: profile.id })
     .eq("id", dispatchId);
   if (error) fail(`/dispatch/${dispatchId}/check`, `Failed to verify: ${error.message}`);
+
+  // Mig 163 — persist the weight mode + whole-truck weight. SEPARATE from the
+  // critical approve update above + error ignored, so a pre-migration schema
+  // never blocks Verify (it just falls back to per-slab).
+  {
+    const { error: wmErr } = await admin
+      .from("dispatches")
+      .update({
+        weight_mode: weightMode,
+        load_weight_tonnes: weightMode === "truck" && truckTonnes > 0 ? truckTonnes : null,
+      })
+      .eq("id", dispatchId);
+    if (wmErr) console.warn("[dispatch weight_mode] non-fatal", wmErr.message);
+  }
 
   const chalanLabel = dispatch.challan_number != null
     ? `CHLN-${String(dispatch.challan_number).padStart(4, "0")}`

@@ -52,6 +52,23 @@ export default async function DispatchCheckPage({
   if (dispatch.approved_at) redirect("/dispatch?tab=out_for_delivery");
   if (dispatch.delivered_at) redirect("/dispatch?tab=delivered");
 
+  // Mig 163 — weight mode + saved whole-truck weight. Best-effort (separate
+  // select) so a pre-migration schema falls back to per-slab instead of 404-ing
+  // the page on an unknown column.
+  let initialWeightMode: "slab" | "truck" = "slab";
+  let initialLoadTonnes = 0;
+  {
+    const { data: wm } = await admin
+      .from("dispatches")
+      .select("weight_mode, load_weight_tonnes")
+      .eq("id", id)
+      .maybeSingle();
+    if (wm) {
+      initialWeightMode = (wm as { weight_mode?: string }).weight_mode === "truck" ? "truck" : "slab";
+      initialLoadTonnes = Number((wm as { load_weight_tonnes?: number | null }).load_weight_tonnes) || 0;
+    }
+  }
+
   const { data: logs } = await admin
     .from("dispatch_logs")
     .select("slab_requirement_id, weight_tonnes, measure_unit, desc_override, additional_override")
@@ -208,7 +225,7 @@ export default async function DispatchCheckPage({
         resolvedLabel={handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "—"}
       />
 
-      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} />
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
     </div>
   );
 }

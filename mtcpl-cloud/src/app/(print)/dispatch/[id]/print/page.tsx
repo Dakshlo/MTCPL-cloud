@@ -17,7 +17,7 @@ import { groupDispatchSlabs, dash, type DispatchSlabInput, type DispatchGroupRow
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ units?: string; weights?: string; descs?: string }>;
+type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -28,7 +28,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
-  const { units: unitsParam, weights: weightsParam, descs: descsParam } = await searchParams;
+  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam } = await searchParams;
   const admin = createAdminSupabaseClient();
 
   const { data: dispatch, error } = await admin
@@ -39,6 +39,23 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
     .eq("id", id)
     .maybeSingle();
   if (error || !dispatch) notFound();
+
+  // Mig 163 — weight mode + whole-truck weight. Best-effort (separate select) so
+  // a pre-migration schema just falls back to per-slab. The Check-page preview
+  // overrides with the on-screen choice.
+  let weightMode: "slab" | "truck" = "slab";
+  let loadTonnes = 0;
+  {
+    const { data: wm } = await admin.from("dispatches").select("weight_mode, load_weight_tonnes").eq("id", id).maybeSingle();
+    if (wm) {
+      weightMode = (wm as { weight_mode?: string }).weight_mode === "truck" ? "truck" : "slab";
+      loadTonnes = Number((wm as { load_weight_tonnes?: number | null }).load_weight_tonnes) || 0;
+    }
+  }
+  if (weightModeParam) {
+    weightMode = weightModeParam === "truck" ? "truck" : "slab";
+    loadTonnes = Number(truckWeightParam) || 0;
+  }
 
   const { data: logs } = await admin
     .from("dispatch_logs")
@@ -116,7 +133,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const sftGroups = groups.filter((g) => g.measure_unit === "sft");
   const cftTotal = cftGroups.reduce((a, g) => a + g.measureQty, 0);
   const sftTotal = sftGroups.reduce((a, g) => a + g.measureQty, 0);
-  const totalTonnes = groups.reduce((a, g) => a + g.weightTonnes, 0);
+  // Truck mode → the single whole-truck weight; slab mode → sum of per-slab.
+  const totalTonnes = weightMode === "truck" ? loadTonnes : groups.reduce((a, g) => a + g.weightTonnes, 0);
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
   const hasWeights = totalTonnes > 0;
 
@@ -304,7 +322,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
 
           <div><div className="k">MTCPL dispatch incharge</div><div className="v">{contact(handlingMan?.name, handlingMan?.phone)}</div></div>
           <div><div className="k">Total pieces</div><div className="v big">{totalSlabs}</div></div>
-          {hasWeights && <div><div className="k">Net weight</div><div className="v mono big">{fmt(totalTonnes, 3)} T</div></div>}
+          {hasWeights && <div><div className="k">Net weight{weightMode === "truck" ? " (whole truck)" : ""}</div><div className="v mono big">{fmt(totalTonnes, 3)} T</div></div>}
           {dispatch.expected_delivery_date && <div><div className="k">Expected delivery</div><div className="v">{new Date(dispatch.expected_delivery_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div></div>}
         </div>
 
@@ -318,7 +336,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
               <span>Σ {totalSlabs} piece{totalSlabs !== 1 ? "s" : ""}</span>
               {cftTotal > 0 && <span>CFT TOTAL: {fmt(cftTotal)}</span>}
               {sftTotal > 0 && <span>SFT TOTAL: {fmt(sftTotal)}</span>}
-              {hasWeights && <span>NET WEIGHT: {fmt(totalTonnes, 3)} T</span>}
+              {hasWeights && <span>NET WEIGHT{weightMode === "truck" ? " (WHOLE TRUCK)" : ""}: {fmt(totalTonnes, 3)} T</span>}
             </div>
           </>
         )}
