@@ -559,6 +559,34 @@ export async function verifyDispatchAction(formData: FormData) {
       .in("slab_requirement_id", ids);
   }
 
+  // Persist per-slab Description / Additional overrides (challan + invoice only;
+  // Mig 162). Only the rows the user actually changed are sent. Null in a field
+  // = unchanged → leave the column NULL so it falls back to the slab's own text.
+  // Done BEFORE the invoicing bridge below so the snapshot picks up the edits.
+  let descs: Record<string, { d: string | null; a: string | null }> = {};
+  try {
+    descs = JSON.parse(String(formData.get("descs") || "{}")) as Record<string, { d: string | null; a: string | null }>;
+  } catch {
+    descs = {};
+  }
+  const byDesc = new Map<string, { d: string | null; a: string | null; ids: string[] }>();
+  for (const [slabId, v] of Object.entries(descs)) {
+    if (!slabId || !v) continue;
+    const d = v.d == null ? null : String(v.d);
+    const a = v.a == null ? null : String(v.a);
+    const k = JSON.stringify([d, a]); // unambiguous — no separator collisions
+    const e = byDesc.get(k) ?? { d, a, ids: [] };
+    e.ids.push(slabId);
+    byDesc.set(k, e);
+  }
+  for (const { d, a, ids } of byDesc.values()) {
+    await admin
+      .from("dispatch_logs")
+      .update({ desc_override: d, additional_override: a })
+      .eq("dispatch_id", dispatchId)
+      .in("slab_requirement_id", ids);
+  }
+
   const { error } = await admin
     .from("dispatches")
     .update({ approved_at: new Date().toISOString(), approved_by: profile.id })

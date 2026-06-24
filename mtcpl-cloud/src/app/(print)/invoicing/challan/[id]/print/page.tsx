@@ -121,8 +121,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               <th>Label</th>
               <th>Description</th>
               <th>Additional</th>
-              <th>Cat 1</th>
               <th>Cat 2</th>
+              <th>Cat 1</th>
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
@@ -140,8 +140,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
                 <td>{dash(it.additional_description)}</td>
-                <td>{dash(it.component_section)}</td>
                 <td>{dash(it.component_element)}</td>
+                <td>{dash(it.component_section)}</td>
                 <td className="r mono">{it.length_ft ?? "-"}</td>
                 <td className="r mono">{it.width_ft ?? "-"}</td>
                 <td className="r mono">{it.thickness_ft ?? "-"}</td>

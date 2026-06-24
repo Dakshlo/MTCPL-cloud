@@ -25,7 +25,8 @@ export type AvailableSlab = {
   thickness_ft: number;
 };
 
-const COLS = ["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2", "L", "W", "H", "Qty", "Weight (kg)"] as const;
+// Daksh: Category 2 is shown BEFORE Category 1 across the challan + invoice.
+const COLS = ["Code(s)", "Label", "Description", "Additional", "Cat 2", "Cat 1", "L", "W", "H", "Qty", "Weight (kg)"] as const;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -65,6 +66,21 @@ export function CheckGrid({
     for (const g of groups) m[g.key] = g.weightTonnes > 0 ? String(Math.round(g.weightTonnes * 1000)) : "";
     return m;
   });
+  // Edit Description / Additional for the challan + invoice ONLY (never the
+  // slab / Temple View). Locked behind a toggle so a normal verify can't change
+  // text by accident; the edited rows are saved as per-slab overrides on Verify.
+  const [editDesc, setEditDesc] = useState(false);
+  const [descByKey, setDescByKey] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {};
+    for (const g of groups) m[g.key] = g.description ?? "";
+    return m;
+  });
+  const [addlByKey, setAddlByKey] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {};
+    for (const g of groups) m[g.key] = g.additional_description ?? "";
+    return m;
+  });
+
   const unitOf = (g: DispatchGroupRow): "cft" | "sft" => unitByKey[g.key] ?? g.measure_unit;
   const measureOf = (g: DispatchGroupRow, u: "cft" | "sft") => (u === "sft" ? g.sftEach : g.cftEach) * g.qty;
   const weightKgOf = (g: DispatchGroupRow) => Number(weightByKey[g.key]) || 0;
@@ -93,6 +109,23 @@ export function CheckGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weightByKey, groups]);
 
+  // Per-slab description overrides — ONLY rows the user actually changed. A null
+  // field means "unchanged → fall back to the slab's own value" on the server.
+  const descsJson = useMemo(() => {
+    const map: Record<string, { d: string | null; a: string | null }> = {};
+    for (const g of groups) {
+      const d = descByKey[g.key] ?? g.description ?? "";
+      const a = addlByKey[g.key] ?? g.additional_description ?? "";
+      const dChanged = d !== (g.description ?? "");
+      const aChanged = a !== (g.additional_description ?? "");
+      if (!dChanged && !aChanged) continue;
+      for (const sid of g.slabIds) map[sid] = { d: dChanged ? d : null, a: aChanged ? a : null };
+    }
+    return JSON.stringify(map);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descByKey, addlByKey, groups]);
+  const hasDescEdits = descsJson !== "{}";
+
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
   const totalKg = groups.reduce((a, g) => a + weightKgOf(g), 0);
   const totalTonnes = totalKg / 1000;
@@ -103,6 +136,7 @@ export function CheckGrid({
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--surface)" };
   const numCell: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+  const descInput: React.CSSProperties = { width: "100%", minWidth: 130, fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid #2563eb", background: "var(--bg)", color: "var(--text)" };
 
   function Section({ rows, unit }: { rows: DispatchGroupRow[]; unit: "cft" | "sft" }) {
     if (rows.length === 0) return null;
@@ -139,10 +173,19 @@ export function CheckGrid({
                       </div>
                     </td>
                     <td style={cell}>{dash(g.label)}</td>
-                    <td style={{ ...cell, maxWidth: 220 }}>{dash(g.description)}</td>
-                    <td style={{ ...cell, maxWidth: 200 }}>{dash(g.additional_description)}</td>
-                    <td style={cell}>{dash(g.component_section)}</td>
+                    <td style={{ ...cell, maxWidth: editDesc ? 240 : 220 }}>
+                      {editDesc ? (
+                        <input value={descByKey[g.key] ?? ""} onChange={(e) => setDescByKey((p) => ({ ...p, [g.key]: e.target.value }))} placeholder="—" style={descInput} />
+                      ) : dash(g.description)}
+                    </td>
+                    <td style={{ ...cell, maxWidth: editDesc ? 220 : 200 }}>
+                      {editDesc ? (
+                        <input value={addlByKey[g.key] ?? ""} onChange={(e) => setAddlByKey((p) => ({ ...p, [g.key]: e.target.value }))} placeholder="—" style={descInput} />
+                      ) : dash(g.additional_description)}
+                    </td>
+                    {/* Cat 2 before Cat 1 (Daksh) */}
                     <td style={cell}>{dash(g.component_element)}</td>
+                    <td style={cell}>{dash(g.component_section)}</td>
                     <td style={numCell}>{g.length_ft}</td>
                     <td style={numCell}>{g.width_ft}</td>
                     <td style={numCell}>{g.thickness_ft}</td>
@@ -215,6 +258,19 @@ export function CheckGrid({
 
   return (
     <div>
+      {/* Edit-descriptions toggle — unlocks the Description + Additional columns
+          for THIS challan/invoice only (never the slab or Temple View). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, padding: "9px 13px", border: `1.5px solid ${editDesc ? "#2563eb" : "var(--border)"}`, borderRadius: 10, background: editDesc ? "rgba(37,99,235,0.06)" : "var(--surface)" }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>
+          <input type="checkbox" checked={editDesc} onChange={(e) => setEditDesc(e.target.checked)} />
+          ✏️ Edit Description / Additional
+        </label>
+        <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
+          Changes apply to this challan &amp; invoice only — the slab and Temple View stay as they are.
+        </span>
+        {hasDescEdits && <span style={{ fontSize: 11.5, fontWeight: 800, color: "#2563eb" }}>● edits will save on Verify</span>}
+      </div>
+
       {/* Called inline (not <Section/>) so editing the weight input doesn't
           remount the table and lose focus after one keystroke. */}
       {Section({ rows: cftGroups, unit: "cft" })}
@@ -287,6 +343,7 @@ export function CheckGrid({
           <input type="hidden" name="id" value={dispatchId} />
           <input type="hidden" name="units" value={unitsJson} />
           <input type="hidden" name="weights" value={weightsJson} />
+          <input type="hidden" name="descs" value={descsJson} />
           <button type="submit" style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 11, cursor: "pointer" }}>
             ✅ Verify — create challan &amp; send truck
           </button>
@@ -306,7 +363,7 @@ export function CheckGrid({
         {/* Preview carries the current (unsaved) cft/sft toggles so the grouped
             challan matches what's on screen before verifying. */}
         <Link
-          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}&weights=${encodeURIComponent(weightsJson)}`}
+          href={`/dispatch/${dispatchId}/print?units=${encodeURIComponent(unitsJson)}&weights=${encodeURIComponent(weightsJson)}${hasDescEdits ? `&descs=${encodeURIComponent(descsJson)}` : ""}`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 13, padding: "12px 16px", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 11, textDecoration: "none" }}

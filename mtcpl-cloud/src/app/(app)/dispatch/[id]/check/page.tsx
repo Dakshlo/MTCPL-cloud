@@ -54,21 +54,29 @@ export default async function DispatchCheckPage({
 
   const { data: logs } = await admin
     .from("dispatch_logs")
-    .select("slab_requirement_id, weight_tonnes, measure_unit")
+    .select("slab_requirement_id, weight_tonnes, measure_unit, desc_override, additional_override")
     .eq("dispatch_id", id);
   const logRows = (logs ?? []) as Array<{
     slab_requirement_id: string | null;
     weight_tonnes: number | null;
     measure_unit: string | null;
+    desc_override: string | null;
+    additional_override: string | null;
   }>;
   const slabIds = [...new Set(logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
 
   const unitBy = new Map<string, "cft" | "sft">();
   const weightBy = new Map<string, number>();
+  // Saved per-slab description overrides (Mig 162); null = use slab's own. Only
+  // present if this dispatch was verified then undone back to Check.
+  const descOv = new Map<string, string | null>();
+  const addlOv = new Map<string, string | null>();
   for (const l of logRows) {
     if (!l.slab_requirement_id) continue;
     unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
     weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
+    descOv.set(l.slab_requirement_id, l.desc_override);
+    addlOv.set(l.slab_requirement_id, l.additional_override);
   }
 
   let inputs: DispatchSlabInput[] = [];
@@ -84,8 +92,8 @@ export default async function DispatchCheckPage({
       .map((s) => ({
         id: s.id as string,
         label: (s.label as string | null) ?? null,
-        description: (s.description as string | null) ?? null,
-        additional_description: (s.additional_description as string | null) ?? null,
+        description: descOv.get(s.id as string) ?? ((s.description as string | null) ?? null),
+        additional_description: addlOv.get(s.id as string) ?? ((s.additional_description as string | null) ?? null),
         component_section: (s.component_section as string | null) ?? null,
         component_element: (s.component_element as string | null) ?? null,
         length_ft: Number(s.length_ft) || 0,

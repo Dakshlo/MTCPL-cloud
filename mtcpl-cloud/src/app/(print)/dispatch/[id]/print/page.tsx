@@ -17,7 +17,7 @@ import { groupDispatchSlabs, dash, type DispatchSlabInput, type DispatchGroupRow
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ units?: string; weights?: string }>;
+type Search = Promise<{ units?: string; weights?: string; descs?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -28,7 +28,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
-  const { units: unitsParam, weights: weightsParam } = await searchParams;
+  const { units: unitsParam, weights: weightsParam, descs: descsParam } = await searchParams;
   const admin = createAdminSupabaseClient();
 
   const { data: dispatch, error } = await admin
@@ -42,16 +42,34 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
 
   const { data: logs } = await admin
     .from("dispatch_logs")
-    .select("slab_requirement_id, weight_tonnes, measure_unit")
+    .select("slab_requirement_id, weight_tonnes, measure_unit, desc_override, additional_override")
     .eq("dispatch_id", id);
-  const logRows = (logs ?? []) as Array<{ slab_requirement_id: string | null; weight_tonnes: number | null; measure_unit: string | null }>;
+  const logRows = (logs ?? []) as Array<{ slab_requirement_id: string | null; weight_tonnes: number | null; measure_unit: string | null; desc_override: string | null; additional_override: string | null }>;
   const slabIds = [...new Set(logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[])];
   const unitBy = new Map<string, "cft" | "sft">();
   const weightBy = new Map<string, number>();
+  // Per-slab challan description overrides (Mig 162); null = use slab's own.
+  const descOv = new Map<string, string | null>();
+  const addlOv = new Map<string, string | null>();
   for (const l of logRows) {
     if (!l.slab_requirement_id) continue;
     unitBy.set(l.slab_requirement_id, l.measure_unit === "sft" ? "sft" : "cft");
     weightBy.set(l.slab_requirement_id, Number(l.weight_tonnes) || 0);
+    descOv.set(l.slab_requirement_id, l.desc_override);
+    addlOv.set(l.slab_requirement_id, l.additional_override);
+  }
+  // Check-page preview passes the unsaved description edits (changed rows only).
+  if (descsParam) {
+    try {
+      const o = JSON.parse(descsParam) as Record<string, { d: string | null; a: string | null }>;
+      for (const [sid, v] of Object.entries(o)) {
+        if (!v) continue;
+        if (v.d !== null && v.d !== undefined) descOv.set(sid, v.d);
+        if (v.a !== null && v.a !== undefined) addlOv.set(sid, v.a);
+      }
+    } catch {
+      /* ignore malformed preview override */
+    }
   }
   if (unitsParam) {
     try {
@@ -81,8 +99,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
       .map((s) => ({
         id: s.id as string,
         label: (s.label as string | null) ?? null,
-        description: (s.description as string | null) ?? null,
-        additional_description: (s.additional_description as string | null) ?? null,
+        description: descOv.get(s.id as string) ?? ((s.description as string | null) ?? null),
+        additional_description: addlOv.get(s.id as string) ?? ((s.additional_description as string | null) ?? null),
         component_section: (s.component_section as string | null) ?? null,
         component_element: (s.component_element as string | null) ?? null,
         length_ft: Number(s.length_ft) || 0,
@@ -149,8 +167,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
               <th>Label</th>
               <th>Description</th>
               <th>Additional</th>
-              <th>Cat 1</th>
               <th>Cat 2</th>
+              <th>Cat 1</th>
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
@@ -167,8 +185,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
                 <td>{dash(g.label)}</td>
                 <td>{dash(g.description)}</td>
                 <td>{dash(g.additional_description)}</td>
-                <td>{dash(g.component_section)}</td>
                 <td>{dash(g.component_element)}</td>
+                <td>{dash(g.component_section)}</td>
                 <td className="r mono">{g.length_ft}</td>
                 <td className="r mono">{g.width_ft}</td>
                 <td className="r mono">{g.thickness_ft}</td>

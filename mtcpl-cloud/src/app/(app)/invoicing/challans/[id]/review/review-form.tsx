@@ -82,8 +82,9 @@ export function ReviewForm({
       <td style={cell}>{dash(it.label)}</td>
       <td style={{ ...cell, maxWidth: 210 }}>{dash(it.description)}</td>
       <td style={{ ...cell, maxWidth: 190 }}>{dash(it.additional_description)}</td>
-      <td style={cell}>{dash(it.component_section)}</td>
+      {/* Cat 2 before Cat 1 (Daksh) */}
       <td style={cell}>{dash(it.component_element)}</td>
+      <td style={cell}>{dash(it.component_section)}</td>
       <td style={numCell}>{it.length_ft ?? "-"}</td>
       <td style={numCell}>{it.width_ft ?? "-"}</td>
       <td style={numCell}>{it.thickness_ft ?? "-"}</td>
@@ -119,7 +120,7 @@ export function ReviewForm({
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
             <thead>
               <tr>
-                {["Code(s)", "Label", "Description", "Additional", "Cat 1", "Cat 2"].map((c) => (
+                {["Code(s)", "Label", "Description", "Additional", "Cat 2", "Cat 1"].map((c) => (
                   <th key={c} style={head}>{c}</th>
                 ))}
                 {["L", "W", "H", "Qty", unit.toUpperCase()].map((c) => (
