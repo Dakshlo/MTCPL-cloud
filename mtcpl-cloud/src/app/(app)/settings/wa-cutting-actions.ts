@@ -6,7 +6,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { saveCuttingAlertRecipients } from "@/lib/wa-cutting-alert";
+import { saveCuttingAlertRecipients, saveOperatorPhones } from "@/lib/wa-cutting-alert";
 
 export async function updateWaCuttingRecipientsAction(
   numbers: string[],
@@ -19,4 +19,17 @@ export async function updateWaCuttingRecipientsAction(
   });
   revalidatePath("/settings");
   return { ok: true, numbers: res.numbers };
+}
+
+export async function updateCuttingOperatorPhonesAction(
+  phones: Record<string, string>,
+): Promise<{ ok: true; phones: Record<string, string> } | { ok: false; error: string }> {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const res = await saveOperatorPhones(phones && typeof phones === "object" ? phones : {}, profile.id);
+  if (!res.ok) return res;
+  await logAudit(profile.id, "wa_cutting_operator_phones_updated", "app_setting", "wa_cutting_operator_phones", {
+    count: Object.keys(res.phones).length,
+  });
+  revalidatePath("/settings");
+  return { ok: true, phones: res.phones };
 }

@@ -60,6 +60,55 @@ export async function saveCuttingAlertRecipients(
   return { ok: true, numbers: clean };
 }
 
+// ── Per-operator phones (operator_id → mobile) ─────────────────────
+// So each cutter operator ALSO gets their own block's message, while the
+// master recipients above get every block. Stored as a map keyed by
+// operators.id; operator-less blocks just go to the master list.
+export const WA_CUTTING_OPERATOR_PHONES_KEY = "wa_cutting_operator_phones";
+
+export async function getOperatorPhones(): Promise<Record<string, string>> {
+  try {
+    const admin = createAdminSupabaseClient();
+    const { data } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", WA_CUTTING_OPERATOR_PHONES_KEY)
+      .maybeSingle();
+    const v = (data?.value as { phones?: Record<string, unknown> } | null)?.phones;
+    if (v && typeof v === "object") {
+      const out: Record<string, string> = {};
+      for (const [id, num] of Object.entries(v)) {
+        const d = digits(typeof num === "string" ? num : "");
+        if (id && d) out[id] = d;
+      }
+      return out;
+    }
+  } catch {
+    /* default empty */
+  }
+  return {};
+}
+
+export async function saveOperatorPhones(
+  phones: Record<string, string>,
+  updatedBy: string,
+): Promise<{ ok: true; phones: Record<string, string> } | { ok: false; error: string }> {
+  const clean: Record<string, string> = {};
+  for (const [id, num] of Object.entries(phones ?? {})) {
+    const d = digits(num);
+    if (id && d.length >= 10 && d.length <= 12) clean[id] = d;
+  }
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("app_settings").upsert({
+    key: WA_CUTTING_OPERATOR_PHONES_KEY,
+    value: { phones: clean },
+    updated_at: new Date().toISOString(),
+    updated_by: updatedBy,
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, phones: clean };
+}
+
 // ── Send ───────────────────────────────────────────────────────────
 
 // Every slab that physically came out of a block, regardless of how it
@@ -206,10 +255,17 @@ export async function sendCuttingApprovedWhatsApp(
     }
     const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objectPath).data.publicUrl;
 
-    // Recipients.
+    // Recipients = the master list (gets EVERY block) + this block's own
+    // operator (gets only their blocks), if a phone is on file for them.
     const { normalizeIndianMobile } = await import("@/lib/wa-send");
-    const raw = await getCuttingAlertRecipients();
-    const to = [...new Set(raw.map((n) => normalizeIndianMobile(n)).filter((n): n is string => !!n))];
+    const masterRaw = await getCuttingAlertRecipients();
+    let operatorRaw: string[] = [];
+    if (block.operator_id) {
+      const phones = await getOperatorPhones();
+      const own = phones[block.operator_id];
+      if (own) operatorRaw = [own];
+    }
+    const to = [...new Set([...masterRaw, ...operatorRaw].map((n) => normalizeIndianMobile(n)).filter((n): n is string => !!n))];
     if (to.length === 0) {
       await logAudit(actorId, "cut_approval_wa_skipped", "cut_session_block", sessionBlockId, { reason: "no valid recipient configured" });
       return;
@@ -238,6 +294,7 @@ export async function sendCuttingApprovedWhatsApp(
 
     await logAudit(actorId, "cut_approval_wa_sent", "cut_session_block", sessionBlockId, {
       block: block.block_id, operator: operatorName, slab_count: slabs.length, to,
+      operator_phoned: operatorRaw.length > 0,
     });
   } catch (e) {
     console.warn("[sendCuttingApprovedWhatsApp] failed", e);

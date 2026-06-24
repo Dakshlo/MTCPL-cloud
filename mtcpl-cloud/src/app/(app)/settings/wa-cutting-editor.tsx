@@ -48,7 +48,7 @@ export function WaCuttingEditor({ initial, configured }: { initial: string[]; co
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <p className="muted" style={{ fontSize: 13, margin: 0, lineHeight: 1.5 }}>
-        When a <strong>cutting audit is approved</strong>, these numbers get a WhatsApp with the cutter, block, the slabs cut (codes + location), and a <strong>PDF</strong> of every slab&apos;s size, label, description &amp; category.
+        Master list — these numbers get a WhatsApp for <strong>every approved block</strong> (no matter the operator): cutter, block, slabs cut (codes + location), and a <strong>PDF</strong> of every slab&apos;s size, label, description &amp; category. Per-operator numbers are set below.
       </p>
       {!configured && (
         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#b45309", background: "rgba(180,83,9,0.1)", border: "1px solid rgba(180,83,9,0.3)", borderRadius: 7, padding: "8px 12px" }}>

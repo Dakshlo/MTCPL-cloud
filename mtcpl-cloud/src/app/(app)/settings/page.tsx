@@ -20,7 +20,8 @@ import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 import { WaRecipientsEditor } from "./wa-recipients-editor";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { WaCuttingEditor } from "./wa-cutting-editor";
-import { getCuttingAlertRecipients } from "@/lib/wa-cutting-alert";
+import { WaCuttingOperatorsEditor } from "./wa-cutting-operators-editor";
+import { getCuttingAlertRecipients, getOperatorPhones } from "@/lib/wa-cutting-alert";
 import { WaVendorCcEditor } from "./wa-vendor-cc-editor";
 import { getVendorCcSetting } from "@/lib/wa-vendor-cc";
 import { WaAlertsEditor } from "./wa-alerts-editor";
@@ -160,6 +161,10 @@ export default async function SettingsPage() {
   const canManageWaCutting = currentUser.role === "owner" || currentUser.role === "developer";
   const waCuttingRecipients = canManageWaCutting ? await getCuttingAlertRecipients() : [];
   const waCuttingConfigured = !!process.env.MSG91_WA_CUTTING_TEMPLATE;
+  const cuttingOperators = canManageWaCutting
+    ? ((await admin.from("operators").select("id, name").eq("is_active", true).order("name")).data ?? []) as Array<{ id: string; name: string }>
+    : [];
+  const cuttingOperatorPhones = canManageWaCutting ? await getOperatorPhones() : {};
 
   // Vendor-message carbon-copy (developer only).
   const canManageVendorCc = currentUser.role === "developer";
@@ -497,6 +502,12 @@ export default async function SettingsPage() {
                   ✂️ Cutting-approved alert
                 </div>
                 <WaCuttingEditor initial={waCuttingRecipients} configured={waCuttingConfigured} />
+                <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--border)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, margin: "0 0 10px", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    Per-operator (their own blocks)
+                  </div>
+                  <WaCuttingOperatorsEditor operators={cuttingOperators} initial={cuttingOperatorPhones} />
+                </div>
               </div>
             )}
           </div>
