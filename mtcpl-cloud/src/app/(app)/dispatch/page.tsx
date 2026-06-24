@@ -14,6 +14,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
 import {
   DispatchClient,
   type ReadySlab,
@@ -263,6 +264,11 @@ export default async function DispatchPage({
     }
   }
 
+  // Carving→Dispatch lane toggle (developer Settings). When ON, a carving slab
+  // is only clickable once it's been brought in (receivedAtDispatch set) — the
+  // SlabCard greys it until then. When OFF (default), the gate is inert.
+  const slabTransferStages = await getSlabTransferStages();
+
   // Mig 160 — dispatch stations: the Main (default) + per-CNC-vendor sheds.
   // Each ready slab's "station" = its carving_items.dispatch_station_id, mapped
   // to "main" (default/null/direct/outsource) or a shed id. The Make Dispatch
@@ -456,6 +462,7 @@ export default async function DispatchPage({
       initialTab={initialTab}
       canApprove={canApprove}
       canUndo={canUndo}
+      carvingDispatchTransfer={slabTransferStages.carvingToDispatch}
       toast={toastParam ?? null}
       error={errorParam ?? null}
     />

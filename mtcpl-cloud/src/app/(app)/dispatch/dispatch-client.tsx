@@ -236,17 +236,21 @@ function ReadyTimer({ since, reworked }: { since: string | null; reworked: boole
  *  dispatch peek (tap to select). Mig 132 — pending-cancel slabs render
  *  RED + locked; long-press (where wired) opens the request modal. */
 function SlabCard({
-  s, selected, onToggle, onLongPress,
+  s, selected, onToggle, onLongPress, carvingDispatchTransfer,
 }: {
   s: ReadySlab;
   selected?: boolean;
   onToggle?: () => void;
   onLongPress?: () => void;
+  /** Carving→Dispatch lane (developer Settings). */
+  carvingDispatchTransfer?: boolean;
 }) {
-  // Daksh (Jun 2026) — the carving→dispatch transfer step is removed: a
-  // carving job that's done + approved (status 'completed') is DIRECTLY
-  // selectable on dispatch, no bring-in needed. (cutting→carving stays.)
-  const awaitingTransfer = false;
+  // Carving→Dispatch lane toggle. When ON, a carving slab (hasCarving) is greyed
+  // and non-selectable until it's been brought in to the station
+  // (receivedAtDispatch set). When OFF (default), an approved carving job is
+  // DIRECTLY selectable, no bring-in. Direct-dispatch slabs (no carving row) are
+  // always exempt. (cutting→carving is a separate lane.)
+  const awaitingTransfer = !!carvingDispatchTransfer && s.hasCarving && !s.receivedAtDispatch;
   const selectable = !!onToggle && !s.cancelPending && !awaitingTransfer;
   const pressHandlers =
     onLongPress && !s.cancelPending && !awaitingTransfer ? longPressHandlers(onLongPress) : {};
@@ -305,6 +309,12 @@ function SlabCard({
           🚫 CANCEL REQUESTED — waiting for owner
         </div>
       )}
+      {/* Carving→Dispatch lane ON — slab not yet brought in to the station. */}
+      {awaitingTransfer && !s.cancelPending && (
+        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#4f46e5", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
+          🚚 AWAITING DISPATCH TRANSFER — bring in on Slab Transfer
+        </div>
+      )}
       <SlabComponentDetail
         section={s.component_section}
         element={s.component_element}
@@ -348,6 +358,7 @@ export function DispatchClient({
   initialTab,
   canApprove,
   canUndo,
+  carvingDispatchTransfer,
   toast,
   error,
 }: {
@@ -375,6 +386,9 @@ export function DispatchClient({
   /** Undo (recall an approved truck) — owner / developer / senior_incharge
    *  only. carving_head + dispatch incharge get false → no Undo button. */
   canUndo: boolean;
+  /** Carving→Dispatch lane (developer Settings). When true, a carving slab is
+   *  greyed/non-selectable until it's been brought in to the station. */
+  carvingDispatchTransfer: boolean;
   toast: string | null;
   error: string | null;
 }) {
@@ -519,7 +533,7 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && (
-        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} />
+        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} />
       )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
@@ -542,13 +556,15 @@ export function DispatchClient({
 type TempleGroup = { key: string; temple: string; isMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
-  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan,
+  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
 }: {
   slabs: ReadySlab[];
   vendorSheds: { id: string; name: string }[];
   truckHistory: TruckTrip[];
   siteInfoByTemple: Record<string, SiteInfo>;
   handlingMan: { name?: string; phone?: string } | null;
+  /** Carving→Dispatch lane (developer Settings) — greys un-brought-in slabs. */
+  carvingDispatchTransfer?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -724,7 +740,7 @@ function ReadyTab({
                 {expanded && (
                   <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, borderTop: "1px solid var(--border)" }}>
                     {g.matched.map((s) => (
-                      <SlabCard key={s.id} s={s} onLongPress={() => setCancelTarget(s)} />
+                      <SlabCard key={s.id} s={s} onLongPress={() => setCancelTarget(s)} carvingDispatchTransfer={carvingDispatchTransfer} />
                     ))}
                   </div>
                 )}
@@ -741,6 +757,7 @@ function ReadyTab({
           siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
           handlingMan={handlingMan}
           onClose={() => setPeekGroup(null)}
+          carvingDispatchTransfer={carvingDispatchTransfer}
         />
       )}
 
@@ -762,13 +779,15 @@ function ReadyTab({
 // search), ② truck details (recent-truck quick fill) → create dispatch.
 
 function TempleDispatchPeek({
-  group, truckHistory, siteInfo, handlingMan, onClose,
+  group, truckHistory, siteInfo, handlingMan, onClose, carvingDispatchTransfer,
 }: {
   group: TempleGroup;
   truckHistory: TruckTrip[];
   siteInfo: SiteInfo | null;
   handlingMan: { name?: string; phone?: string } | null;
   onClose: () => void;
+  /** Carving→Dispatch lane (developer Settings) — greys un-brought-in slabs. */
+  carvingDispatchTransfer?: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
@@ -878,8 +897,10 @@ function TempleDispatchPeek({
   }
 
   // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
-  // (Carving→dispatch transfer gate removed — carving slabs are selectable.)
-  const selectableMatched = matched.filter((s) => !s.cancelPending);
+  // Carving→Dispatch lane ON → also skip carving slabs not yet brought in.
+  const selectableMatched = matched.filter(
+    (s) => !s.cancelPending && !(carvingDispatchTransfer && s.hasCarving && !s.receivedAtDispatch),
+  );
   const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (
@@ -955,7 +976,7 @@ function TempleDispatchPeek({
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(245px, 1fr))", gap: 10 }}>
                   {matched.map((s) => (
-                    <SlabCard key={s.id} s={s} selected={selected.has(s.id)} onToggle={() => toggle(s.id)} />
+                    <SlabCard key={s.id} s={s} selected={selected.has(s.id)} onToggle={() => toggle(s.id)} carvingDispatchTransfer={carvingDispatchTransfer} />
                   ))}
                 </div>
               )}

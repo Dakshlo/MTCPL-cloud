@@ -23,6 +23,8 @@ import { WaVendorCcEditor } from "./wa-vendor-cc-editor";
 import { getVendorCcSetting } from "@/lib/wa-vendor-cc";
 import { WaAlertsEditor } from "./wa-alerts-editor";
 import { getSlabTransferAlert, getCarvingBacklog } from "@/lib/wa-alerts";
+import { SlabTransferEditor } from "./slab-transfer-editor";
+import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
 
 // All assignable roles — only shown to developer.
 //
@@ -159,6 +161,8 @@ export default async function SettingsPage() {
 
   // WhatsApp operational alerts — slab-transfer ping + carving backlog
   // (developer only).
+  const canManageSlabStages = currentUser.role === "developer";
+  const slabTransferStages = canManageSlabStages ? await getSlabTransferStages() : null;
   const canManageWaAlerts = currentUser.role === "developer";
   const [slabTransferAlert, carvingBacklog] = canManageWaAlerts
     ? await Promise.all([getSlabTransferAlert(), getCarvingBacklog()])
@@ -481,6 +485,18 @@ export default async function SettingsPage() {
                 <WaAlertsEditor slabTransfer={slabTransferAlert} backlog={carvingBacklog} />
               </div>
             )}
+          </div>
+        </PeekSection>
+      )}
+
+      {/* Slab-transfer lanes (developer) — turn the cutting→carving and
+          carving→dispatch transfer steps ON/OFF without a redeploy. OFF = the
+          slab skips the runner and goes straight where it needs to. Stored in
+          app_settings. */}
+      {canManageSlabStages && slabTransferStages && (
+        <PeekSection icon="🔁" title="Slab Transfer" subtitle="Cutting→Carving · Carving→Dispatch lanes" modalMaxWidth={560}>
+          <div className="settings-card">
+            <SlabTransferEditor initial={slabTransferStages} />
           </div>
         </PeekSection>
       )}

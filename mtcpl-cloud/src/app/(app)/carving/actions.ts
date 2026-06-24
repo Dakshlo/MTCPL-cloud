@@ -14,32 +14,31 @@ import {
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 import { nextSlabCodeFromMaxId } from "../slabs/utils";
 import { jobworkQuantity } from "@/lib/dimensions";
+import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
 
 /**
- * Daksh May 2026 → re-enabled Jun 2026.
+ * Daksh May 2026 → re-enabled Jun 2026 → made a Settings toggle Jun 2026.
  *
- * The "yard → vendor shade" handoff (slab_transfer runner) is now
- * LIVE: when the carving head assigns a slab it sits in the vendor's
- * Pending stock tray until a runner claims + delivers it, then it
- * moves to Ready to load. This flag is the global kill-switch — set
- * it back to `true` to make EVERY assignment auto-receive again (the
- * old "skip the runner" behaviour) if the floor handoff falls apart.
+ * The "yard → vendor shade" handoff (slab_transfer runner) is controlled by the
+ * developer Settings → 🔁 Slab Transfer → "Cutting → Carving transfer" toggle
+ * (lib/slab-transfer-stages: getSlabTransferStages().cuttingToCarving).
+ *   ON  → an assigned slab sits in the vendor's Pending stock tray until a
+ *         runner claims + delivers it, then moves to Ready to load.
+ *   OFF → EVERY assignment auto-receives (old "skip the runner" behaviour) — the
+ *         slab lands straight in Ready to load (Outsource auto-starts).
  *
- * Per-assignment bypass (the day-to-day escape hatch): the assign
- * form carries a "Receive now (skip transfer)" checkbox. When the
- * carving head ticks it, that single assignment auto-receives even
- * though the flag is false — so work never stalls when no runner is
- * around. See `receiveNow` in the two assign actions below.
+ * Per-assignment bypass (the day-to-day escape hatch, independent of the toggle):
+ * the assign form carries a "Receive now (skip transfer)" checkbox. When ticked,
+ * that single assignment auto-receives even while the lane is ON — so work never
+ * stalls when no runner is around. See `receiveNow` in the two assign actions.
  *
  * Mechanics: assign actions stamp received_at_vendor_at=NOW() +
- * received_at_vendor_by=actor on the new carving_items row when
- * EITHER this flag is true OR the per-assignment checkbox is ticked.
+ * received_at_vendor_by=actor on the new carving_items row when EITHER the lane
+ * is OFF OR the per-assignment checkbox is ticked.
  *
- * Inter-vendor transfers (Problem/Transfer → other vendor) keep
- * their existing flow because they have their own Accept/Flag
- * self-receive path that doesn't depend on slab_transfer.
+ * Inter-vendor transfers (Problem/Transfer → other vendor) keep their existing
+ * flow — their own Accept/Flag self-receive path doesn't depend on slab_transfer.
  */
-const SKIP_SLAB_TRANSFER_STAGE = false;
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
@@ -1433,10 +1432,12 @@ export async function assignCarvingJobAction(formData: FormData) {
   // (transfer in-progress) tray. Reverting the flag to false
   // restores the regular yard→shade flow.
   const nowIso = new Date().toISOString();
-  // Both CNC and Outsource route through the Pending stock tray now — the
-  // transfer runner delivers and stamps receipt. (The global skip flag or a
-  // per-slab "receive now" still bypasses the tray.)
-  const autoReceipt = SKIP_SLAB_TRANSFER_STAGE || receiveNow
+  // Both CNC and Outsource route through the Pending stock tray when the
+  // Cutting→Carving lane is ON (developer Settings). When OFF, or when the
+  // per-slab "receive now" is ticked, the slab auto-receives → Ready to load.
+  const transferStages = await getSlabTransferStages();
+  const skipCuttingToCarving = !transferStages.cuttingToCarving;
+  const autoReceipt = skipCuttingToCarving || receiveNow
     ? {
         received_at_vendor_at: nowIso,
         received_at_vendor_by: profile.id,
@@ -1669,9 +1670,11 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   // group slabs sharing a batch_id with the same colour stripe.
   const batchId = crypto.randomUUID();
   const now = new Date().toISOString();
-  // Daksh (Jun 2026) — Outsource routes through the transfer too now, so it
-  // no longer auto-receives. Only the skip-flag / receive-now bypass the tray.
-  const autoReceiptBatch = SKIP_SLAB_TRANSFER_STAGE || receiveNow
+  // Cutting→Carving lane (developer Settings): ON → CNC + Outsource both route
+  // through the Pending stock tray; OFF (or per-slab "receive now") → auto-receive.
+  const transferStagesBatch = await getSlabTransferStages();
+  const skipCuttingToCarvingBatch = !transferStagesBatch.cuttingToCarving;
+  const autoReceiptBatch = skipCuttingToCarvingBatch || receiveNow
     ? {
         received_at_vendor_at: now,
         received_at_vendor_by: profile.id,
@@ -4742,6 +4745,13 @@ export async function approveCarvingJobAction(formData: FormData) {
   }
   const selfTransfer = toShed;
 
+  // Carving→Dispatch lane (developer Settings). OFF (default) → stamp the slab
+  // received at dispatch NOW so it's immediately selectable. ON → leave it NULL
+  // so it waits in the Carving→Dispatch bring-in queue. A shed self-transfer
+  // always receives instantly regardless of the lane.
+  const carvingStages = await getSlabTransferStages();
+  const receiveAtDispatchNow = !carvingStages.carvingToDispatch || selfTransfer;
+
   // Surface the actual error if the update fails (could be a
   // missing column on prod schema if migration 014 wasn't run).
   const { error: updateErr } = await admin
@@ -4780,12 +4790,12 @@ export async function approveCarvingJobAction(formData: FormData) {
       // surface that doesn't send these fields) never touches them — same
       // safety posture as the depart columns above.
       ...(dispatchStationId ? { dispatch_station_id: dispatchStationId } : {}),
-      // Daksh (Jun 2026) — carving→dispatch transfer removed: every approval
-      // marks the slab received at dispatch NOW, so it is immediately
-      // selectable on the Dispatch board (no bring-in step). mig 145 columns
-      // exist in prod, so writing them unconditionally is safe.
-      received_at_dispatch_at: now,
-      received_at_dispatch_by: profile.id,
+      // Carving→Dispatch lane toggle (developer Settings). When OFF (default)
+      // or self-transferred, stamp received-at-dispatch NOW so the slab is
+      // immediately selectable on the Dispatch board. When ON, leave it NULL so
+      // it surfaces in the Carving→Dispatch bring-in queue. mig 145 columns
+      // exist in prod, so writing them is safe.
+      ...(receiveAtDispatchNow ? { received_at_dispatch_at: now, received_at_dispatch_by: profile.id } : {}),
       ...(selfTransfer ? { dispatch_self_transfer: true } : {}),
     })
     .eq("id", jobId);
