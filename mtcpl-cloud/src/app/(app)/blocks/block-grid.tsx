@@ -73,6 +73,26 @@ type Block = {
   created_by: string | null;
 };
 
+// Stone-type filter tab — colour dot + label + count badge.
+function StonePill({ label, count, active, color, onClick }: { label: string; count: number; active: boolean; color?: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 800, padding: "5px 12px", borderRadius: 999, cursor: "pointer",
+        border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+        background: active ? "rgba(184,115,51,0.12)" : "var(--surface)",
+        color: active ? "var(--gold-dark)" : "var(--text)",
+      }}
+    >
+      {color && <span style={{ width: 10, height: 10, borderRadius: 3, background: color, border: "1px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />}
+      {label}
+      <span style={{ fontSize: 11, fontWeight: 800, fontFamily: "ui-monospace, monospace", background: active ? "var(--gold-dark)" : "var(--border)", color: active ? "#fff" : "var(--muted)", borderRadius: 999, padding: "0 7px", minWidth: 18, textAlign: "center" }}>{count}</span>
+    </button>
+  );
+}
+
 export function BlockGrid({
   blocks,
   canEdit,
@@ -99,6 +119,18 @@ export function BlockGrid({
   const [marbleGroupBy, setMarbleGroupBy] = useState<"truck" | "stone">("truck");
   const hasMarble = blocks.some((b) => stoneCategoryMap[b.stone] === "marble");
   const selected = blocks.find(b => b.id === selectedId) ?? null;
+
+  // Stone-type filter tabs (marble view) — "All" + one tab per stone, each with
+  // its own block count. Selecting narrows the cards to that stone only.
+  const [stoneFilter, setStoneFilter] = useState<string | null>(null);
+  const stoneCounts: Array<[string, number]> = (() => {
+    const m = new Map<string, number>();
+    for (const b of blocks) m.set(b.stone, (m.get(b.stone) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  })();
+  // Filtered set used ONLY for the displayed grouping below — counts, collapse
+  // state and the drawer still see the full list.
+  const visibleBlocks = stoneFilter ? blocks.filter((b) => b.stone === stoneFilter) : blocks;
 
   // Drawer facility/yard — synced whenever a different block is opened so the
   // picker starts on that block's actual facility and yard.
@@ -141,7 +173,7 @@ export function BlockGrid({
   // float the just-updated section to the top.
   const byFacility: Record<Facility, Block[]> = { mtcpl: [], riico: [] };
   const latestAt: Record<Facility, string> = { mtcpl: "", riico: "" };
-  for (const b of blocks) {
+  for (const b of visibleBlocks) {
     const f = facilityOfYard(b.yard);
     byFacility[f].push(b);
     if ((b.created_at ?? "") > latestAt[f]) latestAt[f] = b.created_at ?? "";
@@ -273,29 +305,49 @@ export function BlockGrid({
   return (
     <>
       {hasMarble && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Marble grouping:</span>
-          {([
-            { key: "truck", label: "🚛 By truck" },
-            { key: "stone", label: "🗿 By stone type" },
-          ] as const).map((opt) => {
-            const active = marbleGroupBy === opt.key;
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => setMarbleGroupBy(opt.key)}
-                style={{
-                  fontSize: 12, fontWeight: 800, padding: "5px 13px", borderRadius: 999, cursor: "pointer",
-                  border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-                  background: active ? "rgba(184,115,51,0.1)" : "var(--surface)",
-                  color: active ? "var(--gold-dark)" : "var(--text)",
-                }}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
+        <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Stone-type filter — "All" + one tab per stone, each with its own
+              block count. Selecting a stone narrows the cards below to it. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Stone type:</span>
+            <StonePill label="All" count={blocks.length} active={stoneFilter === null} onClick={() => setStoneFilter(null)} />
+            {stoneCounts.map(([stone, count]) => (
+              <StonePill
+                key={stone}
+                label={stoneDisplayName(stone)}
+                count={count}
+                active={stoneFilter === stone}
+                color={stones.find((s) => s.name === stone)?.color_top}
+                onClick={() => setStoneFilter((cur) => (cur === stone ? null : stone))}
+              />
+            ))}
+          </div>
+
+          {/* Marble grouping — truck vs stone-type layout (unchanged). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Marble grouping:</span>
+            {([
+              { key: "truck", label: "🚛 By truck" },
+              { key: "stone", label: "🗿 By stone type" },
+            ] as const).map((opt) => {
+              const active = marbleGroupBy === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setMarbleGroupBy(opt.key)}
+                  style={{
+                    fontSize: 12, fontWeight: 800, padding: "5px 13px", borderRadius: 999, cursor: "pointer",
+                    border: `1.5px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
+                    background: active ? "rgba(184,115,51,0.1)" : "var(--surface)",
+                    color: active ? "var(--gold-dark)" : "var(--text)",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
