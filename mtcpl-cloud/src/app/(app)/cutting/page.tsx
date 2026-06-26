@@ -413,6 +413,68 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
         .sort(sortLatestFirst)
     : [];
 
+  // Daksh June 2026 — Manual cuts completed today (planning skipped).
+  // These create NO cut_session_block, so the formal Done-Today list never
+  // showed them (sandstone manual cuts were invisible; marble had its own
+  // log). Pull them from the manual_cut_block audit, with a recovery %
+  // (cut-slab CFT ÷ block CFT) per block.
+  type ManualCutCard = {
+    blockId: string; operatorName: string; slabCount: number;
+    stockLocation: string; stone: string; at: string;
+    blockCft: number; slabCft: number; recoveryPct: number | null;
+  };
+  let manualCutsToday: ManualCutCard[] = [];
+  if (activeTab === "done") {
+    const { data: mcAudits } = await supabase
+      .from("audit_logs")
+      .select("entity_id, details, created_at")
+      .eq("action", "manual_cut_block")
+      .eq("entity_type", "block")
+      .gte("created_at", todayStartIso)
+      .lt("created_at", tomorrowStartIso)
+      .order("created_at", { ascending: false });
+    const audits = (mcAudits ?? []) as Array<{
+      entity_id: string;
+      details: { slabs?: string[]; operator_id?: string; stock_location?: string } | null;
+      created_at: string;
+    }>;
+    if (audits.length > 0) {
+      const blockIds = [...new Set(audits.map((a) => a.entity_id))];
+      const allSlabIds = [...new Set(audits.flatMap((a) => a.details?.slabs ?? []))];
+      const [{ data: blkRows }, { data: slabRows }] = await Promise.all([
+        supabase.from("blocks").select("id, length_ft, width_ft, height_ft, stone").in("id", blockIds),
+        allSlabIds.length > 0
+          ? supabase.from("slab_requirements").select("id, length_ft, width_ft, thickness_ft").in("id", allSlabIds)
+          : Promise.resolve({ data: [] as Array<{ id: string; length_ft: number; width_ft: number; thickness_ft: number }> }),
+      ]);
+      const blkMap = new Map(
+        ((blkRows ?? []) as Array<{ id: string; length_ft: number; width_ft: number; height_ft: number; stone: string | null }>)
+          .map((b) => [b.id, b] as const),
+      );
+      const slabCftMap = new Map(
+        ((slabRows ?? []) as Array<{ id: string; length_ft: number; width_ft: number; thickness_ft: number }>)
+          .map((s) => [s.id, (Number(s.length_ft) * Number(s.width_ft) * Number(s.thickness_ft)) / 1728] as const),
+      );
+      manualCutsToday = audits.map((a) => {
+        const blk = blkMap.get(a.entity_id);
+        const blockCft = blk ? (Number(blk.length_ft) * Number(blk.width_ft) * Number(blk.height_ft)) / 1728 : 0;
+        const slabIds = a.details?.slabs ?? [];
+        const slabCft = slabIds.reduce((sum, id) => sum + (slabCftMap.get(id) ?? 0), 0);
+        return {
+          blockId: a.entity_id,
+          operatorName: operatorOptions.find((o) => o.id === a.details?.operator_id)?.name ?? "—",
+          slabCount: slabIds.length,
+          stockLocation: a.details?.stock_location ?? "—",
+          stone: blk?.stone ?? "—",
+          at: a.created_at,
+          blockCft,
+          slabCft,
+          recoveryPct: blockCft > 0 ? (slabCft / blockCft) * 100 : null,
+        };
+      });
+    }
+  }
+
   const tabs: { key: Tab; label: string; count: number | null }[] = [
     { key: "pending",     label: "Pending Approval", count: pendingCount },
     { key: "waiting",     label: "Waiting to Cut",   count: waitingCount },
@@ -639,8 +701,48 @@ export default async function CuttingPage({ searchParams }: { searchParams: Sear
           </div>
         )}
 
-        {rows.length === 0 && rejectedRows.length === 0 && (
+        {rows.length === 0 && rejectedRows.length === 0 && manualCutsToday.length === 0 && (
           <div className="banner">{emptyMessages[activeTab]}</div>
+        )}
+
+        {/* Manual cuts (planning skipped) completed today — sandstone or
+            marble. Badged + recovery %; these have no cut_session_block so
+            they never appeared on the formal Done-Today list. */}
+        {activeTab === "done" && manualCutsToday.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "4px 0 10px", paddingBottom: 6, borderBottom: "1px solid var(--border)" }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+                ✂️ Manual cuts
+                <span style={{ marginLeft: 8, fontWeight: 500, color: "var(--muted)", fontSize: 12 }}>· planning skipped · {manualCutsToday.length}</span>
+              </h3>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 10 }}>
+              {manualCutsToday.map((mc) => (
+                <div key={mc.blockId + mc.at} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "#b45309", background: "rgba(217,119,6,0.14)", border: "1px solid rgba(217,119,6,0.3)", borderRadius: 999, padding: "3px 9px" }}>
+                    ✋ Manual cut · skipped cutting
+                  </span>
+                  <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
+                    {mc.blockId}
+                    <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>{mc.stone}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                    <strong style={{ color: "var(--text)" }}>{mc.slabCount}</strong> slab{mc.slabCount === 1 ? "" : "s"} · {mc.operatorName}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>📍 {mc.stockLocation}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+                    Cut output <strong style={{ color: "var(--text)" }}>{mc.slabCft.toFixed(2)} CFT</strong>
+                    {mc.recoveryPct != null && (
+                      <span style={{ fontWeight: 700, color: "#15803d", marginLeft: 8 }}>
+                        · recovery {mc.recoveryPct.toFixed(1)}%
+                        <span style={{ fontWeight: 500, color: "var(--muted)" }}> of {mc.blockCft.toFixed(2)}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Done tab: "Today" heading */}
