@@ -197,7 +197,9 @@ async function blockCutting(admin: AdminClient, w: { startIso: string; endIso: s
       .eq("entity_type", "cut_session_block")
       .gte("created_at", w.startIso)
       .lt("created_at", w.endIso)
-      .order("id"),
+      // order by created_at (always present) — audit_logs' PK isn't in the
+      // tracked schema, so don't assume an "id" column exists.
+      .order("created_at"),
   );
   const csbIds = uniq(logs.map((l) => l.entity_id).filter(Boolean));
   const csb = await chunkInBy<{ id: string; block_id: string }>(csbIds, (chunk) =>
