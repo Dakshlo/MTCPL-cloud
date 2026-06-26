@@ -183,7 +183,7 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
 
       <div style={{ marginTop: 16, fontSize: 11, color: "var(--muted)" }}>
         Generated {new Date(report.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} ·
-        CFT = L×W×H ÷ 1728 · &ldquo;Out for delivery&rdquo; = truck approved &amp; sent; &ldquo;Dispatched&rdquo; = challan made.
+        CFT = L×W×H ÷ 1728 · &ldquo;Dispatched&rdquo; = truck approved &amp; sent.
       </div>
     </section>
   );

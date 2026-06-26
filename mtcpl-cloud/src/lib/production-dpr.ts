@@ -40,7 +40,6 @@ export type DprStageKey =
   | "carving_outsource"
   | "carving_done"
   | "dispatched"
-  | "out_for_delivery"
   | "unloaded"
   | "installed";
 
@@ -383,7 +382,6 @@ export async function buildProductionDpr(period: DprPeriod): Promise<DprReport> 
     sCarving,
     sCarvingDone,
     sDispatched,
-    sOutForDelivery,
     sUnloaded,
     sInstalled,
   ] = await Promise.all([
@@ -392,8 +390,10 @@ export async function buildProductionDpr(period: DprPeriod): Promise<DprReport> 
     cuttingDone(admin, w),
     carvingSplit(admin, w),
     carvingDone(admin, w),
-    dispatchStage(admin, w, "dispatched_at", "dispatched", "Dispatched", "challan made"),
-    dispatchStage(admin, w, "approved_at", "out_for_delivery", "Out for delivery", "approved & sent"),
+    // Daksh: "dispatched" and "out for delivery" are the same event here,
+    // so a single Dispatched stage keyed on approved_at (truck actually
+    // approved & sent — excludes provisional loads not yet sent).
+    dispatchStage(admin, w, "approved_at", "dispatched", "Dispatched", "approved & sent"),
     siteSlabStage(admin, w, "site_unloaded_at", "unloaded", "Unloaded on site"),
     siteSlabStage(admin, w, "installed_at", "installed", "Installed"),
   ]);
@@ -407,7 +407,6 @@ export async function buildProductionDpr(period: DprPeriod): Promise<DprReport> 
       ...sCarving,
       sCarvingDone,
       sDispatched,
-      sOutForDelivery,
       sUnloaded,
       sInstalled,
     ],
