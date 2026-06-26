@@ -16,6 +16,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { matchesDimSearch } from "@/lib/dimension-search";
+
 type Slab = {
   id: string;
   label: string;
@@ -85,20 +87,8 @@ export function SlabSearchBar({ slabs }: { slabs: Slab[] }) {
         if (s.label.toLowerCase().includes(lower)) return true;
         if (s.temple.toLowerCase().includes(lower)) return true;
         if ((s.stone ?? "").toLowerCase().includes(lower)) return true;
-        const L = s.length_ft;
-        const W = s.width_ft;
-        const T = s.thickness_ft;
-        const perms = [
-          `${L}x${W}x${T}`,
-          `${L}x${T}x${W}`,
-          `${W}x${L}x${T}`,
-          `${W}x${T}x${L}`,
-          `${T}x${L}x${W}`,
-          `${T}x${W}x${L}`,
-        ];
-        for (const p of perms) {
-          if (p.toLowerCase().includes(lower)) return true;
-        }
+        // Order-insensitive (any orientation) + ×/x/space normalisation.
+        if (matchesDimSearch(lower, [s.length_ft, s.width_ft, s.thickness_ft])) return true;
         return false;
       })
       .slice(0, 200);

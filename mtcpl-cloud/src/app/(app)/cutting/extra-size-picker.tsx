@@ -39,6 +39,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { matchesDimSearch } from "@/lib/dimension-search";
+
 export type OpenSlabItem = {
   id: string;
   label?: string | null;
@@ -163,14 +165,12 @@ export function ExtraSizePicker({
   const filtered = useMemo(() => {
     const lower = q.trim().toLowerCase();
     if (!lower) return items;
-    const dimsQ = lower.replace(/\s+/g, "").replace(/×/g, "x");
     return items.filter((i) => {
       if (i.id.toLowerCase().includes(lower)) return true;
       if ((i.temple ?? "").toLowerCase().includes(lower)) return true;
       if ((i.label ?? "").toLowerCase().includes(lower)) return true;
-      const dimStr = `${i.length_ft}x${i.width_ft}x${i.thickness_ft}`.toLowerCase();
-      const dimStrShort = `${i.length_ft}x${i.width_ft}`.toLowerCase();
-      if (dimStr.includes(dimsQ) || dimStrShort.includes(dimsQ)) return true;
+      // Order-insensitive: 22x50x5 also matches 50x22x5 / 5x22x50 etc.
+      if (matchesDimSearch(lower, [i.length_ft, i.width_ft, i.thickness_ft])) return true;
       if (i.kind === "planned" && i.donor_block_id.toLowerCase().includes(lower)) return true;
       return false;
     });

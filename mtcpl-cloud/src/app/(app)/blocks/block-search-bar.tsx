@@ -17,6 +17,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { matchesDimSearch } from "@/lib/dimension-search";
+
 type Block = {
   id: string;
   stone: string;
@@ -57,7 +59,6 @@ export function BlockSearchBar({ blocks }: { blocks: Block[] }) {
   const results = useMemo(() => {
     const lower = q.trim().toLowerCase();
     if (!lower) return blocks.slice(0, 50);
-    const dimsQ = lower.replace(/\s+/g, "");
     return blocks
       .filter((b) => {
         if (b.id.toLowerCase().includes(lower)) return true;
@@ -67,8 +68,8 @@ export function BlockSearchBar({ blocks }: { blocks: Block[] }) {
         if ((b.bill_no ?? "").toLowerCase().includes(lower)) return true;
         if ((b.status ?? "").toLowerCase().includes(lower)) return true;
         if (`yard${b.yard}`.includes(lower) || `y${b.yard}`.includes(lower)) return true;
-        const dimStr = `${b.length_ft ?? ""}x${b.width_ft ?? ""}x${b.height_ft ?? ""}`.toLowerCase();
-        if (dimStr.includes(dimsQ)) return true;
+        // Order-insensitive: any ordering of L×W×H matches.
+        if (matchesDimSearch(lower, [b.length_ft, b.width_ft, b.height_ft])) return true;
         return false;
       })
       .slice(0, 50);

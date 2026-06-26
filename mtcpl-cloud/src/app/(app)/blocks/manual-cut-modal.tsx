@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { manualCutBlockAction } from "./actions";
+import { matchesDimSearch } from "@/lib/dimension-search";
 import { yardLabel } from "@/lib/yards";
 
 type OpenSlab = {
@@ -98,18 +99,9 @@ export function ManualCutModal({
 
   const temples = Array.from(new Set(stoneNarrowed.map((s) => s.temple ?? "").filter(Boolean))).sort();
 
-  // Daksh May 2026 round 3 — dimension search on the manual cut
-  // picker. Type "36x11x3", "36×11×3", "36x11", or even "36x" and
-  // the list narrows to slabs whose L×W×T (stored in inches despite
-  // the column name) starts with those numbers. Mirrors the partial-
-  // dim search Daksh wanted on Find ID + Required Sizes search.
-  function normalizeDims(s: string): string {
-    return s
-      .toLowerCase()
-      .replace(/[×x*,]/g, "×")
-      .replace(/[″"'’′]/g, "")
-      .replace(/\s+/g, "");
-  }
+  // Dimension search now uses the shared, order-insensitive matcher
+  // (matchesDimSearch) so "36x11x3", "11x36x3", "3x11x36" all narrow to
+  // the same slab. L×W×T are stored in inches despite the *_ft column name.
   const filteredSlabs = stoneNarrowed.filter((s) => {
     if (templeFilter !== "all" && s.temple !== templeFilter) return false;
     if (!filter) return true;
@@ -121,16 +113,8 @@ export function ManualCutModal({
     ) {
       return true;
     }
-    // Dim match — normalise both query + slab dims to the same
-    // separator + drop quote glyphs, then test prefix. Handles
-    // "36", "36x", "36x11", "36x11x3", "36×11×3".
-    const qDim = normalizeDims(q);
-    if (qDim && /[0-9]/.test(qDim)) {
-      const slabDim = normalizeDims(
-        `${s.length_ft}×${s.width_ft}×${s.thickness_ft}`,
-      );
-      if (slabDim.includes(qDim)) return true;
-    }
+    // Order-insensitive: 22x50x5 also matches 50x22x5 / 5x22x50 etc.
+    if (matchesDimSearch(q, [s.length_ft, s.width_ft, s.thickness_ft])) return true;
     return false;
   });
 
