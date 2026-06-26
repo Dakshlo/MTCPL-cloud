@@ -2894,12 +2894,31 @@ function ReloadHeldModal({
   stoneTypes: StoneTypeDef[];
   onClose: () => void;
 }) {
-  // Compatible CNCs: same vendor's machines, currently idle, work-
-  // type matches (lathe slabs → lathe machines, others → non-lathe).
-  const isCompatibleType = (m: CncMachineLive) =>
-    held.requires_machine_type === "lathe"
-      ? m.machine_type === "lathe"
-      : m.machine_type !== "lathe";
+  // Compatible CNCs: same vendor's machines, currently idle. Daksh
+  // June 2026 — work-type routing disabled: a slab with no
+  // requires_machine_type (the new default) reloads onto ANY idle
+  // machine. Only an explicit legacy tag still gates (lathe → lathe,
+  // an explicit non-lathe tag → non-lathe).
+  const isCompatibleType = (m: CncMachineLive) => {
+    // Work-type gate (Daksh June 2026: NULL = any machine).
+    const typeOk =
+      held.requires_machine_type == null
+        ? true
+        : held.requires_machine_type === "lathe"
+          ? m.machine_type === "lathe"
+          : m.machine_type !== "lathe";
+    if (!typeOk) return false;
+    // Axis gate — mirrors the server's checkAxisMatch on reload: an
+    // axis-tagged (3/4/5) slab only fits a CNC of that exact axis, and a
+    // lathe has no axis so it never fits one. Stops the picker offering a
+    // machine the server would then reject.
+    if (held.requires_cnc_axes != null) {
+      if (m.machine_type === "lathe" || (m.cnc_axes ?? 3) !== held.requires_cnc_axes) {
+        return false;
+      }
+    }
+    return true;
+  };
   const compatibleIdle = machines.filter((m) => m.status === "idle" && isCompatibleType(m));
 
   // Daksh May 2026 — pair-join candidates. A 2-head CNC currently
@@ -5542,18 +5561,27 @@ function LoadModal({
   const compatibleQueue = useMemo(
     () =>
       queue.filter((q) => {
-        // Machine-type gate (lathe vs flat) — unchanged.
-        const typeOk = machineIsLathe
-          ? q.requires_machine_type === "lathe"
-          : q.requires_machine_type !== "lathe";
+        // Machine-type gate. Daksh June 2026 — work-type routing
+        // disabled: a slab with no requires_machine_type (the new
+        // default) can load on ANY machine, so it shows on both lathe
+        // and non-lathe pickers. Only an explicit legacy tag still
+        // gates (lathe → lathe machines, non-lathe → non-lathe).
+        const typeOk =
+          q.requires_machine_type == null
+            ? true
+            : machineIsLathe
+              ? q.requires_machine_type === "lathe"
+              : q.requires_machine_type !== "lathe";
         if (!typeOk) return false;
-        // Mig 079 / 093 — axis gate (non-lathe only). A slab tagged
-        // 3/4/5 only fits a machine of that EXACT axis; NULL = "Any
-        // CNC" fits all. This is the picker-side mirror of the
-        // server's strict checkAxisMatch — a 4-axis slab simply won't
-        // appear when you open Load on a 3-axis machine.
-        if (!machineIsLathe && q.requires_cnc_axes != null) {
-          if ((selectedMachine.cnc_axes ?? 3) !== q.requires_cnc_axes) {
+        // Mig 079 / 093 — axis gate. A slab tagged 3/4/5 only fits a
+        // CNC of that EXACT axis; NULL = "Any CNC" fits all. A lathe has
+        // no CNC axis, so an axis-tagged slab can NEVER load on one.
+        // Daksh June 2026 — now that a no-work-type slab can reach a
+        // lathe's picker, exclude an axis-tagged slab from lathes too
+        // (else it'd be offered and then bounced by the server's
+        // checkAxisMatch with a "needs an N-axis CNC" toast).
+        if (q.requires_cnc_axes != null) {
+          if (machineIsLathe || (selectedMachine.cnc_axes ?? 3) !== q.requires_cnc_axes) {
             return false;
           }
         }

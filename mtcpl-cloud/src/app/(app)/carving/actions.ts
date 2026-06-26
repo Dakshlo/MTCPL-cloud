@@ -1886,27 +1886,28 @@ export async function loadSlabOnMachineAction(formData: FormData) {
   }
 
   // ── Machine type check (migration 024) ──────────────────────────
-  // Derive the job's required machine type. NULL on the job means
-  // "flat-panel default" which always maps to multi_head_2 (the only
-  // non-lathe type in the fleet). Daksh May 2026 — the prior derivation
-  // had a bug where if the machine itself was a lathe, requiredType
-  // would collapse to NULL and the check would pass, letting flat
-  // slabs land on a lathe. Fixed: flat-panel always demands
-  // multi_head_2 regardless of which machine is being loaded.
-  const requiredType = item.requires_machine_type ?? "multi_head_2";
-  if (machine.machine_type !== requiredType) {
+  // Daksh June 2026 — work-type (Flat panel / Lathe) routing is turned
+  // off. Every assign now stores requires_machine_type = NULL, and a
+  // NULL job is allowed to load on ANY machine — single-head CNC,
+  // multi-head CNC, or lathe. Only an explicit legacy tag (a job tagged
+  // before the feature was disabled) still gates the load to that type.
+  // (Earlier this defaulted NULL → multi_head_2; that pinning is exactly
+  //  the restriction the owner asked to lift.)
+  const requiredType = item.requires_machine_type; // null = any machine
+  if (requiredType && machine.machine_type !== requiredType) {
     const friendly =
       requiredType === "lathe"
         ? "This is a lathe (cylindrical) slab — pick a lathe machine, not a flat-panel CNC."
-        : machine.machine_type === "lathe"
-          ? "This is a flat-panel slab — it cannot be loaded onto a lathe machine."
-          : `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`;
+        : `This job is tagged for ${requiredType}. Pick a ${requiredType} machine.`;
     redirect(`/vendor?toast=${encodeURIComponent(friendly)}`);
   }
 
   // ── Mig 079 / 093 — Strict CNC axis match (shared helper) ───────
-  // Skipped on Lathe assignments (the machine_type guard above
-  // already rules them out). NULL = "Any CNC"; 3/4/5 = exact match.
+  // NULL = "Any CNC" (fits any machine, incl. a lathe); 3/4/5 = exact
+  // match. Since work-type routing was disabled (June 2026) a no-type
+  // slab CAN now reach a lathe here, so checkAxisMatch is the backstop:
+  // a lathe's cnc_axes is NULL→3, so an axis-tagged slab is rejected —
+  // the cockpit pickers already filter those out, this just fail-safes.
   const axisErr = checkAxisMatch(item.requires_cnc_axes, machine);
   if (axisErr) redirect(`/vendor?toast=${encodeURIComponent(axisErr)}`);
 
@@ -3270,12 +3271,19 @@ export async function reloadHeldSlabAction(formData: FormData) {
   if (machine.vendor_id !== item.vendor_id) {
     redirect(`${redirectTo}?toast=Machine+belongs+to+another+vendor`);
   }
-  // Work-type check: lathe slab → lathe machine; non-lathe → non-lathe.
+  // Work-type check — Daksh June 2026: routing disabled. A slab with no
+  // requires_machine_type (the new default) reloads onto ANY machine.
+  // Only an explicit tag still gates: a lathe-tagged slab needs a lathe,
+  // and an explicit non-lathe legacy tag still avoids a lathe.
   if (item.requires_machine_type === "lathe" && machine.machine_type !== "lathe") {
     redirect(`${redirectTo}?toast=Lathe+slab+needs+a+lathe+machine`);
   }
-  if (item.requires_machine_type !== "lathe" && machine.machine_type === "lathe") {
-    redirect(`${redirectTo}?toast=Non-lathe+slab+cannot+go+on+a+lathe`);
+  if (
+    item.requires_machine_type &&
+    item.requires_machine_type !== "lathe" &&
+    machine.machine_type === "lathe"
+  ) {
+    redirect(`${redirectTo}?toast=This+job+is+tagged+for+a+non-lathe+machine`);
   }
 
   // Mig 079 / 093 — strict CNC axis match (was missing on reload, so a

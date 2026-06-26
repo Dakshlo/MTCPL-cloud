@@ -659,6 +659,19 @@ async function loadSlabContext(
   } else if (isParked && slab.status === "completed") {
     // Mig 125 — parked completed = dispatch storage.
     currentLocation = `🗄 In DISPATCH storage${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
+  } else if (
+    carving &&
+    carving.completed_at != null &&
+    carving.review_approved_at == null
+  ) {
+    // Daksh June 2026 — carving marked done by the operator but the team
+    // review/approval hasn't happened yet. In this window the slab is
+    // UNLOADED (cnc_machine_id cleared), sitting at a temporary location
+    // awaiting approval — NOT on a machine. slab.status is still
+    // 'carving_in_progress', so without this branch the headline wrongly
+    // read "On a CNC at <vendor>". Mirror the Find ID "carving approval
+    // pending" pill.
+    currentLocation = `Carving done — awaiting approval at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
   } else if (carving?.status === "carving_in_progress") {
     currentLocation = `On a CNC at ${carving.vendor_name}`;
   } else if (carving?.status === "completed") {

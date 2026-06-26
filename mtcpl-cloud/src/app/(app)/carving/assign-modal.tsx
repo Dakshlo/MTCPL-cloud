@@ -223,14 +223,17 @@ export function AssignModal({
   outsourceOnly?: boolean;
 }) {
   const [vendorId, setVendorId] = useState<string>("");
-  const [workType, setWorkType] = useState<WorkType>("flat");
-  // Mig 079 / 093 — CNC axis requirement. Daksh June 2026: default to
-  // 3-axis (the floor majority) instead of "Any" so most slabs are
-  // axis-locked out of the box; the assigner bumps to 4/5 only for
-  // the special ones. Only meaningful when workType is "flat" (CNC);
-  // flipping to lathe resets it to 0 ("Any") so it doesn't leak into
-  // the lathe assignment.
-  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(3);
+  // Work-type (Flat panel / Lathe) selection is temporarily turned off
+  // (Daksh June 2026) — the picker is hidden behind a "feature
+  // unavailable" note and every slab is treated as flat-panel CNC so it
+  // can be loaded to any CNC or lathe. State stays pinned to "flat";
+  // the setter is dropped since nothing flips it any more.
+  const [workType] = useState<WorkType>("flat");
+  // Mig 079 / 093 — CNC axis requirement. Daksh June 2026: default back
+  // to 0 ("Any CNC") so a slab isn't axis-locked out of the box; the
+  // assigner bumps to 3/4/5 only for the special ones. Only meaningful
+  // when workType is "flat" (CNC).
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
   useEffect(() => {
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);
@@ -440,43 +443,30 @@ export function AssignModal({
             {!isManual && !outsourceOnly && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <Label>Work type</Label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setWorkType("flat")}
-                    style={{
-                      flex: 1,
-                      padding: "10px 14px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      border: `1.5px solid ${workType === "flat" ? "var(--gold-dark)" : "var(--border)"}`,
-                      background: workType === "flat" ? "rgba(180,115,51,0.08)" : "var(--surface)",
-                      color: "var(--text)",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                    }}
-                    title="Flat panel work — must go on a 2-head CNC machine. Default."
-                  >
-                    📐 Flat panel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setWorkType("lathe")}
-                    style={{
-                      flex: 1,
-                      padding: "10px 14px",
-                      fontSize: 13,
-                      fontWeight: 700,
-                      border: `1.5px solid ${workType === "lathe" ? "#7c3aed" : "var(--border)"}`,
-                      background: workType === "lathe" ? "rgba(124,58,237,0.08)" : "var(--surface)",
-                      color: workType === "lathe" ? "#5b21b6" : "var(--text)",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                    }}
-                    title="Cylindrical work — must go on a lathe."
-                  >
-                    🌀 Lathe (cylindrical)
-                  </button>
+                {/* Daksh June 2026 — Flat panel / Lathe routing is
+                    temporarily disabled. The toggle is hidden behind a
+                    "feature unavailable" note; workType stays pinned to
+                    "flat" so a slab can be loaded to any CNC or lathe. */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "10px 14px",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    background: "var(--surface)",
+                    border: "1.5px dashed var(--border)",
+                    borderRadius: 8,
+                  }}
+                  title="Flat panel / Lathe routing is temporarily turned off."
+                >
+                  🚧{" "}
+                  <span>
+                    Flat panel / Lathe selection is currently unavailable —
+                    slabs can be loaded to any CNC or lathe.
+                  </span>
                 </div>
                 {/* Mig 079 — CNC axis sub-picker. Only renders for
                     Flat panel work (CNC). Three options:

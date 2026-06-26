@@ -47,6 +47,10 @@ const STATUS_TONE: Record<string, { fg: string; bg: string }> = {
   cut_done:            { fg: "#15803d", bg: "rgba(21,128,61,0.10)" },
   carving_assigned:    { fg: "#7c3aed", bg: "rgba(124,58,237,0.10)" },
   carving_in_progress: { fg: "#7c3aed", bg: "rgba(124,58,237,0.10)" },
+  // Synthetic status (NOT a DB value) — Find ID swaps it in when a carving
+  // job is done but its review approval is still pending, so the slab reads
+  // "carving approval pending" instead of "carving in progress".
+  carving_approval_pending: { fg: "#b45309", bg: "rgba(217,119,6,0.14)" },
   completed:           { fg: "#15803d", bg: "rgba(21,128,61,0.10)" },
   dispatched:          { fg: "#1e40af", bg: "rgba(30,64,175,0.10)" },
   rejected:            { fg: "#b91c1c", bg: "rgba(185,28,28,0.10)" },
@@ -1111,6 +1115,21 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
   // section so the user can see the literal stencilled rack code.
   const stageContext: string = result.current_location;
 
+  // Daksh June 2026 — a carving job that's been marked complete but not
+  // yet review-approved leaves the slab at status 'carving_in_progress'
+  // (the approval-pending state lives on carving_items: completed_at set,
+  // review_approved_at null). Find ID was therefore reading "carving in
+  // progress" for those slabs. Swap in a synthetic 'carving_approval_pending'
+  // status so the pill reads "carving approval pending" instead.
+  const carvingApprovalPending =
+    s.status === "carving_in_progress" &&
+    result.carving != null &&
+    result.carving.completed_at != null &&
+    result.carving.review_approved_at == null;
+  const displayStatus = carvingApprovalPending
+    ? "carving_approval_pending"
+    : s.status;
+
   return (
     <div
       style={{
@@ -1136,7 +1155,7 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
           Where it is now
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <StagePill status={s.status} />
+          <StagePill status={displayStatus} />
           {s.priority && (
             <span
               style={{
@@ -1343,7 +1362,15 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
             </div>
             <Field k="Vendor" v={result.carving.vendor_name} />
             <Field k="Vendor type" v={result.carving.vendor_type} />
-            <Field k="Status" v={result.carving.status} mono />
+            <Field
+              k="Status"
+              v={
+                carvingApprovalPending
+                  ? "approval pending"
+                  : result.carving.status
+              }
+              mono
+            />
             {result.carving.location && (
               <Field k="Location" v={result.carving.location} />
             )}

@@ -174,8 +174,11 @@ export function BulkAssignModal({
   outsourceOnly?: boolean;
 }) {
   const [vendorId, setVendorId] = useState("");
-  const [workType, setWorkType] = useState<WorkType>("flat");
-  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(3);
+  // Daksh June 2026 — Flat panel / Lathe picker temporarily disabled;
+  // pinned to "flat" so slabs load to any CNC or lathe (setter dropped).
+  // CNC-axis default back to 0 ("Any CNC") so slabs aren't axis-locked.
+  const [workType] = useState<WorkType>("flat");
+  const [cncAxesReq, setCncAxesReq] = useState<CncAxesReq>(0);
   useEffect(() => {
     if (workType === "lathe" && cncAxesReq !== 0) setCncAxesReq(0);
   }, [workType, cncAxesReq]);
@@ -371,9 +374,10 @@ export function BulkAssignModal({
             {!isManual && !outsourceOnly && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <Label>Work type (applies to all {slabs.length})</Label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" onClick={() => setWorkType("flat")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 600, border: `1.5px solid ${workType === "flat" ? "var(--gold-dark)" : "var(--border)"}`, background: workType === "flat" ? "rgba(180,115,51,0.08)" : "var(--surface)", color: "var(--text)", borderRadius: 8, cursor: "pointer" }}>📐 Flat panel</button>
-                  <button type="button" onClick={() => setWorkType("lathe")} style={{ flex: 1, padding: "10px 14px", fontSize: 13, fontWeight: 700, border: `1.5px solid ${workType === "lathe" ? "#7c3aed" : "var(--border)"}`, background: workType === "lathe" ? "rgba(124,58,237,0.08)" : "var(--surface)", color: workType === "lathe" ? "#5b21b6" : "var(--text)", borderRadius: 8, cursor: "pointer" }}>🌀 Lathe (cylindrical)</button>
+                {/* Daksh June 2026 — Flat panel / Lathe routing disabled;
+                    toggle hidden behind a "feature unavailable" note. */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", fontSize: 12.5, fontWeight: 600, color: "var(--muted)", background: "var(--surface)", border: "1.5px dashed var(--border)", borderRadius: 8 }} title="Flat panel / Lathe routing is temporarily turned off.">
+                  🚧 <span>Flat panel / Lathe selection is currently unavailable — slabs can be loaded to any CNC or lathe.</span>
                 </div>
                 {workType === "flat" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>

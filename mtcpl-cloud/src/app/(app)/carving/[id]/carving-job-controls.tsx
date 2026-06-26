@@ -77,8 +77,14 @@ export function CarvingJobControls({
     ["carving_assigned", "carving_in_progress", "carving_on_hold", "completed"].includes(status);
   const canShowReceipt =
     canManage && isCnc && status === "carving_assigned" && !receivedAtVendorAt;
-  const canShowTagEditor =
-    canManage && isCnc && (status === "carving_assigned" || status === "carving_in_progress") && !cncMachineId;
+  // Daksh June 2026 — work-type (Flat panel / Lathe) routing is disabled.
+  // Loading is no longer gated by work type (a slab can go on any
+  // machine — CNC or lathe), so the per-job "Re-tag work type" control is
+  // hidden. The editor JSX is kept below (just gated off) so it can be
+  // restored by putting the role/status condition back here:
+  //   canManage && isCnc && (status === "carving_assigned" ||
+  //   status === "carving_in_progress") && !cncMachineId
+  const canShowTagEditor = false;
   // Mig 098 — Outsource has no transfer-between-vendors flow on this page;
   // owner recalls from the Work Orders page instead. CNC keeps transfer.
   const canShowTransfer = canManage && !isLockedDone && vendorType !== "Outsource";
