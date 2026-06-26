@@ -89,7 +89,6 @@ function donorStatusBadge(status: string): { label: string; bg: string; fg: stri
 
 export function ExtraSizePicker({
   openSlabs,
-  blockStone = null,
   transferableSlabs,
   allowTransfer,
   selectedExtraIds,
@@ -98,10 +97,6 @@ export function ExtraSizePicker({
   onToggleTransfer,
 }: {
   openSlabs: OpenSlabItem[];
-  /** The block's stone — rows of a DIFFERENT stone get a ⚠ flag so the
-   *  operator double-checks before cutting (the list now spans the whole
-   *  stone category, not just the exact block stone). */
-  blockStone?: string | null;
   transferableSlabs: TransferableSlabItem[];
   /** When false the planned/claim list is hidden entirely. */
   allowTransfer: boolean;
@@ -173,7 +168,6 @@ export function ExtraSizePicker({
       if (i.id.toLowerCase().includes(lower)) return true;
       if ((i.temple ?? "").toLowerCase().includes(lower)) return true;
       if ((i.label ?? "").toLowerCase().includes(lower)) return true;
-      if ((i.stone ?? "").toLowerCase().includes(lower)) return true;
       const dimStr = `${i.length_ft}x${i.width_ft}x${i.thickness_ft}`.toLowerCase();
       const dimStrShort = `${i.length_ft}x${i.width_ft}`.toLowerCase();
       if (dimStr.includes(dimsQ) || dimStrShort.includes(dimsQ)) return true;
@@ -756,14 +750,6 @@ export function ExtraSizePicker({
                           </div>
                           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1, fontFamily: "ui-monospace, monospace" }}>
                             {item.length_ft}×{item.width_ft}×{item.thickness_ft} in
-                            {item.stone && (() => {
-                              const diff = !!(blockStone && item.stone !== blockStone);
-                              return (
-                                <span style={{ marginLeft: 8, color: diff ? "#b45309" : "var(--muted)", fontWeight: diff ? 700 : 400 }} title={diff ? `Different stone from this block (${blockStone}) — double-check before cutting` : undefined}>
-                                  · {item.stone}{diff ? " ⚠" : ""}
-                                </span>
-                              );
-                            })()}
                             {isPlanned && (
                               <span style={{ marginLeft: 8 }}>
                                 · from <strong style={{ color: "#b91c1c" }}>{item.donor_block_id}</strong>

@@ -251,7 +251,6 @@ export function FinishBlockForm({
   sessionId,
   blockId,
   stone,
-  blockStone = null,
   yard,
   allSlabs,
   openSlabs = [],
@@ -271,9 +270,6 @@ export function FinishBlockForm({
   sessionId: string;
   blockId: string;
   stone: string;
-  /** The block's actual stone (null preserved) — used to flag open slabs of a
-   *  DIFFERENT stone in the picker now that it shows the whole category. */
-  blockStone?: string | null;
   yard: number;
   allSlabs: PlacedSlab[];
   openSlabs?: OpenSlab[];
@@ -800,7 +796,6 @@ export function FinishBlockForm({
           )}
           <ExtraSizePicker
             openSlabs={openSlabs}
-            blockStone={blockStone}
             transferableSlabs={transferableSlabs}
             allowTransfer={allowTransfer}
             selectedExtraIds={precutMode ? precutExtraIds : extraIds}

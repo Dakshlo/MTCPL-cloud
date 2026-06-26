@@ -137,7 +137,7 @@ export default async function CuttingDetailPage({
 
   const [profilesMap, { data: stoneTypes }, { data: openSlabs }, transferableSlabs, { data: parentBlock }] = await Promise.all([
     getProfilesMap(),
-    createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side, stone_category").order("name"),
+    createAdminSupabaseClient().from("stone_types").select("id, name, color_top, color_front, color_side").order("name"),
     // Paginated fetch so the "Add unplanned slab" picker sees the
     // full open-slab pool. The previous single .select() was capped
     // at PostgREST's default 1000 rows — once a stone had >1000
@@ -150,19 +150,12 @@ export default async function CuttingDetailPage({
           const PAGE = 1000;
           const all: SlabRow[] = [];
           for (let offset = 0; offset < 50000; offset += PAGE) {
-            // Daksh Jun 2026 — DON'T filter by exact block stone here. That
-            // hid open slabs whose stone didn't byte-match the block's (incl.
-            // NULL stone, or a same-sandstone different name), so operators saw
-            // them on Required Sizes / Find ID but not in this picker. We fetch
-            // every open slab and narrow to the block's CATEGORY (sandstone vs
-            // marble) at render — a sandstone block can't cut a marble slab, but
-            // any sandstone slab is fair game. `id` tiebreaker = stable paging.
             const { data, error: pageErr } = await supabase
               .from("slab_requirements")
               .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft")
               .eq("status", "open")
+              .eq("stone", blockStone)
               .order("created_at", { ascending: false })
-              .order("id", { ascending: true })
               .range(offset, offset + PAGE - 1);
             if (pageErr) throw new Error(pageErr.message);
             if (!data || data.length === 0) break;
@@ -263,19 +256,6 @@ export default async function CuttingDetailPage({
     // is a different grade than the outside.
     supabase.from("blocks").select("quality").eq("id", block.block_id).maybeSingle(),
   ]);
-
-  // Stone-name → category map (sandstone vs marble). The open-slab picker is
-  // narrowed to the block's CATEGORY, not its exact stone, so a sandstone block
-  // surfaces every sandstone slab (incl. NULL-stone / different-name) but never
-  // a marble slab (which can't be cut from it). Unknown / NULL → sandstone.
-  const stoneCategoryMap: Record<string, "sandstone" | "marble"> = {};
-  for (const s of (stoneTypes ?? []) as Array<{ name: string; stone_category?: string | null }>) {
-    stoneCategoryMap[s.name] = s.stone_category === "marble" ? "marble" : "sandstone";
-  }
-  const categoryOfStone = (stone: string | null | undefined): "sandstone" | "marble" =>
-    stone && stoneCategoryMap[stone] === "marble" ? "marble" : "sandstone";
-  const blockCategory = categoryOfStone(blockStone);
-  const openSlabsSameCategory = (openSlabs ?? []).filter((s) => categoryOfStone(s.stone) === blockCategory);
 
   // Mig 143 — curated stock-location names for the Cutting-Done combobox.
   const { data: stockLocRows } = await supabase
@@ -1018,8 +998,7 @@ export default async function CuttingDetailPage({
               sw: s.sw,
               sh: s.sh,
             }))}
-            openSlabs={openSlabsSameCategory.filter(s => !placed.some(p => p.id === s.id))}
-            blockStone={blockStone}
+            openSlabs={(openSlabs ?? []).filter(s => !placed.some(p => p.id === s.id))}
             transferableSlabs={transferableSlabs}
             allowTransfer={allowTransfer}
             parentQuality={parentQuality}
@@ -1094,8 +1073,7 @@ export default async function CuttingDetailPage({
                   sw: s.sw,
                   sh: s.sh,
                 }))}
-                openSlabs={openSlabsSameCategory.filter((s) => !placed.some((p) => p.id === s.id))}
-                blockStone={blockStone}
+                openSlabs={(openSlabs ?? []).filter((s) => !placed.some((p) => p.id === s.id))}
                 transferableSlabs={transferableSlabs}
                 allowTransfer={allowTransfer}
                 parentQuality={parentQuality}
