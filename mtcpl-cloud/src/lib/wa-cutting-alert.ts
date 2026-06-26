@@ -309,3 +309,169 @@ export async function sendCuttingApprovedWhatsApp(
     }
   }
 }
+
+/**
+ * Manual-cut variant (Daksh June 2026). Same alert as a normal cutting
+ * approval, but for a block cut straight from the Blocks page (planning
+ * skipped — no cut_session_block exists). Keyed on the block id + the
+ * operator chosen on the Manual Cut form. Works for sandstone AND marble.
+ * Fire-and-forget; never throws.
+ */
+export async function sendManualCutWhatsApp(
+  blockId: string,
+  operatorId: string | null,
+  actorId: string,
+): Promise<void> {
+  try {
+    const templateName = process.env.MSG91_WA_CUTTING_TEMPLATE;
+    if (!templateName || !process.env.MSG91_AUTH_KEY) {
+      await logAudit(actorId, "manual_cut_wa_skipped", "block", blockId, {
+        reason: !templateName ? "MSG91_WA_CUTTING_TEMPLATE not configured" : "MSG91_AUTH_KEY not configured",
+      });
+      return;
+    }
+
+    const admin = createAdminSupabaseClient();
+
+    const [{ data: blockMeta }, { data: opRow }] = await Promise.all([
+      admin
+        .from("blocks")
+        .select("stone, tonnes, yard, length_ft, width_ft, height_ft")
+        .eq("id", blockId)
+        .maybeSingle(),
+      operatorId
+        ? admin.from("operators").select("name").eq("id", operatorId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    const meta = (blockMeta ?? {}) as {
+      stone?: string | null; tonnes?: number | string | null; yard?: number | null;
+      length_ft?: number | string | null; width_ft?: number | string | null; height_ft?: number | string | null;
+    };
+    const operatorName = (opRow as { name?: string | null } | null)?.name ?? "-";
+
+    const { data: slabRows } = await admin
+      .from("slab_requirements")
+      .select("id, temple, length_ft, width_ft, thickness_ft, label, description, additional_description, component_section, component_element, stock_location")
+      .eq("source_block_id", blockId)
+      .in("status", [...POST_CUT_STATUSES]);
+    const slabs = ((slabRows ?? []) as Array<Record<string, unknown>>)
+      .map((s) => ({
+        id: s.id as string,
+        temple: (s.temple as string | null) ?? "-",
+        length_ft: Number(s.length_ft) || 0,
+        width_ft: Number(s.width_ft) || 0,
+        thickness_ft: Number(s.thickness_ft) || 0,
+        label: (s.label as string | null) ?? null,
+        description: (s.description as string | null) ?? null,
+        additional: (s.additional_description as string | null) ?? null,
+        section: (s.component_section as string | null) ?? null,
+        element: (s.component_element as string | null) ?? null,
+        stock_location: (s.stock_location as string | null) ?? null,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    if (slabs.length === 0) {
+      await logAudit(actorId, "manual_cut_wa_skipped", "block", blockId, { reason: "no slabs cut" });
+      return;
+    }
+
+    const { getProfilesMap } = await import("@/lib/profiles");
+    const profilesMap = await getProfilesMap();
+    const actorName = profilesMap[actorId] ?? "-";
+
+    const tonnes = meta.tonnes != null ? Number(meta.tonnes) : null;
+    const blockDims =
+      tonnes && tonnes > 0
+        ? `${tonnes.toFixed(3)} T`
+        : meta.length_ft && meta.width_ft && meta.height_ft
+          ? `${Number(meta.length_ft)}×${Number(meta.width_ft)}×${Number(meta.height_ft)}″`
+          : "-";
+
+    const { generateCuttingDonePdf } = await import("@/lib/cutting-done-pdf");
+    const generatedAt = fmtIstDateTime(new Date().toISOString());
+    const pdfBytes = await generateCuttingDonePdf({
+      title: `Block ${blockId} — manual cut`,
+      subtitle: `${slabs.length} slab${slabs.length === 1 ? "" : "s"} cut · ${meta.stone ?? "-"} · manual (planning skipped)`,
+      generatedAt,
+      generatedBy: actorName,
+      blocks: [{
+        cutSessionBlockId: blockId,
+        blockCode: blockId,
+        stone: meta.stone ?? "-",
+        yard: `Yard ${meta.yard ?? "-"}`,
+        blockDims,
+        cutDate: generatedAt,
+        operator: operatorName,
+        planGenerator: "— (manual cut)",
+        sessionCode: "Manual cut",
+        approvedBy: actorName,
+        slabs: slabs.map((s) => ({
+          id: s.id,
+          temple: s.temple,
+          dims: `${s.length_ft}×${s.width_ft}×${s.thickness_ft}″`,
+          label: s.label,
+          description: s.description,
+          additional: s.additional,
+          section: s.section,
+          element: s.element,
+        })),
+      }],
+    });
+
+    const objectPath = `cutting/${blockId}/${crypto.randomUUID()}.pdf`;
+    const { error: upErr } = await admin.storage
+      .from("whatsapp_reports")
+      .upload(objectPath, Buffer.from(pdfBytes), { contentType: "application/pdf", upsert: false });
+    if (upErr) {
+      await logAudit(actorId, "manual_cut_wa_failed", "block", blockId, { reason: `pdf upload failed: ${upErr.message}` });
+      return;
+    }
+    const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(objectPath).data.publicUrl;
+
+    const { normalizeIndianMobile } = await import("@/lib/wa-send");
+    const masterRaw = await getCuttingAlertRecipients();
+    let operatorRaw: string[] = [];
+    if (operatorId) {
+      const phones = await getOperatorPhones();
+      const own = phones[operatorId];
+      if (own) operatorRaw = [own];
+    }
+    const to = [...new Set([...masterRaw, ...operatorRaw].map((n) => normalizeIndianMobile(n)).filter((n): n is string => !!n))];
+    if (to.length === 0) {
+      await logAudit(actorId, "manual_cut_wa_skipped", "block", blockId, { reason: "no valid recipient configured" });
+      return;
+    }
+
+    const codes = slabs.map((s) => s.id);
+    const codesText = codes.length <= 12 ? codes.join(", ") : `${codes.slice(0, 12).join(", ")} +${codes.length - 12} more`;
+    const locations = [...new Set(slabs.map((s) => (s.stock_location ?? "").trim()).filter(Boolean))];
+    const locationText = locations.length > 0 ? locations.join(", ") : "-";
+
+    const { sendWhatsAppTemplate } = await import("@/lib/wa-send");
+    await sendWhatsAppTemplate({
+      to,
+      templateName,
+      components: {
+        header_1: { type: "document", value: pdfUrl, filename: `Cutting-${blockId}.pdf` },
+        body_1: { type: "text", value: operatorName },
+        body_2: { type: "text", value: blockId },
+        body_3: { type: "text", value: String(slabs.length) },
+        body_4: { type: "text", value: codesText },
+        body_5: { type: "text", value: locationText },
+      },
+    });
+
+    await logAudit(actorId, "manual_cut_wa_sent", "block", blockId, {
+      block: blockId, operator: operatorName, slab_count: slabs.length, to,
+      operator_phoned: operatorRaw.length > 0,
+    });
+  } catch (e) {
+    console.warn("[sendManualCutWhatsApp] failed", e);
+    try {
+      await logAudit(actorId, "manual_cut_wa_failed", "block", blockId, {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } catch {
+      /* final swallow */
+    }
+  }
+}

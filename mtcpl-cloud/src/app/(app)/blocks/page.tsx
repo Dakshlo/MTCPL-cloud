@@ -84,6 +84,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     { data: vendorRows },
     { data: stoneTypes },
     openSlabs,
+    { data: operatorRows },
   ] = await Promise.all([
     blocksQuery,
     // Explicit high limit — same reason as in the slab page: Supabase's
@@ -111,6 +112,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       .order("sort_order")
       .order("name"),
     fetchAllOpenSlabs(),
+    admin.from("operators").select("id, name").eq("is_active", true).order("name"),
   ]);
 
   if (error) throw new Error(error.message);
@@ -488,6 +490,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
           profilesMap={profilesMap}
           stoneTypes={stoneList}
           openSlabs={openSlabs}
+          operators={(operatorRows ?? []) as Array<{ id: string; name: string }>}
           stoneCategoryMap={stoneCategoryMap}
         />
       )}

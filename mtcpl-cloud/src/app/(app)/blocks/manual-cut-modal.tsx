@@ -33,11 +33,14 @@ type RemainderEntry = { l: string; w: string; h: string };
 export function ManualCutModal({
   block,
   openSlabs,
+  operators,
   onClose,
   isMarble = false,
 }: {
   block: Block;
   openSlabs: OpenSlab[];
+  /** Active cutting operators for the mandatory operator picker. */
+  operators: Array<{ id: string; name: string }>;
   onClose: () => void;
   /** When true, the remainder-pieces section is hidden. Marble blocks
    *  are brittle and don't get restocked — slabs only, rest is implicit
@@ -54,6 +57,8 @@ export function ManualCutModal({
   // Captured here so we don't need a 2-stage flow; the EN + HI labels
   // sit right above the action buttons so the worker can't miss it.
   const [stockLocation, setStockLocation] = useState<string>("");
+  // Daksh June 2026 — mandatory cutting operator (drives the WhatsApp alert).
+  const [operatorId, setOperatorId] = useState<string>("");
 
   function toggleSlab(id: string) {
     setSelectedIds((prev) => {
@@ -177,6 +182,10 @@ export function ManualCutModal({
       );
       return;
     }
+    if (!operatorId) {
+      setError("Select the cutting operator who cut this block. · कटिंग ऑपरेटर चुनें।");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -188,6 +197,7 @@ export function ManualCutModal({
       formData.set("remainders_json", remaindersJson);
       formData.set("restock", restock ? "yes" : "no");
       formData.set("stock_location", loc);
+      formData.set("operator_id", operatorId);
       await manualCutBlockAction(formData);
       // Daksh May 2026 — pop the slab-labels print page in a new tab
       // so the team can immediately stencil IDs on the physical slabs.
@@ -806,6 +816,31 @@ export function ManualCutModal({
             <span style={{ fontSize: 10, color: "var(--muted)" }}>
               Required — the team uses this to find the slabs later.
               Printed on each slab label.
+            </span>
+          </label>
+          <label
+            htmlFor="cutting-operator-select"
+            style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text)", marginTop: 10 }}
+          >
+            <span style={{ fontWeight: 700 }}>
+              ✂️ Cutting operator <span style={{ color: "#b91c1c" }}>*</span>
+              <span style={{ fontWeight: 500, color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
+                Who cut this block? · किसने काटा?
+              </span>
+            </span>
+            <select
+              id="cutting-operator-select"
+              value={operatorId}
+              onChange={(e) => setOperatorId(e.target.value)}
+              style={{ padding: "8px 12px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 6, background: "#fff", color: "var(--text)" }}
+            >
+              <option value="">— Select operator —</option>
+              {operators.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>
+              Required — sends the cutting-done WhatsApp to the team and this operator.
             </span>
           </label>
         </div>

@@ -100,6 +100,7 @@ export function BlockGrid({
   profilesMap = {},
   stoneTypes,
   openSlabs = [],
+  operators = [],
   stoneCategoryMap = {},
 }: {
   blocks: Block[];
@@ -108,6 +109,7 @@ export function BlockGrid({
   profilesMap?: Record<string, string>;
   stoneTypes?: StoneType[];
   openSlabs?: OpenSlab[];
+  operators?: Array<{ id: string; name: string }>;
   stoneCategoryMap?: Record<string, StoneCategory>;
 }) {
   const stones = stoneTypes && stoneTypes.length > 0 ? stoneTypes : FALLBACK_STONES;
@@ -686,6 +688,7 @@ export function BlockGrid({
           }}
           isMarble={stoneCategoryMap[selected.stone] === "marble"}
           openSlabs={openSlabs.filter(s => s.stone === selected.stone)}
+          operators={operators}
           onClose={() => setManualCutOpen(false)}
         />
       )}

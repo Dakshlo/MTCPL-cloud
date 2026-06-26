@@ -8,6 +8,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { sendManualCutWhatsApp } from "@/lib/wa-cutting-alert";
 import { ALLOWED_YARDS, isAllowedYard, yardLabel } from "@/lib/yards";
 
 
@@ -275,6 +276,10 @@ export async function manualCutBlockAction(formData: FormData) {
   // labels print sheet + the AI lookup can answer "where is this
   // slab now". Trimmed; capped to 100 chars to match column.
   const stockLocation = textValue(formData, "stock_location").slice(0, 100);
+  // Daksh June 2026 — mandatory cutting operator: drives the WhatsApp
+  // alert (to the master list + this operator's own number) and lets the
+  // Done-Today badge attribute the manual cut, like the formal flow.
+  const operatorId = textValue(formData, "operator_id");
 
   if (!blockId || slabIds.length === 0) {
     throw new Error("Block and at least one slab are required.");
@@ -283,6 +288,9 @@ export async function manualCutBlockAction(formData: FormData) {
     throw new Error(
       "Stock location is required — tell us where the cut slabs are being placed (Yard / rack / shade).",
     );
+  }
+  if (!operatorId) {
+    throw new Error("Select the cutting operator who cut this block.");
   }
 
   // 1. Consume block (race-condition guard: only if still available)
@@ -347,7 +355,13 @@ export async function manualCutBlockAction(formData: FormData) {
     restocked_blocks: restockedIds,
     restock,
     stock_location: stockLocation,
+    operator_id: operatorId,
   });
+
+  // WhatsApp alert — same as a formal cutting approval, keyed on the
+  // block + chosen operator (works for sandstone and marble). Never
+  // throws; awaited so the send completes before the action returns.
+  await sendManualCutWhatsApp(blockId, operatorId, profile.id);
 
   // 5. Revalidate
   revalidatePath("/blocks");
