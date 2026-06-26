@@ -10,6 +10,7 @@ import { EmailSnapshotCard } from "./email-snapshot-card";
 import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
+import { DprEntryCard } from "@/components/dpr-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 
 /**
@@ -270,6 +271,8 @@ export default async function DashboardPage() {
       >
         <AskAiEntryCard />
         <BlockJourneyEntryCard />
+        {/* Production DPR — owner/developer only. */}
+        {(profile.role === "owner" || profile.role === "developer") && <DprEntryCard />}
         <VariousCostingEntryCard />
         <TvModeEntryCard />
         {/* Owner-only market-news brief + chat (liquid-glass page). */}
