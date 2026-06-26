@@ -29,6 +29,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import type { CutterReportPeriod } from "@/lib/cutter-cost-report";
+import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 
 export type DprPeriod = CutterReportPeriod;
 
@@ -196,9 +197,10 @@ async function blockCutting(admin: AdminClient, w: { startIso: string; endIso: s
       .eq("entity_type", "cut_session_block")
       .gte("created_at", w.startIso)
       .lt("created_at", w.endIso)
-      // order by created_at (always present) — audit_logs' PK isn't in the
-      // tracked schema, so don't assume an "id" column exists.
-      .order("created_at"),
+      // created_at + entity_id (both definitely present) — a stable,
+      // near-unique sort for .range() paging without assuming a PK column.
+      .order("created_at")
+      .order("entity_id"),
   );
   const csbIds = uniq(logs.map((l) => l.entity_id).filter(Boolean));
   const csb = await chunkInBy<{ id: string; block_id: string }>(csbIds, (chunk) =>
@@ -241,8 +243,13 @@ async function cuttingDone(admin: AdminClient, w: { startIso: string; endIso: st
         .order("id"),
     200,
   );
+  // Canonical "physically produced" set — POST_CUT_STATUSES keeps a
+  // rejected slab credited to its source block (it WAS cut) and drops
+  // not-yet-cut 'planned' slabs. Matches cutter-cost-report.ts so the
+  // two never diverge (review w8ksgkj64).
+  const postCut = POST_CUT_STATUSES as readonly string[];
   const items = slabs
-    .filter((s) => !["open", "rejected", "cancelled"].includes(s.status))
+    .filter((s) => postCut.includes(s.status))
     .map((s) => ({ code: s.id, qty: 1, cft: cftOf(s.length_ft, s.width_ft, s.thickness_ft) }));
   return makeStage("cutting_done", "Cutting done", "slab", items, "Slabs produced from blocks finished cutting.");
 }
