@@ -168,7 +168,7 @@ export async function sendCuttingApprovedWhatsApp(
     // Slabs that came out of this block (every post-cut status, any link path).
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, temple, length_ft, width_ft, thickness_ft, label, description, component_section, component_element, stock_location")
+      .select("id, temple, length_ft, width_ft, thickness_ft, label, description, additional_description, component_section, component_element, stock_location")
       .eq("source_block_id", block.block_id)
       .in("status", [...POST_CUT_STATUSES]);
     const slabs = ((slabRows ?? []) as Array<Record<string, unknown>>)
@@ -180,6 +180,7 @@ export async function sendCuttingApprovedWhatsApp(
         thickness_ft: Number(s.thickness_ft) || 0,
         label: (s.label as string | null) ?? null,
         description: (s.description as string | null) ?? null,
+        additional: (s.additional_description as string | null) ?? null,
         section: (s.component_section as string | null) ?? null,
         element: (s.component_element as string | null) ?? null,
         stock_location: (s.stock_location as string | null) ?? null,
@@ -238,6 +239,7 @@ export async function sendCuttingApprovedWhatsApp(
           dims: `${s.length_ft}×${s.width_ft}×${s.thickness_ft}″`,
           label: s.label,
           description: s.description,
+          additional: s.additional,
           section: s.section,
           element: s.element,
         })),

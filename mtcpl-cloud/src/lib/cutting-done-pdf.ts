@@ -42,9 +42,10 @@ export type DoneBlockSection = {
      *  Required Sizes. */
     label?: string | null;
     description?: string | null;
+    /** additional_description — shown after Description. */
+    additional?: string | null;
     /** Category 1 = component_section, Category 2 = component_element.
-     *  Shown on the slab sub-line as "Cat <element> / <section>" (Cat 2
-     *  before Cat 1, per the challan/invoice convention). */
+     *  Shown after Additional, Cat 2 before Cat 1 (challan/invoice convention). */
     section?: string | null;
     element?: string | null;
   }>;
@@ -85,6 +86,7 @@ const WIN_ANSI_REPLACEMENTS: Record<string, string> = {
   "“": '"',   // " smart open double
   "”": '"',   // " smart close double
   "–": "-",   // – en dash
+  "—": "-",   // — em dash
   "…": "...", // … ellipsis
   " ": " ",   // nbsp
   "₹": "Rs.", // ₹ Indian rupee
@@ -283,147 +285,66 @@ export async function generateCuttingDonePdf(
       });
       y -= 16;
     } else {
-      // Column geometry — picked for an A4 (595px wide) page with
-      // ~36px margins. Temple column was 220px wide and capped at
-      // 24 chars; widening to ~270 + 36 chars cuts the truncation
-      // significantly while keeping the dims pinned right.
-      const COL_NUM = MARGIN_X + 4;
-      const COL_ID = MARGIN_X + 22;
-      const COL_TEMPLE = MARGIN_X + 110;
-      const COL_DIMS = PAGE_W - MARGIN_X - 70;
-      const ROW_LEFT = MARGIN_X;
-      const ROW_RIGHT = PAGE_W - MARGIN_X;
-
-      // Header row — slightly heavier band so the table reads
-      // separate from the meta grid above.
-      page.drawRectangle({
-        x: ROW_LEFT,
-        y: y - 4,
-        width: ROW_RIGHT - ROW_LEFT,
-        height: 14,
-        color: COLOR_HEAD_BG,
-      });
-      drawText("#", { x: COL_NUM, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      drawText("SLAB ID", { x: COL_ID, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      drawText("TEMPLE", { x: COL_TEMPLE, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      drawText("DIMENSIONS", { x: COL_DIMS, y, size: 8, font: fontBold, color: COLOR_MUTED });
-      y -= 14;
-      page.drawLine({
-        start: { x: ROW_LEFT, y: y + 2 },
-        end: { x: ROW_RIGHT, y: y + 2 },
-        thickness: 0.5,
-        color: COLOR_ACCENT,
-      });
-      y -= 4;
+      // Mobile-first per-slab layout (Daksh, Jun 2026): one block per slab,
+      // read top-to-bottom on a phone. A tinted bar HIGHLIGHTS the code + size;
+      // below it the detail in order — Label, Description, Additional, Category 2,
+      // Category 1 — each label:value, long values word-wrapped. A gap + rule
+      // separates slabs so a long list stays scannable.
+      const LEFT = MARGIN_X;
+      const RIGHT = PAGE_W - MARGIN_X;
+      const PAD = 8;
+      const LABEL_X = LEFT + PAD;
+      const VALUE_X = LEFT + PAD + 84;
+      const VALUE_W = RIGHT - PAD - VALUE_X;
 
       block.slabs.forEach((s, i) => {
-        const hasLabel = !!(s.label && s.label.trim());
-        const hasDesc = !!(s.description && s.description.trim());
-        // Category 2 / Category 1 (element / section), blanks dropped.
-        const cat = [s.element, s.section]
-          .map((x) => (x ?? "").trim())
-          .filter(Boolean)
-          .join(" / ");
-        const hasCat = !!cat;
-        // Total row height = 13 (main line) + 10 (sub line, only
-        // when there's a label, description or category) + 2 (gap).
-        const hasSub = hasLabel || hasDesc || hasCat;
-        const rowHeight = 13 + (hasSub ? 10 : 0) + 2;
-        ensureSpace(rowHeight + 2);
+        // Detail fields in the requested order; blanks dropped.
+        const fields: Array<{ k: string; v: string; color: ReturnType<typeof rgb> }> = [];
+        if (s.label && s.label.trim()) fields.push({ k: "Label", v: s.label.trim(), color: COLOR_LABEL });
+        if (s.description && s.description.trim()) fields.push({ k: "Description", v: s.description.trim(), color: COLOR_NOTE });
+        if (s.additional && s.additional.trim()) fields.push({ k: "Additional", v: s.additional.trim(), color: COLOR_NOTE });
+        if (s.element && s.element.trim()) fields.push({ k: "Category 2", v: s.element.trim(), color: COLOR_ACCENT });
+        if (s.section && s.section.trim()) fields.push({ k: "Category 1", v: s.section.trim(), color: COLOR_ACCENT });
 
-        // Zebra background BEHIND every other row — covers the
-        // main line + sub-line as one block so the row reads as
-        // a single unit.
-        if (i % 2 === 0) {
-          page.drawRectangle({
-            x: ROW_LEFT,
-            y: y - rowHeight + 11,
-            width: ROW_RIGHT - ROW_LEFT,
-            height: rowHeight,
-            color: COLOR_ZEBRA,
+        // Pre-wrap so we can size the block + never orphan the code bar.
+        const wrapped = fields.map((f) => ({ ...f, lines: wrapText(f.v, fontReg, 10.5, VALUE_W) }));
+        const templeLine = s.temple && s.temple !== "—" ? wrapText(s.temple, fontReg, 9.5, RIGHT - PAD - (LEFT + PAD + 50)) : [];
+        const fieldsH = wrapped.reduce((a, f) => a + f.lines.length * 13 + 3, 0);
+        const blockH = 28 /*bar*/ + templeLine.length * 14 + fieldsH + 16 /*gap+rule*/;
+        ensureSpace(blockH);
+
+        // Code + size bar — highlighted.
+        page.drawRectangle({ x: LEFT, y: y - 18, width: RIGHT - LEFT, height: 22, color: COLOR_HEAD_BG });
+        drawText(`${i + 1}.`, { x: LABEL_X, y: y - 12, size: 10, font: fontBold, color: COLOR_MUTED });
+        drawText(s.id, { x: LABEL_X + 20, y: y - 13, size: 13, font: fontBold, color: COLOR_TEXT });
+        const sizeW = fontBold.widthOfTextAtSize(ansiSafe(s.dims), 11.5);
+        drawText(s.dims, { x: RIGHT - PAD - sizeW, y: y - 12, size: 11.5, font: fontBold, color: COLOR_ACCENT });
+        y -= 26;
+
+        // Temple — context line under the bar (muted).
+        if (templeLine.length > 0) {
+          drawText("Temple", { x: LABEL_X, y, size: 8, font: fontBold, color: COLOR_MUTED });
+          templeLine.forEach((ln, li) => {
+            drawText(ln, { x: LABEL_X + 50, y, size: 9.5, font: fontReg, color: COLOR_MUTED });
+            if (li < templeLine.length - 1) y -= 12;
           });
+          y -= 14;
         }
 
-        // Main line: # · slab id · temple · dims
-        drawText(String(i + 1), {
-          x: COL_NUM,
-          y,
-          size: 9,
-          font: fontReg,
-          color: COLOR_MUTED,
-        });
-        drawText(s.id, {
-          x: COL_ID,
-          y,
-          size: 9.5,
-          font: fontMono,
-          color: COLOR_TEXT,
-        });
-        drawText(truncate(s.temple, 38, fontReg, 9), {
-          x: COL_TEMPLE,
-          y,
-          size: 9,
-          font: fontReg,
-          color: COLOR_TEXT,
-        });
-        drawText(s.dims, {
-          x: COL_DIMS,
-          y,
-          size: 9,
-          font: fontMono,
-          color: COLOR_TEXT,
-        });
-        y -= 11;
-
-        // Sub-line: label · description, indented under the slab id.
-        // Combined into one line so each slab takes at most 2 lines
-        // regardless of which sub-fields are populated. Long combined
-        // strings truncated at 100 chars.
-        if (hasSub) {
-          const parts: Array<{ text: string; font: typeof fontReg; color: ReturnType<typeof rgb> }> = [];
-          if (hasLabel) {
-            parts.push({ text: `🏷 ${s.label!.trim()}`, font: fontBold, color: COLOR_LABEL });
-          }
-          if (hasDesc) {
-            parts.push({ text: `“${s.description!.trim()}”`, font: fontReg, color: COLOR_NOTE });
-          }
-          if (hasCat) {
-            parts.push({ text: `[Cat ${cat}]`, font: fontReg, color: COLOR_ACCENT });
-          }
-          // Draw each part inline, starting at COL_ID. fontReg approx
-          // 0.5em per char at size 8.5 — track the cursor manually.
-          let cursorX = COL_ID;
-          const SUB_SIZE = 8.5;
-          let budget = 100; // total char budget across both parts
-          for (let p = 0; p < parts.length; p++) {
-            const isLast = p === parts.length - 1;
-            const trimmed = truncate(parts[p].text, budget, parts[p].font, SUB_SIZE);
-            drawText(trimmed, {
-              x: cursorX,
-              y,
-              size: SUB_SIZE,
-              font: parts[p].font,
-              color: parts[p].color,
-            });
-            // Advance cursor by approx width — Helvetica is ~5px/char
-            // at size 8.5. Good enough for a one-line sub-row.
-            cursorX += trimmed.length * 4.5;
-            budget -= trimmed.length + 2;
-            if (budget <= 0 || isLast) break;
-            // Separator dot between parts.
-            drawText("  ·  ", {
-              x: cursorX,
-              y,
-              size: SUB_SIZE,
-              font: fontReg,
-              color: COLOR_MUTED,
-            });
-            cursorX += 14;
-            budget -= 3;
-          }
-          y -= 10;
+        // Detail fields.
+        for (const f of wrapped) {
+          drawText(f.k, { x: LABEL_X, y, size: 8.5, font: fontBold, color: COLOR_MUTED });
+          f.lines.forEach((ln, li) => {
+            drawText(ln, { x: VALUE_X, y, size: 10.5, font: f.k === "Label" ? fontBold : fontReg, color: f.color });
+            if (li < f.lines.length - 1) y -= 13;
+          });
+          y -= 16;
         }
+
+        // Gap + separator between slabs.
         y -= 2;
+        page.drawLine({ start: { x: LEFT, y }, end: { x: RIGHT, y }, thickness: 0.4, color: COLOR_RULE });
+        y -= 12;
       });
     }
 
@@ -442,4 +363,38 @@ export async function generateCuttingDonePdf(
 function truncate(text: string, maxChars: number, _font: PDFFont, _size: number): string {
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars - 1) + "…";
+}
+
+// Word-wrap a value to fit maxWidth, measured with the real font metrics so the
+// per-slab detail reads top-to-bottom on a phone. Hard-breaks an over-long word;
+// caps at `maxLines` (last line gets an ellipsis) to keep one field from running away.
+function wrapText(text: string, font: PDFFont, size: number, maxWidth: number, maxLines = 4): string[] {
+  const safe = ansiSafe(text);
+  const words = safe.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let line = "";
+  const push = (s: string) => lines.push(s);
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (!line || font.widthOfTextAtSize(test, size) <= maxWidth) {
+      line = test;
+    } else {
+      push(line);
+      line = w;
+    }
+    // Hard-break a single word that's wider than the line.
+    while (font.widthOfTextAtSize(line, size) > maxWidth && line.length > 1) {
+      let cut = line.length - 1;
+      while (cut > 1 && font.widthOfTextAtSize(line.slice(0, cut), size) > maxWidth) cut--;
+      push(line.slice(0, cut));
+      line = line.slice(cut);
+    }
+  }
+  if (line) push(line);
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+    lines[maxLines - 1] = lines[maxLines - 1].replace(/.$/, "…");
+  }
+  return lines;
 }
