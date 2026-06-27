@@ -31,6 +31,9 @@ export type DispatchSlabInput = {
   weight_tonnes: number | null;
   /** dispatch_logs.measure_unit — the billing unit chosen at Check time. */
   measure_unit: "cft" | "sft";
+  /** Stone type — optional. When provided, slabs of different stones never
+   *  merge and the challan/invoice can group stone-wise → cft/sft within. */
+  stone?: string | null;
 };
 
 export type DispatchGroupRow = {
@@ -49,6 +52,8 @@ export type DispatchGroupRow = {
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
+  /** Stone type of the group (null when callers don't supply it). */
+  stone: string | null;
   /** Summed weight over the group (tonnes); 0 if none entered. */
   weightTonnes: number;
   /** Billing unit for the whole group. */
@@ -90,6 +95,7 @@ export function groupDispatchSlabs(slabs: DispatchSlabInput[]): DispatchGroupRow
     const w = num(s.width_ft);
     const t = num(s.thickness_ft);
     const key = [
+      norm(s.stone),
       norm(s.label),
       norm(s.description),
       norm(s.additional_description),
@@ -121,6 +127,7 @@ export function groupDispatchSlabs(slabs: DispatchSlabInput[]): DispatchGroupRow
         length_ft: l,
         width_ft: w,
         thickness_ft: t,
+        stone: s.stone ?? null,
         weightTonnes: num(s.weight_tonnes),
         measure_unit: s.measure_unit === "sft" ? "sft" : "cft",
         cftEach,
@@ -134,4 +141,24 @@ export function groupDispatchSlabs(slabs: DispatchSlabInput[]): DispatchGroupRow
     r.measureQty = (r.measure_unit === "sft" ? r.sftEach : r.cftEach) * r.qty;
   }
   return rows;
+}
+
+/**
+ * Split grouped rows by stone (alphabetical), preserving each stone's row
+ * order. Used by the challan + invoice to print stone-wise sections, with
+ * CFT and SFT sub-tables inside each. Rows with no stone fall under "—".
+ */
+export function groupRowsByStone(
+  rows: DispatchGroupRow[],
+): Array<{ stone: string; rows: DispatchGroupRow[] }> {
+  const map = new Map<string, DispatchGroupRow[]>();
+  for (const r of rows) {
+    const stone = (r.stone ?? "").trim() || "—";
+    const list = map.get(stone) ?? [];
+    list.push(r);
+    map.set(stone, list);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([stone, rows]) => ({ stone, rows }));
 }

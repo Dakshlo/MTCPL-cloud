@@ -13,7 +13,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { resolveDispatchIncharge } from "@/lib/dispatch-incharge";
-import { groupDispatchSlabs, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+import { groupDispatchSlabs, groupRowsByStone, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
@@ -109,7 +109,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   if (slabIds.length > 0) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
-      .select("id, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft")
+      .select("id, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft, stone")
       .in("id", slabIds);
     const order = new Map(slabIds.map((sid, i) => [sid, i]));
     inputs = ((slabRows ?? []) as Array<Record<string, unknown>>)
@@ -123,6 +123,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         length_ft: Number(s.length_ft) || 0,
         width_ft: Number(s.width_ft) || 0,
         thickness_ft: Number(s.thickness_ft) || 0,
+        stone: (s.stone as string | null) ?? null,
         weight_tonnes: weightBy.get(s.id as string) ?? null,
         measure_unit: unitBy.get(s.id as string) ?? "cft",
       }))
@@ -253,7 +254,9 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .info .v.big { font-size: 13px; font-weight: 800; }
         .info .mono { font-family: ui-monospace, monospace; }
 
-        .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #5b2e0a; margin: 10px 0 3px; }
+        .stone-block { margin-top: 4px; }
+        .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
+        .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #5b2e0a; margin: 6px 0 3px; }
         table.slab-table { width: 100%; border-collapse: collapse; font-size: 10px; }
         table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8px; font-weight: 800; color: #555; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
         table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; }
@@ -330,8 +333,14 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No slabs linked to this dispatch.</p>
         ) : (
           <>
-            <SlabTable rows={cftGroups} unit="cft" />
-            <SlabTable rows={sftGroups} unit="sft" />
+            {/* Stone-wise sections; CFT + SFT sub-tables within each stone. */}
+            {groupRowsByStone(groups).map(({ stone, rows }) => (
+              <div key={stone} className="stone-block">
+                <div className="stone-title">🪨 {stone}</div>
+                <SlabTable rows={rows.filter((g) => g.measure_unit === "cft")} unit="cft" />
+                <SlabTable rows={rows.filter((g) => g.measure_unit === "sft")} unit="sft" />
+              </div>
+            ))}
             <div className="totals">
               <span>Σ {totalSlabs} piece{totalSlabs !== 1 ? "s" : ""}</span>
               {cftTotal > 0 && <span>CFT TOTAL: {fmt(cftTotal)}</span>}
