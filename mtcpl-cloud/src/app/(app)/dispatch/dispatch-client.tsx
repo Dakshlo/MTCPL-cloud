@@ -553,7 +553,7 @@ export function DispatchClient({
 // Temples collapsed by default. Search opens matching groups. One big
 // Dispatch button per temple opens the selection peek.
 
-type TempleGroup = { key: string; temple: string; isMarble: boolean; slabs: ReadySlab[] };
+type TempleGroup = { key: string; temple: string; hasMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
   slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
@@ -590,11 +590,17 @@ function ReadyTab({
   const groups: TempleGroup[] = useMemo(() => {
     const map = new Map<string, TempleGroup>();
     for (const s of stationSlabs) {
-      const key = `${s.temple}::${s.isMarble ? "marble" : "sandstone"}`;
-      if (!map.has(key)) map.set(key, { key, temple: s.temple, isMarble: s.isMarble, slabs: [] });
-      map.get(key)!.slabs.push(s);
+      // Daksh June 2026 — ONE entry per temple (was split sandstone vs
+      // marble, which forced two separate dispatches for the same temple).
+      // A temple now lists ALL its ready slabs together so a single
+      // dispatch can mix stones; each slab keeps its own MARBLE badge.
+      const key = s.temple;
+      if (!map.has(key)) map.set(key, { key, temple: s.temple, hasMarble: false, slabs: [] });
+      const g = map.get(key)!;
+      g.slabs.push(s);
+      if (s.isMarble) g.hasMarble = true;
     }
-    return [...map.values()].sort((a, b) => a.temple.localeCompare(b.temple) || (a.isMarble ? 1 : -1));
+    return [...map.values()].sort((a, b) => a.temple.localeCompare(b.temple));
   }, [stationSlabs]);
 
   const q = query.trim();
@@ -695,7 +701,7 @@ function ReadyTab({
                 key={g.key}
                 style={{
                   background: "var(--surface)",
-                  border: `1.5px solid ${g.isMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
+                  border: `1.5px solid ${g.hasMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
                   borderRadius: 14, overflow: "hidden",
                 }}
               >
@@ -707,16 +713,16 @@ function ReadyTab({
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(g.key); } }}
                   style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
-                    background: g.isMarble ? "rgba(180,83,9,0.05)" : "var(--bg)", cursor: "pointer", flexWrap: "wrap",
+                    background: g.hasMarble ? "rgba(180,83,9,0.05)" : "var(--bg)", cursor: "pointer", flexWrap: "wrap",
                   }}
                 >
                   <span style={{ fontSize: 13, color: "var(--muted)", width: 14, flexShrink: 0, transition: "transform .15s ease", transform: expanded ? "rotate(90deg)" : "none", display: "inline-block" }}>▶</span>
                   <span style={{ fontSize: 16.5, fontWeight: 800 }}>
-                    {g.isMarble ? "🗿" : "🏛"} {g.temple}
+                    🏛 {g.temple}
                   </span>
-                  {g.isMarble && (
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 9px", borderRadius: 5, letterSpacing: "0.04em" }}>
-                      MARBLE
+                  {g.hasMarble && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 9px", borderRadius: 5, letterSpacing: "0.04em" }} title="This temple has marble slabs too — all stones are in one dispatch list.">
+                      + MARBLE
                     </span>
                   )}
                   <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>
@@ -801,6 +807,36 @@ function TempleDispatchPeek({
   // Mig 130 — optional per-slab weight (tonnes). Keyed by slab id;
   // empty string = not entered (stored NULL).
   const [weights, setWeights] = useState<Record<string, string>>({});
+
+  // Daksh June 2026 — keep the slab selection while the user steps away
+  // (browser-back to check something) and returns. Persist per temple in
+  // sessionStorage; on reopen, restore BUT intersect with the CURRENT ready
+  // list so the picker refreshes — slabs that left drop out, newly-ready
+  // ones show up to add. Deselecting all (Clear) wipes it; so does a
+  // successful dispatch (those slabs leave the list, so they drop on reopen).
+  const selKey = `dispatch-sel:${group.temple}`;
+  useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.sessionStorage.getItem(selKey) : null;
+      if (!raw) return;
+      const ids = JSON.parse(raw) as string[];
+      const valid = ids.filter((id) => group.slabs.some((s) => s.id === id));
+      if (valid.length > 0) setSelected(new Set(valid));
+    } catch {
+      /* ignore corrupt/blocked storage */
+    }
+    // Restore once when the peek opens; `group` is fixed for this instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (selected.size === 0) window.sessionStorage.removeItem(selKey);
+      else window.sessionStorage.setItem(selKey, JSON.stringify([...selected]));
+    } catch {
+      /* ignore */
+    }
+  }, [selected, selKey]);
 
   // Mig 125 follow-on — optionally pull this temple's storage slabs into the
   // picker: carving storage (parked cut-done, direct-dispatch) + dispatch
@@ -910,7 +946,7 @@ function TempleDispatchPeek({
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>
-              🚚 Dispatch — {group.isMarble ? "🗿" : "🏛"} {group.temple}
+              🚚 Dispatch — 🏛 {group.temple}
             </div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
               {step === 1
@@ -1022,6 +1058,8 @@ function TempleDispatchPeek({
           <form
             action={(fd) => {
               setSubmitting(true);
+              // these slabs are leaving the ready list — drop the saved selection
+              try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ }
               return createDispatchAction(fd);
             }}
             style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
