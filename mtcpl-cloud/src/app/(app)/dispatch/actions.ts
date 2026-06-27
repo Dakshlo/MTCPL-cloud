@@ -1215,10 +1215,11 @@ export async function setDispatchInchargeAction(formData: FormData) {
   redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("✓ Incharge updated for this dispatch")}`);
 }
 
-// ── Dispatch storage (Mig 125 follow-on) ─────────────────────────────────
+// ── Storage: ready (completed) slabs (Mig 125 follow-on) ─────────────────
 // Park "ready to dispatch" (status=completed) slabs OUT of Make Dispatch, to
-// declutter — mirrors carving's cut-done storage. Same `is_parked` column,
-// distinguished by status (completed = dispatch storage; cut_done = carving).
+// declutter. Daksh June 2026 — there is now ONE "Main Storage" (/carving/
+// storage) holding both kinds; these actions revalidate it. Same `is_parked`
+// column, distinguished by status (completed = ready; cut_done = carving).
 // Result-returning (not redirect) so the storage client can call them directly.
 function canDispatchStorage(role: string): boolean {
   return ["owner", "developer", "carving_head", "senior_incharge", "dispatch"].includes(role);
@@ -1243,7 +1244,7 @@ export async function parkDispatchSlabsAction(
   const count = (data ?? []).length;
   void logAudit(profile.id, "dispatch_slabs_parked", "slab", "batch", { count });
   revalidatePath("/dispatch");
-  revalidatePath("/dispatch/storage");
+  revalidatePath("/carving/storage");
   return { ok: true, count };
 }
 
@@ -1266,7 +1267,7 @@ export async function unparkDispatchSlabsAction(
   const count = (data ?? []).length;
   void logAudit(profile.id, "dispatch_slabs_unparked", "slab", "batch", { count });
   revalidatePath("/dispatch");
-  revalidatePath("/dispatch/storage");
+  revalidatePath("/carving/storage");
   return { ok: true, count };
 }
 
@@ -1342,6 +1343,6 @@ export async function parkAllReadyDispatchAction(): Promise<{ ok: true; count: n
   const count = (data ?? []).length;
   void logAudit(profile.id, "dispatch_slabs_parked_all", "slab", "batch", { count });
   revalidatePath("/dispatch");
-  revalidatePath("/dispatch/storage");
+  revalidatePath("/carving/storage");
   return { ok: true, count };
 }

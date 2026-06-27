@@ -1,28 +1,52 @@
 "use client";
 
-// Mig 125 — Temporary Storage client. Park-all-unassigned (one-click clear)
-// + a searchable list of parked slabs grouped by temple, with multi-select
-// "bring back" and per-slab bring-back.
+// Main Storage client (Daksh June 2026 — unified carving + dispatch storage).
+// Park-all cards (one per kind) + a searchable, collapsible per-temple list of
+// parked slabs with multi-select / per-temple / per-slab bring-back. Bring-back
+// is routed by each slab's KIND: cut-done → Carving Unassigned (unparkSlabs),
+// ready → Make Dispatch (unparkDispatchSlabs).
 
 import { useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { parkAllUnassignedAction, unparkSlabsAction } from "../actions";
+import { parkAllReadyDispatchAction, unparkDispatchSlabsAction } from "../../dispatch/actions";
 
 export type ParkedSlab = {
   id: string; label: string; temple: string; stone: string | null;
   l: number; w: number; t: number; parkedAt: string | null;
+  /** carving = parked cut-done (→ Carving); dispatch = parked ready (→ Make Dispatch). */
+  kind: "carving" | "dispatch";
 };
 
 const calcCft = (l: number, w: number, t: number) => (l * w * t) / 1728;
 
-export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[]; unassignedCount: number }) {
+export function StorageClient({
+  parked,
+  unassignedCount,
+  readyCount,
+  canCarving,
+  canDispatch,
+}: {
+  parked: ParkedSlab[];
+  unassignedCount: number;
+  readyCount: number;
+  canCarving: boolean;
+  canDispatch: boolean;
+}) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [confirmPark, setConfirmPark] = useState(false);
+  const [confirmPark, setConfirmPark] = useState<null | "carving" | "dispatch">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  // id → kind, so bring-back can route each slab to the right action.
+  const kindById = useMemo(() => {
+    const m = new Map<string, ParkedSlab["kind"]>();
+    for (const s of parked) m.set(s.id, s.kind);
+    return m;
+  }, [parked]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -44,14 +68,15 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered]);
 
-  // Collapsible temple groups (match the Unassigned UI) — default collapsed so
-  // a 1800-slab storage isn't one giant wall; a live search auto-expands.
+  // Collapsible temple groups — default collapsed; a live search auto-expands.
   const [open, setOpen] = useState<Set<string>>(new Set());
   function toggleOpen(temple: string) {
     setOpen((prev) => { const n = new Set(prev); n.has(temple) ? n.delete(temple) : n.add(temple); return n; });
   }
 
   function toggle(id: string) {
+    const k = kindById.get(id);
+    if (k && !canManageKind(k)) return; // read-only kind for this viewer
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
   function toggleTemple(slabs: ParkedSlab[]) {
@@ -59,54 +84,99 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
     setSelected((prev) => { const n = new Set(prev); for (const s of slabs) allOn ? n.delete(s.id) : n.add(s.id); return n; });
   }
 
-  async function parkAll() {
+  async function parkAll(kind: "carving" | "dispatch") {
     if (busy) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
-      const res = await parkAllUnassignedAction();
+      const res = kind === "carving" ? await parkAllUnassignedAction() : await parkAllReadyDispatchAction();
       if (!res.ok) setErr(res.error);
-      else { setMsg(`Moved ${res.count} slab${res.count === 1 ? "" : "s"} to storage. Unassigned is now 0.`); router.refresh(); }
+      else {
+        const where = kind === "carving" ? "Carving Unassigned is now 0." : "Make Dispatch is now clear.";
+        setMsg(`Moved ${res.count} slab${res.count === 1 ? "" : "s"} to storage. ${where}`);
+        router.refresh();
+      }
     } catch { setErr("Failed — check your connection."); }
-    finally { setBusy(false); setConfirmPark(false); }
+    finally { setBusy(false); setConfirmPark(null); }
+  }
+
+  // Which kind the current viewer may actually return: CUT-DONE (carving) needs
+  // canCarving, READY (dispatch) needs canDispatch. Drives both the per-row
+  // controls and a defensive filter inside bringBack.
+  function canManageKind(kind: ParkedSlab["kind"]) {
+    return kind === "carving" ? canCarving : canDispatch;
   }
 
   async function bringBack(ids: string[]) {
     if (busy || ids.length === 0) return;
-    const confirmMsg = ids.length === 1
-      ? `Bring slab ${ids[0]} back to Carving Unassigned?`
-      : `Bring ${ids.length} selected slabs back to Carving Unassigned?`;
+    // Route each id by kind, and only attempt the kinds this viewer may manage
+    // (CUT-DONE → carving roles; READY → dispatch roles). Anything else is
+    // skipped rather than firing a server action that would just be rejected.
+    const carvingIds = ids.filter((id) => kindById.get(id) === "carving" && canCarving);
+    const dispatchIds = ids.filter((id) => kindById.get(id) === "dispatch" && canDispatch);
+    const attempt = carvingIds.length + dispatchIds.length;
+    const skipped = ids.length - attempt;
+    if (attempt === 0) { setErr("You don't have permission to return these slabs."); return; }
+    const dest =
+      carvingIds.length && dispatchIds.length ? "their lists (Carving / Make Dispatch)"
+        : carvingIds.length ? "Carving Unassigned" : "Make Dispatch";
+    const confirmMsg = attempt === 1
+      ? `Bring slab ${[...carvingIds, ...dispatchIds][0]} back to ${dest}?`
+      : `Bring ${attempt} slab${attempt === 1 ? "" : "s"} back to ${dest}?`;
     if (!window.confirm(confirmMsg)) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
-      const res = await unparkSlabsAction(ids);
-      if (!res.ok) setErr(res.error);
-      else { setMsg(`Brought ${res.count} slab${res.count === 1 ? "" : "s"} back to Unassigned.`); setSelected(new Set()); router.refresh(); }
+      // Two independent, non-transactional actions — handle a partial result.
+      const [carvRes, dispRes] = await Promise.all([
+        carvingIds.length ? unparkSlabsAction(carvingIds) : Promise.resolve({ ok: true as const, count: 0 }),
+        dispatchIds.length ? unparkDispatchSlabsAction(dispatchIds) : Promise.resolve({ ok: true as const, count: 0 }),
+      ]);
+      const okCount = (carvRes.ok ? carvRes.count : 0) + (dispRes.ok ? dispRes.count : 0);
+      const failed = [carvRes, dispRes].find((r) => !r.ok) as { ok: false; error: string } | undefined;
+      // Clear only the ids whose action succeeded; keep failed ones selected for a retry.
+      setSelected((prev) => {
+        const n = new Set(prev);
+        if (carvRes.ok) for (const id of carvingIds) n.delete(id);
+        if (dispRes.ok) for (const id of dispatchIds) n.delete(id);
+        return n;
+      });
+      if (okCount > 0) setMsg(`Brought ${okCount} slab${okCount === 1 ? "" : "s"} back to ${dest}.`);
+      if (failed) setErr(failed.error);
+      else if (skipped > 0) setErr(`${skipped} slab${skipped === 1 ? "" : "s"} skipped — you can't return those.`);
+      router.refresh();
     } catch { setErr("Failed — check your connection."); }
     finally { setBusy(false); }
   }
 
   const btn = (bg: string): CSSProperties => ({ padding: "9px 16px", fontSize: 13.5, fontWeight: 800, color: "#fff", background: bg, border: "none", borderRadius: 9, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1, whiteSpace: "nowrap" });
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Park-all card */}
+  // One "move all → storage" card per kind the user can manage.
+  function ParkAllCard({ kind, count, listLabel }: { kind: "carving" | "dispatch"; count: number; listLabel: string }) {
+    return (
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 800 }}>Carving Unassigned: <span style={{ color: unassignedCount > 0 ? "#b45309" : "#15803d" }}>{unassignedCount}</span></div>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Move the whole backlog into storage in one click, then bring back only the few you need.</div>
+          <div style={{ fontSize: 14, fontWeight: 800 }}>{listLabel}: <span style={{ color: count > 0 ? "#b45309" : "#15803d" }}>{count}</span></div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>Move the whole {kind === "carving" ? "backlog" : "ready list"} into storage in one click, then bring back only the few you need.</div>
         </div>
-        {confirmPark ? (
+        {confirmPark === kind ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, fontWeight: 700 }}>Move all {unassignedCount}?</span>
-            <button type="button" disabled={busy} onClick={parkAll} style={btn("#b45309")}>{busy ? "Moving…" : "Yes, move all"}</button>
-            <button type="button" disabled={busy} onClick={() => setConfirmPark(false)} className="ghost-button">Cancel</button>
+            <span style={{ fontSize: 12.5, fontWeight: 700 }}>Move all {count}?</span>
+            <button type="button" disabled={busy} onClick={() => parkAll(kind)} style={btn("#b45309")}>{busy ? "Moving…" : "Yes, move all"}</button>
+            <button type="button" disabled={busy} onClick={() => setConfirmPark(null)} className="ghost-button">Cancel</button>
           </div>
         ) : (
-          <button type="button" disabled={busy || unassignedCount === 0} onClick={() => setConfirmPark(true)} style={{ ...btn("#b45309"), opacity: unassignedCount === 0 ? 0.5 : 1, cursor: unassignedCount === 0 ? "not-allowed" : "pointer" }}>
-            🗄 Move all {unassignedCount} unassigned → storage
+          <button type="button" disabled={busy || count === 0} onClick={() => setConfirmPark(kind)} style={{ ...btn("#b45309"), opacity: count === 0 ? 0.5 : 1, cursor: count === 0 ? "not-allowed" : "pointer" }}>
+            🗄 Move all {count} {kind === "carving" ? "unassigned" : "ready"} → storage
           </button>
         )}
       </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Park-all cards — one per kind the user is allowed to manage. */}
+      {canCarving && <ParkAllCard kind="carving" count={unassignedCount} listLabel="Carving Unassigned" />}
+      {canDispatch && <ParkAllCard kind="dispatch" count={readyCount} listLabel="In Make Dispatch" />}
 
       {msg && <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 10, padding: "9px 13px" }}>✓ {msg}</div>}
       {err && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>⚠ {err}</div>}
@@ -127,38 +197,55 @@ export function StorageClient({ parked, unassignedCount }: { parked: ParkedSlab[
       </div>
 
       {parked.length === 0 ? (
-        <div className="banner">Storage is empty. Use “Move all unassigned → storage” above to park the backlog.</div>
+        <div className="banner">Storage is empty. Use the “Move all → storage” cards above, or send selected slabs from the carving / dispatch pickers.</div>
       ) : filtered.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>No parked slabs match “{q}”.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {groups.map(([temple, slabs]) => {
-            const allOn = slabs.every((s) => selected.has(s.id));
+            // Only slabs of a kind THIS viewer can return participate in
+            // select-all / bring-all (CUT-DONE → carving roles; READY → dispatch).
+            const manageable = slabs.filter((s) => canManageKind(s.kind));
+            const allOn = manageable.length > 0 && manageable.every((s) => selected.has(s.id));
             const expanded = q.trim() !== "" || open.has(temple);
             return (
               <div key={temple} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", overflow: "hidden" }}>
                 <div style={{ padding: "10px 14px", borderBottom: expanded ? "1px solid var(--border)" : "none", display: "flex", alignItems: "center", gap: 10, background: "var(--surface-alt, rgba(0,0,0,0.02))" }}>
-                  <input type="checkbox" checked={allOn} onChange={() => toggleTemple(slabs)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} title="Select all in this temple" />
+                  <input type="checkbox" checked={allOn} disabled={manageable.length === 0} onChange={() => toggleTemple(manageable)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, cursor: manageable.length === 0 ? "not-allowed" : "pointer", opacity: manageable.length === 0 ? 0.4 : 1, flexShrink: 0 }} title="Select all in this temple" />
                   <button type="button" onClick={() => toggleOpen(temple)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", flex: 1, textAlign: "left", color: "var(--text)", fontWeight: 800, fontSize: 14, minWidth: 0 }}>
                     <span style={{ color: "var(--muted)", fontSize: 12, width: 12 }}>{expanded ? "▾" : "▸"}</span>
                     🏛 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{temple}</span>
                     <span className="muted" style={{ fontWeight: 600, fontSize: 12 }}>· {slabs.length}</span>
                   </button>
-                  <button type="button" disabled={busy} onClick={() => bringBack(slabs.map((s) => s.id))} style={{ fontSize: 11.5, fontWeight: 700, color: "#15803d", background: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>↩ Bring all back</button>
+                  {manageable.length > 0 && (
+                    <button type="button" disabled={busy} onClick={() => bringBack(manageable.map((s) => s.id))} style={{ fontSize: 11.5, fontWeight: 700, color: "#15803d", background: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>↩ Bring all back</button>
+                  )}
                 </div>
                 {expanded && (
                 <div style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
                   {slabs.map((s) => {
                     const on = selected.has(s.id);
+                    // Read-only for this viewer when they can't manage this kind.
+                    const canMng = canManageKind(s.kind);
                     return (
-                      <div key={s.id} onClick={() => toggle(s.id)} style={{ border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "rgba(184,115,51,0.06)" : "var(--bg)", borderRadius: 10, padding: "8px 10px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div key={s.id} onClick={canMng ? () => toggle(s.id) : undefined} style={{ border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "rgba(184,115,51,0.06)" : "var(--bg)", borderRadius: 10, padding: "8px 10px", cursor: canMng ? "pointer" : "default", opacity: canMng ? 1 : 0.6, display: "flex", flexDirection: "column", gap: 3 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input type="checkbox" checked={on} onChange={() => toggle(s.id)} onClick={(e) => e.stopPropagation()} style={{ width: 15, height: 15, cursor: "pointer" }} />
+                          {canMng ? (
+                            <input type="checkbox" checked={on} onChange={() => toggle(s.id)} onClick={(e) => e.stopPropagation()} style={{ width: 15, height: 15, cursor: "pointer" }} />
+                          ) : (
+                            <span title={`Only ${s.kind === "carving" ? "carving" : "dispatch"} roles can return these`} style={{ fontSize: 12, flexShrink: 0 }}>🔒</span>
+                          )}
                           <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+                          {/* Kind tag — tells the user where this slab returns to. */}
+                          <span title={s.kind === "carving" ? "Cut-done — returns to Carving Unassigned" : "Ready — returns to Make Dispatch"} style={{ marginLeft: "auto", flexShrink: 0, fontSize: 8.5, fontWeight: 800, letterSpacing: "0.03em", color: "#fff", background: s.kind === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 5px" }}>
+                            {s.kind === "carving" ? "CUT-DONE" : "READY"}
+                          </span>
                         </div>
                         <div style={{ fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label || "—"}</div>
                         <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: "var(--text)" }}>{s.l}&quot;×{s.w}&quot;×{s.t}&quot; · {calcCft(s.l, s.w, s.t).toFixed(2)} CFT</div>
-                        <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); bringBack([s.id]); }} style={{ alignSelf: "flex-start", fontSize: 11, fontWeight: 700, color: "#15803d", background: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>↩ Bring back</button>
+                        {canMng && (
+                          <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); bringBack([s.id]); }} style={{ alignSelf: "flex-start", fontSize: 11, fontWeight: 700, color: "#15803d", background: "none", border: "1px solid rgba(22,163,74,0.4)", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>↩ Bring back</button>
+                        )}
                       </div>
                     );
                   })}

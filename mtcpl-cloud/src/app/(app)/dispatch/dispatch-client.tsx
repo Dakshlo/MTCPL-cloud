@@ -458,15 +458,15 @@ export function DispatchClient({
             <span style={{ opacity: 0.6 }}>⚙</span>
           </button>
           <Link
-            href="/dispatch/storage"
+            href="/carving/storage"
             style={{
               textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6,
               padding: "10px 16px", background: "var(--bg)", border: "1.5px solid var(--border)",
               borderRadius: 10, color: "var(--text)", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap",
             }}
-            title="Park ready slabs out of Make Dispatch to declutter — bring them back when loading"
+            title="Main Storage — park ready slabs out of Make Dispatch to declutter, and bring them back when loading"
           >
-            🗄 Dispatch storage →
+            🗄 Storage →
           </Link>
           <Link
             href="/challan"
@@ -878,6 +878,13 @@ function TempleDispatchPeek({
   // re-toggle restore; selectedIds/selCount drive everything user-facing.
   const selectedIds = selSlabs.map((s) => s.id);
   const selCount = selSlabs.length;
+  // "Send → storage" only parks FRESH ready slabs. Storage-sourced slabs pulled
+  // in by the Storage toggle are already parked, so parkDispatchSlabsAction skips
+  // them — exclude them from the count/action so the button can't silently no-op
+  // (review w5ft32i80).
+  const parkableSlabs = selSlabs.filter((s) => !s.storageSource);
+  const parkableIds = parkableSlabs.map((s) => s.id);
+  const parkCount = parkableSlabs.length;
 
   // Per-slab weight is entered in KG (blank rows skipped). The challan
   // shows the net total in tonnes; weightsParsed maps slabId → kg.
@@ -1029,23 +1036,25 @@ function TempleDispatchPeek({
             {/* Footer */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
               <button type="button" className="ghost-button" onClick={onClose} style={{ fontSize: 14 }}>Cancel</button>
-              {/* Park selected ready slabs into Dispatch Storage (declutter). */}
+              {/* Park selected ready slabs into Main Storage (declutter).
+                  Only fresh ready slabs are parkable — storage-sourced ones are
+                  already in storage, so they're excluded from the count/action. */}
               <button
                 type="button"
-                disabled={selCount === 0 || parking}
+                disabled={parkCount === 0 || parking}
                 onClick={async () => {
-                  if (selCount === 0) return;
-                  if (!window.confirm(`Send ${selCount} slab${selCount !== 1 ? "s" : ""} to Dispatch Storage (out of Make Dispatch)?`)) return;
+                  if (parkCount === 0) return;
+                  if (!window.confirm(`Send ${parkCount} slab${parkCount !== 1 ? "s" : ""} to storage (out of Make Dispatch)?`)) return;
                   setParking(true);
                   try {
-                    const res = await parkDispatchSlabsAction(selectedIds);
+                    const res = await parkDispatchSlabsAction(parkableIds);
                     if (res.ok) { onClose(); router.refresh(); }
                     else window.alert(res.error);
                   } finally { setParking(false); }
                 }}
-                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: selCount === 0 ? "var(--muted)" : "var(--text)", cursor: selCount === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: parkCount === 0 ? "var(--muted)" : "var(--text)", cursor: parkCount === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
               >
-                {parking ? "Moving…" : `🗄 Send ${selCount || ""} → storage`}
+                {parking ? "Moving…" : `🗄 Send ${parkCount || ""} → storage`}
               </button>
               <button
                 type="button"

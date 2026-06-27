@@ -786,14 +786,15 @@ export default async function CarvingDashboardPage({
   // Tab badge = live orders (exclude cancelled / rejected).
   const workOrdersLiveCount = workOrdersForTab.filter((w) => w.status !== "cancelled" && w.status !== "rejected").length;
 
-  // Mig 125 — temporary-storage (parked) count + gate for the Storage link.
+  // Mig 125 — Main Storage (parked) count + gate for the Storage link. Counts
+  // BOTH kinds now (cut-done + ready) since they share one Main Storage.
   const canManageStorage = profile.role === "developer" || profile.role === "owner" || profile.role === "carving_head";
   let parkedCount = 0;
   if (canManageStorage) {
     const { count } = await admin
       .from("slab_requirements")
       .select("*", { count: "exact", head: true })
-      .eq("status", "cut_done")
+      .in("status", ["cut_done", "completed"])
       .eq("is_parked", true);
     parkedCount = count ?? 0;
   }

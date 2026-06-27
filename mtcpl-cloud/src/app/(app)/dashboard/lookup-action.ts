@@ -655,11 +655,11 @@ async function loadSlabContext(
   } else if (dispatch?.dispatched_at) {
     currentLocation = `On vehicle ${dispatch.vehicle_no ?? "—"} (dispatched ${new Date(dispatch.dispatched_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })})`;
   } else if (isParked && slab.status === "cut_done") {
-    // Mig 125 — parked cut-done = carving storage (ready for direct dispatch).
-    currentLocation = `📦 In CARVING storage${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
+    // Mig 125 — parked cut-done lives in Main Storage (returns to carving).
+    currentLocation = `📦 In Main Storage (cut-done)${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
   } else if (isParked && slab.status === "completed") {
-    // Mig 125 — parked completed = dispatch storage.
-    currentLocation = `🗄 In DISPATCH storage${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
+    // Mig 125 — parked completed lives in Main Storage (returns to dispatch).
+    currentLocation = `🗄 In Main Storage (ready)${slab.stock_location ? ` · ${slab.stock_location}` : ""}`;
   } else if (
     carving &&
     carving.completed_at != null &&
