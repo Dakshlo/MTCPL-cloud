@@ -1,58 +1,70 @@
 "use client";
 
 /**
- * "Block Added" section rendered as an authentic spreadsheet (Daksh: "exact
+ * Generic DPR section rendered as an authentic spreadsheet (Daksh: "exact
  * excel view … even row and column number"). Column letters A–G across the
  * top, row numbers 1.. down the left, gridlines, and coloured rows:
- *   yellow = section header   orange = stone   grey = vendor   bold = TOTAL
+ *   yellow = section header   orange = group   grey = item   bold = TOTAL
  *
- * Every CFT cell is clickable — click flips it to the block COUNT (Daksh:
- * "if i press shell … it will show quantity eg 5 blocks"); click again for CFT.
+ * Drives both "Block Added" (group=stone, item=vendor, unit=block) and
+ * "Block Cutted" (group=temple, item=slab, unit=slab) — same component, the
+ * data shape (DprSection) is identical.
+ *
+ * Each value cell shows CFT (or TONNES for tonnage stock like marble) and is
+ * clickable — click flips it to the block/slab COUNT; click again for value.
  */
 
 import { useState, type CSSProperties } from "react";
-import type { BlockAddedReport, DprWin, DprWindows } from "@/lib/dpr-block-added";
+import type { DprSection, DprWin, DprWindows } from "@/lib/dpr-section";
 
 type WinKey = "daily" | "week" | "month" | "allTime";
 const WIN_ORDER: WinKey[] = ["daily", "week", "month", "allTime"];
 const WIN_LABELS: Record<WinKey, string> = { daily: "DAILY", week: "7 DAYS", month: "MONTH", allTime: "ALL TIME" };
+const COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G"];
 
 type Row =
   | { kind: "blank" }
   | { kind: "header" }
-  | { kind: "data"; id: string; type: "stone" | "vendor" | "total"; label: string; windows: DprWindows };
+  | { kind: "data"; id: string; type: "group" | "item" | "total"; label: string; windows: DprWindows };
 
-const COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G"];
-
-function fmtCft(n: number): string {
+function fmt(n: number): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function BlockAddedGrid({ report }: { report: BlockAddedReport }) {
-  // Per-cell toggle — keys (`${rowId}:${winKey}`) currently showing COUNT.
+export function DprGrid({
+  report, title, shortUnit, longUnit,
+}: {
+  report: DprSection;
+  /** Cell A2 text, e.g. "BLOCK ADDED". */
+  title: string;
+  /** Compact count suffix in a cell, e.g. "blk" / "slab". */
+  shortUnit: string;
+  /** Noun for the tooltip, e.g. "block" / "slab". */
+  longUnit: string;
+}) {
+  // Per-cell toggle — keys (`${rowId}:${win}`) currently flipped from default.
   const [asCount, setAsCount] = useState<Set<string>>(new Set());
   const flip = (key: string) =>
     setAsCount((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   // Build the logical row list (blank spacers reproduce the screenshot).
-  // Data rows get a counter id (collision-proof vs any ':' in a name; the
-  // per-cell toggle state keys off it).
+  // Data rows get a counter id (collision-proof vs any ':' in a name).
   let rid = 0;
   const rows: Row[] = [{ kind: "blank" }, { kind: "header" }, { kind: "blank" }];
-  for (const s of report.stones) {
-    rows.push({ kind: "data", id: `d${rid++}`, type: "stone", label: s.stone, windows: s.windows });
-    for (const v of s.vendors) {
-      rows.push({ kind: "data", id: `d${rid++}`, type: "vendor", label: v.vendor, windows: v.windows });
+  for (const g of report.groups) {
+    rows.push({ kind: "data", id: `d${rid++}`, type: "group", label: g.label, windows: g.windows });
+    for (const it of g.items) {
+      rows.push({ kind: "data", id: `d${rid++}`, type: "item", label: it.label, windows: it.windows });
     }
     rows.push({ kind: "blank" });
   }
   rows.push({ kind: "data", id: `d${rid++}`, type: "total", label: "TOTAL", windows: report.total });
   rows.push({ kind: "blank" }, { kind: "blank" });
 
-  if (report.stones.length === 0) {
+  if (report.groups.length === 0) {
     return (
       <div style={{ border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", padding: "16px 18px", fontSize: 13, color: "#555" }}>
-        No blocks have been added yet.
+        Nothing to show yet.
       </div>
     );
   }
@@ -89,7 +101,7 @@ export function BlockAddedGrid({ report }: { report: BlockAddedReport }) {
                 {r.kind === "blank" && COL_LETTERS.map((c) => <td key={c} style={blankCell} />)}
                 {r.kind === "header" && (
                   <>
-                    <td style={headerLabelCell}>BLOCK ADDED</td>
+                    <td style={headerLabelCell}>{title}</td>
                     <td style={headerCell} />
                     {WIN_ORDER.map((w) => <td key={w} style={headerColCell}>{WIN_LABELS[w]}</td>)}
                     <td style={headerCell} />
@@ -100,7 +112,7 @@ export function BlockAddedGrid({ report }: { report: BlockAddedReport }) {
                     <td style={labelCell(r.type)} title={r.label}>{r.label}</td>
                     <td style={bodyCell(r.type)} />
                     {WIN_ORDER.map((w) => (
-                      <DataCell key={w} rowId={r.id} type={r.type} win={w} data={r.windows[w]} asCount={asCount} flip={flip} />
+                      <DataCell key={w} rowId={r.id} type={r.type} win={w} data={r.windows[w]} shortUnit={shortUnit} longUnit={longUnit} asCount={asCount} flip={flip} />
                     ))}
                     <td style={bodyCell(r.type)} />
                   </>
@@ -115,30 +127,38 @@ export function BlockAddedGrid({ report }: { report: BlockAddedReport }) {
 }
 
 function DataCell({
-  rowId, type, win, data, asCount, flip,
+  rowId, type, win, data, shortUnit, longUnit, asCount, flip,
 }: {
-  rowId: string; type: "stone" | "vendor" | "total"; win: WinKey; data: DprWin;
+  rowId: string; type: "group" | "item" | "total"; win: WinKey; data: DprWin;
+  shortUnit: string; longUnit: string;
   asCount: Set<string>; flip: (k: string) => void;
 }) {
   const key = `${rowId}:${win}`;
-  const empty = data.count === 0;          // nothing added in this window
-  const zeroCft = data.cft === 0;          // tonnage block (marble) — count>0 here
-  // Default view is CFT, EXCEPT a zero-CFT cell defaults to the block count so
-  // tonnage/marble production isn't hidden behind a misleading "0.00". Clicking
-  // flips either kind of cell to the other reading.
-  const showCount = empty ? false : zeroCft ? !asCount.has(key) : asCount.has(key);
+  const empty = data.count === 0;                                   // nothing in this window
+  // Show CFT and/or TONNES — BOTH when a cell mixes them (e.g. the grand
+  // TOTAL over sandstone + marble), so marble tonnage is never masked.
+  const valParts: string[] = [];
+  if (data.cft > 0) valParts.push(fmt(data.cft));
+  if (data.tonnes > 0) valParts.push(`${fmt(data.tonnes)} T`);
+  const value = valParts.length ? valParts.join(" + ") : null;
+  const clickable = !empty && value !== null;                      // only flip when there IS a value
+  const showCount = empty ? false : value === null ? true : asCount.has(key);
+  const tipParts: string[] = [];
+  if (data.cft > 0) tipParts.push(`${fmt(data.cft)} CFT`);
+  if (data.tonnes > 0) tipParts.push(`${fmt(data.tonnes)} tonnes`);
+  const valTip = tipParts.join(" + ");
   return (
     <td
-      onClick={empty ? undefined : () => flip(key)}
-      title={empty ? undefined : `${fmtCft(data.cft)} CFT · ${data.count} block${data.count === 1 ? "" : "s"} (click to flip)`}
-      style={{ ...numCell(type), cursor: empty ? "default" : "pointer" }}
+      onClick={clickable ? () => flip(key) : undefined}
+      title={empty ? undefined : `${valTip ? valTip + " · " : ""}${data.count} ${longUnit}${data.count === 1 ? "" : "s"}${clickable ? " (click to flip)" : ""}`}
+      style={{ ...numCell(type), cursor: clickable ? "pointer" : "default" }}
     >
       {empty ? "" : showCount ? (
         <span style={{ color: "#1d4ed8", fontWeight: 800 }}>
-          {data.count}<span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>blk</span>
+          {data.count}<span style={{ fontSize: 9, fontWeight: 700, marginLeft: 2 }}>{shortUnit}</span>
         </span>
       ) : (
-        fmtCft(data.cft)
+        value
       )}
     </td>
   );
@@ -157,29 +177,29 @@ const headerCell: CSSProperties = { border: GRID, background: "#ffe600", height:
 const headerLabelCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", padding: "4px 8px", letterSpacing: "0.02em" };
 const headerColCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", textAlign: "right", padding: "4px 8px" };
 
-function rowBg(type: "stone" | "vendor" | "total"): string {
-  return type === "stone" ? "#ed7d31" : type === "vendor" ? "#d4d4d4" : "#ffffff";
+function rowBg(type: "group" | "item" | "total"): string {
+  return type === "group" ? "#ed7d31" : type === "item" ? "#d4d4d4" : "#ffffff";
 }
-function bodyCell(type: "stone" | "vendor" | "total"): CSSProperties {
+function bodyCell(type: "group" | "item" | "total"): CSSProperties {
   return { border: GRID, background: rowBg(type), height: 24, ...(type === "total" ? { borderTop: "2px solid #404040" } : {}) };
 }
-function labelCell(type: "stone" | "vendor" | "total"): CSSProperties {
+function labelCell(type: "group" | "item" | "total"): CSSProperties {
   return {
     ...bodyCell(type),
     padding: "4px 8px",
-    fontWeight: type === "vendor" ? 600 : 800,
+    fontWeight: type === "item" ? 600 : 800,
     color: "#1a1a1a",
     textTransform: "uppercase",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   };
 }
-function numCell(type: "stone" | "vendor" | "total"): CSSProperties {
+function numCell(type: "group" | "item" | "total"): CSSProperties {
   return {
     ...bodyCell(type),
     padding: "4px 8px",
     textAlign: "right",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    fontWeight: type === "total" ? 800 : type === "stone" ? 700 : 500,
+    fontWeight: type === "total" ? 800 : type === "group" ? 700 : 500,
     color: "#1a1a1a",
   };
 }

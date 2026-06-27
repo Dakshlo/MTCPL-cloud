@@ -2,17 +2,20 @@
  * Production DPR — owner/developer report.
  *
  * Redesigned (Daksh, June 2026) into SECTION tabs instead of a period
- * toggle. Scope: MTCPL plant now; site-wise later. First section is
- * "Block Added" — a spreadsheet-style grid (stone → vendor) with Daily /
- * 7 Days / Month / All Time columns. More sections (Block Cutted, …) land
- * one at a time. Section data lives in src/lib/dpr-*.ts.
+ * toggle. Scope: MTCPL plant now; site-wise later. Each section is a
+ * spreadsheet-style grid (DprGrid). Live sections:
+ *   • Block Added  — stone → vendor, CFT (tonnes for marble)
+ *   • Block Cutted — temple → each slab, CFT
+ * Section data lives in src/lib/dpr-*.ts.
  */
 
 import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { buildBlockAddedReport } from "@/lib/dpr-block-added";
-import { BlockAddedGrid } from "./block-added-grid";
+import { buildBlockCuttedReport } from "@/lib/dpr-block-cutted";
+import type { DprSection } from "@/lib/dpr-section";
+import { DprGrid } from "./dpr-grid";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +23,25 @@ type Search = Promise<Record<string, string | string[] | undefined>>;
 
 const SECTIONS = [
   { key: "block_added", label: "Block Added", live: true },
-  { key: "block_cutted", label: "Block Cutted", live: false },
+  { key: "block_cutted", label: "Block Cutted", live: true },
 ] as const;
+
+type SectionKey = (typeof SECTIONS)[number]["key"];
+
+const VIEW: Record<SectionKey, { title: string; shortUnit: string; longUnit: string; note: string }> = {
+  block_added: {
+    title: "BLOCK ADDED",
+    shortUnit: "blk",
+    longUnit: "block",
+    note: "CFT = L×W×H ÷ 1728 · stone-wise → vendor-wise (no-vendor blocks shown under “NO VENDOR”) · marble is tonnage-based so those cells show tonnes (T)",
+  },
+  block_cutted: {
+    title: "BLOCK CUTTED",
+    shortUnit: "slab",
+    longUnit: "slab",
+    note: "CFT = L×W×T ÷ 1728 · temple-wise → each slab listed separately · windowed by the slab’s cut-done date",
+  },
+};
 
 export default async function DprPage({ searchParams }: { searchParams: Search }) {
   const { profile } = await requireAuth();
@@ -29,9 +49,13 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
 
   const sp = await searchParams;
   const reqSection = typeof sp.section === "string" ? sp.section : "block_added";
-  const section = SECTIONS.find((s) => s.key === reqSection && s.live) ? reqSection : "block_added";
+  const section: SectionKey = SECTIONS.find((s) => s.key === reqSection && s.live)
+    ? (reqSection as SectionKey)
+    : "block_added";
 
-  const report = await buildBlockAddedReport();
+  const report: DprSection =
+    section === "block_cutted" ? await buildBlockCuttedReport() : await buildBlockAddedReport();
+  const view = VIEW[section];
 
   return (
     <section style={{ paddingBottom: 24 }}>
@@ -72,20 +96,14 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
       </div>
 
       {/* Active section */}
-      {section === "block_added" && (
-        <>
-          <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 2px 8px" }}>
-            💡 Click any CFT cell to flip it to the block count.
-          </div>
-          <BlockAddedGrid report={report} />
-          <div style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
-            Generated {new Date(report.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} ·
-            CFT = L×W×H ÷ 1728 · stone-wise → vendor-wise (no-vendor blocks shown under &ldquo;NO VENDOR&rdquo;) ·
-            marble is tonnage-based (no CFT) so those cells show the block count ·
-            Daily = today, 7 Days = last 7 days, Month = this calendar month (IST).
-          </div>
-        </>
-      )}
+      <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 2px 8px" }}>
+        💡 Click any value cell to flip it to the {view.longUnit} count.
+      </div>
+      <DprGrid report={report} title={view.title} shortUnit={view.shortUnit} longUnit={view.longUnit} />
+      <div style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
+        Generated {new Date(report.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} ·
+        {" "}{view.note} · Daily = today, 7 Days = last 7 days, Month = this calendar month (IST).
+      </div>
     </section>
   );
 }
