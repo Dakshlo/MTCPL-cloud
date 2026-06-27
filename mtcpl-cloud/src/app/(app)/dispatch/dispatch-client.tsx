@@ -704,19 +704,22 @@ function ReadyTab({
           {visibleGroups.map((g) => {
             const totalCft = g.matched.reduce((sum, s) => sum + s.cft, 0);
             const urgent = g.matched.filter((s) => s.priority).length;
+            // Marble cue reflects the CURRENT (filtered) matches, not the whole
+            // temple — so a sandstone-only search doesn't falsely show + MARBLE.
+            const matchedMarble = g.matched.some((s) => s.isMarble);
             return (
               <div
                 key={g.key}
                 style={{
-                  background: g.hasMarble ? "rgba(180,83,9,0.05)" : "var(--surface)",
-                  border: `1.5px solid ${g.hasMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
+                  background: matchedMarble ? "rgba(180,83,9,0.05)" : "var(--surface)",
+                  border: `1.5px solid ${matchedMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
                   borderRadius: 14, padding: "16px 16px 14px",
                   display: "flex", flexDirection: "column", gap: 9,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 7, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>🏛 {g.temple}</span>
-                  {g.hasMarble && (
+                  {matchedMarble && (
                     <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 8px", borderRadius: 5, letterSpacing: "0.04em", whiteSpace: "nowrap" }} title="This temple has marble slabs too — all stones are in one dispatch list.">
                       + MARBLE
                     </span>
@@ -869,6 +872,12 @@ function TempleDispatchPeek({
   }, [matched, selected, query]);
   const selSlabs = allSlabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
+  // Only count/post/park slabs that are actually VISIBLE now. A storage slab
+  // selected then hidden (Storage toggle off) must not be dispatched or counted
+  // — review w0v1fyekz. Raw `selected` is kept for the per-card checkbox + the
+  // re-toggle restore; selectedIds/selCount drive everything user-facing.
+  const selectedIds = selSlabs.map((s) => s.id);
+  const selCount = selSlabs.length;
 
   // Per-slab weight is entered in KG (blank rows skipped). The challan
   // shows the net total in tonnes; weightsParsed maps slabId → kg.
@@ -933,7 +942,7 @@ function TempleDispatchPeek({
   const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (
-    <div style={{ ...peekOverlay, padding: 0 }} onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) onClose(); }}>
+    <div style={{ ...peekOverlay, padding: 0 }}>
       <div style={peekPanelFull} role="dialog" aria-modal="true" aria-label={`Dispatch from ${group.temple}`}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
@@ -947,8 +956,8 @@ function TempleDispatchPeek({
                 : "Step 2 of 2 — truck & driver details · गाड़ी की जानकारी भरें"}
             </div>
           </div>
-          <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, color: selected.size > 0 ? "var(--gold-dark)" : "var(--muted)", whiteSpace: "nowrap" }}>
-            ✓ {selected.size} selected · {selCft.toFixed(2)} CFT
+          <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, color: selCount > 0 ? "var(--gold-dark)" : "var(--muted)", whiteSpace: "nowrap" }}>
+            ✓ {selCount} selected · {selCft.toFixed(2)} CFT
           </span>
           <button type="button" onClick={onClose} disabled={submitting} aria-label="Close" style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "var(--muted)" }}>×</button>
         </div>
@@ -980,14 +989,14 @@ function TempleDispatchPeek({
               >
                 {allMatchedSelected ? "✕ Clear shown" : `✓ Select all (${selectableMatched.length})`}
               </button>
-              {selected.size > 0 && (
+              {selCount > 0 && (
                 <button
                   type="button"
                   onClick={() => { setSelected(new Set()); try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ } }}
                   title="Unselect every slab for this temple"
                   style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid #b91c1c", background: "rgba(185,28,28,0.06)", color: "#b91c1c", cursor: "pointer", whiteSpace: "nowrap" }}
                 >
-                  ✕ Clear {selected.size}
+                  ✕ Clear {selCount}
                 </button>
               )}
             </div>
@@ -1023,32 +1032,32 @@ function TempleDispatchPeek({
               {/* Park selected ready slabs into Dispatch Storage (declutter). */}
               <button
                 type="button"
-                disabled={selected.size === 0 || parking}
+                disabled={selCount === 0 || parking}
                 onClick={async () => {
-                  if (selected.size === 0) return;
-                  if (!window.confirm(`Send ${selected.size} slab${selected.size !== 1 ? "s" : ""} to Dispatch Storage (out of Make Dispatch)?`)) return;
+                  if (selCount === 0) return;
+                  if (!window.confirm(`Send ${selCount} slab${selCount !== 1 ? "s" : ""} to Dispatch Storage (out of Make Dispatch)?`)) return;
                   setParking(true);
                   try {
-                    const res = await parkDispatchSlabsAction([...selected]);
+                    const res = await parkDispatchSlabsAction(selectedIds);
                     if (res.ok) { onClose(); router.refresh(); }
                     else window.alert(res.error);
                   } finally { setParking(false); }
                 }}
-                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: selected.size === 0 ? "var(--muted)" : "var(--text)", cursor: selected.size === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: selCount === 0 ? "var(--muted)" : "var(--text)", cursor: selCount === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
               >
-                {parking ? "Moving…" : `🗄 Send ${selected.size || ""} → storage`}
+                {parking ? "Moving…" : `🗄 Send ${selCount || ""} → storage`}
               </button>
               <button
                 type="button"
-                disabled={selected.size === 0}
+                disabled={selCount === 0}
                 onClick={() => setStep(2)}
                 style={{
-                  marginLeft: "auto", background: selected.size === 0 ? "var(--border)" : "var(--gold-dark)",
-                  color: selected.size === 0 ? "var(--muted)" : "#fff", border: "none", borderRadius: 12,
-                  padding: "13px 26px", fontSize: 15.5, fontWeight: 800, cursor: selected.size === 0 ? "not-allowed" : "pointer",
+                  marginLeft: "auto", background: selCount === 0 ? "var(--border)" : "var(--gold-dark)",
+                  color: selCount === 0 ? "var(--muted)" : "#fff", border: "none", borderRadius: 12,
+                  padding: "13px 26px", fontSize: 15.5, fontWeight: 800, cursor: selCount === 0 ? "not-allowed" : "pointer",
                 }}
               >
-                Truck details → ({selected.size} slab{selected.size === 1 ? "" : "s"})
+                Truck details → ({selCount} slab{selCount === 1 ? "" : "s"})
               </button>
             </div>
           </>
@@ -1064,10 +1073,10 @@ function TempleDispatchPeek({
             style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
           >
             <input type="hidden" name="temple" value={group.temple} />
-            <input type="hidden" name="slab_ids" value={JSON.stringify([...selected])} />
+            <input type="hidden" name="slab_ids" value={JSON.stringify(selectedIds)} />
             <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />
 
-            <div style={{ flex: 1, minHeight: 0, maxHeight: "calc(92vh - 168px)", overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, WebkitOverflowScrolling: "touch" }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, WebkitOverflowScrolling: "touch" }}>
               {/* Mig 130 — site info that will print on the challan,
                   pulled from Settings → Temple Codes. */}
               <div style={{ background: "rgba(184,115,51,0.06)", border: "1.5px solid rgba(184,115,51,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.6 }}>
@@ -1234,7 +1243,7 @@ function TempleDispatchPeek({
                   cursor: submitting ? "wait" : "pointer",
                 }}
               >
-                {submitting ? "Creating dispatch…" : `🚚 Send for approval (${selected.size})`}
+                {submitting ? "Creating dispatch…" : `🚚 Send for approval (${selCount})`}
               </button>
             </div>
           </form>
