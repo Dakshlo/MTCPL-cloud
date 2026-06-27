@@ -193,6 +193,13 @@ const peekPanel: CSSProperties = {
   background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 18,
   boxShadow: "0 24px 80px rgba(0,0,0,0.5)", overflow: "hidden",
 };
+// Full-screen variant — the dispatch picker uses the whole viewport so the
+// team sees as many slab cards as possible (Daksh June 2026).
+const peekPanelFull: CSSProperties = {
+  width: "100vw", height: "100dvh", maxWidth: "none", maxHeight: "none",
+  display: "flex", flexDirection: "column", background: "var(--surface)",
+  border: "none", borderRadius: 0, overflow: "hidden",
+};
 const bigSearch: CSSProperties = {
   flex: "1 1 260px", padding: "12px 16px", fontSize: 15, border: "1.5px solid var(--border)",
   borderRadius: 12, background: "var(--bg)", color: "var(--text)",
@@ -296,8 +303,8 @@ function SlabCard({
         )}
         <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{s.id}</code>
         {s.storageSource && (
-          <span title={s.storageSource === "carving" ? "From carving storage (cut-done) — dispatching it skips carving" : "From dispatch storage"} style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.03em" }}>
-            {s.storageSource === "carving" ? "📦 CARVING STORE" : "🗄 STORE"}
+          <span title="From storage" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.03em" }}>
+            📦 STORAGE
           </span>
         )}
         {s.priority && <span title="Urgent" style={{ fontSize: 13 }}>⚡</span>}
@@ -691,65 +698,44 @@ function ReadyTab({
           {q ? `No slab matches “${q}”.` : stationSlabs.length === 0 ? "No slabs at this station yet." : "Nothing to show."}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        // Temples as compact cards (4–5/row, Daksh June 2026). No inline slab
+        // expansion — tap Dispatch to open the full-screen picker.
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
           {visibleGroups.map((g) => {
-            const expanded = q ? true : open.has(g.key);
             const totalCft = g.matched.reduce((sum, s) => sum + s.cft, 0);
             const urgent = g.matched.filter((s) => s.priority).length;
             return (
               <div
                 key={g.key}
                 style={{
-                  background: "var(--surface)",
+                  background: g.hasMarble ? "rgba(180,83,9,0.05)" : "var(--surface)",
                   border: `1.5px solid ${g.hasMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
-                  borderRadius: 14, overflow: "hidden",
+                  borderRadius: 14, padding: "16px 16px 14px",
+                  display: "flex", flexDirection: "column", gap: 9,
                 }}
               >
-                {/* Temple header — tap anywhere to expand/collapse */}
-                <div
-                  onClick={() => toggleOpen(g.key)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(g.key); } }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
-                    background: g.hasMarble ? "rgba(180,83,9,0.05)" : "var(--bg)", cursor: "pointer", flexWrap: "wrap",
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: "var(--muted)", width: 14, flexShrink: 0, transition: "transform .15s ease", transform: expanded ? "rotate(90deg)" : "none", display: "inline-block" }}>▶</span>
-                  <span style={{ fontSize: 16.5, fontWeight: 800 }}>
-                    🏛 {g.temple}
-                  </span>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 7, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>🏛 {g.temple}</span>
                   {g.hasMarble && (
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 9px", borderRadius: 5, letterSpacing: "0.04em" }} title="This temple has marble slabs too — all stones are in one dispatch list.">
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 8px", borderRadius: 5, letterSpacing: "0.04em", whiteSpace: "nowrap" }} title="This temple has marble slabs too — all stones are in one dispatch list.">
                       + MARBLE
                     </span>
                   )}
-                  <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>
-                    {g.matched.length} slab{g.matched.length === 1 ? "" : "s"} · {totalCft.toFixed(2)} CFT
-                    {urgent > 0 && <span style={{ color: "#dc2626", fontWeight: 800 }}> · ⚡ {urgent} urgent</span>}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setPeekGroup(g); }}
-                    style={{
-                      marginLeft: "auto", background: "var(--gold-dark)", color: "#fff", border: "none",
-                      borderRadius: 10, padding: "11px 22px", fontSize: 14.5, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
-                    }}
-                  >
-                    🚚 Dispatch
-                  </button>
                 </div>
-
-                {/* Slab cards (browse-only — selection happens in the peek).
-                    Mig 132 — long-press a card to request a cancel. */}
-                {expanded && (
-                  <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, borderTop: "1px solid var(--border)" }}>
-                    {g.matched.map((s) => (
-                      <SlabCard key={s.id} s={s} onLongPress={() => setCancelTarget(s)} carvingDispatchTransfer={carvingDispatchTransfer} />
-                    ))}
-                  </div>
-                )}
+                <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {g.matched.length} slab{g.matched.length === 1 ? "" : "s"} · {totalCft.toFixed(2)} CFT
+                  {urgent > 0 && <span style={{ color: "#dc2626", fontWeight: 800 }}> · ⚡ {urgent}</span>}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPeekGroup(g)}
+                  style={{
+                    marginTop: "auto", background: "var(--gold-dark)", color: "#fff", border: "none",
+                    borderRadius: 10, padding: "11px 16px", fontSize: 14.5, fontWeight: 800, cursor: "pointer", width: "100%",
+                  }}
+                >
+                  🚚 Dispatch
+                </button>
               </div>
             );
           })}
@@ -841,8 +827,8 @@ function TempleDispatchPeek({
   // Mig 125 follow-on — optionally pull this temple's storage slabs into the
   // picker: carving storage (parked cut-done, direct-dispatch) + dispatch
   // storage (parked completed). Lazily loaded the first time a toggle is on.
-  const [inclCarving, setInclCarving] = useState(false);
-  const [inclDispatch, setInclDispatch] = useState(false);
+  // One unified "Storage" toggle — carving + dispatch storage combined (Daksh).
+  const [inclStorage, setInclStorage] = useState(false);
   const [storage, setStorage] = useState<{ carving: ReadySlab[]; dispatch: ReadySlab[] }>({ carving: [], dispatch: [] });
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [loadingStorage, setLoadingStorage] = useState(false);
@@ -865,15 +851,22 @@ function TempleDispatchPeek({
   const allSlabs = useMemo(
     () => [
       ...group.slabs,
-      ...(inclCarving ? storage.carving : []),
-      ...(inclDispatch ? storage.dispatch : []),
+      ...(inclStorage ? [...storage.carving, ...storage.dispatch] : []),
     ],
-    [group.slabs, inclCarving, inclDispatch, storage],
+    [group.slabs, inclStorage, storage],
   );
   const matched = useMemo(
     () => allSlabs.filter((s) => slabMatches(s, query)),
     [allSlabs, query],
   );
+  // Pin selected slabs to the top — but ONLY when not searching (a search
+  // shows just the matches, no pinned block). Selection cleared → no pins.
+  const displaySlabs = useMemo(() => {
+    if (query.trim()) return matched;
+    const sel = matched.filter((s) => selected.has(s.id));
+    const rest = matched.filter((s) => !selected.has(s.id));
+    return [...sel, ...rest];
+  }, [matched, selected, query]);
   const selSlabs = allSlabs.filter((s) => selected.has(s.id));
   const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
 
@@ -940,8 +933,8 @@ function TempleDispatchPeek({
   const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
 
   return (
-    <div style={peekOverlay} onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) onClose(); }}>
-      <div style={peekPanel} role="dialog" aria-modal="true" aria-label={`Dispatch from ${group.temple}`}>
+    <div style={{ ...peekOverlay, padding: 0 }} onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) onClose(); }}>
+      <div style={peekPanelFull} role="dialog" aria-modal="true" aria-label={`Dispatch from ${group.temple}`}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
@@ -985,8 +978,18 @@ function TempleDispatchPeek({
                 }}
                 style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}
               >
-                {allMatchedSelected ? "✕ Clear all" : `✓ Select all (${selectableMatched.length})`}
+                {allMatchedSelected ? "✕ Clear shown" : `✓ Select all (${selectableMatched.length})`}
               </button>
+              {selected.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setSelected(new Set()); try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ } }}
+                  title="Unselect every slab for this temple"
+                  style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid #b91c1c", background: "rgba(185,28,28,0.06)", color: "#b91c1c", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  ✕ Clear {selected.size}
+                </button>
+              )}
             </div>
 
             {/* Mig 125 follow-on — pull this temple's storage slabs in too.
@@ -995,12 +998,8 @@ function TempleDispatchPeek({
             <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", background: "var(--surface)" }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Also include from storage:</span>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#6d28d9" }}>
-                <input type="checkbox" checked={inclCarving} onChange={(e) => { setInclCarving(e.target.checked); if (e.target.checked) ensureStorage(); }} />
-                📦 Cut-done storage (carving) {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.carving.length}</span>}
-              </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#1d4ed8" }}>
-                <input type="checkbox" checked={inclDispatch} onChange={(e) => { setInclDispatch(e.target.checked); if (e.target.checked) ensureStorage(); }} />
-                🗄 Dispatch storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.dispatch.length}</span>}
+                <input type="checkbox" checked={inclStorage} onChange={(e) => { setInclStorage(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                📦 Storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.carving.length + storage.dispatch.length}</span>}
               </label>
               {loadingStorage && <span className="muted" style={{ fontSize: 11.5 }}>Loading…</span>}
             </div>
@@ -1011,7 +1010,7 @@ function TempleDispatchPeek({
                 <div className="muted" style={{ padding: "30px 0", textAlign: "center", fontSize: 14 }}>No slab matches “{query}”.</div>
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(245px, 1fr))", gap: 10 }}>
-                  {matched.map((s) => (
+                  {displaySlabs.map((s) => (
                     <SlabCard key={s.id} s={s} selected={selected.has(s.id)} onToggle={() => toggle(s.id)} carvingDispatchTransfer={carvingDispatchTransfer} />
                   ))}
                 </div>
