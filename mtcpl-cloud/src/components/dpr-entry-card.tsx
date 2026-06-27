@@ -56,7 +56,7 @@ export function DprEntryCard() {
           DPR
         </div>
         <div style={{ fontSize: 12.5, color: "#d1fae5", marginTop: 4, lineHeight: 1.4 }}>
-          Day · week · month — every stage by code, with CFT.
+          Block added — stone &amp; vendor wise, daily to all-time.
         </div>
       </div>
 
