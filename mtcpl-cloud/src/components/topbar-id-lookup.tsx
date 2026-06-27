@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lookupId, type LookupResult } from "@/app/(app)/dashboard/lookup-action";
+import { slabStatusLabel } from "@/lib/slab-status-label";
 import {
   lookupFinance,
   type FinanceLookupResult,
@@ -1045,7 +1046,7 @@ function MultipleResultPanel({
   );
 }
 
-function StagePill({ status }: { status: string }) {
+function StagePill({ status, label }: { status: string; label?: string }) {
   const tone = STATUS_TONE[status] ?? { fg: "#525252", bg: "rgba(82,82,82,0.10)" };
   return (
     <span
@@ -1074,7 +1075,7 @@ function StagePill({ status }: { status: string }) {
           boxShadow: `0 0 0 3px ${tone.bg}`,
         }}
       />
-      {status.replace(/_/g, " ")}
+      {label ?? status.replace(/_/g, " ")}
     </span>
   );
 }
@@ -1129,6 +1130,14 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
   const displayStatus = carvingApprovalPending
     ? "carving_approval_pending"
     : s.status;
+  // Friendly label: completed → "Ready to dispatch"; dispatched →
+  // approval-pending / on the way / delivered (from the dispatch record).
+  const displayLabel = carvingApprovalPending
+    ? "carving approval pending"
+    : slabStatusLabel(s.status, {
+        approvedAt: result.dispatch?.approved_at,
+        deliveredAt: result.dispatch?.delivered_at,
+      });
 
   return (
     <div
@@ -1155,7 +1164,7 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
           Where it is now
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <StagePill status={displayStatus} />
+          <StagePill status={displayStatus} label={displayLabel} />
           {s.priority && (
             <span
               style={{
@@ -1758,7 +1767,7 @@ function BlockResultPanel({
                           flexShrink: 0,
                         }}
                       >
-                        {sl.status.replace(/_/g, " ")}
+                        {slabStatusLabel(sl.status)}
                       </span>
                       <span
                         aria-hidden

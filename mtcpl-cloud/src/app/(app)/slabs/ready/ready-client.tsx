@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useMemo, useDeferredValue } from "react";
+
+import { slabStatusLabel, type SlabDispatchState } from "@/lib/slab-status-label";
 import Link from "next/link";
 import { slabSearchMatch } from "@/lib/slab-search";
 
@@ -49,6 +51,9 @@ type Slab = {
    *  manual-cut event by source_block_id), NOT updated_at — which moves
    *  on every later edit. Used for the Cut Done column, sort + date filter. */
   cut_done_at: string | null;
+  /** Dispatch record state (only for 'dispatched' slabs) so the status
+   *  chip can show approval-pending / on-the-way / delivered. */
+  dispatch_state?: SlabDispatchState;
   /** Block this slab was cut from. Set by finish_block_cut RPC at
    *  approval time. Older / manually-entered slabs may be NULL. */
   source_block_id?: string | null;
@@ -67,8 +72,9 @@ const STATUS_TINT: Record<string, { label: string; bg: string; fg: string }> = {
   rejected:             { label: "Broken / rejected",        bg: "rgba(220,38,38,0.14)",  fg: "#991b1b" },
 };
 
-function StatusChip({ status }: { status: string }) {
+function StatusChip({ status, dispatch }: { status: string; dispatch?: SlabDispatchState }) {
   const t = STATUS_TINT[status] ?? { label: status, bg: "rgba(0,0,0,0.06)", fg: "var(--muted)" };
+  const label = slabStatusLabel(status, dispatch);
   return (
     <span
       style={{
@@ -84,7 +90,7 @@ function StatusChip({ status }: { status: string }) {
         whiteSpace: "nowrap",
       }}
     >
-      {t.label}
+      {label}
     </span>
   );
 }
@@ -698,7 +704,7 @@ export function ReadySlabsClient({
                     {mode === "for-carving" && (
                       <>
                         <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                          <StatusChip status={s.status} />
+                          <StatusChip status={s.status} dispatch={s.dispatch_state} />
                         </td>
                         <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
                           {s.status === "cut_done" ? (

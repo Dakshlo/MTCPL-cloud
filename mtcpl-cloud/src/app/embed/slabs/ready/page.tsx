@@ -13,6 +13,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { cutDoneDateByBlock } from "@/lib/cut-done-date";
+import { dispatchStateBySlab } from "@/lib/dispatch-state";
 import { ReadySlabsClient } from "@/app/(app)/slabs/ready/ready-client";
 
 // Match the standalone /slabs/ready page: the embed kiosk view must
@@ -38,10 +39,15 @@ export default async function EmbedReadySlabsPage() {
 
   // Real cut-done date (NOT updated_at) — same as the standalone page.
   const cutDates = await cutDoneDateByBlock(admin, (data ?? []).map((s) => s.source_block_id));
+  const dispatchStates = await dispatchStateBySlab(
+    admin,
+    (data ?? []).filter((s) => s.status === "dispatched").map((s) => s.id),
+  );
   const slabsWithCutDate = (data ?? []).map((s) => ({
     ...s,
     cut_done_at:
       (s.source_block_id ? cutDates.get(s.source_block_id) : undefined) ?? s.created_at ?? s.updated_at,
+    dispatch_state: dispatchStates.get(s.id) ?? null,
   }));
 
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);

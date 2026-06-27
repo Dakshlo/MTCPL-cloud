@@ -101,6 +101,7 @@ export type SlabResult = {
     challan_number: number | null;
     vehicle_no: string | null;
     dispatched_at: string | null;
+    approved_at: string | null;
     delivered_at: string | null;
     receiver_name: string | null;
     temple: string | null;
@@ -634,7 +635,7 @@ async function loadSlabContext(
       const { data: d } = await admin
         .from("dispatches")
         .select(
-          "challan_number, vehicle_no, dispatched_at, delivered_at, receiver_name, temple",
+          "challan_number, vehicle_no, dispatched_at, approved_at, delivered_at, receiver_name, temple",
         )
         .eq("id", dispatchId)
         .maybeSingle();

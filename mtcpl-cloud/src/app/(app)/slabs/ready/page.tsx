@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { cutDoneDateByBlock } from "@/lib/cut-done-date";
+import { dispatchStateBySlab } from "@/lib/dispatch-state";
 import { ReadySlabsClient } from "./ready-client";
 
 // Per Daksh's note: the Ready Sizes page is the cutting team's
@@ -78,10 +79,17 @@ export default async function ReadySlabsPage() {
   // on every later edit, wrongly counting long-cut slabs as cut "today").
   // See src/lib/cut-done-date.ts.
   const cutDates = await cutDoneDateByBlock(admin, (data ?? []).map((s) => s.source_block_id));
+  // Dispatch state for 'dispatched' slabs → friendly sub-state label
+  // (approval pending / on the way / delivered). See slab-status-label.ts.
+  const dispatchStates = await dispatchStateBySlab(
+    admin,
+    (data ?? []).filter((s) => s.status === "dispatched").map((s) => s.id),
+  );
   const slabsWithCutDate = (data ?? []).map((s) => ({
     ...s,
     cut_done_at:
       (s.source_block_id ? cutDates.get(s.source_block_id) : undefined) ?? s.created_at ?? s.updated_at,
+    dispatch_state: dispatchStates.get(s.id) ?? null,
   }));
 
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
