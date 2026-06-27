@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import { cutDoneDateByBlock } from "@/lib/cut-done-date";
 import * as XLSX from "xlsx";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const admin = createAdminSupabaseClient();
@@ -19,33 +23,66 @@ export async function GET(req: NextRequest) {
   // dispatch (including broken/rejected). Filtering to cut_done only
   // would silently drop slabs the moment they enter carving — see
   // MT-B-246 bug. POST_CUT_STATUSES is the shared canonical set.
-  let query = admin
-    .from("slab_requirements")
-    .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, source_block_id, created_at, updated_at")
-    .in("status", POST_CUT_STATUSES)
-    .order("updated_at", { ascending: false });
+  type Row = {
+    id: string; label: string | null; temple: string; stone: string | null; quality: string | null;
+    length_ft: number; width_ft: number; thickness_ft: number; status: string; priority: boolean;
+    source_block_id: string | null; created_at: string | null; updated_at: string | null;
+  };
 
-  if (stone)  query = query.eq("stone", stone);
-  if (temple) query = query.eq("temple", temple);
-  if (quality === "A" || quality === "B") query = query.eq("quality", quality);
-  if (from)   query = query.gte("updated_at", from + "T00:00:00Z");
-  if (to)     query = query.lte("updated_at", to + "T23:59:59Z");
+  // Paginated fetch — PostgREST caps a single select at 1000 rows, so the
+  // export was silently truncating. Column filters run in the query; the
+  // date range is applied below against the DERIVED cut date (not updated_at).
+  const all: Row[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; offset < 50000; offset += PAGE) {
+    let query = admin
+      .from("slab_requirements")
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, source_block_id, created_at, updated_at")
+      .in("status", POST_CUT_STATUSES)
+      .order("id")
+      .range(offset, offset + PAGE - 1);
+    if (stone)  query = query.eq("stone", stone);
+    if (temple) query = query.eq("temple", temple);
+    if (quality === "A" || quality === "B") query = query.eq("quality", quality);
+    const { data, error } = await query;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data || data.length === 0) break;
+    all.push(...(data as Row[]));
+    if (data.length < PAGE) break;
+  }
 
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Real cut-done date (NOT updated_at, which moves on every later edit).
+  const cutDates = await cutDoneDateByBlock(admin, all.map((s) => s.source_block_id));
+  const cutDoneOf = (s: Row): string | null =>
+    (s.source_block_id ? cutDates.get(s.source_block_id) : undefined) ?? s.created_at ?? s.updated_at;
 
   function fmtDate(iso: string | null) {
     if (!iso) return "";
     return new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
   }
 
-  let rows = (data ?? []).map(s => {
+  // Filter by the REAL cut date, then search/quality.
+  let slabs = all;
+  if (from) slabs = slabs.filter((s) => { const c = cutDoneOf(s); return !!c && c >= from + "T00:00:00Z"; });
+  if (to)   slabs = slabs.filter((s) => { const c = cutDoneOf(s); return !!c && c <= to + "T23:59:59Z"; });
+  if (search) {
+    const q = search.toLowerCase();
+    slabs = slabs.filter((s) =>
+      (s.id ?? "").toLowerCase().includes(q) ||
+      (s.label ?? "").toLowerCase().includes(q) ||
+      (s.temple ?? "").toLowerCase().includes(q) ||
+      (s.stone ?? "").toLowerCase().includes(q),
+    );
+  }
+  if (quality === "none") slabs = slabs.filter((s) => !s.quality);
+
+  const rows = slabs.map((s) => {
     const l = Number(s.length_ft), w = Number(s.width_ft), t = Number(s.thickness_ft);
     const cft = ((l * w * t) / 1728).toFixed(2);
     return {
       "Size Code":       s.id,
       "Temple":          s.temple,
-      "Label":           s.label,
+      "Label":           s.label ?? "",
       "Stone":           s.stone ?? "",
       "Quality":         s.quality ?? "",
       "Length (in)":     l,
@@ -54,24 +91,9 @@ export async function GET(req: NextRequest) {
       "Volume (CFT)":    Number(cft),
       "Priority":        s.priority ? "Yes" : "No",
       "Added Date":      fmtDate(s.created_at),
-      "Cut Done Date":   fmtDate(s.updated_at),
+      "Cut Done Date":   fmtDate(cutDoneOf(s)),
     };
   });
-
-  // Client-side search filter (if passed)
-  if (search) {
-    const q = search.toLowerCase();
-    rows = rows.filter(r =>
-      r["Size Code"].toLowerCase().includes(q) ||
-      r["Label"].toLowerCase().includes(q) ||
-      r["Temple"].toLowerCase().includes(q) ||
-      r["Stone"].toLowerCase().includes(q)
-    );
-  }
-
-  if (quality === "none") {
-    rows = rows.filter(r => !r["Quality"]);
-  }
 
   const ws = XLSX.utils.json_to_sheet(rows);
 

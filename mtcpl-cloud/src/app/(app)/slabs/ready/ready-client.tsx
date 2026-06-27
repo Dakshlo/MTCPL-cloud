@@ -45,6 +45,10 @@ type Slab = {
   priority: boolean;
   created_at: string | null;
   updated_at: string | null;
+  /** Real cut-done date (derived server-side from the cut-approval /
+   *  manual-cut event by source_block_id), NOT updated_at — which moves
+   *  on every later edit. Used for the Cut Done column, sort + date filter. */
+  cut_done_at: string | null;
   /** Block this slab was cut from. Set by finish_block_cut RPC at
    *  approval time. Older / manually-entered slabs may be NULL. */
   source_block_id?: string | null;
@@ -105,7 +109,7 @@ function calcCft(l: number, w: number, t: number) {
   return (Number(l) * Number(w) * Number(t)) / 1728;
 }
 
-type SortCol = "id" | "temple" | "stone" | "cft" | "created_at" | "updated_at";
+type SortCol = "id" | "temple" | "stone" | "cft" | "created_at" | "updated_at" | "cut_done_at";
 
 export function ReadySlabsClient({
   slabs,
@@ -154,7 +158,7 @@ export function ReadySlabsClient({
   // history on first load — Daksh asked to drop it.)
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [sortBy, setSortBy] = useState<SortCol>("updated_at");
+  const [sortBy, setSortBy] = useState<SortCol>("cut_done_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [exporting, setExporting] = useState(false);
 
@@ -239,8 +243,8 @@ export function ReadySlabsClient({
         )
       );
     }
-    if (dateFrom) rows = rows.filter(s => s.updated_at && s.updated_at >= dateFrom);
-    if (dateTo) rows = rows.filter(s => s.updated_at && s.updated_at <= dateTo + "T23:59:59Z");
+    if (dateFrom) rows = rows.filter(s => s.cut_done_at && s.cut_done_at >= dateFrom);
+    if (dateTo) rows = rows.filter(s => s.cut_done_at && s.cut_done_at <= dateTo + "T23:59:59Z");
 
     rows.sort((a, b) => {
       let av: string | number = "";
@@ -594,7 +598,7 @@ export function ReadySlabsClient({
                 { label: "CFT",          col: "cft" as SortCol },
                 { label: "Priority",     col: null },
                 { label: "Added",        col: "created_at" as SortCol },
-                { label: "Cut Done",     col: "updated_at" as SortCol },
+                { label: "Cut Done",     col: "cut_done_at" as SortCol },
                 // Status column on the for-carving page (where the
                 // chip row + multi-status query make it meaningful).
                 // Verification ("Total Ready Sizes") is a flat list
@@ -690,7 +694,7 @@ export function ReadySlabsClient({
                       {s.priority ? <span style={{ fontSize: 14 }}>⚡</span> : <span className="muted">—</span>}
                     </td>
                     <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.created_at)}</td>
-                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.updated_at)}</td>
+                    <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 12 }}>{fmtDate(s.cut_done_at)}</td>
                     {mode === "for-carving" && (
                       <>
                         <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>

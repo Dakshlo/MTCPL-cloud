@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import { cutDoneDateByBlock } from "@/lib/cut-done-date";
 import { ReadySlabsClient } from "./ready-client";
 
 // Per Daksh's note: the Ready Sizes page is the cutting team's
@@ -73,6 +74,16 @@ export default async function ReadySlabsPage() {
     admin.from("stone_types").select("name").order("name"),
   ]);
 
+  // Daksh June 2026 — real cut-done date per slab (NOT updated_at, which moves
+  // on every later edit, wrongly counting long-cut slabs as cut "today").
+  // See src/lib/cut-done-date.ts.
+  const cutDates = await cutDoneDateByBlock(admin, (data ?? []).map((s) => s.source_block_id));
+  const slabsWithCutDate = (data ?? []).map((s) => ({
+    ...s,
+    cut_done_at:
+      (s.source_block_id ? cutDates.get(s.source_block_id) : undefined) ?? s.created_at ?? s.updated_at,
+  }));
+
   const stoneNames = (stoneTypeRows ?? []).map((s) => s.name);
   const templeNames = [...new Set((data ?? []).map((s) => s.temple))].sort();
 
@@ -85,7 +96,7 @@ export default async function ReadySlabsPage() {
       </div>
 
       <ReadySlabsClient
-        slabs={data ?? []}
+        slabs={slabsWithCutDate}
         stoneNames={stoneNames}
         templeNames={templeNames}
         mode="verification"
