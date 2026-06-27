@@ -1,12 +1,10 @@
 /**
  * Production DPR — owner/developer report.
  *
- * Redesigned (Daksh, June 2026) into SECTION tabs instead of a period
- * toggle. Scope: MTCPL plant now; site-wise later. Each section is a
- * spreadsheet-style grid (DprGrid). Live sections:
- *   • Block Added  — stone → vendor, CFT (tonnes for marble)
- *   • Block Cutted — temple → each slab, CFT
- * Section data lives in src/lib/dpr-*.ts.
+ * Section tabs (Block Added / Block Cutted / Carving Done), scope MTCPL now /
+ * site-wise later. The FIRST section is server-rendered here for a fast first
+ * paint; <DprTabs> then switches sections client-side (prefetched, no reload)
+ * so tab switching is instant. Section data lives in src/lib/dpr-*.ts.
  */
 
 import { redirect } from "next/navigation";
@@ -16,56 +14,26 @@ import { buildBlockAddedReport } from "@/lib/dpr-block-added";
 import { buildBlockCuttedReport } from "@/lib/dpr-block-cutted";
 import { buildCarvingDoneReport } from "@/lib/dpr-carving-done";
 import type { DprSection } from "@/lib/dpr-section";
-import { DprGrid } from "./dpr-grid";
+import { DprTabs, type DprSectionKey } from "./dpr-tabs";
 
 export const dynamic = "force-dynamic";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
-const SECTIONS = [
-  { key: "block_added", label: "Block Added", live: true },
-  { key: "block_cutted", label: "Block Cutted", live: true },
-  { key: "carving_done", label: "Carving Done", live: true },
-] as const;
-
-type SectionKey = (typeof SECTIONS)[number]["key"];
-
-const VIEW: Record<SectionKey, { title: string; shortUnit: string; longUnit: string; note: string }> = {
-  block_added: {
-    title: "BLOCK ADDED",
-    shortUnit: "blk",
-    longUnit: "block",
-    note: "CFT = L×W×H ÷ 1728 · stone-wise → vendor-wise (no-vendor blocks shown under “NO VENDOR”) · marble is tonnage-based so those cells show tonnes (T)",
-  },
-  block_cutted: {
-    title: "BLOCK CUTTED",
-    shortUnit: "slab",
-    longUnit: "slab",
-    note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor (slabs not yet handed to a carver shown under “NOT ASSIGNED TO CARVING”) · windowed by the slab’s cut-done date",
-  },
-  carving_done: {
-    title: "CARVING DONE",
-    shortUnit: "slab",
-    longUnit: "slab",
-    note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor · windowed by when carving finished (released to dispatch) · excludes direct-dispatch slabs that skipped carving",
-  },
-};
+const LIVE: DprSectionKey[] = ["block_added", "block_cutted", "carving_done"];
 
 export default async function DprPage({ searchParams }: { searchParams: Search }) {
   const { profile } = await requireAuth();
   if (!["owner", "developer"].includes(profile.role)) redirect("/");
 
   const sp = await searchParams;
-  const reqSection = typeof sp.section === "string" ? sp.section : "block_added";
-  const section: SectionKey = SECTIONS.find((s) => s.key === reqSection && s.live)
-    ? (reqSection as SectionKey)
-    : "block_added";
+  const req = typeof sp.section === "string" ? sp.section : "block_added";
+  const initialKey: DprSectionKey = (LIVE as string[]).includes(req) ? (req as DprSectionKey) : "block_added";
 
-  const report: DprSection =
-    section === "carving_done" ? await buildCarvingDoneReport()
-      : section === "block_cutted" ? await buildBlockCuttedReport()
+  const initialReport: DprSection =
+    initialKey === "carving_done" ? await buildCarvingDoneReport()
+      : initialKey === "block_cutted" ? await buildBlockCuttedReport()
       : await buildBlockAddedReport();
-  const view = VIEW[section];
 
   return (
     <section style={{ paddingBottom: 24 }}>
@@ -92,28 +60,7 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
         </div>
       </header>
 
-      {/* Section tabs */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-        {SECTIONS.map((s) =>
-          s.live ? (
-            <SectionTab key={s.key} href={`/reports/dpr?section=${s.key}`} active={section === s.key}>
-              {s.label}
-            </SectionTab>
-          ) : (
-            <Chip key={s.key} soon>{s.label}</Chip>
-          ),
-        )}
-      </div>
-
-      {/* Active section */}
-      <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 2px 8px" }}>
-        💡 Click any value cell to flip it to the {view.longUnit} count.
-      </div>
-      <DprGrid report={report} title={view.title} shortUnit={view.shortUnit} longUnit={view.longUnit} />
-      <div style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
-        Generated {new Date(report.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} ·
-        {" "}{view.note} · Daily = today, 7 Days = last 7 days, Month = this calendar month (IST).
-      </div>
+      <DprTabs initialKey={initialKey} initialReport={initialReport} />
     </section>
   );
 }
@@ -140,24 +87,5 @@ function Chip({ active, soon, children }: { active?: boolean; soon?: boolean; ch
     >
       {children}{soon ? " · soon" : ""}
     </span>
-  );
-}
-
-function SectionTab({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
-  // Plain anchor (full reload) — section switch refetches server data.
-  return (
-    <a
-      href={href}
-      style={{
-        padding: "8px 16px", fontSize: 12.5, fontWeight: 800, borderRadius: 8,
-        textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none",
-        background: active ? "var(--gold)" : "var(--bg)",
-        color: active ? "#fff" : "var(--text)",
-        border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </a>
   );
 }
