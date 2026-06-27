@@ -14,6 +14,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { buildBlockAddedReport } from "@/lib/dpr-block-added";
 import { buildBlockCuttedReport } from "@/lib/dpr-block-cutted";
+import { buildCarvingDoneReport } from "@/lib/dpr-carving-done";
 import type { DprSection } from "@/lib/dpr-section";
 import { DprGrid } from "./dpr-grid";
 
@@ -24,6 +25,7 @@ type Search = Promise<Record<string, string | string[] | undefined>>;
 const SECTIONS = [
   { key: "block_added", label: "Block Added", live: true },
   { key: "block_cutted", label: "Block Cutted", live: true },
+  { key: "carving_done", label: "Carving Done", live: true },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
@@ -39,7 +41,13 @@ const VIEW: Record<SectionKey, { title: string; shortUnit: string; longUnit: str
     title: "BLOCK CUTTED",
     shortUnit: "slab",
     longUnit: "slab",
-    note: "CFT = L×W×T ÷ 1728 · temple-wise → each slab listed separately · windowed by the slab’s cut-done date",
+    note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor (slabs not yet handed to a carver shown under “NOT ASSIGNED TO CARVING”) · windowed by the slab’s cut-done date",
+  },
+  carving_done: {
+    title: "CARVING DONE",
+    shortUnit: "slab",
+    longUnit: "slab",
+    note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor · windowed by when carving finished (released to dispatch) · excludes direct-dispatch slabs that skipped carving",
   },
 };
 
@@ -54,7 +62,9 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
     : "block_added";
 
   const report: DprSection =
-    section === "block_cutted" ? await buildBlockCuttedReport() : await buildBlockAddedReport();
+    section === "carving_done" ? await buildCarvingDoneReport()
+      : section === "block_cutted" ? await buildBlockCuttedReport()
+      : await buildBlockAddedReport();
   const view = VIEW[section];
 
   return (

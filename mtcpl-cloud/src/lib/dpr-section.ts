@@ -1,22 +1,25 @@
 /**
  * Shared types + helpers for the DPR section grids (Block Added, Block
- * Cutted, …). Daksh, June 2026.
+ * Cutted, Carving Done, …). Daksh, June 2026.
  *
- * Every section is a GROUP → ITEM table across four time windows:
+ * Each section is an ordered list of LINES — every line is a group (orange),
+ * a subtotal (cyan), or an item (white) — rendered across four time windows:
  *   Daily = today · 7 Days = last 7 incl. today · Month = this calendar
  *   month · All Time = everything (all IST).
  * Each cell carries cft + tonnes + a count. The grid shows CFT (or TONNES
- * for tonnage stock like marble, which has no L×W×H) and flips to the count
- * on click.
+ * for tonnage stock like marble) and flips to the count on click.
  *
  * CFT = L×W×H ÷ 1728 (the *_ft columns hold INCHES — legacy naming).
  */
 
 export type DprWin = { cft: number; tonnes: number; count: number };
 export type DprWindows = { daily: DprWin; week: DprWin; month: DprWin; allTime: DprWin };
-export type DprRow = { label: string; windows: DprWindows };
-export type DprGroup = { label: string; windows: DprWindows; items: DprRow[] };
-export type DprSection = { groups: DprGroup[]; total: DprWindows; generatedAt: string };
+
+/** group = top level (stone / temple, orange) · subtotal = mid (CNC / Outsource
+ *  total, cyan) · item = leaf (vendor, white). */
+export type DprTone = "group" | "subtotal" | "item";
+export type DprLine = { tone: DprTone; label: string; windows: DprWindows };
+export type DprSection = { lines: DprLine[]; total: DprWindows; generatedAt: string };
 
 const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
@@ -71,4 +74,91 @@ export function byVolume(a: DprWindows, b: DprWindows): number {
     b.allTime.tonnes - a.allTime.tonnes ||
     b.allTime.count - a.allTime.count
   );
+}
+
+// ── shared temple → CNC/Outsource → vendor builder ──────────────────────
+// Used by Block Cutted and Carving Done — both group TEMPLE-wise, then split
+// by carving vendor type (CNC vs Outsource), then by vendor. Block Cutted may
+// also carry slabs not yet assigned to any carver → a "NOT ASSIGNED" item.
+
+export type VendorItem = {
+  temple: string | null;
+  cft: number;
+  /** the window date (cut-done date, or carving-done date) */
+  date: string | null;
+  /** "CNC" | "Outsource" | null (not yet assigned to a carver) */
+  vendorType: "CNC" | "Outsource" | null;
+  vendorName: string | null;
+};
+
+type TempleAgg = {
+  windows: DprWindows;
+  cnc: { sum: DprWindows; vendors: Map<string, DprWindows> };
+  out: { sum: DprWindows; vendors: Map<string, DprWindows> };
+  unassigned: DprWindows;
+  hasUnassigned: boolean;
+};
+function newTempleAgg(): TempleAgg {
+  return {
+    windows: emptyWindows(),
+    cnc: { sum: emptyWindows(), vendors: new Map() },
+    out: { sum: emptyWindows(), vendors: new Map() },
+    unassigned: emptyWindows(),
+    hasUnassigned: false,
+  };
+}
+function vendorLines(vendors: Map<string, DprWindows>): DprLine[] {
+  return [...vendors.entries()]
+    .map(([label, windows]) => ({ tone: "item" as const, label, windows }))
+    .sort((a, b) => byVolume(a.windows, b.windows) || a.label.localeCompare(b.label));
+}
+
+export function buildTempleVendorSection(
+  items: VendorItem[],
+  bounds: WinBounds,
+): { lines: DprLine[]; total: DprWindows } {
+  const temples = new Map<string, TempleAgg>();
+  const total = emptyWindows();
+
+  for (const it of items) {
+    const temple = (it.temple ?? "").trim() || "—";
+    const v = { cft: it.cft, tonnes: 0 };
+    const f = windowFlags(it.date, bounds);
+    let t = temples.get(temple);
+    if (!t) { t = newTempleAgg(); temples.set(temple, t); }
+    addWin(t.windows, v, f);
+    addWin(total, v, f);
+
+    if (it.vendorType === "CNC" || it.vendorType === "Outsource") {
+      const side = it.vendorType === "CNC" ? t.cnc : t.out;
+      addWin(side.sum, v, f);
+      const vn = (it.vendorName ?? "").trim() || "—";
+      let vw = side.vendors.get(vn);
+      if (!vw) { vw = emptyWindows(); side.vendors.set(vn, vw); }
+      addWin(vw, v, f);
+    } else {
+      addWin(t.unassigned, v, f);
+      t.hasUnassigned = true;
+    }
+  }
+
+  const lines: DprLine[] = [];
+  const sorted = [...temples.entries()].sort(
+    (a, b) => byVolume(a[1].windows, b[1].windows) || a[0].localeCompare(b[0]),
+  );
+  for (const [temple, t] of sorted) {
+    lines.push({ tone: "group", label: temple, windows: t.windows });
+    if (t.cnc.vendors.size > 0) {
+      lines.push({ tone: "subtotal", label: "CNC VENDOR TOTAL", windows: t.cnc.sum });
+      lines.push(...vendorLines(t.cnc.vendors));
+    }
+    if (t.out.vendors.size > 0) {
+      lines.push({ tone: "subtotal", label: "OUTSOURCE TOTAL", windows: t.out.sum });
+      lines.push(...vendorLines(t.out.vendors));
+    }
+    if (t.hasUnassigned) {
+      lines.push({ tone: "item", label: "NOT ASSIGNED TO CARVING", windows: t.unassigned });
+    }
+  }
+  return { lines, total };
 }

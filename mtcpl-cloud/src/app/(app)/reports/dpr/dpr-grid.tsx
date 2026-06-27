@@ -3,12 +3,12 @@
 /**
  * Generic DPR section rendered as an authentic spreadsheet (Daksh: "exact
  * excel view … even row and column number"). Column letters A–G across the
- * top, row numbers 1.. down the left, gridlines, and coloured rows:
- *   yellow = section header   orange = group   grey = item   bold = TOTAL
+ * top, row numbers 1.. down the left, gridlines, and coloured rows by tone:
+ *   yellow = section header   orange = group (stone/temple)
+ *   cyan = subtotal (CNC / Outsource total)   grey = item (vendor)   bold = TOTAL
  *
- * Drives both "Block Added" (group=stone, item=vendor, unit=block) and
- * "Block Cutted" (group=temple, item=slab, unit=slab) — same component, the
- * data shape (DprSection) is identical.
+ * Drives Block Added (stone→vendor), Block Cutted and Carving Done
+ * (temple→CNC/Outsource→vendor) — the data shape (DprSection lines) is shared.
  *
  * Each value cell shows CFT (or TONNES for tonnage stock like marble) and is
  * clickable — click flips it to the block/slab COUNT; click again for value.
@@ -22,10 +22,11 @@ const WIN_ORDER: WinKey[] = ["daily", "week", "month", "allTime"];
 const WIN_LABELS: Record<WinKey, string> = { daily: "DAILY", week: "7 DAYS", month: "MONTH", allTime: "ALL TIME" };
 const COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G"];
 
-type Row =
+type Tone = "group" | "subtotal" | "item" | "total";
+type Disp =
   | { kind: "blank" }
   | { kind: "header" }
-  | { kind: "data"; id: string; type: "group" | "item" | "total"; label: string; windows: DprWindows };
+  | { kind: "data"; id: string; tone: Tone; label: string; windows: DprWindows };
 
 function fmt(n: number): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -35,7 +36,7 @@ export function DprGrid({
   report, title, shortUnit, longUnit,
 }: {
   report: DprSection;
-  /** Cell A2 text, e.g. "BLOCK ADDED". */
+  /** Cell A2 text, e.g. "BLOCK CUTTED". */
   title: string;
   /** Compact count suffix in a cell, e.g. "blk" / "slab". */
   shortUnit: string;
@@ -47,21 +48,24 @@ export function DprGrid({
   const flip = (key: string) =>
     setAsCount((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  // Build the logical row list (blank spacers reproduce the screenshot).
-  // Data rows get a counter id (collision-proof vs any ':' in a name).
+  // Flatten lines → display rows, inserting blank spacers (before each group,
+  // and between two subgroups). Data rows get a counter id (collision-proof).
   let rid = 0;
-  const rows: Row[] = [{ kind: "blank" }, { kind: "header" }, { kind: "blank" }];
-  for (const g of report.groups) {
-    rows.push({ kind: "data", id: `d${rid++}`, type: "group", label: g.label, windows: g.windows });
-    for (const it of g.items) {
-      rows.push({ kind: "data", id: `d${rid++}`, type: "item", label: it.label, windows: it.windows });
-    }
-    rows.push({ kind: "blank" });
+  const disp: Disp[] = [{ kind: "blank" }, { kind: "header" }, { kind: "blank" }];
+  let prevTone: Tone | null = null;
+  let anyData = false;
+  for (const ln of report.lines) {
+    if (ln.tone === "group") { if (anyData) disp.push({ kind: "blank" }); }
+    else if (ln.tone === "subtotal") { if (prevTone === "item") disp.push({ kind: "blank" }); }
+    disp.push({ kind: "data", id: `d${rid++}`, tone: ln.tone, label: ln.label, windows: ln.windows });
+    prevTone = ln.tone;
+    anyData = true;
   }
-  rows.push({ kind: "data", id: `d${rid++}`, type: "total", label: "TOTAL", windows: report.total });
-  rows.push({ kind: "blank" }, { kind: "blank" });
+  disp.push({ kind: "blank" });
+  disp.push({ kind: "data", id: `d${rid++}`, tone: "total", label: "TOTAL", windows: report.total });
+  disp.push({ kind: "blank" }, { kind: "blank" });
 
-  if (report.groups.length === 0) {
+  if (report.lines.length === 0) {
     return (
       <div style={{ border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", padding: "16px 18px", fontSize: 13, color: "#555" }}>
         Nothing to show yet.
@@ -92,8 +96,8 @@ export function DprGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
-            const isTotal = r.kind === "data" && r.type === "total";
+          {disp.map((r, i) => {
+            const isTotal = r.kind === "data" && r.tone === "total";
             return (
               <tr key={i}>
                 {/* Row number gutter — match the TOTAL row's heavy top rule */}
@@ -109,12 +113,12 @@ export function DprGrid({
                 )}
                 {r.kind === "data" && (
                   <>
-                    <td style={labelCell(r.type)} title={r.label}>{r.label}</td>
-                    <td style={bodyCell(r.type)} />
+                    <td style={labelCell(r.tone)} title={r.label}>{r.label}</td>
+                    <td style={bodyCell(r.tone)} />
                     {WIN_ORDER.map((w) => (
-                      <DataCell key={w} rowId={r.id} type={r.type} win={w} data={r.windows[w]} shortUnit={shortUnit} longUnit={longUnit} asCount={asCount} flip={flip} />
+                      <DataCell key={w} rowId={r.id} tone={r.tone} win={w} data={r.windows[w]} shortUnit={shortUnit} longUnit={longUnit} asCount={asCount} flip={flip} />
                     ))}
-                    <td style={bodyCell(r.type)} />
+                    <td style={bodyCell(r.tone)} />
                   </>
                 )}
               </tr>
@@ -127,9 +131,9 @@ export function DprGrid({
 }
 
 function DataCell({
-  rowId, type, win, data, shortUnit, longUnit, asCount, flip,
+  rowId, tone, win, data, shortUnit, longUnit, asCount, flip,
 }: {
-  rowId: string; type: "group" | "item" | "total"; win: WinKey; data: DprWin;
+  rowId: string; tone: Tone; win: WinKey; data: DprWin;
   shortUnit: string; longUnit: string;
   asCount: Set<string>; flip: (k: string) => void;
 }) {
@@ -151,7 +155,7 @@ function DataCell({
     <td
       onClick={clickable ? () => flip(key) : undefined}
       title={empty ? undefined : `${valTip ? valTip + " · " : ""}${data.count} ${longUnit}${data.count === 1 ? "" : "s"}${clickable ? " (click to flip)" : ""}`}
-      style={{ ...numCell(type), cursor: clickable ? "pointer" : "default" }}
+      style={{ ...numCell(tone), cursor: clickable ? "pointer" : "default" }}
     >
       {empty ? "" : showCount ? (
         <span style={{ color: "#1d4ed8", fontWeight: 800 }}>
@@ -177,29 +181,29 @@ const headerCell: CSSProperties = { border: GRID, background: "#ffe600", height:
 const headerLabelCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", padding: "4px 8px", letterSpacing: "0.02em" };
 const headerColCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", textAlign: "right", padding: "4px 8px" };
 
-function rowBg(type: "group" | "item" | "total"): string {
-  return type === "group" ? "#ed7d31" : type === "item" ? "#d4d4d4" : "#ffffff";
+function rowBg(tone: Tone): string {
+  return tone === "group" ? "#ed7d31" : tone === "subtotal" ? "#4dabf7" : tone === "item" ? "#d4d4d4" : "#ffffff";
 }
-function bodyCell(type: "group" | "item" | "total"): CSSProperties {
-  return { border: GRID, background: rowBg(type), height: 24, ...(type === "total" ? { borderTop: "2px solid #404040" } : {}) };
+function bodyCell(tone: Tone): CSSProperties {
+  return { border: GRID, background: rowBg(tone), height: 24, ...(tone === "total" ? { borderTop: "2px solid #404040" } : {}) };
 }
-function labelCell(type: "group" | "item" | "total"): CSSProperties {
+function labelCell(tone: Tone): CSSProperties {
   return {
-    ...bodyCell(type),
+    ...bodyCell(tone),
     padding: "4px 8px",
-    fontWeight: type === "item" ? 600 : 800,
+    fontWeight: tone === "item" ? 600 : 800,
     color: "#1a1a1a",
     textTransform: "uppercase",
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   };
 }
-function numCell(type: "group" | "item" | "total"): CSSProperties {
+function numCell(tone: Tone): CSSProperties {
   return {
-    ...bodyCell(type),
+    ...bodyCell(tone),
     padding: "4px 8px",
     textAlign: "right",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    fontWeight: type === "total" ? 800 : type === "group" ? 700 : 500,
+    fontWeight: tone === "total" ? 800 : tone === "item" ? 500 : 700,
     color: "#1a1a1a",
   };
 }

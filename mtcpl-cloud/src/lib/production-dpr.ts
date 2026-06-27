@@ -3,9 +3,11 @@
  *
  * For a chosen period (day / week / month / year) returns, per pipeline
  * STAGE, every item that ENTERED that stage in the window — itemised by
- * CODE with quantity and CFT. Powers both the /reports/dpr grid and the
- * /api/reports/dpr.xlsx download (one builder → screen and Excel never
- * diverge, mirroring cutter-cost-report.ts).
+ * CODE with quantity and CFT.
+ *
+ * LEGACY (June 2026): the /reports/dpr screen was redesigned into section
+ * tabs (src/lib/dpr-*.ts) and no longer uses this builder — only the
+ * /api/reports/dpr.xlsx export still calls it, so the two now diverge.
  *
  * Stage → window-key mapping (all verified against schema + migrations):
  *   1 Block added        blocks.created_at                         (block code)

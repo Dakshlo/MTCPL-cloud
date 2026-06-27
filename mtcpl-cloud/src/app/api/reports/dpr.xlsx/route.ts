@@ -2,8 +2,13 @@
  * GET /api/reports/dpr.xlsx?view=daily|weekly|monthly|yearly&date=…
  *
  * Downloadable Production DPR workbook — a Summary tab (stage totals)
- * plus one tab per stage, itemised by code with Qty + CFT. Same data
- * as the /reports/dpr screen (both call buildProductionDpr).
+ * plus one tab per stage, itemised by code with Qty + CFT.
+ *
+ * LEGACY (June 2026): the /reports/dpr SCREEN was redesigned into section
+ * tabs (Block Added / Block Cutted / Carving Done via src/lib/dpr-*.ts) and
+ * no longer links here, so this export uses the old stage-wise model and now
+ * DIVERGES from the screen. Repoint at the section builders before re-adding
+ * a download button.
  *
  * Uses the stock `xlsx` package (Node-only; see serverExternalPackages
  * in next.config.ts). exceljs is deliberately avoided here — it has a
