@@ -1418,7 +1418,9 @@ export async function assignCarvingJobAction(formData: FormData) {
   // Race guard: slab must currently be cut_done
   const { data: slabRow, error: slabErr } = await admin
     .from("slab_requirements")
-    .update({ status: assignedStatus, updated_by: profile.id, updated_at: new Date().toISOString() })
+    // is_parked:false — assigning a slab pulls it OUT of (carving) storage
+    // (Daksh June 2026). No-op for a normal unparked slab.
+    .update({ status: assignedStatus, is_parked: false, updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", slabId)
     .eq("status", "cut_done")
     .select("id");
@@ -1696,7 +1698,8 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
     // Race-guard the slab transition first.
     const { data: slabRow, error: slabErr } = await admin
       .from("slab_requirements")
-      .update({ status: assignedStatusBatch, updated_by: profile.id, updated_at: now })
+      // is_parked:false — assigning pulls the slab out of (carving) storage.
+      .update({ status: assignedStatusBatch, is_parked: false, updated_by: profile.id, updated_at: now })
       .eq("id", slabId)
       .eq("status", "cut_done")
       .select("id");

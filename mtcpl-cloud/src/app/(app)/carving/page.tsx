@@ -181,9 +181,34 @@ export default async function CarvingDashboardPage({
     return out;
   }
 
+  // Parked (carving-storage) cut-done slabs — surfaced on the Unassigned tab
+  // only when the operator enables "Include storage". Assigning one un-parks it.
+  async function fetchStorageSlabs(): Promise<UnassignedRow[]> {
+    const PAGE = 1000;
+    const out: UnassignedRow[] = [];
+    for (let offset = 0; offset < 50000; offset += PAGE) {
+      const { data, error } = await admin
+        .from("slab_requirements")
+        .select(
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description",
+        )
+        .eq("status", "cut_done")
+        .eq("is_parked", true)
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!data || data.length === 0) break;
+      out.push(...(data as UnassignedRow[]));
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+
   // Load everything we need for all tabs in parallel
   const [
     unassignedSlabsAll,
+    storageSlabsAll,
     { data: activeJobs },
     { data: reviewJobs },
     { data: doneJobs },
@@ -193,6 +218,7 @@ export default async function CarvingDashboardPage({
     { data: stoneTypes },
   ] = await Promise.all([
     fetchAllUnassignedSlabs(),
+    fetchStorageSlabs(),
     admin
       .from("carving_items")
       .select(
@@ -1066,6 +1092,7 @@ export default async function CarvingDashboardPage({
           tab={tab}
           mode={mode}
           unassignedSlabs={unassignedSlabsAll ?? []}
+          storageSlabs={(storageSlabsAll ?? []).map((s) => ({ ...s, fromStorage: true }))}
           activeJobs={activeForTab}
           reviewJobs={reviewAccess ? reviewForMode : []}
           doneJobs={doneForMode}

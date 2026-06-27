@@ -85,6 +85,10 @@ type UnassignedSlab = {
   component_section?: string | null;
   component_element?: string | null;
   additional_description?: string | null;
+  /** Daksh June 2026 — true when this is a parked carving-STORAGE slab,
+   *  surfaced on the Unassigned tab only when "Include storage" is on.
+   *  Renders a 📦 STORAGE badge; assigning it un-parks it (actions.ts). */
+  fromStorage?: boolean;
 };
 
 type JobRow = {
@@ -217,6 +221,7 @@ export function CarvingDashboardClient({
   tab,
   mode,
   unassignedSlabs,
+  storageSlabs = [],
   activeJobs,
   reviewJobs,
   doneJobs,
@@ -234,6 +239,9 @@ export function CarvingDashboardClient({
    *  filtering + the Outsource "Receive" affordance. */
   mode: "cnc" | "outsource";
   unassignedSlabs: UnassignedSlab[];
+  /** Daksh June 2026 — parked carving-storage slabs, merged into the
+   *  Unassigned pool only when the operator enables "Include storage". */
+  storageSlabs?: UnassignedSlab[];
   activeJobs: JobRow[];
   reviewJobs: JobRow[];
   doneJobs: JobRow[];
@@ -302,6 +310,9 @@ export function CarvingDashboardClient({
   // stone, vendor name, status. Lower-cased compare.
   const [query, setQuery] = useState("");
   const [priorityOnly, setPriorityOnly] = useState(false);
+  // Daksh June 2026 — fold parked carving-STORAGE slabs into the
+  // Unassigned pool. Off by default; assigning one un-parks it.
+  const [inclStorage, setInclStorage] = useState(false);
   // Unassigned tab can render either temple-grouped (default, good
   // when the carving head is working through one temple at a time)
   // or as a flat searchable grid (better with a query active).
@@ -522,15 +533,36 @@ export function CarvingDashboardClient({
     // sort lexicographically by date prefix.
     return iso.slice(0, 10) >= unassignedFromDate;
   }
+  const unassignedPool = useMemo(
+    () => (inclStorage ? [...unassignedSlabs, ...storageSlabs] : unassignedSlabs),
+    [unassignedSlabs, storageSlabs, inclStorage],
+  );
   const filteredUnassigned = useMemo(
     () =>
-      unassignedSlabs.filter(
+      unassignedPool.filter(
         (s) =>
           matches(s) && passesDate(s.updated_at) && passesUnassignedFrom(s.updated_at),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [unassignedSlabs, priorityOnly, queryNorm, dateFilter, unassignedFromDate],
+    [unassignedPool, priorityOnly, queryNorm, dateFilter, unassignedFromDate],
   );
+  // Keep bulk selection ⊆ the visible pool. If "Include storage" is turned
+  // off after a storage slab was ticked, drop it — otherwise the count + the
+  // park action would carry a slab the operator can no longer see (the same
+  // ghost-selection bug the dispatch picker had).
+  useEffect(() => {
+    setBulkSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(unassignedPool.map((s) => s.id));
+      const next = new Set<string>();
+      let changed = false;
+      for (const id of prev) {
+        if (ids.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [unassignedPool]);
   const filteredActive = useMemo(
     () => activeJobs.filter((j) => matches(j) && passesDate(j.assigned_at)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -689,6 +721,29 @@ export function CarvingDashboardClient({
         >
           ⚡ Priority
         </button>
+
+        {/* Daksh June 2026 — fold parked carving-STORAGE slabs into the
+            Unassigned list (badged 📦 STORAGE). Assigning one un-parks it. */}
+        {tab === "unassigned" && storageSlabs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setInclStorage((v) => !v)}
+            title="Include slabs parked in carving storage"
+            style={{
+              padding: "7px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              border: `1.5px solid ${inclStorage ? "var(--gold-dark)" : "var(--border)"}`,
+              background: inclStorage ? "rgba(180,140,40,0.10)" : "var(--surface)",
+              color: inclStorage ? "var(--gold-dark)" : "var(--muted)",
+              borderRadius: 6,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            📦 Storage · {storageSlabs.length}
+          </button>
+        )}
 
         {/* Mig 126 — blink keyframes for the pre-cut dot on unassigned
             cards (defined once here, used by every card). */}
@@ -948,7 +1003,7 @@ export function CarvingDashboardClient({
         // which only makes sense for identical slabs). Different-dim
         // cards go dim + cursor:not-allowed in the renderCard.
         const anchorId = bulkSelected.size > 0 ? [...bulkSelected][0] : null;
-        const anchor = anchorId ? unassignedSlabs.find((s) => s.id === anchorId) ?? null : null;
+        const anchor = anchorId ? unassignedPool.find((s) => s.id === anchorId) ?? null : null;
         return (
           <UnassignedByTemple
             slabs={filteredUnassigned}
@@ -969,7 +1024,7 @@ export function CarvingDashboardClient({
                 if (next.size >= BULK_MAX) return prev;
                 // Enforce same-dim constraint when there's an anchor.
                 if (anchor) {
-                  const cand = unassignedSlabs.find((s) => s.id === slabId);
+                  const cand = unassignedPool.find((s) => s.id === slabId);
                   if (
                     cand &&
                     (Number(cand.length_ft) !== Number(anchor.length_ft) ||
@@ -1118,7 +1173,7 @@ export function CarvingDashboardClient({
       {/* Bulk-assign modal — fired by the sticky bottom bar. */}
       {bulkOpen && bulkSelected.size > 0 && (
         <BulkAssignModal
-          slabs={unassignedSlabs
+          slabs={unassignedPool
             .filter((s) => bulkSelected.has(s.id))
             .map((s) => ({
               id: s.id,
@@ -1513,6 +1568,26 @@ function UnassignedByTemple({
           title="Where the cutter team dropped this slab"
         >
           📍 {s.stock_location}
+        </div>
+      )}
+      {/* Daksh June 2026 — parked carving-storage slab. Assigning it
+          pulls it out of storage (un-parks). */}
+      {s.fromStorage && (
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: "var(--gold-dark)",
+            background: "rgba(180,140,40,0.12)",
+            border: "1px solid rgba(180,140,40,0.35)",
+            padding: "3px 7px",
+            borderRadius: 5,
+            alignSelf: "flex-start",
+            letterSpacing: 0.3,
+          }}
+          title="Parked in carving storage — assigning will pull it out"
+        >
+          📦 STORAGE
         </div>
       )}
       {/* Ready-since pill — tells the carving head how long this
