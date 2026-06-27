@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useDeferredValue } from "react";
 import Link from "next/link";
 import { slabSearchMatch } from "@/lib/slab-search";
 
@@ -140,7 +140,12 @@ export function ReadySlabsClient({
   const [statusFilter, setStatusFilter] = useState<string>(
     mode === "for-carving" ? "cut_done" : "all",
   );
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  // Daksh June 2026 — this list can be thousands of rows. useDeferredValue
+  // keeps typing instant: the input (searchInput) updates immediately while
+  // the heavy filter + render uses the deferred `search` at lower priority,
+  // so keystrokes never block. Every memo below reads `search` unchanged.
+  const search = useDeferredValue(searchInput);
   // Default to NO date filter — page lands showing every cut slab so
   // the cutting team can scroll back as far as they need. The quick
   // preset buttons (Today / Yesterday / Last 3 / 7 / 30 / 90) and the
@@ -257,6 +262,11 @@ export function ReadySlabsClient({
 
   const totalCft = filtered.reduce((sum, s) => sum + calcCft(s.length_ft, s.width_ft, s.thickness_ft), 0);
 
+  // Cap rendered rows so a multi-thousand match set doesn't build a giant
+  // DOM (the count + CFT above stay over ALL matches; Export gives them all).
+  const RENDER_CAP = 500;
+  const visibleRows = filtered.slice(0, RENDER_CAP);
+
   function toggleSort(col: SortCol) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortBy(col); setSortDir("desc"); }
@@ -272,7 +282,7 @@ export function ReadySlabsClient({
     setTempleFilter("all");
     setQualityFilter("all");
     setStatusFilter("all");
-    setSearch("");
+    setSearchInput("");
     setDateFrom("");
     setDateTo("");
   }
@@ -432,8 +442,8 @@ export function ReadySlabsClient({
           <label className="stack" style={{ flex: "1 1 160px" }}>
             <span>Search</span>
             <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
               placeholder="Code, label, temple, stone, block, or size (e.g. 53x29x14)…"
             />
           </label>
@@ -557,6 +567,11 @@ export function ReadySlabsClient({
         <p className="muted" style={{ fontSize: 13 }}>
           Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {slabs.length} ready sizes ·{" "}
           Total <strong style={{ color: "var(--text)" }}>{totalCft.toFixed(2)} CFT</strong>
+          {filtered.length > RENDER_CAP && (
+            <span style={{ color: "var(--gold-dark)" }}>
+              {" "}· showing first {RENDER_CAP} — refine the search or Export to see all
+            </span>
+          )}
         </p>
         <button className="primary-button" type="button" onClick={handleExport} disabled={exporting} style={{ gap: 6 }}>
           {exporting ? "Exporting…" : "⬇ Export to Excel"}
@@ -620,7 +635,7 @@ export function ReadySlabsClient({
                 </td>
               </tr>
             ) : (
-              filtered.map((s, i) => {
+              visibleRows.map((s, i) => {
                 const cft = calcCft(s.length_ft, s.width_ft, s.thickness_ft);
                 return (
                   <tr
