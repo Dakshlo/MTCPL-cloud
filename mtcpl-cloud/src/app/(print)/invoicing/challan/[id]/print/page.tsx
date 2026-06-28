@@ -45,7 +45,7 @@ function Party({ label, p, fallback }: { label: string; p: PartyShape | null; fa
   return (
     <div className="party">
       <div className="party-k">{label}</div>
-      <div className="party-name">{dash(p.name)}</div>
+      {p.name && <div className="party-name">{p.name}</div>}
       {p.address && <div className="party-line">{p.address}</div>}
       {loc && <div className="party-line">{loc}</div>}
       {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)} · PAN: {dash(p.pan)}</div>}
@@ -192,16 +192,15 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               <th>Code(s)</th>
               <th>Label</th>
               <th>Description</th>
-              <th>Additional</th>
-              <th>Cat 2</th>
-              <th>Cat 1</th>
+              <th>Category 2</th>
+              <th>Category 1</th>
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
               <th className="r">Qty</th>
-              <th className="r">{unit.toUpperCase()}</th>
-              <th className="r">Rate</th>
-              <th className="r">Amount</th>
+              <th className="r hl">{unit.toUpperCase()}</th>
+              <th className="r hl">Rate</th>
+              <th className="r hl">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -211,26 +210,25 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                 <td className="mono"><CodeCell codes={it.codes} /></td>
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
-                <td>{dash(it.additional_description)}</td>
                 <td>{dash(it.component_element)}</td>
                 <td>{dash(it.component_section)}</td>
                 <td className="r mono">{it.length_ft ?? "-"}</td>
                 <td className="r mono">{it.width_ft ?? "-"}</td>
                 <td className="r mono">{it.thickness_ft ?? "-"}</td>
                 <td className="r mono b">{Number(it.quantity) || 0}</td>
-                <td className="r mono">{fmt(measureOf(it))}</td>
-                <td className="r mono">{fmt(Number(it.rate) || 0)}</td>
-                <td className="r mono b">{rupee(amountOf(it))}</td>
+                <td className="r mono b hl">{fmt(measureOf(it))}</td>
+                <td className="r mono hl">{fmt(Number(it.rate) || 0)}</td>
+                <td className="r mono b hl">{rupee(amountOf(it))}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={10} className="r">Total {unit.toUpperCase()}</td>
+              <td colSpan={9} className="r">Total {unit.toUpperCase()}</td>
               <td className="r mono b">{qtyTotal}</td>
-              <td className="r mono b">{fmt(measTotal)}</td>
-              <td></td>
-              <td className="r mono b">{rupee(sub)}</td>
+              <td className="r mono b hl">{fmt(measTotal)}</td>
+              <td className="hl"></td>
+              <td className="r mono b hl">{rupee(sub)}</td>
             </tr>
           </tfoot>
         </table>
@@ -258,7 +256,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
         .info .v.big { font-size: 13px; font-weight: 800; }
         .info .mono { font-family: ui-monospace, monospace; }
-        .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 4px; }
+        .cust { font-size: 15px; font-weight: 800; color: #0f2540; margin: 8px 0 5px; }
+        .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 4px; }
         .party { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; background: #f7fafc; }
         .party-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
         .party-name { font-size: 13px; font-weight: 800; color: #1a1a1a; }
@@ -275,6 +274,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         table.t td { padding: 2px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
+        /* Highlighted money columns (CFT/SFT · Rate · Amount) — never wrap. */
+        .t .hl { white-space: nowrap; }
+        .t td.hl { background: #fff7e0; }
+        .t th.hl { background: #ffe6a8; }
+        .t tfoot td.hl { background: #ffeec2; }
         .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
         .totals { min-width: 280px; border: 1px solid #d3dae3; border-radius: 8px; overflow: hidden; }
         .totals .row { display: flex; justify-content: space-between; gap: 24px; padding: 5px 14px; font-size: 11.5px; }
@@ -323,8 +327,9 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
         </div>
 
+        <div className="cust">🛕 {dash(billParty?.name ?? c.temple)}</div>
         <div className="parties">
-          <Party label="Bill To" p={billParty} />
+          <Party label="Bill To" p={billParty ? { ...billParty, name: null } : null} />
           <Party label="Ship To" p={shipParty} fallback="Same as billing address" />
         </div>
         {(billing?.vendor_code || billing?.work_order_no) && (

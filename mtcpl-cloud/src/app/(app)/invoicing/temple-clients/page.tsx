@@ -12,7 +12,8 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { allowedDepartmentsForRole } from "@/lib/departments";
 import { AccountsHero, BUTTON_STYLES } from "../../accounts/_ui/components";
-import { TempleClientsClient, ALL_FIELDS, type Field, type TempleRow } from "./temple-clients-client";
+import { TempleClientsClient } from "./temple-clients-client";
+import { ALL_FIELDS, type Field, type TempleRow } from "./fields";
 
 export const dynamic = "force-dynamic";
 

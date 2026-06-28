@@ -12,49 +12,12 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setTempleBillingAction, renameTempleClientAction } from "../actions";
+import {
+  BILLING_FIELDS, SHIPPING_FIELDS, SHARED_FIELDS, ALL_FIELDS,
+  type Field, type FieldMeta, type TempleRow,
+} from "./fields";
 
-const BILLING_FIELDS = [
-  { key: "bill_name", label: "Name" },
-  { key: "bill_address", label: "Address", wide: true },
-  { key: "bill_city", label: "City" },
-  { key: "bill_state", label: "State" },
-  { key: "bill_state_code", label: "State code" },
-  { key: "bill_gstin", label: "GSTIN" },
-  { key: "bill_pan", label: "PAN" },
-  { key: "bill_phone", label: "Phone" },
-  { key: "bill_email", label: "Email" },
-] as const;
-const SHIPPING_FIELDS = [
-  { key: "ship_name", label: "Name" },
-  { key: "ship_address", label: "Address", wide: true },
-  { key: "ship_city", label: "City" },
-  { key: "ship_state", label: "State" },
-  { key: "ship_state_code", label: "State code" },
-  { key: "ship_gstin", label: "GSTIN" },
-  { key: "ship_pan", label: "PAN" },
-  { key: "ship_phone", label: "Phone" },
-  { key: "ship_email", label: "Email" },
-] as const;
-const SHARED_FIELDS = [
-  { key: "vendor_code", label: "Vendor code" },
-  { key: "work_order_no", label: "Work order no" },
-] as const;
-
-type FieldMeta = { key: string; label: string; wide?: boolean };
-export type Field =
-  | (typeof BILLING_FIELDS)[number]["key"]
-  | (typeof SHIPPING_FIELDS)[number]["key"]
-  | (typeof SHARED_FIELDS)[number]["key"];
-
-export const ALL_FIELDS: Field[] = [...BILLING_FIELDS, ...SHIPPING_FIELDS, ...SHARED_FIELDS].map((f) => f.key);
-
-export type TempleRow = {
-  id: string;
-  name: string;
-  code_prefix: string;
-  is_active: boolean;
-  site_location: string;
-} & Record<Field, string>;
+export type { TempleRow } from "./fields";
 
 type Status = { state: "idle" | "saving" | "saved" | "error"; msg?: string };
 
