@@ -25,6 +25,7 @@ async function pageAll<T>(
 
 type PricedChallan = {
   id: string; challan_number: string; challan_date: string; temple: string | null; priced_at: string;
+  invoice_no_override: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
 type LegacyInvoice = { id: string; invoice_number: string; invoice_date: string; customer_name: string; total: number };
@@ -50,7 +51,7 @@ export default async function InvoicingListPage() {
     pageAll<PricedChallan>((from, to) =>
       supabase
         .from("challans")
-        .select("id, challan_number, challan_date, temple, priced_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
+        .select("id, challan_number, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
         .not("priced_at", "is", null)
         .is("cancelled_at", null)
         .is("converted_invoice_id", null)
@@ -92,7 +93,7 @@ export default async function InvoicingListPage() {
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
     })),
     ...priced.map((c) => ({
-      key: `ch:${c.id}`, code: invoiceCode(c.challan_number, c.challan_date), date: c.challan_date,
+      key: `ch:${c.id}`, code: (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date), date: c.challan_date,
       customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
     })),

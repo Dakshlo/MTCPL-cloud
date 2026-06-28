@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
+import { invoiceCode } from "@/lib/invoice-code";
 import { ReviewForm, type PriceItem } from "./review-form";
 
 type Params = Promise<{ id: string }>;
@@ -31,7 +32,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -59,6 +60,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     sgst_percent: number | null;
     priced_at: string | null;
     temple: string | null;
+    invoice_no_override: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
@@ -73,6 +75,21 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     : party
     ? { name: party.name, gstin: party.gstin, pan: null, address: party.address, email: null, phone: party.phone }
     : null;
+
+  // Stone per item — derived from its slab codes (challan_items has no stone),
+  // so the review page can group by stone like the invoice.
+  const codeStone = new Map<string, string>();
+  const allCodes = [...new Set(((items ?? []) as Array<{ codes: string | null }>).flatMap((it) => (it.codes ?? "").split(",").map((s) => s.trim()).filter(Boolean)))];
+  for (let i = 0; i < allCodes.length; i += 300) {
+    const chunk = allCodes.slice(i, i + 300);
+    if (chunk.length === 0) break;
+    const { data: sr } = await admin.from("slab_requirements").select("id, stone").in("id", chunk);
+    for (const s of (sr ?? []) as Array<{ id: string; stone: string | null }>) codeStone.set(s.id, (s.stone ?? "").trim());
+  }
+  const stoneOf = (codes: string | null) => {
+    const f = (codes ?? "").split(",").map((s) => s.trim()).filter(Boolean)[0];
+    return (f && codeStone.get(f)) || "—";
+  };
 
   const priceItems: PriceItem[] = ((items ?? []) as Array<Record<string, unknown>>).map((it) => {
     const measureQty =
@@ -95,6 +112,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
       unit: ((it.measure_unit as string | null) || (it.unit as string | null) || "cft") as "cft" | "sft",
       measureQty,
       rate: it.rate != null ? Number(it.rate) : 0,
+      stone: stoneOf((it.codes as string | null) ?? null),
     };
   });
 
@@ -112,9 +130,9 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
           ← Challan {c.challan_number}
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
-          <h1 style={{ margin: 0, fontSize: 22 }}>🧾 Review &amp; price</h1>
+          <h1 style={{ margin: 0, fontSize: 22 }}>Review &amp; price</h1>
           <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#0f172a", fontSize: 15 }}>{c.challan_number}</span>
-          <span style={{ fontSize: 14, color: "var(--muted)" }}>· 🛕 {billing?.name ?? c.temple ?? "—"} · {c.challan_date}</span>
+          <span style={{ fontSize: 14, color: "var(--muted)" }}>· {billing?.name ?? c.temple ?? "—"} · {c.challan_date}</span>
           {c.priced_at && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.1)", borderRadius: 999, padding: "2px 10px" }}>PRICED</span>}
         </div>
         {billing && (billing.gstin || billing.pan || billing.address || billing.phone) && (
@@ -133,7 +151,13 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
         </div>
       )}
 
-      <ReviewForm challanId={id} items={priceItems} initGst={initGst} />
+      <ReviewForm
+        challanId={id}
+        items={priceItems}
+        initGst={initGst}
+        initInvoiceNo={c.invoice_no_override ?? ""}
+        autoCode={invoiceCode(c.challan_number, c.challan_date)}
+      />
     </div>
   );
 }

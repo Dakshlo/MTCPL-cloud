@@ -225,7 +225,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={10} className="r">Total {unit.toUpperCase()}</td>
+              <td colSpan={10} className="r">Total</td>
               <td className="r mono b">{rows.reduce((a, g) => a + g.qty, 0)}</td>
               <td className="r mono">{wt > 0 ? Math.round(wt * 1000).toLocaleString("en-IN") : "-"}</td>
               <td className="r mono b">{fmt(total)}</td>
@@ -241,6 +241,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #f0f0f0; }
+        /* Print the on-screen colours exactly (no "Background graphics" toggle). */
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .print-wrap { max-width: 1180px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
@@ -269,7 +271,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
         table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         table.slab-table tfoot td { font-weight: 800; background: #faf7f0; border: 1px solid #d8d2c4; }
-        .slab-table .r { text-align: right; }
+        .slab-table .r { text-align: right; white-space: nowrap; }
         .slab-table .mono { font-family: ui-monospace, monospace; }
         .slab-table .b { font-weight: 800; }
         .slab-table .muted { color: #999; }

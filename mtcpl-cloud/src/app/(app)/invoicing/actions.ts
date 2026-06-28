@@ -99,6 +99,7 @@ export async function saveChallanPricingAction(formData: FormData) {
       sgst_percent: gstMode === "cgst_sgst" ? sgst : null,
       priced_at: new Date().toISOString(),
       priced_by: profile.id,
+      invoice_no_override: txt(formData, "invoice_no_override") || null,
     })
     .eq("id", challanId);
 

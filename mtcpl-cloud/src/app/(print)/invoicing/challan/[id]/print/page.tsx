@@ -26,6 +26,12 @@ function CodeCell({ codes }: { codes: string | null }) {
   return <>{lines.map((ln, i) => (<span key={i}>{ln}{i < lines.length - 1 ? <br /> : null}</span>))}</>;
 }
 
+// Combined Category cell — Category 2 — Category 1 in one column to save width.
+function catText(el: string | null, section: string | null): string {
+  const parts = [el, section].map((v) => (v ?? "").trim()).filter(Boolean);
+  return parts.length ? parts.join(" — ") : "-";
+}
+
 type PartyShape = {
   name: string | null; address: string | null; city: string | null; state: string | null;
   state_code: string | null; gstin: string | null; pan: string | null; phone: string | null; email: string | null;
@@ -90,7 +96,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -114,6 +120,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     cgst_percent: number | null;
     sgst_percent: number | null;
     priced_at: string | null;
+    invoice_no_override: string | null;
     temple: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
@@ -144,7 +151,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const amountOf = (it: Item) => (it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * measureOf(it));
   // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
   // it as INV-YYYY-N instead of the internal challan CH-YYYY-N code.
-  const invCode = invoiceCode(c.challan_number, c.challan_date);
+  const invCode = (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date);
 
   // Stone per item — derived from its slab codes (challan_items has no stone
   // column). One lookup for all codes; a group is single-stone so its first
@@ -192,8 +199,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               <th>Code(s)</th>
               <th>Label</th>
               <th>Description</th>
-              <th>Category 2</th>
-              <th>Category 1</th>
+              <th>Category</th>
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
@@ -210,8 +216,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                 <td className="mono"><CodeCell codes={it.codes} /></td>
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
-                <td>{dash(it.component_element)}</td>
-                <td>{dash(it.component_section)}</td>
+                <td>{catText(it.component_element, it.component_section)}</td>
                 <td className="r mono">{it.length_ft ?? "-"}</td>
                 <td className="r mono">{it.width_ft ?? "-"}</td>
                 <td className="r mono">{it.thickness_ft ?? "-"}</td>
@@ -224,7 +229,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={9} className="r">Total {unit.toUpperCase()}</td>
+              <td colSpan={8} className="r">Total</td>
               <td className="r mono b">{qtyTotal}</td>
               <td className="r mono b hl">{fmt(measTotal)}</td>
               <td className="hl"></td>
@@ -241,6 +246,9 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #f0f0f0; }
+        /* Print the on-screen colours (highlights, stone bars, totals) exactly,
+           without needing the browser's "Background graphics" toggle. */
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
@@ -273,7 +281,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         table.t th { background: #eef2f7; padding: 2px 4px; text-align: left; font-size: 7px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.02em; border: 1px solid #d3dae3; }
         table.t td { padding: 2px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
-        .t .r { text-align: right; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
+        .t .r { text-align: right; white-space: nowrap; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
         /* Highlighted money columns (CFT/SFT · Rate · Amount) — never wrap. */
         .t .hl { white-space: nowrap; }
         .t td.hl { background: #fff7e0; }
@@ -327,7 +335,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
         </div>
 
-        <div className="cust">🛕 {dash(billParty?.name ?? c.temple)}</div>
+        <div className="cust">{dash(billParty?.name ?? c.temple)}</div>
         <div className="parties">
           <Party label="Bill To" p={billParty ? { ...billParty, name: null } : null} />
           <Party label="Ship To" p={shipParty} fallback="Same as billing address" />
@@ -346,7 +354,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <>
             {stoneGroups.map(([stone, rows]) => (
               <div key={stone} className="stone-block">
-                <div className="stone-title">🪨 {stone}</div>
+                <div className="stone-title">{stone}</div>
                 <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
                 <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
               </div>

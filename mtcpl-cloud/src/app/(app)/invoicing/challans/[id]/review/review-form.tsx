@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * Invoicing review grid (Mig 157). Every slab attribute is locked; the team
- * fills a Rate per row and picks GST (none / IGST / CGST+SGST, manual %). Live
- * totals; Save (optionally → print landscape tax invoice). Blanks show "-".
+ * Invoicing review grid (Mig 157). Rows are locked; the team prices each
+ * STONE+UNIT table ONCE (one Rate ₹/cft|sft per table, applied to its whole
+ * measure) — not per row (Daksh). GST (none / IGST / CGST+SGST). Optionally
+ * override the invoice number during the migration off the old series. Live
+ * totals; Save (optionally → print landscape tax invoice).
  */
 
 import { useMemo, useState } from "react";
@@ -27,6 +29,7 @@ export type PriceItem = {
   unit: "cft" | "sft";
   measureQty: number;
   rate: number;
+  stone: string;
 };
 
 function fmt(n: number, dp = 2): string {
@@ -37,22 +40,45 @@ export function ReviewForm({
   challanId,
   items,
   initGst,
+  initInvoiceNo,
+  autoCode,
 }: {
   challanId: string;
   items: PriceItem[];
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
+  initInvoiceNo: string;
+  autoCode: string;
 }) {
+  // One rate per stone+unit group (key = `${stone}|${unit}`).
+  const groups = useMemo(() => {
+    const m = new Map<string, { key: string; stone: string; unit: "cft" | "sft"; items: PriceItem[] }>();
+    for (const it of items) {
+      const key = `${it.stone}|${it.unit}`;
+      let g = m.get(key);
+      if (!g) { g = { key, stone: it.stone, unit: it.unit, items: [] }; m.set(key, g); }
+      g.items.push(it);
+    }
+    return [...m.values()].sort(
+      (a, b) => a.stone.localeCompare(b.stone) || (a.unit === b.unit ? 0 : a.unit === "cft" ? -1 : 1),
+    );
+  }, [items]);
+
   const [rates, setRates] = useState<Record<string, string>>(() => {
     const m: Record<string, string> = {};
-    for (const it of items) m[it.id] = it.rate ? String(it.rate) : "";
+    for (const g of groups) {
+      const r = g.items.find((it) => it.rate > 0)?.rate ?? 0; // pre-fill from existing per-item rate
+      m[g.key] = r ? String(r) : "";
+    }
     return m;
   });
+  const [invoiceNo, setInvoiceNo] = useState(initInvoiceNo);
   const [mode, setMode] = useState<GstMode>(initGst.mode);
   const [igst, setIgst] = useState(String(initGst.igst));
   const [cgst, setCgst] = useState(String(initGst.cgst));
   const [sgst, setSgst] = useState(String(initGst.sgst));
 
-  const amountOf = (it: PriceItem) => (Number(rates[it.id]) || 0) * it.measureQty;
+  const rateOf = (it: PriceItem) => Number(rates[`${it.stone}|${it.unit}`]) || 0;
+  const amountOf = (it: PriceItem) => rateOf(it) * it.measureQty;
   const totals = useMemo(
     () =>
       computeInvoiceTotals(
@@ -62,75 +88,71 @@ export function ReviewForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rates, mode, igst, cgst, sgst, items],
   );
+  // Expand the per-group rate to a per-item rate for the existing action.
   const ratesJson = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const it of items) m[it.id] = Number(rates[it.id]) || 0;
+    for (const it of items) m[it.id] = rateOf(it);
     return JSON.stringify(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rates, items]);
 
-  // Full cell borders → Excel-style grid (column lines + row lines).
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
   const numCell: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
 
-  const cftItems = items.filter((it) => it.unit !== "sft");
-  const sftItems = items.filter((it) => it.unit === "sft");
-
   const ItemRow = (it: PriceItem) => (
     <tr key={it.id}>
-      <td style={{ ...cell, fontFamily: "ui-monospace, monospace", fontWeight: 700, maxWidth: 170 }}>{dash(it.codes)}</td>
+      <td style={{ ...cell, fontFamily: "ui-monospace, monospace", fontWeight: 700, maxWidth: 190 }}>{dash(it.codes)}</td>
       <td style={cell}>{dash(it.label)}</td>
-      <td style={{ ...cell, maxWidth: 210 }}>{dash(it.description)}</td>
-      <td style={{ ...cell, maxWidth: 190 }}>{dash(it.additional_description)}</td>
-      {/* Cat 2 before Cat 1 (Daksh) */}
+      <td style={{ ...cell, maxWidth: 230 }}>{dash(it.description)}</td>
+      {/* Category 2 before Category 1 (Daksh) */}
       <td style={cell}>{dash(it.component_element)}</td>
       <td style={cell}>{dash(it.component_section)}</td>
       <td style={numCell}>{it.length_ft ?? "-"}</td>
       <td style={numCell}>{it.width_ft ?? "-"}</td>
       <td style={numCell}>{it.thickness_ft ?? "-"}</td>
       <td style={{ ...numCell, fontWeight: 800 }}>{it.qty}</td>
-      <td style={numCell}>{fmt(it.measureQty)}</td>
-      <td style={{ ...cell, textAlign: "right" }}>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          inputMode="decimal"
-          value={rates[it.id] ?? ""}
-          onChange={(e) => setRates((p) => ({ ...p, [it.id]: e.target.value }))}
-          placeholder="0"
-          style={{ width: 90, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
-        />
-      </td>
-      <td style={{ ...numCell, fontWeight: 800 }}>{rupee(amountOf(it))}</td>
+      <td style={{ ...numCell, fontWeight: 800 }}>{fmt(it.measureQty)}</td>
     </tr>
   );
 
-  function Section({ rows, unit }: { rows: PriceItem[]; unit: "cft" | "sft" }) {
-    if (rows.length === 0) return null;
-    const sub = rows.reduce((a, it) => a + amountOf(it), 0);
-    const meas = rows.reduce((a, it) => a + it.measureQty, 0);
+  function GroupSection(g: { key: string; stone: string; unit: "cft" | "sft"; items: PriceItem[] }) {
+    const meas = g.items.reduce((a, it) => a + it.measureQty, 0);
+    const sub = (Number(rates[g.key]) || 0) * meas;
     return (
-      <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ padding: "9px 14px", background: unit === "cft" ? "rgba(37,99,235,0.08)" : "rgba(217,119,6,0.1)", borderBottom: "1px solid var(--border)", fontWeight: 800, fontSize: 13, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <span>{unit === "cft" ? "📦 CFT (volume)" : "🟧 SFT (area)"} · {rows.length} row{rows.length !== 1 ? "s" : ""} · {fmt(meas)} {unit}</span>
-          <span style={{ fontFamily: "ui-monospace, monospace" }}>Subtotal {rupee(sub)}</span>
+      <div key={g.key} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ padding: "10px 14px", background: g.unit === "cft" ? "rgba(37,99,235,0.07)" : "rgba(217,119,6,0.09)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontWeight: 800, fontSize: 13 }}>
+            {g.stone} · {g.unit.toUpperCase()} <span style={{ fontWeight: 600, color: "var(--muted)" }}>· {g.items.length} row{g.items.length !== 1 ? "s" : ""} · {fmt(meas)} {g.unit}</span>
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
+              Rate ₹/{g.unit}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={rates[g.key] ?? ""}
+                onChange={(e) => setRates((p) => ({ ...p, [g.key]: e.target.value.replace(/[^0-9.]/g, "") }))}
+                placeholder="0"
+                style={{ width: 110, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "6px 9px", borderRadius: 8, border: "1.5px solid var(--gold-dark)", background: "var(--bg)", color: "var(--text)" }}
+              />
+            </label>
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5, minWidth: 110, textAlign: "right" }}>{rupee(sub)}</span>
+          </span>
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
             <thead>
               <tr>
-                {["Code(s)", "Label", "Description", "Additional", "Cat 2", "Cat 1"].map((c) => (
+                {["Code(s)", "Label", "Description", "Category 2", "Category 1"].map((c) => (
                   <th key={c} style={head}>{c}</th>
                 ))}
-                {["L", "W", "H", "Qty", unit.toUpperCase()].map((c) => (
+                {["L", "W", "H", "Qty", g.unit.toUpperCase()].map((c) => (
                   <th key={c} style={{ ...head, textAlign: "right" }}>{c}</th>
                 ))}
-                <th style={{ ...head, textAlign: "right" }}>Rate ₹/{unit}</th>
-                <th style={{ ...head, textAlign: "right" }}>Amount</th>
               </tr>
             </thead>
-            <tbody>{rows.map(ItemRow)}</tbody>
+            <tbody>{g.items.map(ItemRow)}</tbody>
           </table>
         </div>
       </div>
@@ -145,11 +167,10 @@ export function ReviewForm({
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
+      <input type="hidden" name="invoice_no_override" value={invoiceNo} />
 
-      {/* Called inline (not <Section/>) so editing a Rate input doesn't remount
-          the table and drop focus after one keystroke. */}
-      {Section({ rows: cftItems, unit: "cft" })}
-      {Section({ rows: sftItems, unit: "sft" })}
+      {/* Called inline (not <GroupSection/>) so editing a Rate doesn't remount. */}
+      {groups.map((g) => GroupSection(g))}
       {items.length === 0 && (
         <div className="muted" style={{ textAlign: "center", padding: "24px 10px", fontSize: 13, border: "1px dashed var(--border)", borderRadius: 12, marginBottom: 16 }}>No items on this challan.</div>
       )}
@@ -176,21 +197,35 @@ export function ReviewForm({
           {mode === "igst" && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
               IGST %
-              <input type="number" min={0} step="0.01" value={igst} onChange={(e) => setIgst(e.target.value)} style={pctInput} />
+              <input type="text" inputMode="decimal" value={igst} onChange={(e) => setIgst(e.target.value.replace(/[^0-9.]/g, ""))} style={pctInput} />
             </label>
           )}
           {mode === "cgst_sgst" && (
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                 CGST %
-                <input type="number" min={0} step="0.01" value={cgst} onChange={(e) => setCgst(e.target.value)} style={pctInput} />
+                <input type="text" inputMode="decimal" value={cgst} onChange={(e) => setCgst(e.target.value.replace(/[^0-9.]/g, ""))} style={pctInput} />
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                 SGST %
-                <input type="number" min={0} step="0.01" value={sgst} onChange={(e) => setSgst(e.target.value)} style={pctInput} />
+                <input type="text" inputMode="decimal" value={sgst} onChange={(e) => setSgst(e.target.value.replace(/[^0-9.]/g, ""))} style={pctInput} />
               </label>
             </div>
           )}
+          {/* Manual invoice number override (transition off the old series). */}
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-light)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
+              <span style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>Invoice no. (optional)</span>
+              <input
+                type="text"
+                value={invoiceNo}
+                onChange={(e) => setInvoiceNo(e.target.value)}
+                placeholder={autoCode}
+                style={{ ...pctInput, width: "100%", textAlign: "left" }}
+              />
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{autoCode}</strong>.</span>
+            </label>
+          </div>
         </div>
 
         <div style={{ flex: "1 1 280px", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface)" }}>
@@ -220,7 +255,7 @@ export function ReviewForm({
 }
 
 const pctInput: React.CSSProperties = {
-  width: 80,
+  width: 90,
   textAlign: "right",
   fontFamily: "ui-monospace, monospace",
   fontSize: 13,
