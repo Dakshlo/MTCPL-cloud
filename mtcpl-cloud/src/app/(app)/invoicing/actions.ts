@@ -131,7 +131,7 @@ export async function saveChallanPricingAction(formData: FormData) {
 /** OWNER approves a priced challan → it becomes a final tax invoice and the
  *  linked dispatch's truck is released to the road (on_road_at). */
 export async function ownerApproveChallanAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
   const admin = createAdminSupabaseClient();
 
   const challanId = txt(formData, "challan_id");
@@ -178,7 +178,7 @@ export async function ownerApproveChallanAction(formData: FormData) {
 /** OWNER rejects a priced challan → back to the accountant on Challans. The
  *  dispatch stays in "Invoice in process" (truck still held). */
 export async function ownerRejectChallanAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
   const admin = createAdminSupabaseClient();
 
   const challanId = txt(formData, "challan_id");

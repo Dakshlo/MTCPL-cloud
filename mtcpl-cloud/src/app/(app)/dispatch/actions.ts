@@ -1312,6 +1312,59 @@ export async function updateDispatchLoadNumberAction(
   return { ok: true };
 }
 
+// ── Edit Challan No. (unified per-FY doc number) on Check & verify (Mig 168) ─
+// The challan/invoice number must match real operations, so a senior can edit
+// the trailing N of CH-26/27-N here (the invoicing challan copies it at verify,
+// and the tax invoice mirrors it as INV-26/27-N). Setting N bumps the FY counter
+// so the next auto number continues from N+1, and a duplicate is rejected.
+export async function setChallanDocSeqAction(
+  dispatchId: string,
+  docSeq: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!CAN_EDIT_LOAD.includes(profile.role)) return { ok: false, error: "Not allowed." };
+  const n = Math.floor(Number(docSeq));
+  if (!Number.isFinite(n) || n <= 0) return { ok: false, error: "Enter a valid challan number (1 or more)." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: disp } = await admin
+    .from("dispatches")
+    .select("id, doc_fy, doc_seq, dispatched_at")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!disp) return { ok: false, error: "Dispatch not found." };
+  const d = disp as { doc_fy: string | null; doc_seq: number | null; dispatched_at: string };
+  const fy = (d.doc_fy ?? "").trim() || financialYear(d.dispatched_at);
+  if (!fy) return { ok: false, error: "Could not determine the financial year." };
+  if (d.doc_seq === n && (d.doc_fy ?? "") === fy) return { ok: true }; // unchanged
+
+  // Reject a number already used this FY by another dispatch OR an invoicing challan.
+  const [{ data: dClash }, { data: cClash }] = await Promise.all([
+    admin.from("dispatches").select("id").eq("doc_fy", fy).eq("doc_seq", n).neq("id", dispatchId).limit(1).maybeSingle(),
+    admin.from("challans").select("id").eq("doc_fy", fy).eq("doc_seq", n).limit(1).maybeSingle(),
+  ]);
+  if (dClash || cClash) {
+    return { ok: false, error: `CH-${fy}-${String(n).padStart(2, "0")} already exists. Pick a different number.` };
+  }
+
+  const { error } = await admin.from("dispatches").update({ doc_fy: fy, doc_seq: n }).eq("id", dispatchId);
+  if (error) return { ok: false, error: error.message };
+
+  // Bump the FY counter so the NEXT auto-assigned number continues from n+1.
+  try {
+    const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", fy).maybeSingle();
+    const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
+    if (n > last) await admin.from("doc_counters").upsert({ fy, last_seq: n }, { onConflict: "fy" });
+  } catch {
+    /* doc_counters missing (mig 168 not applied) — ignore */
+  }
+
+  void logAudit(profile.id, "challan_doc_seq_edited", "dispatch", dispatchId, { doc_fy: fy, doc_seq: n });
+  revalidatePath(`/dispatch/${dispatchId}/check`);
+  revalidatePath(`/dispatch/${dispatchId}/print`);
+  return { ok: true };
+}
+
 // ── Storage: ready (completed) slabs (Mig 125 follow-on) ─────────────────
 // Park "ready to dispatch" (status=completed) slabs OUT of Make Dispatch, to
 // declutter. Daksh June 2026 — there is now ONE "Main Storage" (/carving/

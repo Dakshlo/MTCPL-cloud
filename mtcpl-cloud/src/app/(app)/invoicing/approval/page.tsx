@@ -12,7 +12,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { canUseInvoicing, canApproveInvoice } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
@@ -63,7 +63,9 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/");
   const sp = await searchParams;
-  const isOwner = profile.role === "owner" || profile.role === "developer";
+  // Owner / developer / account-plus (accountant_star) can act; plain accountant
+  // sees the queue read-only (Mig 168).
+  const isOwner = canApproveInvoice(profile);
 
   const supabase = createAdminSupabaseClient();
 
@@ -145,7 +147,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
 
       {!isOwner && (
         <div style={{ marginTop: 12, fontSize: 12.5, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8, padding: "8px 12px" }}>
-          Read-only view — only the owner can approve or reject. These bills are waiting on owner sign-off.
+          Read-only view — only the owner or account-plus can approve or reject. These bills are waiting on their sign-off.
         </div>
       )}
 

@@ -173,7 +173,7 @@ export default async function TasksPage() {
   }
   // Mig 167 — priced challans awaiting the OWNER's invoice approval.
   async function fetchInvoiceApproval(): Promise<number | null> {
-    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    if (!["owner", "developer", "accountant_star"].includes(profile.role)) return null;
     const { count, error } = await supabase
       .from("challans")
       .select("*", { count: "exact", head: true })

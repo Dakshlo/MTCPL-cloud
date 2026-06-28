@@ -419,7 +419,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Mig 167 — Invoice approval (OWNER): priced challans waiting for the owner's
   // final sign-off before they become invoices + release the truck.
   async function fetchInvoiceApprovalBadge(): Promise<number | null> {
-    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    if (!["owner", "developer", "accountant_star"].includes(profile.role)) return null;
     const { count, error: iErr } = await supabase
       .from("challans")
       .select("*", { count: "exact", head: true })

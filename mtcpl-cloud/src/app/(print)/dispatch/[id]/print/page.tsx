@@ -267,14 +267,18 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
 
         .pending-banner { background: #b45309; color: #fff; text-align: center; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; }
 
-        .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #7c4a1e; padding-bottom: 8px; }
-        .brand-logo { height: 40px; width: auto; display: block; }
-        .company-name { font-size: 13.5px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.02em; }
-        .company-line { font-size: 8.5px; color: #666; margin-top: 1px; line-height: 1.45; }
-        .doc-pill { font-size: 13px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #7c4a1e; border-radius: 6px; padding: 4px 14px; background: #faf4ea; white-space: nowrap; }
-        .doc-num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; white-space: nowrap; }
-        .doc-date { width: fit-content; margin-left: auto; margin-top: 5px; font-size: 13px; font-weight: 800; color: #5b2e0a; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 3px 11px; white-space: nowrap; }
-        .doc-dt { font-size: 9px; color: #888; text-align: right; margin-top: 4px; }
+        /* Header mirrors the tax-invoice letterhead (Daksh): centered company
+           block + big logo + a "DELIVERY CHALLAN" title box. */
+        .doc-title { text-align: center; margin: 0 0 7px; }
+        .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; text-transform: uppercase; }
+        .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
+        .brand-logo { height: 68px; width: auto; display: block; }
+        .company-block { flex: 1; text-align: center; }
+        .company-name { font-size: 15px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
+        .company-line { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.45; }
+        .doc-num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; white-space: nowrap; color: #1a1a1a; }
+        .doc-date { width: fit-content; margin-left: auto; margin-top: 4px; font-size: 12px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 2px 9px; white-space: nowrap; }
+        .doc-dt { font-size: 8.5px; color: #888; text-align: right; margin-top: 3px; }
 
         /* Billing To · Shipping To · routing — three address-style boxes. */
         .parties { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 10px; margin: 8px 0 4px; align-items: start; }
@@ -332,18 +336,16 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         {pending && (
           <div className="pending-banner">⚠ Approval pending — preview only · not valid for dispatch until verified</div>
         )}
+        <div className="doc-title"><span>Delivery Challan</span></div>
         <div className="head">
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-dark.png" alt="MTCPL" className="brand-logo" />
-            <div>
-              <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-              <div className="company-line">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-              <div className="company-line">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
-            </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
+          <div className="company-block">
+            <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+            <div className="company-line">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="company-line">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
           </div>
           <div>
-            <span className="doc-pill">Delivery Challan</span>
             <div className="doc-num">{shortId}</div>
             <div className="doc-date">📅 {dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
             <div className="doc-dt">

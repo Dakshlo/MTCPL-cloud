@@ -14,9 +14,11 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { groupDispatchSlabs, dash, type DispatchSlabInput } from "@/lib/dispatch-grouping";
 import { resolveDispatchIncharge, fetchInchargeOptions } from "@/lib/dispatch-incharge";
+import { challanCode, financialYear } from "@/lib/doc-code";
 import { CheckGrid } from "./check-grid";
 import { InchargePicker } from "./incharge-picker";
 import { LoadNumberEditor } from "./load-number-editor";
+import { ChallanNumberEditor } from "./challan-number-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -202,6 +204,23 @@ export default async function DispatchCheckPage({
     : `DISP-${id.slice(0, 8).toUpperCase()}`;
   const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
 
+  // Mig 168 — unified per-FY challan number (editable here). Best-effort select
+  // so a pre-migration schema (no doc_fy/doc_seq columns) just shows the legacy
+  // read-only label instead of the editor.
+  let docFy: string | null = null;
+  let docSeq: number | null = null;
+  let docNumAvailable = false;
+  {
+    const { data: dn, error: dnErr } = await admin.from("dispatches").select("doc_fy, doc_seq").eq("id", id).maybeSingle();
+    if (!dnErr) {
+      docNumAvailable = true;
+      docFy = (dn as { doc_fy?: string | null } | null)?.doc_fy ?? null;
+      docSeq = (dn as { doc_seq?: number | null } | null)?.doc_seq ?? null;
+    }
+  }
+  const editorFy = (docFy ?? "").trim() || financialYear(dispatch.dispatched_at);
+  const unifiedLabel = challanCode(docFy, docSeq) ?? challanLabel;
+
   const meta: Array<[string, string]> = [
     ["Vehicle", dash(dispatch.vehicle_no)],
     ["Driver", dash(dispatch.driver_name)],
@@ -221,7 +240,11 @@ export default async function DispatchCheckPage({
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
           <h1 style={{ margin: 0, fontSize: 22 }}>🔍 Check &amp; verify</h1>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#D97706", fontSize: 15 }}>{challanLabel}</span>
+          {docNumAvailable ? (
+            <ChallanNumberEditor dispatchId={id} fy={editorFy} seq={docSeq} />
+          ) : (
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#D97706", fontSize: 15 }}>{challanLabel}</span>
+          )}
           <span style={{ fontSize: 14, color: "var(--muted)" }}>· 🏛 {dispatch.temple}</span>
         </div>
       </div>
@@ -263,7 +286,7 @@ export default async function DispatchCheckPage({
         resolvedLabel={handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "—"}
       />
 
-      <CheckGrid dispatchId={id} groups={groups} challanLabel={challanLabel} available={available} temple={dispatch.temple} vendorSheds={vendorSheds} canUseStorage={canUseStorage} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={unifiedLabel} available={available} temple={dispatch.temple} vendorSheds={vendorSheds} canUseStorage={canUseStorage} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
     </div>
   );
 }
