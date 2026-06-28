@@ -266,8 +266,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
-        .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
-        .brand-logo { height: 46px; }
+        .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
+        .brand-logo { height: 68px; width: auto; }
         .cn { font-size: 15px; font-weight: 800; color: #0f2540; }
         .cl { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.4; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
@@ -345,9 +345,9 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       <div className="wrap">
         <div className="doc-title"><span>TAX INVOICE</span></div>
         <div className="head">
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-dark.png" alt="MTCPL" className="brand-logo" />
+            <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
             <div>
               <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
               <div className="cl">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
