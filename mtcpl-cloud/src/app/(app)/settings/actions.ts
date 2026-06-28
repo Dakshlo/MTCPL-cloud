@@ -175,11 +175,10 @@ export async function addTempleAction(formData: FormData) {
   const name = text(formData, "name");
   const code_prefix = text(formData, "code_prefix").toUpperCase();
   const default_stone = text(formData, "default_stone") || "PinkStone";
-  // Mig 130 — site details, auto-filled onto every dispatch challan
-  // for this temple. All optional.
-  const site_location = text(formData, "site_location") || null;
-  const site_incharge_name = text(formData, "site_incharge_name") || null;
-  const site_incharge_phone = text(formData, "site_incharge_phone") || null;
+  // Daksh (Jun 2026): the client site address + client incharge are no longer
+  // captured here — the temple's billing/shipping address (mig 165) is the
+  // single source of truth and is edited per-temple in the row below. Only the
+  // installation contractor (our side) is set at creation.
   const installer_name = text(formData, "installer_name") || null;
   const installer_phone = text(formData, "installer_phone") || null;
   // Mig 154 billing customer (temples.invoice_party_id) is now managed in
@@ -190,7 +189,7 @@ export async function addTempleAction(formData: FormData) {
 
   const { error } = await admin.from("temples").insert({
     name, code_prefix, default_stone,
-    site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
+    installer_name, installer_phone,
   });
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
@@ -259,25 +258,35 @@ export async function updateTempleAction(formData: FormData) {
   // site-info fields (those are freely editable — they only feed
   // the dispatch challan).
   const is_active = formData.get("is_active") === "true";
-  const site_location = text(formData, "site_location") || null;
-  const site_incharge_name = text(formData, "site_incharge_name") || null;
-  const site_incharge_phone = text(formData, "site_incharge_phone") || null;
   const installer_name = text(formData, "installer_name") || null;
   const installer_phone = text(formData, "installer_phone") || null;
+  // Mig 165 — Billing + Shipping + vendor/work-order. The standalone "Client
+  // billing" page (Invoicing) was retired; these now save straight from the
+  // Temple Codes editor. Only fields actually present in the submitted form get
+  // patched, so a partial form can never wipe a column it didn't render.
+  const BILLING_SHIPPING_FIELDS = [
+    "bill_name", "bill_gstin", "bill_pan", "bill_address", "bill_city", "bill_state", "bill_state_code", "bill_email", "bill_phone",
+    "ship_name", "ship_address", "ship_city", "ship_state", "ship_state_code", "ship_gstin", "ship_pan", "ship_phone", "ship_email",
+    "vendor_code", "work_order_no",
+  ] as const;
+  // NOTE: site_location / site_incharge_* are intentionally NOT written here —
+  // their inputs were removed and the billing block replaces them. Omitting
+  // them preserves any legacy site_location (still a fallback on the prints).
+  //
   // Mig 154 billing customer (temples.invoice_party_id) is managed in the
-  // Invoicing dept now (Invoicing → Temple → Client). This update MUST NOT
-  // include invoice_party_id — otherwise every Settings temple edit would
-  // overwrite the customer mapping to null and silently break the
-  // dispatch→invoicing auto-challan.
+  // Invoicing dept now (dispatch→invoicing auto-challan). This update MUST NOT
+  // include invoice_party_id — else every edit would null the mapping.
 
   if (!id) redirect("/settings?toast=Missing+ID");
 
+  const patch: Record<string, unknown> = { is_active, installer_name, installer_phone };
+  for (const f of BILLING_SHIPPING_FIELDS) {
+    if (formData.has(f)) patch[f] = text(formData, f) || null;
+  }
+
   const { error } = await admin
     .from("temples")
-    .update({
-      is_active,
-      site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone,
-    })
+    .update(patch)
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 

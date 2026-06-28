@@ -37,25 +37,24 @@ type PartyShape = {
   state_code: string | null; gstin: string | null; pan: string | null; phone: string | null; email: string | null;
 };
 
-// One bill-to / ship-to address block.
-function Party({ label, p, fallback }: { label: string; p: PartyShape | null; fallback?: string }) {
-  if (!p) {
-    return (
-      <div className="party">
-        <div className="party-k">{label}</div>
-        <div className="party-line muted">{fallback ?? "-"}</div>
-      </div>
-    );
-  }
-  const loc = [p.city, p.state, p.state_code ? `(code ${p.state_code})` : null].filter(Boolean).join(", ");
+// One bill-to / ship-to address block. The temple `name` sits UNDER the label
+// (Daksh); `p` carries the address lines (null ⇒ show the fallback note).
+function Party({ label, name, p, fallback }: { label: string; name: string | null; p: PartyShape | null; fallback?: string }) {
+  const loc = p ? [p.city, p.state, p.state_code ? `(code ${p.state_code})` : null].filter(Boolean).join(", ") : "";
   return (
     <div className="party">
       <div className="party-k">{label}</div>
-      {p.name && <div className="party-name">{p.name}</div>}
-      {p.address && <div className="party-line">{p.address}</div>}
-      {loc && <div className="party-line">{loc}</div>}
-      {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)} · PAN: {dash(p.pan)}</div>}
-      {(p.phone || p.email) && <div className="party-meta">{[p.phone, p.email].filter(Boolean).join(" · ")}</div>}
+      {name && <div className="party-name">{name}</div>}
+      {p ? (
+        <>
+          {p.address && <div className="party-line">{p.address}</div>}
+          {loc && <div className="party-line">{loc}</div>}
+          {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)} · PAN: {dash(p.pan)}</div>}
+          {(p.phone || p.email) && <div className="party-meta">{[p.phone, p.email].filter(Boolean).join(" · ")}</div>}
+        </>
+      ) : (
+        <div className="party-line muted">{fallback ?? "-"}</div>
+      )}
     </div>
   );
 }
@@ -144,6 +143,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     ? { name: c.temple, address: null, city: null, state: null, state_code: null, gstin: null, pan: null, phone: null, email: null }
     : null;
   const shipParty: PartyShape | null = billing?.shipping ?? null;
+  // Temple name shown UNDER each Bill To / Ship To label (Daksh). Ship-to name
+  // falls back to the billing name when there's no separate shipping party.
+  const billName = billParty?.name ?? c.temple ?? "—";
+  const shipName = (shipParty?.name ?? "").trim() || billName;
   // Vehicle no — from the source dispatch (Daksh).
   const { data: dispRow } = c.source_dispatch_id
     ? await admin.from("dispatches").select("vehicle_no").eq("id", c.source_dispatch_id).maybeSingle()
@@ -235,10 +238,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <tfoot>
             <tr>
               <td colSpan={8} className="r">Total</td>
-              <td className="r mono b hl1">{qtyTotal}</td>
-              <td className="r mono b hl1">{fmt(measTotal)}</td>
-              <td className="hl2"></td>
-              <td className="r mono b hl2">{rupee(sub)}</td>
+              <td className="r mono b">{qtyTotal}</td>
+              <td className="r mono b">{fmt(measTotal)}</td>
+              <td></td>
+              <td className="r mono b">{rupee(sub)}</td>
             </tr>
           </tfoot>
         </table>
@@ -263,7 +266,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .cl { font-size: 9.5px; color: #666; margin-top: 2px; line-height: 1.5; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
         .num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; }
-        .dt { font-size: 9px; color: #888; text-align: right; }
+        .idate { width: fit-content; margin-left: auto; margin-top: 5px; font-size: 13px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 3px 11px; white-space: nowrap; }
+        .dt { font-size: 9px; color: #888; text-align: right; margin-top: 4px; }
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #f7fafc; }
         .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
         .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
@@ -288,14 +292,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; white-space: nowrap; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
         /* Highlighted columns — never wrap. Two colour groups:
-           hl1 = Qty + CFT/SFT (blue) · hl2 = Rate + Amount (amber). */
+           hl1 = Qty + CFT/SFT (blue) · hl2 = Rate + Amount (amber). The TOTAL
+           row stays the plain tfoot colour (Daksh — the tint there was
+           confusing). */
         .t .hl1, .t .hl2 { white-space: nowrap; }
         .t td.hl1 { background: #e6f0fb; }
         .t th.hl1 { background: #c7ddf6; }
-        .t tfoot td.hl1 { background: #d8e8fa; }
         .t td.hl2 { background: #fff7e0; }
         .t th.hl2 { background: #ffe6a8; }
-        .t tfoot td.hl2 { background: #ffeec2; }
         .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
         .totals { min-width: 280px; border: 1px solid #d3dae3; border-radius: 8px; overflow: hidden; }
         .totals .row { display: flex; justify-content: space-between; gap: 24px; padding: 5px 14px; font-size: 11.5px; }
@@ -340,14 +344,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
           <div>
             <div className="num">{invCode}</div>
-            <div className="dt">Date {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}{vehicleNo ? <><br />Vehicle {vehicleNo}</> : null}<br />Printed {printDate}</div>
+            <div className="idate">📅 {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+            <div className="dt">{vehicleNo ? <>Vehicle {vehicleNo}<br /></> : null}Printed {printDate}</div>
           </div>
         </div>
 
-        <div className="cust">{dash(billParty?.name ?? c.temple)}</div>
         <div className="parties">
-          <Party label="Bill To" p={billParty ? { ...billParty, name: null } : null} />
-          <Party label="Ship To" p={shipParty} fallback="Same as billing address" />
+          <Party label="Bill To" name={billName} p={billParty} />
+          <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
         {(billing?.vendor_code || billing?.work_order_no) && (
           <div className="vw">

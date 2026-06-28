@@ -1,7 +1,11 @@
-// Billing/shipping field metadata for the Client-billing page (mig 165).
-// PLAIN module (NOT "use client") so the server page can import the real
-// ALL_FIELDS array — values exported from a "use client" file become client
-// references when imported by a server component and throw when used.
+// Billing/shipping field metadata for a temple-as-client (mig 158 → 165).
+// PLAIN module (NOT "use client") so server components (the Settings Temple
+// Codes editor) can import the real arrays — values exported from a "use client"
+// file become client references when imported by a server component and throw.
+//
+// Daksh (June 2026): the standalone "Client billing" page was retired and these
+// fields now live on the Settings → Temple Codes editor. The metadata stays
+// shared so the labels match the tax invoice / challan exactly.
 
 export type FieldMeta = { key: string; label: string; wide?: boolean };
 

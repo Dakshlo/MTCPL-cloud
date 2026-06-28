@@ -11,6 +11,7 @@ import {
   bringSystemUpAction,
 } from "./system-status-actions";
 import { stoneDisplayName } from "@/lib/stone-utils";
+import { BILLING_FIELDS, SHIPPING_FIELDS, SHARED_FIELDS } from "@/lib/temple-billing-fields";
 import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
 import { PeekSection } from "@/components/peek-section";
@@ -1179,27 +1180,16 @@ export default async function SettingsPage() {
                 </select>
               </label>
             </div>
-            {/* Mig 130 — site info, auto-filled onto every dispatch
-                challan for this temple. All optional; editable later. */}
+            {/* Installation contractor (our side), auto-filled onto the dispatch
+                challan. Billing & shipping addresses are filled per-temple after
+                creation — expand a row below. */}
             <div className="settings-form-row" style={{ marginTop: 10 }}>
-              <label className="stack" style={{ flex: 2 }}>
-                <span>📍 Site Location (Bill-To address)</span>
-                <input name="site_location" placeholder="e.g. Math Asthal Bohar, Rohtak, Haryana" />
-              </label>
-              <label className="stack" style={{ flex: 1 }}>
-                <span>Site Incharge (client)</span>
-                <input name="site_incharge_name" placeholder="Name" />
-              </label>
-              <label className="stack" style={{ flex: "0 0 140px" }}>
-                <span>Incharge Mobile</span>
-                <input name="site_incharge_phone" type="tel" placeholder="98…" />
-              </label>
               <label className="stack" style={{ flex: 1 }}>
                 <span>Installation By (our contractor)</span>
                 <input name="installer_name" placeholder="Name" />
               </label>
-              <label className="stack" style={{ flex: "0 0 140px" }}>
-                <span>Installer Mobile</span>
+              <label className="stack" style={{ flex: "0 0 170px" }}>
+                <span>Installation Mobile No.</span>
                 <input name="installer_phone" type="tel" placeholder="98…" />
               </label>
               <div className="stack" style={{ flex: "0 0 auto", justifyContent: "flex-end" }}>
@@ -1207,6 +1197,10 @@ export default async function SettingsPage() {
                 <button className="primary-button" type="submit">Add Temple</button>
               </div>
             </div>
+            <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
+              Billing &amp; shipping address, GSTIN / PAN, vendor code and work order no. are added per
+              temple below (expand a row to edit) — these print on the tax invoice and delivery challan.
+            </p>
           </form>
         </div>
 
@@ -1320,31 +1314,52 @@ export default async function SettingsPage() {
                       </select>
                     </label>
                     </div>
-                    {/* Mig 130 — site info (EDITABLE, feeds the dispatch
-                        challan: Bill-To location, client incharge,
-                        installation contractor). */}
+                    {/* Installation contractor (our side) — feeds the challan. */}
                     <div className="settings-form-row" style={{ marginTop: 10 }}>
-                      <label className="stack" style={{ flex: 2 }}>
-                        <span>📍 Site Location</span>
-                        <input name="site_location" defaultValue={(temple as any).site_location ?? ""} placeholder="Bill-To address on challan" />
-                      </label>
-                      <label className="stack" style={{ flex: 1 }}>
-                        <span>Site Incharge (client)</span>
-                        <input name="site_incharge_name" defaultValue={(temple as any).site_incharge_name ?? ""} />
-                      </label>
-                      <label className="stack" style={{ flex: "0 0 130px" }}>
-                        <span>Incharge Mobile</span>
-                        <input name="site_incharge_phone" type="tel" defaultValue={(temple as any).site_incharge_phone ?? ""} />
-                      </label>
                       <label className="stack" style={{ flex: 1 }}>
                         <span>Installation By</span>
-                        <input name="installer_name" defaultValue={(temple as any).installer_name ?? ""} />
+                        <input name="installer_name" defaultValue={(temple as any).installer_name ?? ""} placeholder="Our installation contractor" />
                       </label>
-                      <label className="stack" style={{ flex: "0 0 130px" }}>
-                        <span>Installer Mobile</span>
-                        <input name="installer_phone" type="tel" defaultValue={(temple as any).installer_phone ?? ""} />
+                      <label className="stack" style={{ flex: "0 0 170px" }}>
+                        <span>Installation Mobile No.</span>
+                        <input name="installer_phone" type="tel" defaultValue={(temple as any).installer_phone ?? ""} placeholder="98…" />
                       </label>
-                      <div style={{ display: "flex", gap: 8, alignSelf: "flex-end" }}>
+                    </div>
+
+                    {/* Mig 165 — Billing + Shipping for this temple-as-client.
+                        The single source of truth for the tax invoice + delivery
+                        challan addresses (the old "Client billing" page was
+                        retired). Shipping left blank ⇒ both prints fall back to
+                        the billing address. */}
+                    <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+                      <fieldset style={{ flex: "1 1 320px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7 }}>
+                        <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>🧾 Billing To</legend>
+                        {BILLING_FIELDS.map((f) => (
+                          <label key={f.key} className="stack">
+                            <span>{f.label}</span>
+                            <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
+                          </label>
+                        ))}
+                      </fieldset>
+                      <fieldset style={{ flex: "1 1 320px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7 }}>
+                        <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>📦 Shipping To <span className="muted" style={{ fontWeight: 600 }}>· blank = same as billing</span></legend>
+                        {SHIPPING_FIELDS.map((f) => (
+                          <label key={f.key} className="stack">
+                            <span>{f.label}</span>
+                            <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
+                          </label>
+                        ))}
+                      </fieldset>
+                    </div>
+
+                    <div className="settings-form-row" style={{ marginTop: 12, alignItems: "flex-end" }}>
+                      {SHARED_FIELDS.map((f) => (
+                        <label key={f.key} className="stack" style={{ flex: 1 }}>
+                          <span>{f.label}</span>
+                          <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
+                        </label>
+                      ))}
+                      <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
                         <button className="secondary-button" type="submit">Save</button>
                         <button className="ghost-button danger-ghost" formAction={deleteTempleAction} formNoValidate type="submit">
                           Delete

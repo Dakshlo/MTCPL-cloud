@@ -13,6 +13,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { resolveDispatchIncharge } from "@/lib/dispatch-incharge";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 import { groupDispatchSlabs, groupRowsByStone, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
 import { PrintBtn } from "./print-btn";
 
@@ -147,22 +148,26 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
   const hasWeights = totalTonnes > 0;
 
-  const [{ data: templeRow }, handlingMan] = await Promise.all([
+  const [{ data: templeRow }, handlingMan, billing] = await Promise.all([
     admin
       .from("temples")
-      .select("site_location, site_incharge_name, site_incharge_phone, installer_name, installer_phone")
+      .select("installer_name, installer_phone")
       .eq("name", dispatch.temple)
       .maybeSingle(),
     // Mig 159 — dispatch override → temple's linked incharge → legacy global.
     resolveDispatchIncharge(admin, { inchargeId: (dispatch as { incharge_id?: string | null }).incharge_id ?? null, temple: dispatch.temple }),
+    // Mig 165 — Billing + Shipping address for the temple-as-client, shown as
+    // Bill-To / Ship-To boxes on the challan (same resolver as the tax invoice).
+    fetchTempleBilling(admin, dispatch.temple),
   ]);
   const site = (templeRow ?? {}) as {
-    site_location?: string | null;
-    site_incharge_name?: string | null;
-    site_incharge_phone?: string | null;
     installer_name?: string | null;
     installer_phone?: string | null;
   };
+  // Bill-To name falls back to the temple; Ship-To falls back to the same.
+  const billName = (billing?.name ?? "").trim() || (dispatch.temple ?? "—");
+  const ship = billing?.shipping ?? null;
+  const shipName = (ship?.name ?? "").trim() || billName;
   const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
 
   const profilesMap = await getProfilesMap();
@@ -258,12 +263,18 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .doc-date { width: fit-content; margin-left: auto; margin-top: 5px; font-size: 13px; font-weight: 800; color: #5b2e0a; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 3px 11px; white-space: nowrap; }
         .doc-dt { font-size: 9px; color: #888; text-align: right; margin-top: 4px; }
 
-        /* Tight info strip — every routing field in a compact grid */
-        .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #fdfaf4; }
-        .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
-        .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
-        .info .v.big { font-size: 13px; font-weight: 800; }
-        .info .mono { font-family: ui-monospace, monospace; }
+        /* Billing To · Shipping To · routing — three address-style boxes. */
+        .parties { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 10px; margin: 8px 0 4px; align-items: start; }
+        .party { border: 1px solid #d8d2c4; border-radius: 6px; padding: 7px 10px; background: #faf7f0; }
+        .party-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #8a6a45; margin-bottom: 2px; }
+        .party-name { font-size: 12.5px; font-weight: 800; color: #1a1a1a; }
+        .party-line { font-size: 10px; color: #333; margin-top: 1px; line-height: 1.35; }
+        .party-meta { font-size: 9px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
+        .party .muted { color: #999; }
+        .ib { display: flex; justify-content: space-between; gap: 10px; font-size: 9.5px; line-height: 1.4; margin-top: 1px; }
+        .ib .ibk { color: #8a6a45; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; font-size: 8px; white-space: nowrap; padding-top: 1px; }
+        .ib .ibv { font-weight: 700; color: #1a1a1a; text-align: right; }
+        .ib .ibv.mono { font-family: ui-monospace, monospace; }
 
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
@@ -329,22 +340,44 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           </div>
         </div>
 
-        {/* Compact routing strip */}
-        <div className="info">
-          <div><div className="k">Bill To / Temple</div><div className="v big">🏛 {dash(dispatch.temple)}</div></div>
-          <div><div className="k">Site location</div><div className="v">{dash(site.site_location)}</div></div>
-          <div><div className="k">Vehicle no.</div><div className="v mono big">{dash(dispatch.vehicle_no)}</div></div>
-          <div><div className="k">Load no.</div><div className="v mono big">{loadNumber != null ? loadNumber : "-"}</div></div>
+        {/* Billing To · Shipping To · routing info — three boxes (Daksh). The
+            temple name sits UNDER each box label; the right box holds driver,
+            dispatch incharge, vehicle, load no, installer and challan date. */}
+        <div className="parties">
+          <div className="party">
+            <div className="party-k">Billing To</div>
+            <div className="party-name">🏛 {billName}</div>
+            {billing?.address && <div className="party-line">{billing.address}</div>}
+            {(() => { const loc = [billing?.city, billing?.state, billing?.state_code ? `(code ${billing.state_code})` : null].filter(Boolean).join(", "); return loc ? <div className="party-line">{loc}</div> : null; })()}
+            {(billing?.gstin || billing?.pan) && <div className="party-meta">GSTIN: {dash(billing?.gstin)} · PAN: {dash(billing?.pan)}</div>}
+            {(billing?.phone || billing?.email) && <div className="party-meta">{[billing?.phone, billing?.email].filter(Boolean).join(" · ")}</div>}
+          </div>
 
-          <div><div className="k">Driver</div><div className="v">{dash(dispatch.driver_name)}</div></div>
-          <div><div className="k">Driver phone</div><div className="v mono">{dash(dispatch.driver_phone)}</div></div>
-          <div><div className="k">Site incharge (client)</div><div className="v">{contact(site.site_incharge_name, site.site_incharge_phone)}</div></div>
-          <div><div className="k">Installation by</div><div className="v">{contact(site.installer_name, site.installer_phone)}</div></div>
+          <div className="party">
+            <div className="party-k">Shipping To</div>
+            <div className="party-name">🏛 {shipName}</div>
+            {ship ? (
+              <>
+                {ship.address && <div className="party-line">{ship.address}</div>}
+                {(() => { const loc = [ship.city, ship.state, ship.state_code ? `(code ${ship.state_code})` : null].filter(Boolean).join(", "); return loc ? <div className="party-line">{loc}</div> : null; })()}
+                {(ship.gstin || ship.pan) && <div className="party-meta">GSTIN: {dash(ship.gstin)} · PAN: {dash(ship.pan)}</div>}
+                {(ship.phone || ship.email) && <div className="party-meta">{[ship.phone, ship.email].filter(Boolean).join(" · ")}</div>}
+              </>
+            ) : (
+              <div className="party-line muted">Same as billing address</div>
+            )}
+          </div>
 
-          <div><div className="k">MTCPL dispatch incharge</div><div className="v">{contact(handlingMan?.name, handlingMan?.phone)}</div></div>
-          <div><div className="k">Total pieces</div><div className="v big">{totalSlabs}</div></div>
-          {hasWeights && <div><div className="k">Net weight{weightMode === "truck" ? " (whole truck)" : ""}</div><div className="v mono big">{fmt(totalTonnes, 3)} T</div></div>}
-          {dispatch.expected_delivery_date && <div><div className="k">Expected delivery</div><div className="v">{new Date(dispatch.expected_delivery_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div></div>}
+          <div className="party">
+            <div className="party-k">Dispatch details</div>
+            <div className="ib"><span className="ibk">Driver</span><span className="ibv">{contact(dispatch.driver_name, dispatch.driver_phone)}</span></div>
+            <div className="ib"><span className="ibk">MTCPL dispatch incharge</span><span className="ibv">{contact(handlingMan?.name, handlingMan?.phone)}</span></div>
+            <div className="ib"><span className="ibk">Vehicle no.</span><span className="ibv mono">{dash(dispatch.vehicle_no)}</span></div>
+            <div className="ib"><span className="ibk">Load no.</span><span className="ibv mono">{loadNumber != null ? loadNumber : "-"}</span></div>
+            <div className="ib"><span className="ibk">Installation by</span><span className="ibv">{contact(site.installer_name, site.installer_phone)}</span></div>
+            <div className="ib"><span className="ibk">Challan date</span><span className="ibv">{dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</span></div>
+            {dispatch.expected_delivery_date && <div className="ib"><span className="ibk">Expected delivery</span><span className="ibv">{new Date(dispatch.expected_delivery_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</span></div>}
+          </div>
         </div>
 
         {groups.length === 0 ? (

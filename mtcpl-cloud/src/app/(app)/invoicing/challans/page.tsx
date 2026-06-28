@@ -109,9 +109,6 @@ export default async function ChallansListPage({
             <form action={syncDispatchChallansAction}>
               <button type="submit" style={BUTTON_STYLES.primary}>🔄 Sync from dispatch</button>
             </form>
-            <Link href="/invoicing/temple-clients" style={BUTTON_STYLES.secondary}>
-              🛕 Client billing
-            </Link>
             <Link href="/invoicing" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "none", alignSelf: "center" }}>
               ← Dashboard
             </Link>

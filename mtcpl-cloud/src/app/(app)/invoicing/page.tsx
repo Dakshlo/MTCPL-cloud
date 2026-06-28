@@ -118,10 +118,8 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
-            {/* Mig 158 — the temple IS the client; billing details edited here. */}
-            <Link href="/invoicing/temple-clients" style={BUTTON_STYLES.secondary}>
-              🛕 Client billing
-            </Link>
+            {/* Daksh: client billing moved to Settings → Temple Codes (one place
+                for every temple address). The button was removed from here. */}
             <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
               📝 Work Order Doc
             </Link>
@@ -149,7 +147,6 @@ export default async function InvoicingDashboardPage() {
           sublabel="Temples with billing details"
           tone="accent"
           icon="🛕"
-          href="/invoicing/temple-clients"
         />
         <KpiCard
           label="Open challans"
