@@ -360,7 +360,6 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               {challanLabel ? <div>Challan {challanLabel}</div> : null}
               {vehicleNo ? <div>Vehicle {vehicleNo}</div> : null}
             </div>
-            <div className="dt">Printed {printDate}</div>
           </div>
         </div>
 
