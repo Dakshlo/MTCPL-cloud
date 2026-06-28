@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
+import { invoiceCodeFromDoc } from "@/lib/doc-code";
 
 // Page through a query (the invoices register can exceed the 1000-row cap over a
 // financial year — never silently truncate).
@@ -24,7 +25,7 @@ async function pageAll<T>(
 }
 
 type PricedChallan = {
-  id: string; challan_number: string; challan_date: string; temple: string | null; priced_at: string;
+  id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string;
   invoice_no_override: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
@@ -51,7 +52,7 @@ export default async function InvoicingListPage() {
     pageAll<PricedChallan>((from, to) =>
       supabase
         .from("challans")
-        .select("id, challan_number, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
         .not("priced_at", "is", null)
         // Mig 167 — only OWNER-APPROVED priced challans are final invoices.
         // A priced-but-pending (or rejected) challan stays in the Approval
@@ -97,7 +98,7 @@ export default async function InvoicingListPage() {
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
     })),
     ...priced.map((c) => ({
-      key: `ch:${c.id}`, code: (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date), date: c.challan_date,
+      key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
       customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
     })),

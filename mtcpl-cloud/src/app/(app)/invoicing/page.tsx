@@ -27,6 +27,7 @@ import {
   VendorIdentity,
 } from "../accounts/_ui/components";
 import { ChallanStatusPill } from "./_ui/challan-status-pill";
+import { challanCode } from "@/lib/doc-code";
 
 export default async function InvoicingDashboardPage() {
   const { profile } = await requireAuth();
@@ -81,7 +82,7 @@ export default async function InvoicingDashboardPage() {
       .select("id, total"),
     supabase
       .from("challans")
-      .select("id, challan_number, challan_date, invoice_party_id, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, invoice_parties(name)")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, invoice_party_id, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, invoice_parties(name)")
       .order("created_at", { ascending: false })
       .limit(6),
     supabase
@@ -98,6 +99,8 @@ export default async function InvoicingDashboardPage() {
   type RecentChallan = {
     id: string;
     challan_number: string;
+    doc_fy: string | null;
+    doc_seq: number | null;
     challan_date: string;
     invoice_party_id: string | null;
     temple: string | null;
@@ -251,7 +254,7 @@ export default async function InvoicingDashboardPage() {
                       minWidth: 110,
                     }}
                   >
-                    {c.challan_number}
+                    {challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number}
                   </span>
                   <VendorIdentity name={partyName} size={28} />
                   <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>

@@ -22,6 +22,7 @@ import {
   VendorIdentity,
 } from "../../accounts/_ui/components";
 import { challanStatus } from "@/lib/challan-status";
+import { challanCode } from "@/lib/doc-code";
 import { ChallanStatusPill } from "../_ui/challan-status-pill";
 import { syncDispatchChallansAction, returnDispatchToWaitingAction } from "../actions";
 import { ReturnToDispatchButton } from "../_ui/return-to-dispatch-button";
@@ -50,7 +51,7 @@ export default async function ChallansListPage({
   let q = supabase
     .from("challans")
     .select(
-      "id, challan_number, challan_date, invoice_party_id, temple, notes, source_dispatch_id, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, owner_reject_reason, invoice_parties(name)",
+      "id, challan_number, doc_fy, doc_seq, challan_date, invoice_party_id, temple, notes, source_dispatch_id, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, owner_reject_reason, invoice_parties(name)",
     )
     .order("challan_date", { ascending: false })
     .limit(500);
@@ -87,6 +88,8 @@ export default async function ChallansListPage({
   const challans = (challansRaw ?? []) as Array<{
     id: string;
     challan_number: string;
+    doc_fy: string | null;
+    doc_seq: number | null;
     challan_date: string;
     invoice_party_id: string | null;
     temple: string | null;
@@ -224,7 +227,7 @@ export default async function ChallansListPage({
                     <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
                       <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
                         <Link href={`/invoicing/challans/${c.id}`} style={{ color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}>
-                          {c.challan_number}
+                          {challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number}
                         </Link>
                       </td>
                       <td style={TABLE_STYLES.td}>{c.challan_date}</td>
@@ -234,7 +237,7 @@ export default async function ChallansListPage({
                       <td style={{ ...TABLE_STYLES.td, color: "var(--muted)", fontSize: 12 }}>
                         {st === "rejected" && c.owner_reject_reason
                           ? <span style={{ color: "#991b1b" }}>Rejected: {c.owner_reject_reason}</span>
-                          : c.notes ?? "—"}
+                          : c.notes && !c.notes.startsWith("Auto from dispatch") ? c.notes : "—"}
                       </td>
                       <td style={TABLE_STYLES.td}>
                         {st === "rejected" ? (

@@ -28,6 +28,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { createInvoicingChallanFromDispatch } from "@/lib/dispatch-invoicing-bridge";
+import { financialYear } from "@/lib/doc-code";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -219,6 +220,19 @@ export async function createDispatchAction(formData: FormData) {
     break;
   }
   if (!dispatchId) fail("/dispatch", "Failed to create dispatch — load number collision. Retry.");
+
+  // Mig 168 — assign the unified per-FY doc number (CH-26/27-N), shared with the
+  // invoicing challan + tax invoice. Best-effort: if mig 168 isn't applied yet
+  // the rpc throws, we skip, and displays fall back to the legacy CHLN-#### code.
+  try {
+    const docFy = financialYear(new Date());
+    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: docFy });
+    if (typeof seq === "number") {
+      await admin.from("dispatches").update({ doc_fy: docFy, doc_seq: seq }).eq("id", dispatchId);
+    }
+  } catch {
+    /* mig 168 not applied — legacy CHLN display remains */
+  }
 
   // ── Insert per-slab dispatch_logs (weight_tonnes — mig 130).
   // Input is kg → store tonnes (kg / 1000).

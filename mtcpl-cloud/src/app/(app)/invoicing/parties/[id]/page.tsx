@@ -23,6 +23,7 @@ import {
   VendorAvatar,
 } from "../../../accounts/_ui/components";
 import { ChallanStatusPill } from "../../_ui/challan-status-pill";
+import { challanCode } from "@/lib/doc-code";
 
 type Params = Promise<{ id: string }>;
 
@@ -41,7 +42,7 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
       .maybeSingle(),
     supabase
       .from("challans")
-      .select("id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, notes, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at")
       .eq("invoice_party_id", id)
       .order("challan_date", { ascending: false }),
     supabase
@@ -68,6 +69,8 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
   const challans = (challansRaw ?? []) as Array<{
     id: string;
     challan_number: string;
+    doc_fy: string | null;
+    doc_seq: number | null;
     challan_date: string;
     notes: string | null;
     cancelled_at: string | null;
@@ -177,7 +180,7 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
                     <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
                       <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
                         <Link href={`/invoicing/challans/${c.id}`} style={{ color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}>
-                          {c.challan_number}
+                          {challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number}
                         </Link>
                       </td>
                       <td style={TABLE_STYLES.td}>{c.challan_date}</td>

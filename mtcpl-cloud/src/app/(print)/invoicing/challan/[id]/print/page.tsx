@@ -15,6 +15,7 @@ import { fetchTempleBilling } from "@/lib/temple-billing";
 import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
+import { invoiceCodeFromDoc } from "@/lib/doc-code";
 import { PrintBtn } from "./print-btn";
 
 // Code column: show at most 2 slab codes per line so a row with many codes
@@ -97,7 +98,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, doc_fy, doc_seq, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -119,6 +120,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const c = challan as {
     id: string;
     challan_number: string;
+    doc_fy: string | null;
+    doc_seq: number | null;
     challan_date: string;
     notes: string | null;
     source_dispatch_id: string | null;
@@ -167,8 +170,9 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const measureOf = (it: Item) => (it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0);
   const amountOf = (it: Item) => (it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * measureOf(it));
   // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
-  // it as INV-YYYY-N instead of the internal challan CH-YYYY-N code.
-  const invCode = (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date);
+  // it as INV-<FY>-N instead of the internal challan CH-<FY>-N code. Override
+  // wins, then the unified per-FY code (mig 168), then the legacy fallback.
+  const invCode = (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
   // Source challan no. (the priced challan IS this invoice) — shown under the
   // date so the floor links the bill to its delivery challan at a glance.
   const challanLabel = c.challan_number != null && String(c.challan_number).trim() !== ""

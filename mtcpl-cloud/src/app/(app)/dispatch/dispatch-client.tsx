@@ -32,15 +32,20 @@ import { timeAgoLabel } from "./time-ago";
 // the owner approves/rejects on /tasks/slab-cancels.
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
+// Mig 168 — unified per-FY document code (CH-26/27-27); legacy CHLN-#### is the fallback.
+import { challanCode } from "@/lib/doc-code";
 
 // Mig 167 — "invoice_in_process" sits between Waiting approval and On the road.
 type Tab = "ready" | "provisional" | "invoice_in_process" | "out_for_delivery" | "delivered";
 
-/** Format challan number as CHLN-0001. Falls back to UUID prefix if the
- *  row predates migration 011 (shouldn't happen — migration backfills). */
-function chalanLabel(n: number | null, fallbackId: string): string {
-  if (n != null) return `CHLN-${String(n).padStart(4, "0")}`;
-  return `DISP-${fallbackId.slice(0, 8).toUpperCase()}`;
+/** Format a dispatch's challan code. Mig 168 — prefer the unified per-FY code
+ *  (CH-26/27-27) from doc_fy/doc_seq; fall back to the legacy CHLN-0001 for old
+ *  rows with no doc_seq, then to a UUID prefix if even the number is missing. */
+function chalanLabel(n: number | null, fallbackId: string, docFy?: string | null, docSeq?: number | null): string {
+  return (
+    challanCode(docFy, docSeq) ??
+    (n != null ? `CHLN-${String(n).padStart(4, "0")}` : `DISP-${fallbackId.slice(0, 8).toUpperCase()}`)
+  );
 }
 
 /** Group dispatch rows by temple, alphabetical. */
@@ -129,6 +134,10 @@ export type ReadySlab = {
 export type ProvisionalRow = {
   id: string;
   challan_number: number | null;
+  /** Mig 168 — unified per-FY code parts (CH-26/27-27). Optional so old rows /
+   *  the DeliveredRow extends chain still type-check; null = use legacy CHLN. */
+  docFy?: string | null;
+  docSeq?: number | null;
   temple: string;
   vehicle_no: string | null;
   driver_name: string | null;
@@ -190,6 +199,9 @@ export type TruckTrip = {
   temple: string;
   dispatched_at: string;
   challan_number: number | null;
+  /** Mig 168 — unified per-FY code parts (CH-26/27-27); null = use legacy CHLN. */
+  docFy?: string | null;
+  docSeq?: number | null;
   status: "provisional" | "on_road" | "delivered";
 };
 
@@ -1360,7 +1372,7 @@ function ProvisionalTab({
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#D97706", fontSize: 14.5 }}>
-                      📋 {chalanLabel(r.challan_number, r.id)}
+                      📋 {chalanLabel(r.challan_number, r.id, r.docFy, r.docSeq)}
                     </span>
                     <span style={{ background: "rgba(217,119,6,0.15)", color: "#D97706", border: "1px solid rgba(217,119,6,0.35)", fontSize: 10, fontWeight: 800, borderRadius: 999, padding: "2px 9px" }}>
                       WAITING APPROVAL
@@ -1493,7 +1505,7 @@ function TruckHistoryPeek({ trips, onClose }: { trips: TruckTrip[]; onClose: () 
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: i < Math.min(list.length, 5) - 1 ? "1px dashed var(--border)" : "none", fontSize: 12.5, flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--muted)", fontSize: 11.5 }}>
-                          {chalanLabel(t.challan_number, "")}
+                          {chalanLabel(t.challan_number, "", t.docFy, t.docSeq)}
                         </span>
                         <span style={{ fontWeight: 700 }}>🏛 {t.temple}</span>
                         <span className="muted">
@@ -1568,7 +1580,7 @@ function DispatchRow({
   // Reliable in-app confirm for Undo (native confirm() can be suppressed
   // by the browser after repeated dialogs).
   const [confirmUndo, setConfirmUndo] = useState(false);
-  const chalan = chalanLabel(row.challan_number, row.id);
+  const chalan = chalanLabel(row.challan_number, row.id, row.docFy, row.docSeq);
   const dispatchedAt = new Date(row.dispatched_at);
   const expected = row.expected_delivery_date
     ? new Date(row.expected_delivery_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })
@@ -1701,7 +1713,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
       <div key={g.temple} style={{ marginBottom: 10 }}>
       <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
       {g.rows.map((r) => {
-        const chalan = chalanLabel(r.challan_number, r.id);
+        const chalan = chalanLabel(r.challan_number, r.id, r.docFy, r.docSeq);
         const dispatchedAt = new Date(r.dispatched_at);
         const deliveredAt = new Date(r.delivered_at);
         return (
@@ -1846,7 +1858,7 @@ function InvoiceInProcessTab({ rows }: { rows: InvoiceInProcessRow[] }) {
                 <div style={{ flex: "1 1 300px", minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, fontWeight: 800, color: "#6d28d9" }}>
-                      🧾 {chalanLabel(r.challan_number, r.id)}
+                      🧾 {chalanLabel(r.challan_number, r.id, r.docFy, r.docSeq)}
                     </span>
                     <span className="muted" style={{ fontSize: 12.5 }}>
                       {r.slabCount} slab{r.slabCount !== 1 ? "s" : ""} · {r.slabCftTotal.toFixed(2)} CFT

@@ -16,6 +16,7 @@ import { resolveDispatchIncharge } from "@/lib/dispatch-incharge";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { groupDispatchSlabs, groupRowsByStone, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+import { challanCode } from "@/lib/doc-code";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
@@ -44,7 +45,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { data: dispatch, error } = await admin
     .from("dispatches")
     .select(
-      "id, challan_number, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, approved_at, delivered_at, delivered_by, receiver_name, delivery_note, incharge_id",
+      "id, challan_number, doc_fy, doc_seq, load_number, temple, vehicle_no, driver_name, driver_phone, expected_delivery_date, notes, dispatched_at, dispatched_by, approved_at, delivered_at, delivered_by, receiver_name, delivery_note, incharge_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -183,7 +184,11 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const deliveredByName = dispatch.delivered_by ? profilesMap[dispatch.delivered_by] ?? "—" : null;
 
   const challanNum = (dispatch as { challan_number?: number }).challan_number ?? null;
-  const shortId = challanNum != null ? `CHLN-${String(challanNum).padStart(4, "0")}` : `DISP-${String(dispatch.id).slice(0, 8).toUpperCase()}`;
+  const docFy = (dispatch as { doc_fy?: string | null }).doc_fy ?? null;
+  const docSeq = (dispatch as { doc_seq?: number | null }).doc_seq ?? null;
+  const shortId =
+    challanCode(docFy, docSeq) ??
+    (challanNum != null ? `CHLN-${String(challanNum).padStart(4, "0")}` : `DISP-${String(dispatch.id).slice(0, 8).toUpperCase()}`);
   const dispatchedDate = new Date(dispatch.dispatched_at);
   const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   // A not-yet-verified dispatch (the Check-page preview) prints an APPROVAL

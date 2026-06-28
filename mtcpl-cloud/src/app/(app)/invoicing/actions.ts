@@ -60,11 +60,14 @@ export async function saveChallanPricingAction(formData: FormData) {
   // two invoice documents for one shipment. Re-pricing an already-priced (but
   // not converted) challan is allowed.
   const { data: guard } = await admin
-    .from("challans").select("converted_invoice_id, cancelled_at, owner_approved_at").eq("id", challanId).maybeSingle();
-  const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null; owner_approved_at: string | null } | null;
+    .from("challans").select("converted_invoice_id, cancelled_at, priced_at, owner_approved_at, owner_rejected_at").eq("id", challanId).maybeSingle();
+  const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null; priced_at: string | null; owner_approved_at: string | null; owner_rejected_at: string | null } | null;
   if (g?.converted_invoice_id) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Already converted to an invoice — cannot re-price")}`);
   if (g?.cancelled_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Challan is cancelled — cannot price")}`);
   if (g?.owner_approved_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Owner already approved this invoice — cannot re-price")}`);
+  // Mig 167 — once sent to the owner (priced, not yet rejected), the accountant
+  // can't re-price; they wait for the owner to reject (then re-price or cancel).
+  if (g?.priced_at && !g?.owner_rejected_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Sent to owner for approval — wait for a rejection before re-pricing")}`);
 
   let rates: Record<string, number | string> = {};
   try {

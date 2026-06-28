@@ -78,24 +78,36 @@ export async function createInvoicingChallanFromDispatch(
   const groups = groupDispatchSlabs(inputs);
   if (groups.length === 0) return "empty";
 
-  const chalanLabel =
-    challanNumber != null ? `CHLN-${String(challanNumber).padStart(4, "0")}` : dispatchId.slice(0, 8);
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
-  // Client = the temple (Mig 158). No invoice party.
+  // Client = the temple (Mig 158). No invoice party. Mig 167: no "Auto from
+  // dispatch …" note — the challan IS the dispatch's, shown directly.
   const { data: header, error } = await admin
     .from("challans")
     .insert({
       challan_date: today,
       temple,
       invoice_party_id: null,
-      notes: `Auto from dispatch ${chalanLabel} · ${temple}`,
+      notes: null,
       source_dispatch_id: dispatchId,
       created_by: actorId,
     })
     .select("id")
     .single();
   if (error || !header) return "empty";
+
+  // Mig 168 — copy the dispatch's unified per-FY doc number onto the challan so
+  // its CH-26/27-N code matches the dispatch and its INV-26/27-N tax invoice.
+  // Best-effort: skipped silently if mig 168 isn't applied yet.
+  try {
+    const { data: disp } = await admin.from("dispatches").select("doc_fy, doc_seq").eq("id", dispatchId).maybeSingle();
+    const d = disp as { doc_fy: string | null; doc_seq: number | null } | null;
+    if (d?.doc_fy && d?.doc_seq != null) {
+      await admin.from("challans").update({ doc_fy: d.doc_fy, doc_seq: d.doc_seq }).eq("id", (header as { id: string }).id);
+    }
+  } catch {
+    /* mig 168 not applied — legacy CH-YYYY-N display remains */
+  }
 
   const items = groups.map((g, i) => {
     const dims = `${g.length_ft}×${g.width_ft}×${g.thickness_ft} in`;

@@ -94,7 +94,7 @@ export default async function DispatchPage({
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, returned_at, return_reason",
+        "id, challan_number, doc_fy, doc_seq, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, returned_at, return_reason",
       )
       .is("approved_at", null)
       .is("delivered_at", null)
@@ -107,7 +107,7 @@ export default async function DispatchPage({
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, on_road_at, returned_at, handover_ack_at",
+        "id, challan_number, doc_fy, doc_seq, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, on_road_at, returned_at, handover_ack_at",
       )
       .not("approved_at", "is", null)
       .is("delivered_at", null)
@@ -117,7 +117,7 @@ export default async function DispatchPage({
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, delivered_by, receiver_name, delivery_note, proof_site_path, proof_challan_path",
+        "id, challan_number, doc_fy, doc_seq, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, delivered_by, receiver_name, delivery_note, proof_site_path, proof_challan_path",
       )
       .not("delivered_at", "is", null)
       .order("delivered_at", { ascending: false })
@@ -344,6 +344,8 @@ export default async function DispatchPage({
     return {
       id: d.id,
       challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      docFy: (d as { doc_fy?: string | null }).doc_fy ?? null,
+      docSeq: (d as { doc_seq?: number | null }).doc_seq ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -422,6 +424,8 @@ export default async function DispatchPage({
     return {
       id: d.id,
       challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      docFy: (d as { doc_fy?: string | null }).doc_fy ?? null,
+      docSeq: (d as { doc_seq?: number | null }).doc_seq ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -444,6 +448,8 @@ export default async function DispatchPage({
     return {
       id: d.id,
       challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      docFy: (d as { doc_fy?: string | null }).doc_fy ?? null,
+      docSeq: (d as { doc_seq?: number | null }).doc_seq ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -470,6 +476,8 @@ export default async function DispatchPage({
     return {
       id: d.id,
       challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      docFy: (d as { doc_fy?: string | null }).doc_fy ?? null,
+      docSeq: (d as { doc_seq?: number | null }).doc_seq ?? null,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,
@@ -507,6 +515,8 @@ export default async function DispatchPage({
       temple: x.d.temple,
       dispatched_at: x.d.dispatched_at,
       challan_number: (x.d as { challan_number?: number }).challan_number ?? null,
+      docFy: (x.d as { doc_fy?: string | null }).doc_fy ?? null,
+      docSeq: (x.d as { doc_seq?: number | null }).doc_seq ?? null,
       status: x.status,
     }));
 

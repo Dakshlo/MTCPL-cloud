@@ -15,6 +15,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
+import { invoiceCodeFromDoc } from "@/lib/doc-code";
 import {
   ACCOUNTS_TOKENS,
   AccountsHero,
@@ -44,6 +45,8 @@ async function pageAll<T>(
 type PendingChallan = {
   id: string;
   challan_number: string;
+  doc_fy: string | null;
+  doc_seq: number | null;
   challan_date: string;
   temple: string | null;
   priced_at: string;
@@ -70,7 +73,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
     supabase
       .from("challans")
       .select(
-        "id, challan_number, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent",
+        "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent",
       )
       .not("priced_at", "is", null)
       .is("owner_approved_at", null)
@@ -109,7 +112,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   }
 
   const codeOf = (c: PendingChallan) =>
-    (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date);
+    (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
 
   // Temple-wise sections (alphabetical), newest priced first within each.
   const grouped = (() => {
