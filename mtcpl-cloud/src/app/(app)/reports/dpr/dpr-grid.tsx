@@ -74,7 +74,7 @@ export function DprGrid({
   }
 
   return (
-    <div style={{ overflowX: "auto", border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+    <div style={{ overflow: "auto", maxHeight: "78vh", border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
       <table style={{ borderCollapse: "collapse", fontSize: 12.5, color: "#1a1a1a", tableLayout: "fixed", minWidth: 720 }}>
         <colgroup>
           <col style={{ width: 38 }} />
@@ -98,10 +98,12 @@ export function DprGrid({
         <tbody>
           {disp.map((r, i) => {
             const isTotal = r.kind === "data" && r.tone === "total";
+            const isHeader = r.kind === "header";
             return (
               <tr key={i}>
-                {/* Row number gutter — match the TOTAL row's heavy top rule */}
-                <td style={isTotal ? { ...rowNumCell, borderTop: "2px solid #404040" } : rowNumCell}>{i + 1}</td>
+                {/* Row number gutter — match the TOTAL row's heavy top rule. The
+                    header row's gutter is sticky too so the frozen line is whole. */}
+                <td style={isTotal ? { ...rowNumCell, borderTop: "2px solid #404040" } : isHeader ? { ...rowNumCell, position: "sticky", top: 0, zIndex: 2 } : rowNumCell}>{i + 1}</td>
                 {r.kind === "blank" && COL_LETTERS.map((c) => <td key={c} style={blankCell} />)}
                 {r.kind === "header" && (
                   <>
@@ -177,7 +179,9 @@ const colHeadCell: CSSProperties = { background: HEAD_BG, border: GRID, color: "
 const rowNumCell: CSSProperties = { background: "#f1f1f1", border: GRID, color: "#8a8a8a", fontWeight: 600, textAlign: "center", fontSize: 10.5, width: 38 };
 const blankCell: CSSProperties = { border: GRID, background: "#fff", height: 22 };
 
-const headerCell: CSSProperties = { border: GRID, background: "#ffe600", height: 24 };
+// Frozen header line — sticks to the top of the scroll box so the column names
+// (DAILY / 7 DAYS / MONTH / ALL TIME) stay visible while scrolling (Daksh).
+const headerCell: CSSProperties = { border: GRID, background: "#ffe600", height: 24, position: "sticky", top: 0, zIndex: 2 };
 const headerLabelCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", padding: "4px 8px", letterSpacing: "0.02em" };
 const headerColCell: CSSProperties = { ...headerCell, fontWeight: 800, color: "#1a1a1a", textAlign: "right", padding: "4px 8px" };
 

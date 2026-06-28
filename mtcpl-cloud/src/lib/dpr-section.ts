@@ -113,6 +113,40 @@ function vendorLines(vendors: Map<string, DprWindows>): DprLine[] {
     .sort((a, b) => byVolume(a.windows, b.windows) || a.label.localeCompare(b.label));
 }
 
+// ── shared temple → STONE builder ───────────────────────────────────────
+// Block Cutted + Dispatched group TEMPLE-wise, then by STONE under each temple
+// (Daksh — block cutted is the cut slabs per site per stone, NOT per carver).
+export type StoneItem = { temple: string | null; stone: string | null; cft: number; date: string | null };
+
+export function buildTempleStoneSection(
+  items: StoneItem[],
+  bounds: WinBounds,
+): { lines: DprLine[]; total: DprWindows } {
+  const temples = new Map<string, { windows: DprWindows; stones: Map<string, DprWindows> }>();
+  const total = emptyWindows();
+  for (const it of items) {
+    const temple = (it.temple ?? "").trim() || "—";
+    const stone = (it.stone ?? "").trim() || "—";
+    const v = { cft: it.cft, tonnes: 0 };
+    const f = windowFlags(it.date, bounds);
+    let t = temples.get(temple);
+    if (!t) { t = { windows: emptyWindows(), stones: new Map() }; temples.set(temple, t); }
+    addWin(t.windows, v, f);
+    addWin(total, v, f);
+    let sw = t.stones.get(stone);
+    if (!sw) { sw = emptyWindows(); t.stones.set(stone, sw); }
+    addWin(sw, v, f);
+  }
+  const lines: DprLine[] = [];
+  const sorted = [...temples.entries()].sort((a, b) => byVolume(a[1].windows, b[1].windows) || a[0].localeCompare(b[0]));
+  for (const [temple, t] of sorted) {
+    lines.push({ tone: "group", label: temple, windows: t.windows });
+    const stones = [...t.stones.entries()].sort((a, b) => byVolume(a[1], b[1]) || a[0].localeCompare(b[0]));
+    for (const [stone, sw] of stones) lines.push({ tone: "item", label: stone, windows: sw });
+  }
+  return { lines, total };
+}
+
 export function buildTempleVendorSection(
   items: VendorItem[],
   bounds: WinBounds,

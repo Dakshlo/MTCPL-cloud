@@ -13,12 +13,13 @@ import type { DprSection } from "@/lib/dpr-section";
 import { DprGrid } from "./dpr-grid";
 import { loadDprSectionAction } from "./actions";
 
-export type DprSectionKey = "block_added" | "block_cutted" | "carving_done";
+export type DprSectionKey = "block_added" | "block_cutted" | "carving_done" | "dispatched";
 
 const SECTIONS: { key: DprSectionKey; label: string }[] = [
   { key: "block_added", label: "Block Added" },
   { key: "block_cutted", label: "Block Cutted" },
   { key: "carving_done", label: "Carving Done" },
+  { key: "dispatched", label: "Dispatched" },
 ];
 
 const VIEW: Record<DprSectionKey, { title: string; shortUnit: string; longUnit: string; note: string }> = {
@@ -32,13 +33,19 @@ const VIEW: Record<DprSectionKey, { title: string; shortUnit: string; longUnit: 
     title: "BLOCK CUTTED",
     shortUnit: "slab",
     longUnit: "slab",
-    note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor (slabs not yet handed to a carver shown under “NOT ASSIGNED TO CARVING”) · windowed by the slab’s cut-done date",
+    note: "CFT = L×W×T ÷ 1728 · temple-wise → stone-wise · windowed by the slab’s cut-done date",
   },
   carving_done: {
     title: "CARVING DONE",
     shortUnit: "slab",
     longUnit: "slab",
     note: "CFT = L×W×T ÷ 1728 · temple-wise → CNC / outsource carving vendor · windowed by when carving finished (released to dispatch) · excludes direct-dispatch slabs that skipped carving",
+  },
+  dispatched: {
+    title: "DISPATCHED",
+    shortUnit: "slab",
+    longUnit: "slab",
+    note: "CFT = L×W×T ÷ 1728 · temple-wise → stone-wise · counted when the truck is released (owner-approved invoice → on the road); windowed by that date",
   },
 };
 
