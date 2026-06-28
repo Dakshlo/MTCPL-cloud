@@ -161,6 +161,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
   // it as INV-YYYY-N instead of the internal challan CH-YYYY-N code.
   const invCode = (c.invoice_no_override ?? "").trim() || invoiceCode(c.challan_number, c.challan_date);
+  // Source challan no. (the priced challan IS this invoice) — shown under the
+  // date so the floor links the bill to its delivery challan at a glance.
+  const challanLabel = c.challan_number != null && String(c.challan_number).trim() !== ""
+    ? `CHLN-${String(c.challan_number).padStart(4, "0")}`
+    : null;
 
   // Stone per item — derived from its slab codes (challan_items has no stone
   // column). One lookup for all codes; a group is single-stone so its first
@@ -350,7 +355,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <div>
             <div className="num">{invCode}</div>
             <div className="idate">📅 {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
-            <div className="dt">{vehicleNo ? <>Vehicle {vehicleNo}<br /></> : null}Printed {printDate}</div>
+            <div className="dt">{vehicleNo ? <>Vehicle {vehicleNo}<br /></> : null}{challanLabel ? <>Challan {challanLabel}<br /></> : null}Printed {printDate}</div>
           </div>
         </div>
 
@@ -404,7 +409,6 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </>
         )}
 
-        {c.notes && <p style={{ fontSize: 10, color: "#333", marginTop: 8 }}><strong>Notes:</strong> {c.notes}</p>}
 
         <div className="signoff">
           <div className="sign">For MTCPL · Authorised Signatory<div className="sub">&nbsp;</div></div>
