@@ -268,6 +268,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
         .brand-logo { height: 68px; width: auto; }
+        .company-block { flex: 1; text-align: center; }
         .cn { font-size: 15px; font-weight: 800; color: #0f2540; }
         .cl { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.4; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
@@ -345,14 +346,12 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       <div className="wrap">
         <div className="doc-title"><span>TAX INVOICE</span></div>
         <div className="head">
-          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
-            <div>
-              <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-              <div className="cl">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-              <div className="cl">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
-            </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
+          <div className="company-block">
+            <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+            <div className="cl">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="cl">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
           </div>
           <div>
             <div className="num">{invCode}</div>
