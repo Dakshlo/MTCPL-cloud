@@ -255,7 +255,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .company-line { font-size: 8.5px; color: #666; margin-top: 1px; line-height: 1.45; }
         .doc-pill { font-size: 13px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #7c4a1e; border-radius: 6px; padding: 4px 14px; background: #faf4ea; white-space: nowrap; }
         .doc-num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; white-space: nowrap; }
-        .doc-dt { font-size: 9px; color: #888; text-align: right; }
+        .doc-date { width: fit-content; margin-left: auto; margin-top: 5px; font-size: 13px; font-weight: 800; color: #5b2e0a; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 3px 11px; white-space: nowrap; }
+        .doc-dt { font-size: 9px; color: #888; text-align: right; margin-top: 4px; }
 
         /* Tight info strip — every routing field in a compact grid */
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #fdfaf4; }
@@ -314,14 +315,15 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
             <div>
               <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
               <div className="company-line">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-              <div className="company-line">☎ +91 94141 52740 / +91 94143 74979 · mtcpl.org · mateshwaritemples.com</div>
+              <div className="company-line">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
             </div>
           </div>
           <div>
             <span className="doc-pill">Delivery Challan</span>
             <div className="doc-num">{shortId}</div>
+            <div className="doc-date">📅 {dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
             <div className="doc-dt">
-              Dispatched {dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })} · by {dispatcherName}
+              by {dispatcherName}
               <br />Printed {printDate}
             </div>
           </div>

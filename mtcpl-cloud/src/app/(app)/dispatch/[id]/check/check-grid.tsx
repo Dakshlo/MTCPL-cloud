@@ -206,6 +206,11 @@ export function CheckGrid({
   const cftTotal = cftGroups.reduce((a, g) => a + measureOf(g, "cft"), 0);
   const sftTotal = sftGroups.reduce((a, g) => a + measureOf(g, "sft"), 0);
 
+  // Weight is MANDATORY before verifying (Daksh) — either EVERY row has a weight
+  // (per-slab mode) or a single whole-truck load weight is entered (truck mode).
+  const missingWeightRows = weightMode === "slab" ? groups.filter((g) => weightKgOf(g) <= 0).length : 0;
+  const weightOk = weightMode === "truck" ? truckKgNum > 0 : missingWeightRows === 0;
+
   // Full cell borders → an Excel-style grid (column lines as well as row lines).
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--surface)" };
@@ -276,9 +281,9 @@ export function CheckGrid({
                             inputMode="decimal"
                             value={weightByKey[g.key] ?? ""}
                             onChange={(e) => setWeightByKey((p) => ({ ...p, [g.key]: e.target.value }))}
-                            placeholder="kg"
-                            title={g.qty > 1 ? "Total weight in kg for all pieces in this row" : "Weight in kg"}
-                            style={{ width: 84, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+                            placeholder="kg ⚠"
+                            title={weightKgOf(g) > 0 ? (g.qty > 1 ? "Total weight in kg for all pieces in this row" : "Weight in kg") : "Weight is required for every row"}
+                            style={{ width: 84, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, padding: "5px 7px", borderRadius: 7, border: `1.5px solid ${weightKgOf(g) > 0 ? "var(--border)" : "#dc2626"}`, background: weightKgOf(g) > 0 ? "var(--bg)" : "rgba(220,38,38,0.07)", color: "var(--text)" }}
                           />
                           {weightKgOf(g) > 0 && (
                             <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>{fmt(weightKgOf(g) / 1000, 3)} T</div>
@@ -380,13 +385,17 @@ export function CheckGrid({
               inputMode="decimal"
               value={truckKg}
               onChange={(e) => setTruckKg(e.target.value)}
-              placeholder="kg"
-              style={{ width: 120, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "7px 9px", borderRadius: 8, border: "1.5px solid #0d9488", background: "var(--bg)", color: "var(--text)" }}
+              placeholder="kg ⚠"
+              style={{ width: 120, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "7px 9px", borderRadius: 8, border: `1.5px solid ${truckKgNum > 0 ? "#0d9488" : "#dc2626"}`, background: truckKgNum > 0 ? "var(--bg)" : "rgba(220,38,38,0.07)", color: "var(--text)" }}
             />
-            <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{truckKgNum > 0 ? `= ${fmt(truckTonnes, 3)} T` : "kg"}</span>
+            <span style={{ color: truckKgNum > 0 ? "var(--muted)" : "#dc2626", fontFamily: "ui-monospace, monospace", fontWeight: truckKgNum > 0 ? 400 : 800 }}>{truckKgNum > 0 ? `= ${fmt(truckTonnes, 3)} T` : "required"}</span>
           </label>
         ) : (
-          <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>Weighing each slab — fill the Weight column. Switch to “Whole truck” to enter a single load weight instead.</span>
+          <span style={{ fontSize: 11.5, color: missingWeightRows > 0 ? "#dc2626" : "var(--muted)", fontWeight: missingWeightRows > 0 ? 800 : 600 }}>
+            {missingWeightRows > 0
+              ? `⚠ Weight required — ${missingWeightRows} row${missingWeightRows !== 1 ? "s" : ""} still need a weight (or switch to “Whole truck”).`
+              : "Weighing each slab — every row must have a weight. Switch to “Whole truck” to enter a single load weight instead."}
+          </span>
         )}
       </div>
 
@@ -497,14 +506,25 @@ export function CheckGrid({
 
       {/* Verify / Cancel */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <form action={verifyDispatchAction} style={{ display: "inline" }}>
+        <form
+          action={verifyDispatchAction}
+          style={{ display: "inline" }}
+          onSubmit={(e) => {
+            if (!weightOk) {
+              e.preventDefault();
+              alert(weightMode === "truck"
+                ? "Weight is mandatory — enter the whole-truck load weight before verifying."
+                : `Weight is mandatory — ${missingWeightRows} row${missingWeightRows !== 1 ? "s" : ""} still need a weight (or switch to “Whole truck”).`);
+            }
+          }}
+        >
           <input type="hidden" name="id" value={dispatchId} />
           <input type="hidden" name="units" value={unitsJson} />
           <input type="hidden" name="weights" value={weightsJson} />
           <input type="hidden" name="descs" value={descsJson} />
           <input type="hidden" name="weight_mode" value={weightMode} />
           <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
-          <button type="submit" style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: "#15803d", border: "none", borderRadius: 11, cursor: "pointer" }}>
+          <button type="submit" disabled={!weightOk} title={weightOk ? undefined : "Enter weight first — per slab or whole truck"} style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: weightOk ? "#15803d" : "var(--border)", border: "none", borderRadius: 11, cursor: weightOk ? "pointer" : "not-allowed" }}>
             ✅ Verify — create challan &amp; send truck
           </button>
         </form>

@@ -391,7 +391,7 @@ export function VoucherView({
             Mateshwari Temples Construction Pvt. Ltd. · Nh-27, Opposite Ajari Gate, Pindwara, Dist-Sirohi, Rajasthan
           </div>
           <div>
-            ☎ +91 9414152740 / +91 9414374979 · 🌐 Mtcpl.org · mateshwaritemples.com
+            ☎ +91 9414152740 / +91 9414374979 · ✉ temple@mtcpl.co
           </div>
           <div className="gen-note">
             Computer-generated voucher · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",

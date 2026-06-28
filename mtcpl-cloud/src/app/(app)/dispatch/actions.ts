@@ -562,6 +562,18 @@ export async function verifyDispatchAction(formData: FormData) {
   if (dispatch.approved_at) fail("/dispatch", "Dispatch already verified");
   if (dispatch.delivered_at) fail("/dispatch", "Dispatch already delivered");
 
+  // Weight is MANDATORY before verifying (Daksh). Truck mode → one load weight;
+  // per-slab mode → every slab must carry a weight. The Check grid already
+  // blocks the button, this is the server-side backstop.
+  if (weightMode === "truck") {
+    if (!(truckTonnes > 0)) fail(`/dispatch/${dispatchId}/check`, "Weight is mandatory — enter the whole-truck load weight before verifying.");
+  } else {
+    const vals = Object.values(weights).map((w) => Number(w) || 0);
+    if (vals.length === 0 || vals.some((w) => w <= 0)) {
+      fail(`/dispatch/${dispatchId}/check`, "Weight is mandatory — every slab needs a weight (or switch to whole-truck weight).");
+    }
+  }
+
   // Persist the per-slab billing unit. Default cft; only the explicitly-toggled
   // sft slabs flip. Two bulk updates keep it to a couple of round-trips.
   const sftIds: string[] = [];

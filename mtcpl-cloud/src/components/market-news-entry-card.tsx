@@ -51,9 +51,6 @@ export function MarketNewsEntryCard() {
         <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px" }}>
           Market brief &amp; chat
         </div>
-        <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>
-          Bull / bear read · news · stock ideas · chat
-        </div>
       </div>
       <div
         style={{

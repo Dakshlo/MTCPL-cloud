@@ -55,9 +55,6 @@ export function DprEntryCard() {
         <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.2px" }}>
           DPR
         </div>
-        <div style={{ fontSize: 12.5, color: "#d1fae5", marginTop: 4, lineHeight: 1.4 }}>
-          Block added — stone &amp; vendor wise, daily to all-time.
-        </div>
       </div>
 
       <div

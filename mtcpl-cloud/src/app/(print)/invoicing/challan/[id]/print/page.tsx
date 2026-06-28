@@ -208,10 +208,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
-              <th className="r">Qty</th>
-              <th className="r hl">{unit.toUpperCase()}</th>
-              <th className="r hl">Rate</th>
-              <th className="r hl">Amount</th>
+              <th className="r hl1">Qty</th>
+              <th className="r hl1">{unit.toUpperCase()}</th>
+              <th className="r hl2">Rate</th>
+              <th className="r hl2">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -225,20 +225,20 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                 <td className="r mono">{it.length_ft ?? "-"}</td>
                 <td className="r mono">{it.width_ft ?? "-"}</td>
                 <td className="r mono">{it.thickness_ft ?? "-"}</td>
-                <td className="r mono b">{Number(it.quantity) || 0}</td>
-                <td className="r mono b hl">{fmt(measureOf(it))}</td>
-                <td className="r mono hl">{fmt(Number(it.rate) || 0)}</td>
-                <td className="r mono b hl">{rupee(amountOf(it))}</td>
+                <td className="r mono b hl1">{Number(it.quantity) || 0}</td>
+                <td className="r mono b hl1">{fmt(measureOf(it))}</td>
+                <td className="r mono hl2">{fmt(Number(it.rate) || 0)}</td>
+                <td className="r mono b hl2">{rupee(amountOf(it))}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={8} className="r">Total</td>
-              <td className="r mono b">{qtyTotal}</td>
-              <td className="r mono b hl">{fmt(measTotal)}</td>
-              <td className="hl"></td>
-              <td className="r mono b hl">{rupee(sub)}</td>
+              <td className="r mono b hl1">{qtyTotal}</td>
+              <td className="r mono b hl1">{fmt(measTotal)}</td>
+              <td className="hl2"></td>
+              <td className="r mono b hl2">{rupee(sub)}</td>
             </tr>
           </tfoot>
         </table>
@@ -287,11 +287,15 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         table.t td { padding: 2px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; white-space: nowrap; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
-        /* Highlighted money columns (CFT/SFT · Rate · Amount) — never wrap. */
-        .t .hl { white-space: nowrap; }
-        .t td.hl { background: #fff7e0; }
-        .t th.hl { background: #ffe6a8; }
-        .t tfoot td.hl { background: #ffeec2; }
+        /* Highlighted columns — never wrap. Two colour groups:
+           hl1 = Qty + CFT/SFT (blue) · hl2 = Rate + Amount (amber). */
+        .t .hl1, .t .hl2 { white-space: nowrap; }
+        .t td.hl1 { background: #e6f0fb; }
+        .t th.hl1 { background: #c7ddf6; }
+        .t tfoot td.hl1 { background: #d8e8fa; }
+        .t td.hl2 { background: #fff7e0; }
+        .t th.hl2 { background: #ffe6a8; }
+        .t tfoot td.hl2 { background: #ffeec2; }
         .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
         .totals { min-width: 280px; border: 1px solid #d3dae3; border-radius: 8px; overflow: hidden; }
         .totals .row { display: flex; justify-content: space-between; gap: 24px; padding: 5px 14px; font-size: 11.5px; }
@@ -331,7 +335,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
             <div>
               <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
               <div className="cl">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-              <div className="cl">☎ +91 94141 52740 / +91 94143 74979 · mtcpl.org · mateshwaritemples.com</div>
+              <div className="cl">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
             </div>
           </div>
           <div>
