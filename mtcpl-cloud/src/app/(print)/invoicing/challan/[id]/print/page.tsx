@@ -26,6 +26,34 @@ function CodeCell({ codes }: { codes: string | null }) {
   return <>{lines.map((ln, i) => (<span key={i}>{ln}{i < lines.length - 1 ? <br /> : null}</span>))}</>;
 }
 
+type PartyShape = {
+  name: string | null; address: string | null; city: string | null; state: string | null;
+  state_code: string | null; gstin: string | null; pan: string | null; phone: string | null; email: string | null;
+};
+
+// One bill-to / ship-to address block.
+function Party({ label, p, fallback }: { label: string; p: PartyShape | null; fallback?: string }) {
+  if (!p) {
+    return (
+      <div className="party">
+        <div className="party-k">{label}</div>
+        <div className="party-line muted">{fallback ?? "-"}</div>
+      </div>
+    );
+  }
+  const loc = [p.city, p.state, p.state_code ? `(code ${p.state_code})` : null].filter(Boolean).join(", ");
+  return (
+    <div className="party">
+      <div className="party-k">{label}</div>
+      <div className="party-name">{dash(p.name)}</div>
+      {p.address && <div className="party-line">{p.address}</div>}
+      {loc && <div className="party-line">{loc}</div>}
+      {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)} · PAN: {dash(p.pan)}</div>}
+      {(p.phone || p.email) && <div className="party-meta">{[p.phone, p.email].filter(Boolean).join(" · ")}</div>}
+    </div>
+  );
+}
+
 type Params = Promise<{ id: string }>;
 
 type Item = {
@@ -97,8 +125,18 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const billing = c.temple
     ? await fetchTempleBilling(admin, c.temple)
     : party
-    ? { name: party.name, gstin: party.gstin, pan: null, address: party.address, email: null, phone: party.phone }
+    ? {
+        name: party.name, gstin: party.gstin, pan: null, address: party.address, city: null, state: null,
+        state_code: null, email: null, phone: party.phone, vendor_code: null, work_order_no: null, shipping: null,
+      }
     : null;
+  // Bill-to / Ship-to address blocks for the print (ship null ⇒ same as billing).
+  const billParty: PartyShape | null = billing
+    ? { name: billing.name ?? c.temple ?? null, address: billing.address, city: billing.city, state: billing.state, state_code: billing.state_code, gstin: billing.gstin, pan: billing.pan, phone: billing.phone, email: billing.email }
+    : c.temple
+    ? { name: c.temple, address: null, city: null, state: null, state_code: null, gstin: null, pan: null, phone: null, email: null }
+    : null;
+  const shipParty: PartyShape | null = billing?.shipping ?? null;
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -220,6 +258,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
         .info .v.big { font-size: 13px; font-weight: 800; }
         .info .mono { font-family: ui-monospace, monospace; }
+        .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 4px; }
+        .party { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; background: #f7fafc; }
+        .party-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
+        .party-name { font-size: 13px; font-weight: 800; color: #1a1a1a; }
+        .party-line { font-size: 10px; color: #333; margin-top: 1px; }
+        .party-meta { font-size: 9.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
+        .party .muted { color: #999; }
+        .vw { font-size: 9.5px; color: #444; margin: 5px 0 0; font-weight: 700; }
         .doc-title { text-align: center; font-size: 19px; font-weight: 800; letter-spacing: 0.18em; color: #0f2540; margin: 2px 0 8px; }
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
@@ -277,13 +323,17 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
         </div>
 
-        <div className="info">
-          <div><div className="k">Bill to</div><div className="v big">🛕 {dash(billing?.name ?? c.temple)}</div></div>
-          <div><div className="k">GSTIN</div><div className="v mono">{dash(billing?.gstin)}</div></div>
-          <div><div className="k">PAN</div><div className="v mono">{dash(billing?.pan)}</div></div>
-          <div><div className="k">Phone</div><div className="v mono">{dash(billing?.phone)}</div></div>
-          <div style={{ gridColumn: "1 / -1" }}><div className="k">Address</div><div className="v">{dash(billing?.address)}</div></div>
+        <div className="parties">
+          <Party label="Bill To" p={billParty} />
+          <Party label="Ship To" p={shipParty} fallback="Same as billing address" />
         </div>
+        {(billing?.vendor_code || billing?.work_order_no) && (
+          <div className="vw">
+            {billing?.vendor_code ? `Vendor code: ${billing.vendor_code}` : ""}
+            {billing?.vendor_code && billing?.work_order_no ? "  ·  " : ""}
+            {billing?.work_order_no ? `Work order no: ${billing.work_order_no}` : ""}
+          </div>
+        )}
 
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No items on this invoice.</p>

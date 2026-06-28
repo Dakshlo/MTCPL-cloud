@@ -194,7 +194,14 @@ export async function setTempleBillingAction(
   const templeId = txt(formData, "temple_id");
   if (!templeId) return { ok: false, error: "Missing temple." };
 
-  const FIELDS = ["bill_gstin", "bill_pan", "bill_address", "bill_email", "bill_phone"] as const;
+  const FIELDS = [
+    // Billing block
+    "bill_name", "bill_gstin", "bill_pan", "bill_address", "bill_city", "bill_state", "bill_state_code", "bill_email", "bill_phone",
+    // Shipping block
+    "ship_name", "ship_address", "ship_city", "ship_state", "ship_state_code", "ship_gstin", "ship_pan", "ship_phone", "ship_email",
+    // Shared optional
+    "vendor_code", "work_order_no",
+  ] as const;
   const patch: Record<string, string | null> = {};
   for (const f of FIELDS) {
     if (formData.has(f)) patch[f] = txt(formData, f) || null;
@@ -212,6 +219,27 @@ export async function setTempleBillingAction(
   if (!updated) return { ok: false, error: "Temple not found." };
 
   void logAudit(profile.id, "temple_billing_set", "temple", templeId, { fields: Object.keys(patch) });
+  revalidatePath("/invoicing");
+  revalidatePath("/invoicing/temple-clients");
+  return { ok: true };
+}
+
+/** Rename a temple from the Client-billing page (accountants too). Cascades the
+ *  name across all denormalised tables via rename_temple() (mig 161). The
+ *  code_prefix stays locked — slab IDs embed it. */
+export async function renameTempleClientAction(
+  templeId: string,
+  newName: string,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) return { ok: false, error: "Invoicing access denied." };
+  const name = (newName ?? "").trim();
+  if (!templeId) return { ok: false, error: "Missing temple." };
+  if (!name) return { ok: false, error: "Enter a name." };
+  const supabase = createAdminSupabaseClient();
+  const { error } = await supabase.rpc("rename_temple", { p_id: templeId, p_new: name });
+  if (error) return { ok: false, error: error.message };
+  void logAudit(profile.id, "temple_renamed", "temple", templeId, { name });
   revalidatePath("/invoicing");
   revalidatePath("/invoicing/temple-clients");
   return { ok: true };
