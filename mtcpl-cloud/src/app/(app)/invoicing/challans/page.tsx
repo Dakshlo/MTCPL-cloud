@@ -5,6 +5,7 @@
  * Filter params come from the URL so links can pre-filter.
  */
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
@@ -24,7 +25,7 @@ import { ChallanStatusPill } from "../_ui/challan-status-pill";
 import { syncDispatchChallansAction } from "../actions";
 
 type SearchParams = Promise<{
-  status?: "open" | "converted" | "cancelled" | "all";
+  status?: "open" | "invoiced" | "converted" | "cancelled" | "all";
   from?: string;
   to?: string;
   toast?: string;
@@ -55,7 +56,9 @@ export default async function ChallansListPage({
 
   const status = sp.status ?? "all";
   if (status === "open") {
-    q = q.is("cancelled_at", null).is("converted_invoice_id", null);
+    q = q.is("cancelled_at", null).is("converted_invoice_id", null).is("priced_at", null);
+  } else if (status === "invoiced") {
+    q = q.is("cancelled_at", null).is("converted_invoice_id", null).not("priced_at", "is", null);
   } else if (status === "converted") {
     q = q.is("cancelled_at", null).not("converted_invoice_id", "is", null);
   } else if (status === "cancelled") {
@@ -77,6 +80,22 @@ export default async function ChallansListPage({
     priced_at: string | null;
     invoice_parties: { name: string } | { name: string }[] | null;
   }>;
+
+  type ChallanRow = (typeof challans)[number];
+  const clientNameOf = (c: ChallanRow): string => {
+    const legacy = c.invoice_parties
+      ? Array.isArray(c.invoice_parties) ? c.invoice_parties[0]?.name ?? null : c.invoice_parties.name
+      : null;
+    return c.temple ?? legacy ?? "—";
+  };
+  const statusOf = (c: ChallanRow): "open" | "invoiced" | "converted" | "cancelled" =>
+    c.cancelled_at ? "cancelled" : c.converted_invoice_id ? "converted" : c.priced_at ? "invoiced" : "open";
+  // Temple-wise grouping (Daksh) — one section per client/temple, alphabetical.
+  const grouped = (() => {
+    const m = new Map<string, ChallanRow[]>();
+    for (const c of challans) { const k = clientNameOf(c); const a = m.get(k) ?? []; a.push(c); m.set(k, a); }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
 
   return (
     <section className="page-card">
@@ -123,6 +142,7 @@ export default async function ChallansListPage({
           <select name="status" defaultValue={status} style={INPUT_STYLE}>
             <option value="all">All</option>
             <option value="open">Open</option>
+            <option value="invoiced">Invoiced</option>
             <option value="converted">Converted</option>
             <option value="cancelled">Cancelled</option>
           </select>
@@ -161,44 +181,36 @@ export default async function ChallansListPage({
               <tr>
                 <th style={TABLE_STYLES.th}>Challan #</th>
                 <th style={TABLE_STYLES.th}>Date</th>
-                <th style={TABLE_STYLES.th}>Client (temple)</th>
                 <th style={TABLE_STYLES.th}>Status</th>
                 <th style={TABLE_STYLES.th}>Notes</th>
               </tr>
             </thead>
             <tbody>
-              {challans.map((c, idx) => {
-                const legacyParty = c.invoice_parties
-                  ? Array.isArray(c.invoice_parties)
-                    ? c.invoice_parties[0]?.name ?? null
-                    : c.invoice_parties.name
-                  : null;
-                const clientName = c.temple ?? legacyParty ?? "—";
-                const s: "open" | "converted" | "cancelled" = c.cancelled_at
-                  ? "cancelled"
-                  : c.converted_invoice_id
-                  ? "converted"
-                  : "open";
-                return (
-                  <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
-                    <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-                      <Link href={`/invoicing/challans/${c.id}`} style={{ color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}>
-                        {c.challan_number}
-                      </Link>
-                    </td>
-                    <td style={TABLE_STYLES.td}>{c.challan_date}</td>
-                    <td style={TABLE_STYLES.td}>
-                      <VendorIdentity name={clientName} size={28} />
-                    </td>
-                    <td style={TABLE_STYLES.td}>
-                      <ChallanStatusPill status={s} />
-                    </td>
-                    <td style={{ ...TABLE_STYLES.td, color: "var(--muted)", fontSize: 12 }}>
-                      {c.notes ?? "—"}
+              {grouped.map(([temple, rows]) => (
+                <Fragment key={temple}>
+                  <tr>
+                    <td colSpan={4} style={{ padding: "8px 12px", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800, fontSize: 12.5, color: "var(--text)", borderTop: "2px solid var(--border)" }}>
+                      🛕 {temple} <span style={{ color: "var(--muted)", fontWeight: 600 }}>· {rows.length}</span>
                     </td>
                   </tr>
-                );
-              })}
+                  {rows.map((c, idx) => (
+                    <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
+                      <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                        <Link href={`/invoicing/challans/${c.id}`} style={{ color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}>
+                          {c.challan_number}
+                        </Link>
+                      </td>
+                      <td style={TABLE_STYLES.td}>{c.challan_date}</td>
+                      <td style={TABLE_STYLES.td}>
+                        <ChallanStatusPill status={statusOf(c)} />
+                      </td>
+                      <td style={{ ...TABLE_STYLES.td, color: "var(--muted)", fontSize: 12 }}>
+                        {c.notes ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>

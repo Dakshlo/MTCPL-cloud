@@ -91,10 +91,12 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     position: number;
   }>;
 
-  const status: "open" | "converted" | "cancelled" = c.cancelled_at
+  const status: "open" | "invoiced" | "converted" | "cancelled" = c.cancelled_at
     ? "cancelled"
     : c.converted_invoice_id
     ? "converted"
+    : c.priced_at
+    ? "invoiced"
     : "open";
 
   return (
@@ -129,14 +131,14 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
               🖨 Tax invoice →
             </Link>
           )}
-          {status === "open" && (
+          {(status === "open" || status === "invoiced") && (
             <>
               <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.primary}>
-                🧾 Review &amp; price →
+                {status === "invoiced" ? "✏️ Re-price →" : "🧾 Review & price →"}
               </Link>
-              {/* Legacy portrait flow only for old party-based challans; the
-                  temple-based ones use Review & price → landscape invoice. */}
-              {!c.temple && (
+              {/* Legacy portrait flow only for old party-based, not-yet-priced
+                  challans; temple-based ones use Review & price → tax invoice. */}
+              {status === "open" && !c.temple && (
                 <Link
                   href={`/invoicing/challans/${c.id}/convert`}
                   style={BUTTON_STYLES.secondary}

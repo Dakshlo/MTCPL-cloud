@@ -3,136 +3,133 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { invoiceCode } from "@/lib/invoice-code";
 
-// Mig 038 → Mig 058 — moved from /invoicing/page.tsx to
-// /invoicing/invoices/page.tsx as part of the v2 restructure. The
-// /invoicing/ landing is now the dashboard; this is the dedicated
-// invoices list. Access widened to include final_auditor (the
-// starred accountant) via canUseInvoicing.
+// Mig 038 → Mig 058. The /invoicing/ landing is the dashboard; this is the
+// dedicated invoices list. Daksh June 2026 — a PRICED challan IS a tax invoice
+// (mig 157) but never creates an `invoices` row, so it was missing here. We now
+// merge priced challans (linking to their landscape tax-invoice print) with the
+// legacy converted invoices, newest first.
 export default async function InvoicingListPage() {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/");
   const supabase = createAdminSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("id, invoice_number, invoice_date, customer_name, total, created_at")
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) throw new Error(error.message);
+  const [{ data: legacyData, error: legErr }, { data: pricedData, error: prErr }] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, invoice_date, customer_name, total, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("challans")
+      .select("id, challan_number, challan_date, temple, priced_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .not("priced_at", "is", null)
+      .is("cancelled_at", null)
+      .is("converted_invoice_id", null)
+      .order("priced_at", { ascending: false })
+      .limit(300),
+  ]);
+  if (legErr) throw new Error(legErr.message);
+  if (prErr) throw new Error(prErr.message);
 
-  const rows = (data ?? []) as Array<{
-    id: string;
-    invoice_number: string;
-    invoice_date: string;
-    customer_name: string;
-    total: number;
-    created_at: string;
-  }>;
+  type PricedChallan = {
+    id: string; challan_number: string; challan_date: string; temple: string | null; priced_at: string;
+    gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
+  };
+  const priced = (pricedData ?? []) as PricedChallan[];
+
+  // Compute each priced challan's grand total from its items + GST snapshot.
+  const totalByChallan = new Map<string, number>();
+  const challanIds = priced.map((c) => c.id);
+  for (let i = 0; i < challanIds.length; i += 300) {
+    const chunk = challanIds.slice(i, i + 300);
+    if (chunk.length === 0) break;
+    const { data: items } = await supabase
+      .from("challan_items")
+      .select("challan_id, amount, rate, measure_qty, quantity")
+      .in("challan_id", chunk);
+    const byCh = new Map<string, number[]>();
+    for (const it of (items ?? []) as Array<{ challan_id: string; amount: number | null; rate: number | null; measure_qty: number | null; quantity: number | null }>) {
+      const meas = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
+      const amt = it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * meas;
+      const arr = byCh.get(it.challan_id) ?? []; arr.push(amt); byCh.set(it.challan_id, arr);
+    }
+    for (const c of priced) {
+      if (!chunk.includes(c.id)) continue;
+      const t = computeInvoiceTotals(byCh.get(c.id) ?? [], {
+        mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
+        igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0,
+      });
+      totalByChallan.set(c.id, t.grand);
+    }
+  }
+
+  type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
+  const rows: Row[] = [
+    ...((legacyData ?? []) as Array<{ id: string; invoice_number: string; invoice_date: string; customer_name: string; total: number }>).map((r) => ({
+      key: `inv:${r.id}`, code: r.invoice_number, date: r.invoice_date, customer: r.customer_name,
+      total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
+    })),
+    ...priced.map((c) => ({
+      key: `ch:${c.id}`, code: invoiceCode(c.challan_number, c.challan_date), date: c.challan_date,
+      customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
+      href: `/invoicing/challan/${c.id}/print`, external: true,
+    })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
   return (
     <section className="page-card">
-      <div
-        className="page-header"
-        style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}
-      >
+      <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h1>Invoicing</h1>
           <p className="muted">
-            Outgoing customer invoices. Generate, print, and archive. Different
-            from Finance — Finance handles incoming supplier bills, this
-            handles invoices you issue to clients.
+            Outgoing customer tax invoices — priced challans plus any legacy converted invoices. Different from
+            Finance, which handles incoming supplier bills.
           </p>
         </div>
-        <Link
-          href="/invoicing/invoices/new"
-          style={{
-            textDecoration: "none",
-            fontSize: 13,
-            padding: "10px 18px",
-            background: "var(--gold)",
-            color: "#fff",
-            border: "1px solid var(--gold-dark)",
-            borderRadius: 8,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-          }}
-        >
+        <Link href="/invoicing/invoices/new" style={{ textDecoration: "none", fontSize: 13, padding: "10px 18px", background: "var(--gold)", color: "#fff", border: "1px solid var(--gold-dark)", borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>
           🧾 + New invoice
         </Link>
       </div>
 
       <div style={{ marginTop: 18 }}>
         {rows.length === 0 ? (
-          <div
-            style={{
-              background: "var(--surface)",
-              border: "1px dashed var(--border)",
-              borderRadius: 12,
-              padding: "32px 24px",
-              textAlign: "center",
-              color: "var(--muted)",
-            }}
-          >
-            No invoices yet. Click <strong>+ New invoice</strong> to generate
-            the first one.
+          <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "32px 24px", textAlign: "center", color: "var(--muted)" }}>
+            No invoices yet. Price a challan to issue a tax invoice, or click <strong>+ New invoice</strong>.
           </div>
         ) : (
-          <div
-            style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 13,
-              }}
-            >
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "var(--bg)" }}>
                   <th style={th}>Invoice #</th>
                   <th style={th}>Date</th>
-                  <th style={th}>Customer</th>
+                  <th style={th}>Customer (temple)</th>
                   <th style={{ ...th, textAlign: "right" }}>Total (₹)</th>
                   <th style={{ ...th, width: 100 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} style={{ borderTop: "1px solid var(--border-light)" }}>
-                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
-                      {r.invoice_number}
-                    </td>
+                  <tr key={r.key} style={{ borderTop: "1px solid var(--border-light)" }}>
+                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{r.code}</td>
                     <td style={td}>
-                      {new Date(r.invoice_date).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
+                      {new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                     </td>
-                    <td style={td}>{r.customer_name}</td>
+                    <td style={td}>{r.customer}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                      {Number(r.total).toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {r.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td style={td}>
                       <Link
-                        href={`/invoicing/invoices/${r.id}`}
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: "var(--gold-dark)",
-                          textDecoration: "none",
-                        }}
+                        href={r.href}
+                        target={r.external ? "_blank" : undefined}
+                        rel={r.external ? "noopener noreferrer" : undefined}
+                        style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none" }}
                       >
-                        View →
+                        {r.external ? "🖨 Invoice →" : "View →"}
                       </Link>
                     </td>
                   </tr>

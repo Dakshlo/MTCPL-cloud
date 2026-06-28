@@ -13,10 +13,12 @@
  */
 
 const CHALLAN_STATUS_TINT: Record<
-  "open" | "converted" | "cancelled",
+  "open" | "invoiced" | "converted" | "cancelled",
   { label: string; bg: string; fg: string; dot: string }
 > = {
   open:      { label: "Open",      bg: "#e0e7ff", fg: "#3730a3", dot: "#6366f1" }, // indigo
+  // "invoiced" = priced (the priced challan IS the tax invoice — mig 157).
+  invoiced:  { label: "Invoiced",  bg: "#fef3c7", fg: "#92400e", dot: "#f59e0b" }, // amber
   converted: { label: "Converted", bg: "#dcfce7", fg: "#166534", dot: "#22c55e" }, // emerald
   cancelled: { label: "Cancelled", bg: "#f1f5f9", fg: "#475569", dot: "#94a3b8" }, // slate
 };
@@ -24,7 +26,7 @@ const CHALLAN_STATUS_TINT: Record<
 export function ChallanStatusPill({
   status,
 }: {
-  status: "open" | "converted" | "cancelled";
+  status: "open" | "invoiced" | "converted" | "cancelled";
 }) {
   const t = CHALLAN_STATUS_TINT[status];
   return (
