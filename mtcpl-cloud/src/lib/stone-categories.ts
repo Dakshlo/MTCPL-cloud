@@ -39,6 +39,26 @@ export function isMarble(
   return categoryMap[stoneName] === "marble";
 }
 
+/** Customer-facing stone label for the delivery challan + tax invoice prints
+ *  (Daksh, June 2026):
+ *    • Yellow (Jaisalmer) stone is a SANDSTONE despite its "marble" name — it
+ *      must NEVER print as "yellow marble"; always show "Jaiselmer-sandstone".
+ *    • Every other sandstone-category stone gets a "/sandstone" suffix, e.g.
+ *      "PinkStone" → "PinkStone/sandstone", "RedStone" → "RedStone/sandstone".
+ *    • Marbles (white/black/etc.) print as-is.
+ *  Stones missing from the category map default to sandstone (the app default),
+ *  so they also get the "/sandstone" suffix. */
+export function stonePrintLabel(
+  stoneName: string | null | undefined,
+  categoryMap: Record<string, StoneCategory>,
+): string {
+  const s = (stoneName ?? "").trim();
+  if (!s) return "—";
+  if (/yellow/i.test(s)) return "Jaiselmer-sandstone";
+  if (!isMarble(s, categoryMap)) return `${s}/sandstone`;
+  return s;
+}
+
 /** Suggest the next block ID for a marble truck. Uses a stone-specific
  *  prefix so marble blocks don't collide with sandstone's MT-B- series.
  *  Examples: WhiteMarble → "WM-001", YellowMarble → "YM-001". */

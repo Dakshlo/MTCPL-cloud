@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { resolveDispatchIncharge } from "@/lib/dispatch-incharge";
 import { fetchTempleBilling } from "@/lib/temple-billing";
+import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { groupDispatchSlabs, groupRowsByStone, dash, type DispatchSlabInput, type DispatchGroupRow } from "@/lib/dispatch-grouping";
 import { PrintBtn } from "./print-btn";
 
@@ -148,7 +149,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const totalSlabs = groups.reduce((a, g) => a + g.qty, 0);
   const hasWeights = totalTonnes > 0;
 
-  const [{ data: templeRow }, handlingMan, billing] = await Promise.all([
+  const [{ data: templeRow }, handlingMan, billing, { data: stoneTypeRows }] = await Promise.all([
     admin
       .from("temples")
       .select("installer_name, installer_phone")
@@ -159,7 +160,14 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
     // Mig 165 — Billing + Shipping address for the temple-as-client, shown as
     // Bill-To / Ship-To boxes on the challan (same resolver as the tax invoice).
     fetchTempleBilling(admin, dispatch.temple),
+    // Stone categories — drive the customer-facing stone label (yellow →
+    // Jaiselmer-sandstone; other sandstones get a /sandstone suffix).
+    admin.from("stone_types").select("name, stone_category"),
   ]);
+  const stoneCatMap: Record<string, StoneCategory> = {};
+  for (const r of (stoneTypeRows ?? []) as Array<{ name: string; stone_category?: string | null }>) {
+    stoneCatMap[r.name] = r.stone_category === "marble" ? "marble" : "sandstone";
+  }
   const site = (templeRow ?? {}) as {
     installer_name?: string | null;
     installer_phone?: string | null;
@@ -387,7 +395,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
             {/* Stone-wise sections; CFT + SFT sub-tables within each stone. */}
             {groupRowsByStone(groups).map(({ stone, rows }) => (
               <div key={stone} className="stone-block">
-                <div className="stone-title">🪨 {stone}</div>
+                <div className="stone-title">🪨 {stonePrintLabel(stone, stoneCatMap)}</div>
                 <SlabTable rows={rows.filter((g) => g.measure_unit === "cft")} unit="cft" />
                 <SlabTable rows={rows.filter((g) => g.measure_unit === "sft")} unit="sft" />
               </div>

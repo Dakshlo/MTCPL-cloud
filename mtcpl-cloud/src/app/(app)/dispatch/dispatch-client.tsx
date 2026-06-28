@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction, acknowledgeHandoverAction } from "./actions";
+import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
@@ -1523,10 +1523,6 @@ function TruckHistoryPeek({ trips, onClose }: { trips: TruckTrip[]; onClose: () 
 function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUndo: boolean }) {
   const [deliverRow, setDeliverRow] = useState<OutForDeliveryRow | null>(null);
 
-  // Mig 167 — freshly-released trucks (on_road_at set) whose documents haven't
-  // been handed to the driver yet. They drive the handover popup below.
-  const needsHandover = rows.filter((r) => r.onRoadAt && !r.handoverAckAt);
-
   if (rows.length === 0) {
     return (
       <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 14, fontSize: 15 }}>
@@ -1537,11 +1533,6 @@ function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUn
 
   return (
     <>
-      {/* Mig 167 — handover-documents popup (in-flow faux-overlay, NOT
-          position:fixed). Shows for each just-released truck until its
-          documents are acknowledged as handed to the driver. */}
-      {needsHandover.length > 0 && <HandoverDocsPopup rows={needsHandover} />}
-
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         जब slab site पर पहुँच जाए: <strong>Reached — mark delivered</strong> दबाएँ और दो photo लगाएँ (truck on site + signed challan).
       </div>
@@ -1890,78 +1881,3 @@ function InvoiceInProcessTab({ rows }: { rows: InvoiceInProcessRow[] }) {
   );
 }
 
-// ─── Handover-documents popup (Mig 167) ──────────────────────────────────
-// In-flow faux-overlay (NOT position:fixed) that reminds the dispatcher to
-// hand the printed documents to each freshly-released driver. Acknowledging a
-// truck posts to acknowledgeHandoverAction (stamps handover_ack_at) which
-// removes it from the list on the next render.
-
-function HandoverDocsPopup({ rows }: { rows: OutForDeliveryRow[] }) {
-  return (
-    <div
-      role="dialog"
-      aria-label="Handover the documents to the driver"
-      style={{
-        marginBottom: 16, borderRadius: 14, overflow: "hidden",
-        border: "2px solid #2563EB", background: "rgba(37,99,235,0.06)",
-        boxShadow: "0 10px 30px rgba(37,99,235,0.18)",
-      }}
-    >
-      <div style={{ padding: "13px 18px", background: "rgba(37,99,235,0.12)", borderBottom: "1px solid rgba(37,99,235,0.3)" }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: "#1d4ed8" }}>📄 Handover the documents to the driver</div>
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-          These trucks have been released. Print &amp; hand over the challan/invoice, then mark it done — कागज़ driver को दें।
-        </div>
-      </div>
-      <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {rows.map((r) => (
-          <div
-            key={r.id}
-            style={{
-              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-              padding: "11px 14px", borderRadius: 10, background: "var(--surface)", border: "1px solid var(--border)",
-            }}
-          >
-            <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontWeight: 800, fontSize: 14 }}>🏛 {r.temple}</span>
-                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 800, color: "#1d4ed8" }}>
-                  {chalanLabel(r.challan_number, r.id)}
-                </span>
-              </div>
-              <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
-                {r.vehicle_no ? <>🚛 <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{r.vehicle_no}</strong> · </> : null}
-                {r.driver_name ?? "No driver"}{r.driver_phone ? ` (${r.driver_phone})` : ""}
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <Link
-                href={`/dispatch/${r.id}/print`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  textDecoration: "none", fontSize: 12.5, padding: "9px 14px", background: "var(--bg)",
-                  border: "1.5px solid var(--border)", borderRadius: 9, color: "var(--text)", fontWeight: 700, whiteSpace: "nowrap",
-                }}
-              >
-                🖨 Print
-              </Link>
-              <form action={acknowledgeHandoverAction} style={{ display: "inline" }}>
-                <input type="hidden" name="id" value={r.id} />
-                <button
-                  type="submit"
-                  style={{
-                    background: "#2563EB", color: "#fff", border: "none", borderRadius: 9,
-                    padding: "10px 16px", fontSize: 13, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
-                  }}
-                >
-                  ✓ Documents handed over
-                </button>
-              </form>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}

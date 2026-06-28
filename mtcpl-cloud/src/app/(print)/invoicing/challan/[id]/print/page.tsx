@@ -12,6 +12,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { fetchTempleBilling } from "@/lib/temple-billing";
+import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { PrintBtn } from "./print-btn";
@@ -92,7 +93,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
-  const [{ data: challan }, { data: itemRows }] = await Promise.all([
+  const [{ data: challan }, { data: itemRows }, { data: stoneTypeRows }] = await Promise.all([
     admin
       .from("challans")
       .select(
@@ -107,7 +108,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       )
       .eq("challan_id", id)
       .order("position"),
+    // Stone categories — drive the customer-facing stone label.
+    admin.from("stone_types").select("name, stone_category"),
   ]);
+  const stoneCatMap: Record<string, StoneCategory> = {};
+  for (const r of (stoneTypeRows ?? []) as Array<{ name: string; stone_category?: string | null }>) {
+    stoneCatMap[r.name] = r.stone_category === "marble" ? "marble" : "sandstone";
+  }
   if (!challan) notFound();
   const c = challan as {
     id: string;
@@ -407,7 +414,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <>
             {stoneGroups.map(([stone, rows]) => (
               <div key={stone} className="stone-block">
-                <div className="stone-title">{stone}</div>
+                <div className="stone-title">{stonePrintLabel(stone, stoneCatMap)}</div>
                 <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
                 <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
               </div>
