@@ -249,7 +249,7 @@ export function CftPeekTile({
                     <span style={{ fontFamily: "ui-monospace, monospace" }}>{fmtNum(totalCft)} CFT</span>
                   </div>
                   <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                    Status post-cut · updated_at within the selected window
+                    Status post-cut · counted by block cut date within the selected window
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -762,7 +762,7 @@ function SummaryTable({
 // ── Bucketing helpers ─────────────────────────────────────────────
 
 /** Build summary buckets for a given period kind. The slab list is
- *  bucketed by the IST calendar date of updated_at (yearly collapses
+ *  bucketed by the IST calendar date of the slab's cut date (yearly collapses
  *  further to month). Empty buckets are still emitted so a runner
  *  scanning weekly sees "Tue · 0 slabs" instead of a missing row. */
 function bucketSlabs(
@@ -774,6 +774,7 @@ function bucketSlabs(
   // IST-based YYYY-MM-DD key for a slab.
   function dayKeyIST(iso: string): string {
     const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return ""; // guard empty/invalid cut date
     // toLocaleString → "DD/MM/YYYY, HH:MM:SS am" in en-IN. Easier to
     // pull components via Intl parts.
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -843,7 +844,7 @@ function bucketSlabs(
   // 2. Group slabs by key.
   const slabsByKey = new Map<string, CutterContributingSlab[]>();
   for (const s of slabs) {
-    const dayKey = dayKeyIST(s.updatedAt);
+    const dayKey = dayKeyIST(s.cutDate);
     const key = kind === "yearly" ? monthKeyFromDay(dayKey) : dayKey;
     const arr = slabsByKey.get(key);
     if (arr) arr.push(s);

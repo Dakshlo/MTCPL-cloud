@@ -144,6 +144,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     ? { name: c.temple, address: null, city: null, state: null, state_code: null, gstin: null, pan: null, phone: null, email: null }
     : null;
   const shipParty: PartyShape | null = billing?.shipping ?? null;
+  // Vehicle no — from the source dispatch (Daksh).
+  const { data: dispRow } = c.source_dispatch_id
+    ? await admin.from("dispatches").select("vehicle_no").eq("id", c.source_dispatch_id).maybeSingle()
+    : { data: null };
+  const vehicleNo = (dispRow as { vehicle_no?: string | null } | null)?.vehicle_no ?? null;
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -331,7 +336,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
           <div>
             <div className="num">{invCode}</div>
-            <div className="dt">Date {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}<br />Printed {printDate}</div>
+            <div className="dt">Date {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}{vehicleNo ? <><br />Vehicle {vehicleNo}</> : null}<br />Printed {printDate}</div>
           </div>
         </div>
 

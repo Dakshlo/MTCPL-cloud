@@ -22,6 +22,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import { cutDoneDateByBlock } from "@/lib/cut-done-date";
 
 export type CutterPeriodKind = "daily" | "weekly" | "monthly" | "yearly";
 
@@ -56,18 +57,17 @@ export type CutterContributingSlab = {
   widthIn: number;
   thicknessIn: number;
   cft: number;
-  updatedAt: string;
+  /** The slab's real CUT date (its source block's cut event), not updated_at. */
+  cutDate: string;
 };
 
 export type CutterCostReport = {
   period: CutterReportPeriod;
-  /** Sum of slab CFT produced in the period. Mig 063 follow-on:
-   *  switched from block-CFT (cut_session_blocks) to slab-CFT
-   *  (slab_requirements with POST_CUT_STATUSES + updated_at in
-   *  window) so this number lines up with what the Ready Sizes
-   *  Report shows for the same date range. */
+  /** Sum of CFT of the slabs CUT in the period — windowed by each slab's
+   *  REAL cut date (cutDoneDateByBlock ∪ pre-cut ∪ created_at), excluding
+   *  external slabs (no source block). Matches the Ready Sizes Report. */
   totalCft: number;
-  /** Count of slabs that contributed (post-cut, updated_at in window). */
+  /** Count of slabs cut in the period (by real cut date, external excluded). */
   slabsCount: number;
   /** Every slab that contributed — feeds the click-through peek
    *  modal on the CFT tile. */
@@ -251,27 +251,22 @@ export async function buildCutterCostReport(
   const startIso = startIst.toISOString();
   const endIso = new Date(exclusiveEndMs).toISOString();
 
-  // ── 1. Fetch slab_requirements that contributed in the period.
+  // ── 1. Slabs CUT in the period — by their REAL cut date.
   //
-  // Mig 063 follow-on (Daksh): we used to count block CFT from
-  // cut_session_blocks. But the Ready Sizes Report (the cutting
-  // team's verification view) counts slab CFT from slab_requirements
-  // — those numbers should match. Daksh wants "produced this week"
-  // on cutter cost to be the same denominator they already trust
-  // on Ready Sizes. So:
-  //   • source = slab_requirements
-  //   • filter = status IN POST_CUT_STATUSES (any post-cut state)
-  //              AND updated_at within period  (same filter Ready
-  //              Sizes uses for its "Cut From / Cut To" inputs)
-  //   • CFT per slab = length × width × thickness / 1728
+  // Daksh (Jun 2026) — the old filter counted slab_requirements whose
+  // UPDATED_AT fell in the window. updated_at moves on any later edit (carving
+  // assign, dispatch, …), so it (a) piled re-touched slabs onto busy days and
+  // (b) included EXTERNAL cut slabs (imported via "add external cut slab" —
+  // source_block_id NULL, never cut by us). Both over-counted vs what was cut.
   //
-  // PostgREST caps single .select() at 1000; if there are weeks
-  // with > 1000 slabs we'll need pagination. For now slabs/week
-  // sits well under that ceiling.
-  // Daksh (Jun 2026) — PAGINATED. A month easily exceeds PostgREST's 1000-row
-  // default; with `order(updated_at desc)` that cap kept the NEWEST 1000 rows
-  // and silently DROPPED the oldest, so the monthly view lost its older days.
-  // Page through every matching row instead.
+  // Fix: window each slab by its REAL cut date — exactly as the Ready Sizes
+  // report + the DPR Block-Cutted report do: cut-session 'done' / manual-cut
+  // (cutDoneDateByBlock) → the slab's own pre-cut release → created_at. External
+  // slabs (no source block) are excluded; carving-rejected / cancelled slabs
+  // were still physically cut, so they count (matches DPR Block-Cutted).
+  const windowStartMs = startIst.getTime();
+  const CUT_STATUSES = [...POST_CUT_STATUSES, "carving_rejected", "cancelled"];
+
   type SlabRow = {
     id: string;
     label: string | null;
@@ -282,38 +277,41 @@ export async function buildCutterCostReport(
     width_ft: number | string;
     thickness_ft: number | string;
     status: string;
-    updated_at: string;
     source_block_id: string | null;
+    precut_at: string | null;
+    created_at: string | null;
   };
   const PAGE = 1000;
   const slabsRaw: SlabRow[] = [];
-  for (let offset = 0; offset < 500_000; offset += PAGE) {
-    const { data, error: slabsErr } = await admin
+  let lastId = "";
+  for (let guard = 0; guard < 5000; guard++) {
+    let q = admin
       .from("slab_requirements")
-      .select(
-        "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, updated_at, source_block_id",
-      )
-      .in("status", POST_CUT_STATUSES as unknown as string[])
-      .gte("updated_at", startIso)
-      .lt("updated_at", endIso)
-      .order("updated_at", { ascending: false })
-      .range(offset, offset + PAGE - 1);
+      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, source_block_id, precut_at, created_at")
+      .in("status", CUT_STATUSES as unknown as string[])
+      .not("source_block_id", "is", null)
+      .order("id")
+      .limit(PAGE);
+    if (lastId) q = q.gt("id", lastId);
+    const { data, error: slabsErr } = await q;
     if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
-    const pageRows = (data ?? []) as SlabRow[];
-    slabsRaw.push(...pageRows);
-    if (pageRows.length < PAGE) break;
+    const rows = (data ?? []) as SlabRow[];
+    slabsRaw.push(...rows);
+    if (rows.length < PAGE) break;
+    lastId = rows[rows.length - 1].id;
   }
+
+  // Real cut date per source block (cut-session 'done' ∪ manual-cut audit).
+  const cutByBlock = await cutDoneDateByBlock(admin, slabsRaw.map((r) => r.source_block_id));
 
   const contributingSlabs: CutterContributingSlab[] = [];
   let totalCft = 0;
   for (const r of slabsRaw) {
-    // Daksh (Jun 2026) — a 'rejected' slab with NO source block was never
-    // actually cut by us. In particular the Temple-View "clean up
-    // uncategorized" tool bulk-archives never-cut OPEN slabs to
-    // status='rejected' with updated_at=now, which was wrongly piling
-    // thousands of phantom slabs onto "today". Genuinely cut-then-broken
-    // slabs keep their source_block_id and still count.
-    if (r.status === "rejected" && !r.source_block_id) continue;
+    const cutDate =
+      (r.source_block_id ? cutByBlock.get(r.source_block_id) : null) ?? r.precut_at ?? r.created_at;
+    if (!cutDate) continue;
+    const ms = new Date(cutDate).getTime();
+    if (Number.isNaN(ms) || ms < windowStartMs || ms >= exclusiveEndMs) continue; // cut outside window
     const l = Number(r.length_ft) || 0;
     const w = Number(r.width_ft) || 0;
     const t = Number(r.thickness_ft) || 0;
@@ -331,7 +329,7 @@ export async function buildCutterCostReport(
       widthIn: w,
       thicknessIn: t,
       cft,
-      updatedAt: r.updated_at,
+      cutDate,
     });
   }
   const slabsCount = contributingSlabs.length;
