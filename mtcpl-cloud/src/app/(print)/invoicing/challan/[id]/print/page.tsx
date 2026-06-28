@@ -209,7 +209,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         <table className="t">
           <thead>
             <tr>
-              <th style={{ width: 20 }}>#</th>
+              <th style={{ width: 26, whiteSpace: "nowrap", textAlign: "center" }}>#</th>
               <th>Category</th>
               <th>Label</th>
               <th>Description</th>
@@ -226,7 +226,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <tbody>
             {rows.map((it, i) => (
               <tr key={it.id}>
-                <td className="muted">{i + 1}</td>
+                <td className="muted" style={{ whiteSpace: "nowrap", wordBreak: "normal", textAlign: "center", fontSize: 8 }}>{i + 1}</td>
                 <td>{catText(it.component_section, it.component_element)}</td>
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
@@ -272,7 +272,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .cl { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.4; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
         .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; }
-        .idate { width: fit-content; margin-left: auto; margin-top: 3px; font-size: 11.5px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 5px; padding: 1px 8px; white-space: nowrap; }
+        .meta { text-align: right; margin-top: 3px; font-size: 10.5px; font-weight: 800; color: #1a1a1a; line-height: 1.5; }
+        .meta-date { font-size: 12.5px; font-weight: 800; color: #0f2540; }
         .dt { font-size: 8.5px; color: #888; text-align: right; margin-top: 2px; line-height: 1.45; }
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #f7fafc; }
         .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
@@ -288,7 +289,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .party-meta { font-size: 9.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
         .vw { font-size: 9.5px; color: #444; margin: 5px 0 0; font-weight: 700; }
-        .doc-title { text-align: center; font-size: 17px; font-weight: 800; letter-spacing: 0.18em; color: #0f2540; margin: 0 0 5px; }
+        .doc-title { text-align: center; margin: 0 0 7px; }
+        .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
@@ -341,7 +343,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       </div>
 
       <div className="wrap">
-        <div className="doc-title">TAX INVOICE</div>
+        <div className="doc-title"><span>TAX INVOICE</span></div>
         <div className="head">
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -354,8 +356,12 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
           <div>
             <div className="num">{invCode}</div>
-            <div className="idate">📅 {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
-            <div className="dt">{(challanLabel || vehicleNo) ? <>{[challanLabel ? `Challan ${challanLabel}` : null, vehicleNo ? `Vehicle ${vehicleNo}` : null].filter(Boolean).join(" · ")}<br /></> : null}Printed {printDate}</div>
+            <div className="meta">
+              <div className="meta-date">{new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+              {challanLabel ? <div>Challan {challanLabel}</div> : null}
+              {vehicleNo ? <div>Vehicle {vehicleNo}</div> : null}
+            </div>
+            <div className="dt">Printed {printDate}</div>
           </div>
         </div>
 
@@ -390,7 +396,6 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                   <li>Goods once sold will not be taken back.</li>
                   <li>Interest will be charged @ 24% p.a. from the date of bill.</li>
                   <li>All disputes are subject to PINDWARA jurisdiction only.</li>
-                  <li>C form will be required within 15 days otherwise you are liable as applicable.</li>
                   <li>We are not responsible for any shortage or damage after the goods leaves our godown.</li>
                 </ol>
               </div>
@@ -409,10 +414,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </>
         )}
 
-
+        {/* Customer signs on the LEFT, MTCPL on the RIGHT (Daksh). */}
         <div className="signoff">
-          <div className="sign">For MTCPL · Authorised Signatory<div className="sub">&nbsp;</div></div>
           <div className="sign">Customer Signature<div className="sub">{dash(billing?.name ?? c.temple)}</div></div>
+          <div className="sign" style={{ textAlign: "right" }}>For MTCPL · Authorised Signatory<div className="sub">&nbsp;</div></div>
         </div>
       </div>
     </>
