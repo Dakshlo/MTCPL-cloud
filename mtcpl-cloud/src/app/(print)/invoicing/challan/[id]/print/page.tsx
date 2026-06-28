@@ -266,14 +266,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
-        .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
-        .brand-logo { height: 56px; }
-        .cn { font-size: 16px; font-weight: 800; color: #0f2540; }
-        .cl { font-size: 9.5px; color: #666; margin-top: 2px; line-height: 1.5; }
+        .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
+        .brand-logo { height: 46px; }
+        .cn { font-size: 15px; font-weight: 800; color: #0f2540; }
+        .cl { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.4; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
-        .num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; }
-        .idate { width: fit-content; margin-left: auto; margin-top: 5px; font-size: 13px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 3px 11px; white-space: nowrap; }
-        .dt { font-size: 9px; color: #888; text-align: right; margin-top: 4px; }
+        .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; }
+        .idate { width: fit-content; margin-left: auto; margin-top: 3px; font-size: 11.5px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 5px; padding: 1px 8px; white-space: nowrap; }
+        .dt { font-size: 8.5px; color: #888; text-align: right; margin-top: 2px; line-height: 1.45; }
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #f7fafc; }
         .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
         .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
@@ -288,7 +288,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .party-meta { font-size: 9.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
         .vw { font-size: 9.5px; color: #444; margin: 5px 0 0; font-weight: 700; }
-        .doc-title { text-align: center; font-size: 19px; font-weight: 800; letter-spacing: 0.18em; color: #0f2540; margin: 2px 0 8px; }
+        .doc-title { text-align: center; font-size: 17px; font-weight: 800; letter-spacing: 0.18em; color: #0f2540; margin: 0 0 5px; }
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
@@ -355,7 +355,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <div>
             <div className="num">{invCode}</div>
             <div className="idate">📅 {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
-            <div className="dt">{vehicleNo ? <>Vehicle {vehicleNo}<br /></> : null}{challanLabel ? <>Challan {challanLabel}<br /></> : null}Printed {printDate}</div>
+            <div className="dt">{(challanLabel || vehicleNo) ? <>{[challanLabel ? `Challan ${challanLabel}` : null, vehicleNo ? `Vehicle ${vehicleNo}` : null].filter(Boolean).join(" · ")}<br /></> : null}Printed {printDate}</div>
           </div>
         </div>
 
