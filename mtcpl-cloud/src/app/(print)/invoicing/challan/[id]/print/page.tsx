@@ -96,7 +96,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -120,6 +120,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     cgst_percent: number | null;
     sgst_percent: number | null;
     priced_at: string | null;
+    owner_approved_at: string | null;
     invoice_no_override: string | null;
     temple: string | null;
     invoice_parties:
@@ -198,6 +199,12 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
 
   const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
+  // Mig 167 — a PRICED but NOT-yet-owner-APPROVED challan is printable (the
+  // accountant/owner can review it) but is NOT a valid tax invoice yet, so it
+  // carries a repeating diagonal "UNDER APPROVAL — NOT VALID" watermark. Once
+  // the owner approves, owner_approved_at is set and the watermark disappears.
+  const underApproval = !!c.priced_at && !c.owner_approved_at;
+
   const Section = ({ rows, unit }: { rows: Item[]; unit: "cft" | "sft" }) => {
     if (rows.length === 0) return null;
     const sub = rows.reduce((a, it) => a + amountOf(it), 0);
@@ -263,7 +270,20 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         /* Print the on-screen colours (highlights, stone bars, totals) exactly,
            without needing the browser's "Background graphics" toggle. */
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
+        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; position: relative; }
+        /* Mig 167 — "UNDER APPROVAL — NOT VALID" watermark for a priced but
+           not-yet-owner-approved invoice. A tiled diagonal SVG layer covers the
+           whole page, sits OVER the content (low opacity, readable) and never
+           intercepts clicks. -webkit-print-color-adjust is forced globally (the
+           '*' rule above) so it survives printing. */
+        .approval-wm {
+          position: absolute; inset: 0; z-index: 50; pointer-events: none;
+          opacity: 0.16;
+          background-repeat: repeat;
+          background-position: center;
+          background-size: 420px 300px;
+          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='300'><text x='210' y='150' font-family='Arial, sans-serif' font-size='30' font-weight='700' fill='%23d40000' text-anchor='middle' transform='rotate(-32 210 150)'>UNDER APPROVAL - NOT VALID</text></svg>");
+        }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
@@ -339,11 +359,17 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       `}</style>
 
       <div className="screen-bar">
-        <span className="screen-bar-title">Tax Invoice — {invCode} · {billing?.name ?? c.temple ?? "—"} · A4 portrait</span>
+        <span className="screen-bar-title">
+          Tax Invoice — {invCode} · {billing?.name ?? c.temple ?? "—"} · A4 portrait
+          {underApproval && (
+            <span style={{ marginLeft: 10, color: "#fca5a5", fontWeight: 800 }}>· UNDER APPROVAL — NOT VALID</span>
+          )}
+        </span>
         <PrintBtn />
       </div>
 
       <div className="wrap">
+        {underApproval && <div className="approval-wm" aria-hidden="true" />}
         <div className="doc-title"><span>TAX INVOICE</span></div>
         <div className="head">
           {/* eslint-disable-next-line @next/next/no-img-element */}

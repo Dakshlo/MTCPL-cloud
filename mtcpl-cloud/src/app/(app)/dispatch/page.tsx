@@ -19,14 +19,17 @@ import {
   DispatchClient,
   type ReadySlab,
   type ProvisionalRow,
+  type InvoiceInProcessRow,
   type OutForDeliveryRow,
   type DeliveredRow,
   type LegacyDispatch,
   type TruckTrip,
 } from "./dispatch-client";
 import type { StoneCategory } from "@/lib/stone-categories";
+// Mig 167 — derive the invoicing sub-status of an invoice-in-process dispatch.
+import { challanStatus } from "@/lib/challan-status";
 
-type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
+type Tab = "ready" | "provisional" | "invoice_in_process" | "out_for_delivery" | "delivered";
 
 function toCftFromFtNums(l: number, w: number, h: number): number {
   return (l * w * h) / 1728;
@@ -57,7 +60,10 @@ export default async function DispatchPage({
     profile.role === "senior_incharge";
   const { tab: tabParam, dispatch_toast: toastParam, dispatch_error: errorParam } = await searchParams;
   const initialTab: Tab =
-    tabParam === "provisional" || tabParam === "out_for_delivery" || tabParam === "delivered"
+    tabParam === "provisional" ||
+    tabParam === "invoice_in_process" ||
+    tabParam === "out_for_delivery" ||
+    tabParam === "delivered"
       ? tabParam
       : "ready";
 
@@ -83,20 +89,25 @@ export default async function DispatchPage({
       .eq("is_parked", false)
       .order("priority", { ascending: false })
       .order("updated_at", { ascending: true }),
-    // Provisional = dispatch created but senior hasn't approved yet.
+    // Provisional = dispatch created but senior hasn't verified yet (or it was
+    // RETURNED from invoicing — Mig 167 — to be re-checked / cancelled).
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes",
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, returned_at, return_reason",
       )
       .is("approved_at", null)
       .is("delivered_at", null)
       .order("dispatched_at", { ascending: false }),
-    // Out for Delivery = approved but not yet delivered.
+    // Approved & not delivered. Mig 167 — this set is SPLIT in JS into
+    // "Invoice in process" (on_road_at IS NULL → invoicing is pricing it,
+    // owner must approve) and "On the road" (on_road_at IS NOT NULL → truck
+    // released). on_road_at / returned_at / handover_ack_at drive that split
+    // + the handover popup + the on-road timer.
     admin
       .from("dispatches")
       .select(
-        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at",
+        "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, dispatched_by, notes, approved_at, approved_by, delivered_at, on_road_at, returned_at, handover_ack_at",
       )
       .not("approved_at", "is", null)
       .is("delivered_at", null)
@@ -343,10 +354,70 @@ export default async function DispatchPage({
       notes: d.notes,
       slabCount: count,
       slabCftTotal: cft,
+      // Mig 167 — a "returned from invoicing" dispatch shows a banner here.
+      returnedAt: (d as { returned_at?: string | null }).returned_at ?? null,
+      returnReason: (d as { return_reason?: string | null }).return_reason ?? null,
     };
   });
 
-  const outForDelivery: OutForDeliveryRow[] = (openDispatches ?? []).map((d) => {
+  // Mig 167 — split the approved-not-delivered set: Invoice in process
+  // (on_road_at IS NULL — verified, invoicing pricing + owner approval) vs
+  // On the road (on_road_at IS NOT NULL — owner approved, truck released).
+  const approvedDispatches = openDispatches ?? [];
+  const invoiceInProcessDispatches = approvedDispatches.filter(
+    (d) => (d as { on_road_at?: string | null }).on_road_at == null,
+  );
+  const onRoadDispatches = approvedDispatches.filter(
+    (d) => (d as { on_road_at?: string | null }).on_road_at != null,
+  );
+
+  // Mig 167 — derive each invoice-in-process dispatch's invoicing sub-status
+  // from its challan (source_dispatch_id). Map dispatchId → human label.
+  type IipChallan = {
+    source_dispatch_id: string | null;
+    priced_at: string | null;
+    owner_approved_at: string | null;
+    owner_rejected_at: string | null;
+    cancelled_at: string | null;
+    converted_invoice_id: string | null;
+  };
+  const invoiceSubStatusByDispatch = new Map<string, string>();
+  const iipIds = invoiceInProcessDispatches.map((d) => d.id);
+  if (iipIds.length > 0) {
+    const { data: iipChallans } = await admin
+      .from("challans")
+      .select("source_dispatch_id, priced_at, owner_approved_at, owner_rejected_at, cancelled_at, converted_invoice_id")
+      .in("source_dispatch_id", iipIds);
+    const challanByDispatch = new Map<string, IipChallan>();
+    for (const c of (iipChallans ?? []) as IipChallan[]) {
+      if (c.source_dispatch_id) challanByDispatch.set(c.source_dispatch_id, c);
+    }
+    for (const did of iipIds) {
+      const c = challanByDispatch.get(did);
+      if (!c) {
+        invoiceSubStatusByDispatch.set(did, "Awaiting pricing");
+        continue;
+      }
+      const st = challanStatus({
+        cancelled_at: c.cancelled_at,
+        converted_invoice_id: c.converted_invoice_id,
+        priced_at: c.priced_at,
+        owner_approved_at: c.owner_approved_at,
+        owner_rejected_at: c.owner_rejected_at,
+      });
+      const label =
+        st === "open"
+          ? "Awaiting pricing"
+          : st === "pending_approval"
+            ? "Under owner review"
+            : st === "rejected"
+              ? "Rejected — back to accountant"
+              : "Finalising";
+      invoiceSubStatusByDispatch.set(did, label);
+    }
+  }
+
+  const invoiceInProcess: InvoiceInProcessRow[] = invoiceInProcessDispatches.map((d) => {
     const { count, cft } = cftForDispatch(d.id);
     return {
       id: d.id,
@@ -362,6 +433,32 @@ export default async function DispatchPage({
       slabCount: count,
       slabCftTotal: cft,
       approvedAt: (d as { approved_at?: string | null }).approved_at ?? null,
+      // Mig 167 — invoicing sub-status chip ("Awaiting pricing" by default).
+      subStatus: invoiceSubStatusByDispatch.get(d.id) ?? "Awaiting pricing",
+    };
+  });
+
+  // Mig 167 — On the road = ONLY the released trucks (on_road_at set).
+  const outForDelivery: OutForDeliveryRow[] = onRoadDispatches.map((d) => {
+    const { count, cft } = cftForDispatch(d.id);
+    return {
+      id: d.id,
+      challan_number: (d as { challan_number?: number }).challan_number ?? null,
+      temple: d.temple,
+      vehicle_no: d.vehicle_no,
+      driver_name: d.driver_name,
+      driver_phone: d.driver_phone,
+      dispatched_at: d.dispatched_at,
+      expected_delivery_date: d.expected_delivery_date,
+      dispatcher: d.dispatched_by ? profilesMap[d.dispatched_by] ?? null : null,
+      notes: d.notes,
+      slabCount: count,
+      slabCftTotal: cft,
+      approvedAt: (d as { approved_at?: string | null }).approved_at ?? null,
+      // Mig 167 — the on-road timer counts from on_road_at (truck released),
+      // NOT dispatched_at/approved_at. handoverAckAt gates the handover popup.
+      onRoadAt: (d as { on_road_at?: string | null }).on_road_at ?? null,
+      handoverAckAt: (d as { handover_ack_at?: string | null }).handover_ack_at ?? null,
     };
   });
 
@@ -455,6 +552,7 @@ export default async function DispatchPage({
       inchargeTemples={inchargeTemples}
       provisional={provisional}
       provisionalSlabsByDispatch={provisionalSlabsByDispatch}
+      invoiceInProcess={invoiceInProcess}
       outForDelivery={outForDelivery}
       delivered={delivered}
       legacyDispatches={legacyDispatches}

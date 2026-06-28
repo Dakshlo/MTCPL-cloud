@@ -53,6 +53,10 @@ export default async function InvoicingListPage() {
         .from("challans")
         .select("id, challan_number, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
         .not("priced_at", "is", null)
+        // Mig 167 — only OWNER-APPROVED priced challans are final invoices.
+        // A priced-but-pending (or rejected) challan stays in the Approval
+        // queue and must NOT show on the Invoices list.
+        .not("owner_approved_at", "is", null)
         .is("cancelled_at", null)
         .is("converted_invoice_id", null)
         .order("priced_at", { ascending: false })

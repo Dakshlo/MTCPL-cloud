@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
+import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction, acknowledgeHandoverAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
@@ -33,7 +33,8 @@ import { timeAgoLabel } from "./time-ago";
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
 
-type Tab = "ready" | "provisional" | "out_for_delivery" | "delivered";
+// Mig 167 — "invoice_in_process" sits between Waiting approval and On the road.
+type Tab = "ready" | "provisional" | "invoice_in_process" | "out_for_delivery" | "delivered";
 
 /** Format challan number as CHLN-0001. Falls back to UUID prefix if the
  *  row predates migration 011 (shouldn't happen — migration backfills). */
@@ -138,11 +139,31 @@ export type ProvisionalRow = {
   notes: string | null;
   slabCount: number;
   slabCftTotal: number;
+  /** Mig 167 — set when this dispatch was RETURNED from invoicing (owner
+   *  rejected / accountant kicked it back); a banner prompts re-check or cancel.
+   *  Optional so DeliveredRow (which doesn't carry it) still type-checks. */
+  returnedAt?: string | null;
+  returnReason?: string | null;
 };
 
 export type OutForDeliveryRow = ProvisionalRow & {
-  /** When the senior approved it (truck left). Drives the transit timer. */
+  /** When the senior approved/verified it. */
   approvedAt?: string | null;
+  /** Mig 167 — when the owner approved the invoice and RELEASED the truck. The
+   *  on-the-road timer counts from here (NOT approvedAt/dispatched_at).
+   *  Optional so DeliveredRow still type-checks without supplying it. */
+  onRoadAt?: string | null;
+  /** Mig 167 — when the documents were handed to the driver. NULL → show the
+   *  handover popup for this truck. */
+  handoverAckAt?: string | null;
+};
+
+/** Mig 167 — a verified dispatch the invoicing dept is pricing (owner must
+ *  approve before the truck leaves). READ-ONLY on the Dispatch page. */
+export type InvoiceInProcessRow = OutForDeliveryRow & {
+  /** Invoicing sub-status label: "Awaiting pricing" / "Under owner review" /
+   *  "Rejected — back to accountant" / "Finalising". */
+  subStatus: string;
 };
 
 export type DeliveredRow = OutForDeliveryRow & {
@@ -358,6 +379,7 @@ export function DispatchClient({
   inchargeTemples,
   provisional,
   provisionalSlabsByDispatch,
+  invoiceInProcess,
   outForDelivery,
   delivered,
   legacyDispatches,
@@ -381,6 +403,8 @@ export function DispatchClient({
   inchargeTemples: { id: string; name: string; inchargeId: string | null }[];
   provisional: ProvisionalRow[];
   provisionalSlabsByDispatch: Record<string, ReadySlab[]>;
+  /** Mig 167 — verified dispatches awaiting invoicing + owner approval (read-only). */
+  invoiceInProcess: InvoiceInProcessRow[];
   outForDelivery: OutForDeliveryRow[];
   delivered: DeliveredRow[];
   legacyDispatches: LegacyDispatch[];
@@ -428,6 +452,7 @@ export function DispatchClient({
   const counts = {
     ready: readySlabs.length,
     provisional: provisional.length,
+    invoice_in_process: invoiceInProcess.length, // Mig 167
     out_for_delivery: outForDelivery.length,
     delivered: delivered.length,
   };
@@ -500,6 +525,8 @@ export function DispatchClient({
           [
             { key: "ready", label: "📦 Make Dispatch", count: counts.ready, color: "#b87333" },
             { key: "provisional", label: "🕒 Waiting approval", count: counts.provisional, color: "#D97706" },
+            // Mig 167 — verified, invoicing pricing + owner approval pending.
+            { key: "invoice_in_process", label: "🧾 Invoice in process", count: counts.invoice_in_process, color: "#7C3AED" },
             { key: "out_for_delivery", label: "🚛 On the road", count: counts.out_for_delivery, color: "#2563EB" },
             { key: "delivered", label: "✅ Delivered", count: counts.delivered, color: "#16A34A" },
           ] as const
@@ -545,6 +572,8 @@ export function DispatchClient({
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
       )}
+      {/* Mig 167 — Invoice in process (read-only for everyone). */}
+      {tab === "invoice_in_process" && <InvoiceInProcessTab rows={invoiceInProcess} />}
       {tab === "out_for_delivery" && <OutForDeliveryTab rows={outForDelivery} canUndo={canUndo} />}
       {tab === "delivered" && <DeliveredTab rows={delivered} legacy={legacyDispatches} />}
 
@@ -1171,11 +1200,6 @@ function TempleDispatchPeek({
               </div>
 
               <label className="stack">
-                <span style={{ fontSize: 13.5, fontWeight: 700 }}>Expected Delivery Date</span>
-                <input type="date" name="expected_delivery_date" defaultValue={tomorrowIso} style={{ fontFamily: "inherit", fontSize: 15, padding: "11px 13px" }} />
-              </label>
-
-              <label className="stack">
                 <span style={{ fontSize: 13.5, fontWeight: 700 }}>Notes (optional)</span>
                 <textarea name="notes" rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 14 }} />
               </label>
@@ -1310,10 +1334,28 @@ function ProvisionalTab({
             <div
               key={r.id}
               style={{
-                border: "1px solid var(--border)", borderLeft: "5px solid #D97706", borderRadius: 12,
-                padding: "14px 16px", background: "rgba(217,119,6,0.04)",
+                border: r.returnedAt ? "1px solid rgba(220,38,38,0.45)" : "1px solid var(--border)",
+                borderLeft: r.returnedAt ? "5px solid #dc2626" : "5px solid #D97706", borderRadius: 12,
+                padding: "14px 16px", background: r.returnedAt ? "rgba(220,38,38,0.05)" : "rgba(217,119,6,0.04)",
               }}
             >
+              {/* Mig 167 — returned from invoicing (owner rejected / kicked back). */}
+              {r.returnedAt && (
+                <div
+                  style={{
+                    display: "flex", flexDirection: "column", gap: 2,
+                    marginBottom: 10, padding: "9px 12px", borderRadius: 9,
+                    background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.4)",
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>
+                    ↩ Returned from invoicing — re-check &amp; verify or cancel
+                  </span>
+                  {r.returnReason && (
+                    <span style={{ fontSize: 12, color: "#b91c1c", fontStyle: "italic" }}>“{r.returnReason}”</span>
+                  )}
+                </div>
+              )}
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1481,6 +1523,10 @@ function TruckHistoryPeek({ trips, onClose }: { trips: TruckTrip[]; onClose: () 
 function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUndo: boolean }) {
   const [deliverRow, setDeliverRow] = useState<OutForDeliveryRow | null>(null);
 
+  // Mig 167 — freshly-released trucks (on_road_at set) whose documents haven't
+  // been handed to the driver yet. They drive the handover popup below.
+  const needsHandover = rows.filter((r) => r.onRoadAt && !r.handoverAckAt);
+
   if (rows.length === 0) {
     return (
       <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 14, fontSize: 15 }}>
@@ -1491,6 +1537,11 @@ function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUn
 
   return (
     <>
+      {/* Mig 167 — handover-documents popup (in-flow faux-overlay, NOT
+          position:fixed). Shows for each just-released truck until its
+          documents are acknowledged as handed to the driver. */}
+      {needsHandover.length > 0 && <HandoverDocsPopup rows={needsHandover} />}
+
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         जब slab site पर पहुँच जाए: <strong>Reached — mark delivered</strong> दबाएँ और दो photo लगाएँ (truck on site + signed challan).
       </div>
@@ -1558,10 +1609,11 @@ function DispatchRow({
           <span className="muted" style={{ fontSize: 12.5 }}>
             {row.slabCount} slab{row.slabCount !== 1 ? "s" : ""} · {row.slabCftTotal.toFixed(2)} CFT
           </span>
-          {/* Transit timer — running since the senior approved (truck left). */}
-          {row.approvedAt && (
+          {/* Transit timer — Mig 167: counts from on_road_at (owner approved the
+              invoice → truck released), NOT approved_at/dispatched_at. */}
+          {row.onRoadAt && (
             <span style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.3)", borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>
-              ⏱ on road {timeAgoLabel(row.approvedAt)}
+              ⏱ on road {timeAgoLabel(row.onRoadAt)}
             </span>
           )}
         </div>
@@ -1757,5 +1809,159 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
         </details>
       )}
     </>
+  );
+}
+
+// ─── Invoice in process tab (Mig 167) ────────────────────────────────────
+// Verified dispatches the invoicing dept is pricing — the owner must approve
+// the invoice before the truck is released. READ-ONLY for everyone here (the
+// pricing + approval happen in Invoicing); no action buttons.
+
+/** Palette for the invoicing sub-status chip. */
+function subStatusChip(sub: string): { c: string; bg: string; b: string } {
+  if (sub.startsWith("Rejected")) return { c: "#b91c1c", bg: "rgba(220,38,38,0.1)", b: "rgba(220,38,38,0.4)" }; // red
+  if (sub.startsWith("Under owner")) return { c: "#1d4ed8", bg: "rgba(37,99,235,0.1)", b: "rgba(37,99,235,0.35)" }; // blue
+  return { c: "#92400e", bg: "rgba(180,83,9,0.12)", b: "rgba(180,83,9,0.4)" }; // amber (Awaiting pricing / Finalising)
+}
+
+function InvoiceInProcessTab({ rows }: { rows: InvoiceInProcessRow[] }) {
+  if (rows.length === 0) {
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 14, fontSize: 15 }}>
+        🧾 Nothing is with invoicing right now. A verified dispatch waits here while it&apos;s priced and the owner approves the invoice.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        These trucks are <strong>verified</strong> but not released yet — the invoicing team is pricing each one and the owner must approve the invoice before it goes on the road.
+      </div>
+      {groupByTemple(rows).map((g) => (
+        <div key={g.temple} style={{ marginBottom: 8 }}>
+          <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+          {g.rows.map((r) => {
+            const chip = subStatusChip(r.subStatus);
+            return (
+              <div
+                key={r.id}
+                style={{
+                  padding: "14px 16px", marginBottom: 10, background: "rgba(124,58,237,0.04)",
+                  border: "1px solid var(--border)", borderLeft: "5px solid #7C3AED", borderRadius: 12,
+                  display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between",
+                }}
+              >
+                <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, fontWeight: 800, color: "#6d28d9" }}>
+                      🧾 {chalanLabel(r.challan_number, r.id)}
+                    </span>
+                    <span className="muted" style={{ fontSize: 12.5 }}>
+                      {r.slabCount} slab{r.slabCount !== 1 ? "s" : ""} · {r.slabCftTotal.toFixed(2)} CFT
+                    </span>
+                    {/* Prominent invoicing sub-status chip. */}
+                    <span style={{ fontSize: 11, fontWeight: 800, color: chip.c, background: chip.bg, border: `1px solid ${chip.b}`, borderRadius: 999, padding: "3px 11px", whiteSpace: "nowrap" }}>
+                      {r.subStatus}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 5, fontSize: 13, color: "var(--muted)" }}>
+                    {r.vehicle_no && (
+                      <>🚛 <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{r.vehicle_no}</strong></>
+                    )}
+                    {r.driver_name && (
+                      <>
+                        {" · "}
+                        <strong style={{ color: "var(--text)" }}>{r.driver_name}</strong>
+                        {r.driver_phone ? ` (${r.driver_phone})` : ""}
+                      </>
+                    )}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 6, fontStyle: "italic" }}>
+                    The invoicing team is pricing this; the owner must approve before the truck leaves.
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ─── Handover-documents popup (Mig 167) ──────────────────────────────────
+// In-flow faux-overlay (NOT position:fixed) that reminds the dispatcher to
+// hand the printed documents to each freshly-released driver. Acknowledging a
+// truck posts to acknowledgeHandoverAction (stamps handover_ack_at) which
+// removes it from the list on the next render.
+
+function HandoverDocsPopup({ rows }: { rows: OutForDeliveryRow[] }) {
+  return (
+    <div
+      role="dialog"
+      aria-label="Handover the documents to the driver"
+      style={{
+        marginBottom: 16, borderRadius: 14, overflow: "hidden",
+        border: "2px solid #2563EB", background: "rgba(37,99,235,0.06)",
+        boxShadow: "0 10px 30px rgba(37,99,235,0.18)",
+      }}
+    >
+      <div style={{ padding: "13px 18px", background: "rgba(37,99,235,0.12)", borderBottom: "1px solid rgba(37,99,235,0.3)" }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#1d4ed8" }}>📄 Handover the documents to the driver</div>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+          These trucks have been released. Print &amp; hand over the challan/invoice, then mark it done — कागज़ driver को दें।
+        </div>
+      </div>
+      <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((r) => (
+          <div
+            key={r.id}
+            style={{
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+              padding: "11px 14px", borderRadius: 10, background: "var(--surface)", border: "1px solid var(--border)",
+            }}
+          >
+            <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 800, fontSize: 14 }}>🏛 {r.temple}</span>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 800, color: "#1d4ed8" }}>
+                  {chalanLabel(r.challan_number, r.id)}
+                </span>
+              </div>
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+                {r.vehicle_no ? <>🚛 <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{r.vehicle_no}</strong> · </> : null}
+                {r.driver_name ?? "No driver"}{r.driver_phone ? ` (${r.driver_phone})` : ""}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Link
+                href={`/dispatch/${r.id}/print`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  textDecoration: "none", fontSize: 12.5, padding: "9px 14px", background: "var(--bg)",
+                  border: "1.5px solid var(--border)", borderRadius: 9, color: "var(--text)", fontWeight: 700, whiteSpace: "nowrap",
+                }}
+              >
+                🖨 Print
+              </Link>
+              <form action={acknowledgeHandoverAction} style={{ display: "inline" }}>
+                <input type="hidden" name="id" value={r.id} />
+                <button
+                  type="submit"
+                  style={{
+                    background: "#2563EB", color: "#fff", border: "none", borderRadius: 9,
+                    padding: "10px 16px", fontSize: 13, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >
+                  ✓ Documents handed over
+                </button>
+              </form>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

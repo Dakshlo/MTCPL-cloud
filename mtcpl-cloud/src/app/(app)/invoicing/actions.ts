@@ -60,10 +60,11 @@ export async function saveChallanPricingAction(formData: FormData) {
   // two invoice documents for one shipment. Re-pricing an already-priced (but
   // not converted) challan is allowed.
   const { data: guard } = await admin
-    .from("challans").select("converted_invoice_id, cancelled_at").eq("id", challanId).maybeSingle();
-  const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null } | null;
+    .from("challans").select("converted_invoice_id, cancelled_at, owner_approved_at").eq("id", challanId).maybeSingle();
+  const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null; owner_approved_at: string | null } | null;
   if (g?.converted_invoice_id) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Already converted to an invoice — cannot re-price")}`);
   if (g?.cancelled_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Challan is cancelled — cannot price")}`);
+  if (g?.owner_approved_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Owner already approved this invoice — cannot re-price")}`);
 
   let rates: Record<string, number | string> = {};
   try {
@@ -100,17 +101,154 @@ export async function saveChallanPricingAction(formData: FormData) {
       priced_at: new Date().toISOString(),
       priced_by: profile.id,
       invoice_no_override: txt(formData, "invoice_no_override") || null,
+      // Pricing (re-)submits the challan for owner approval — clear any prior
+      // rejection so it re-enters the Approval queue (Mig 167).
+      owner_rejected_at: null,
+      owner_reject_reason: null,
     })
     .eq("id", challanId);
 
   await logAudit(profile.id, "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });
   refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/approval");
   const goPrint = txt(formData, "go") === "print";
   redirect(
     goPrint
       ? `/invoicing/challan/${challanId}/print`
-      : `/invoicing/challans/${challanId}/review?toast=${encodeURIComponent("Saved")}`,
+      : `/invoicing/challans?toast=${encodeURIComponent("Priced — sent to owner for approval")}`,
   );
+}
+
+// ════════════════════════════════════════════════════════════════
+// Mig 167 — Owner approval gate. A priced challan waits on /invoicing/approval
+// until the OWNER approves (→ becomes a final invoice + releases the truck) or
+// rejects (→ back to the accountant on Challans).
+// ════════════════════════════════════════════════════════════════
+
+/** OWNER approves a priced challan → it becomes a final tax invoice and the
+ *  linked dispatch's truck is released to the road (on_road_at). */
+export async function ownerApproveChallanAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/approval");
+
+  const { data: c } = await admin
+    .from("challans")
+    .select("id, priced_at, owner_approved_at, cancelled_at, converted_invoice_id, source_dispatch_id, temple, challan_number")
+    .eq("id", challanId)
+    .maybeSingle();
+  const ch = c as {
+    priced_at: string | null; owner_approved_at: string | null; cancelled_at: string | null;
+    converted_invoice_id: string | null; source_dispatch_id: string | null; temple: string | null; challan_number: string | null;
+  } | null;
+  if (!ch) redirect("/invoicing/approval?toast=Challan+not+found");
+  if (ch!.cancelled_at || ch!.converted_invoice_id) redirect(`/invoicing/approval?toast=${encodeURIComponent("Challan is no longer pending")}`);
+  if (!ch!.priced_at) redirect(`/invoicing/approval?toast=${encodeURIComponent("Not priced yet")}`);
+  if (ch!.owner_approved_at) redirect(`/invoicing/approval?toast=${encodeURIComponent("Already approved")}`);
+
+  const now = new Date().toISOString();
+  await admin
+    .from("challans")
+    .update({ owner_approved_at: now, owner_approved_by: profile.id, owner_rejected_at: null, owner_reject_reason: null })
+    .eq("id", challanId);
+
+  // Release the truck — only if the dispatch isn't already on the road/delivered.
+  if (ch!.source_dispatch_id) {
+    await admin
+      .from("dispatches")
+      .update({ on_road_at: now, returned_at: null, return_reason: null, handover_ack_at: null })
+      .eq("id", ch!.source_dispatch_id)
+      .is("on_road_at", null)
+      .is("delivered_at", null);
+  }
+
+  await logAudit(profile.id, "challan_owner_approved", "challan", challanId, { temple: ch!.temple, challan_number: ch!.challan_number });
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/dispatch");
+  revalidatePath("/", "layout");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Approved — invoice issued, truck released")}`);
+}
+
+/** OWNER rejects a priced challan → back to the accountant on Challans. The
+ *  dispatch stays in "Invoice in process" (truck still held). */
+export async function ownerRejectChallanAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/approval");
+  const reason = txt(formData, "reason") || null;
+
+  const { data: c } = await admin
+    .from("challans")
+    .select("id, priced_at, owner_approved_at, cancelled_at, converted_invoice_id, temple, challan_number")
+    .eq("id", challanId)
+    .maybeSingle();
+  const ch = c as {
+    priced_at: string | null; owner_approved_at: string | null; cancelled_at: string | null;
+    converted_invoice_id: string | null; temple: string | null; challan_number: string | null;
+  } | null;
+  if (!ch) redirect("/invoicing/approval?toast=Challan+not+found");
+  if (ch!.cancelled_at || ch!.converted_invoice_id) redirect(`/invoicing/approval?toast=${encodeURIComponent("Challan is no longer pending")}`);
+  if (!ch!.priced_at) redirect(`/invoicing/approval?toast=${encodeURIComponent("Not priced yet")}`);
+  if (ch!.owner_approved_at) redirect(`/invoicing/approval?toast=${encodeURIComponent("Already approved — cannot reject")}`);
+
+  await admin
+    .from("challans")
+    .update({ owner_rejected_at: new Date().toISOString(), owner_reject_reason: reason, owner_approved_at: null, owner_approved_by: null })
+    .eq("id", challanId);
+
+  await logAudit(profile.id, "challan_owner_rejected", "challan", challanId, { temple: ch!.temple, reason });
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Rejected — sent back to accountant")}`);
+}
+
+/** Accountant cancels a (rejected) dispatch challan WITH A REASON → the challan
+ *  is removed and its dispatch returns to Waiting approval flagged "Returned",
+ *  where seniors can re-check & verify or cancel (slabs back to Make Dispatch). */
+export async function returnDispatchToWaitingAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) return { ok: false, error: "Invoicing access denied." };
+  const admin = createAdminSupabaseClient();
+
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) return { ok: false, error: "Missing challan." };
+  const reason = txt(formData, "reason");
+  if (!reason) return { ok: false, error: "A cancellation reason is required." };
+
+  const { data: c } = await admin
+    .from("challans")
+    .select("id, owner_approved_at, cancelled_at, source_dispatch_id, temple, challan_number")
+    .eq("id", challanId)
+    .maybeSingle();
+  const ch = c as {
+    owner_approved_at: string | null; cancelled_at: string | null; source_dispatch_id: string | null; temple: string | null; challan_number: string | null;
+  } | null;
+  if (!ch) return { ok: false, error: "Challan not found." };
+  if (ch.owner_approved_at) return { ok: false, error: "Owner already approved this invoice — cannot cancel here." };
+
+  // Bounce the dispatch back to Waiting approval (un-verify), flagged returned.
+  if (ch.source_dispatch_id) {
+    await admin
+      .from("dispatches")
+      .update({ approved_at: null, approved_by: null, on_road_at: null, returned_at: new Date().toISOString(), return_reason: reason })
+      .eq("id", ch.source_dispatch_id)
+      .is("delivered_at", null);
+  }
+
+  await logAudit(profile.id, "challan_returned_to_dispatch", "challan", challanId, { temple: ch.temple, reason });
+  // Remove the challan (items cascade) so a re-verify recreates a fresh one.
+  await admin.from("challans").delete().eq("id", challanId);
+
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/dispatch");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 // ════════════════════════════════════════════════════════════════

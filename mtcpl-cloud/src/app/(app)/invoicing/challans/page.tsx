@@ -21,11 +21,15 @@ import {
   TABLE_STYLES,
   VendorIdentity,
 } from "../../accounts/_ui/components";
+import { challanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "../_ui/challan-status-pill";
-import { syncDispatchChallansAction } from "../actions";
+import { syncDispatchChallansAction, returnDispatchToWaitingAction } from "../actions";
+import { ReturnToDispatchButton } from "../_ui/return-to-dispatch-button";
+
+type StatusFilter = "open" | "pending_approval" | "rejected" | "invoiced" | "converted" | "cancelled" | "all";
 
 type SearchParams = Promise<{
-  status?: "open" | "invoiced" | "converted" | "cancelled" | "all";
+  status?: StatusFilter;
   from?: string;
   to?: string;
   toast?: string;
@@ -46,7 +50,7 @@ export default async function ChallansListPage({
   let q = supabase
     .from("challans")
     .select(
-      "id, challan_number, challan_date, invoice_party_id, temple, notes, cancelled_at, converted_invoice_id, priced_at, invoice_parties(name)",
+      "id, challan_number, challan_date, invoice_party_id, temple, notes, source_dispatch_id, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, owner_reject_reason, invoice_parties(name)",
     )
     .order("challan_date", { ascending: false })
     .limit(500);
@@ -54,11 +58,23 @@ export default async function ChallansListPage({
   if (sp.from) q = q.gte("challan_date", sp.from);
   if (sp.to) q = q.lte("challan_date", sp.to);
 
-  const status = sp.status ?? "all";
+  // Mig 167 — status filter maps to the canonical challanStatus() states.
+  // "Open" EXCLUDES priced challans (priced → pending/rejected/invoiced).
+  const status: StatusFilter = sp.status ?? "all";
   if (status === "open") {
     q = q.is("cancelled_at", null).is("converted_invoice_id", null).is("priced_at", null);
+  } else if (status === "pending_approval") {
+    q = q
+      .is("cancelled_at", null).is("converted_invoice_id", null)
+      .not("priced_at", "is", null).is("owner_approved_at", null).is("owner_rejected_at", null);
+  } else if (status === "rejected") {
+    q = q
+      .is("cancelled_at", null).is("converted_invoice_id", null)
+      .not("priced_at", "is", null).not("owner_rejected_at", "is", null);
   } else if (status === "invoiced") {
-    q = q.is("cancelled_at", null).is("converted_invoice_id", null).not("priced_at", "is", null);
+    q = q
+      .is("cancelled_at", null).is("converted_invoice_id", null)
+      .not("priced_at", "is", null).not("owner_approved_at", "is", null);
   } else if (status === "converted") {
     q = q.is("cancelled_at", null).not("converted_invoice_id", "is", null);
   } else if (status === "cancelled") {
@@ -75,9 +91,13 @@ export default async function ChallansListPage({
     invoice_party_id: string | null;
     temple: string | null;
     notes: string | null;
+    source_dispatch_id: string | null;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
     priced_at: string | null;
+    owner_approved_at: string | null;
+    owner_rejected_at: string | null;
+    owner_reject_reason: string | null;
     invoice_parties: { name: string } | { name: string }[] | null;
   }>;
 
@@ -88,8 +108,6 @@ export default async function ChallansListPage({
       : null;
     return c.temple ?? legacy ?? "—";
   };
-  const statusOf = (c: ChallanRow): "open" | "invoiced" | "converted" | "cancelled" =>
-    c.cancelled_at ? "cancelled" : c.converted_invoice_id ? "converted" : c.priced_at ? "invoiced" : "open";
   // Temple-wise grouping (Daksh) — one section per client/temple, alphabetical.
   const grouped = (() => {
     const m = new Map<string, ChallanRow[]>();
@@ -109,6 +127,13 @@ export default async function ChallansListPage({
             <form action={syncDispatchChallansAction}>
               <button type="submit" style={BUTTON_STYLES.primary}>🔄 Sync from dispatch</button>
             </form>
+            {/* Mig 167 — journey reads Challans → Approval → Invoices. */}
+            <Link href="/invoicing/approval" style={BUTTON_STYLES.secondary}>
+              🟡 Approval
+            </Link>
+            <Link href="/invoicing/invoices" style={BUTTON_STYLES.secondary}>
+              🧾 Invoices
+            </Link>
             <Link href="/invoicing" style={{ fontSize: 12, color: "var(--muted)", textDecoration: "none", alignSelf: "center" }}>
               ← Dashboard
             </Link>
@@ -139,6 +164,8 @@ export default async function ChallansListPage({
           <select name="status" defaultValue={status} style={INPUT_STYLE}>
             <option value="all">All</option>
             <option value="open">Open</option>
+            <option value="pending_approval">Under owner review</option>
+            <option value="rejected">Rejected</option>
             <option value="invoiced">Invoiced</option>
             <option value="converted">Converted</option>
             <option value="cancelled">Cancelled</option>
@@ -180,17 +207,20 @@ export default async function ChallansListPage({
                 <th style={TABLE_STYLES.th}>Date</th>
                 <th style={TABLE_STYLES.th}>Status</th>
                 <th style={TABLE_STYLES.th}>Notes</th>
+                <th style={TABLE_STYLES.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {grouped.map(([temple, rows]) => (
                 <Fragment key={temple}>
                   <tr>
-                    <td colSpan={4} style={{ padding: "8px 12px", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800, fontSize: 12.5, color: "var(--text)", borderTop: "2px solid var(--border)" }}>
+                    <td colSpan={5} style={{ padding: "8px 12px", background: ACCOUNTS_TOKENS.surfaceMuted, fontWeight: 800, fontSize: 12.5, color: "var(--text)", borderTop: "2px solid var(--border)" }}>
                       🛕 {temple} <span style={{ color: "var(--muted)", fontWeight: 600 }}>· {rows.length}</span>
                     </td>
                   </tr>
-                  {rows.map((c, idx) => (
+                  {rows.map((c, idx) => {
+                    const st = challanStatus(c);
+                    return (
                     <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
                       <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
                         <Link href={`/invoicing/challans/${c.id}`} style={{ color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}>
@@ -199,13 +229,32 @@ export default async function ChallansListPage({
                       </td>
                       <td style={TABLE_STYLES.td}>{c.challan_date}</td>
                       <td style={TABLE_STYLES.td}>
-                        <ChallanStatusPill status={statusOf(c)} />
+                        <ChallanStatusPill challan={c} />
                       </td>
                       <td style={{ ...TABLE_STYLES.td, color: "var(--muted)", fontSize: 12 }}>
-                        {c.notes ?? "—"}
+                        {st === "rejected" && c.owner_reject_reason
+                          ? <span style={{ color: "#991b1b" }}>Rejected: {c.owner_reject_reason}</span>
+                          : c.notes ?? "—"}
+                      </td>
+                      <td style={TABLE_STYLES.td}>
+                        {st === "rejected" ? (
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <Link href={`/invoicing/challans/${c.id}/review`} style={{ ...BUTTON_STYLES.secondary, fontSize: 12 }}>
+                              ✏️ Re-price
+                            </Link>
+                            <ReturnToDispatchButton challanId={c.id} action={returnDispatchToWaitingAction} />
+                          </span>
+                        ) : st === "pending_approval" ? (
+                          <Link href="/invoicing/approval" style={{ fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
+                            Awaiting approval →
+                          </Link>
+                        ) : (
+                          <span style={{ color: "var(--muted)", fontSize: 12 }}>—</span>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </Fragment>
               ))}
             </tbody>

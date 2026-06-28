@@ -416,6 +416,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     if (dErr) return null;
     return count ?? 0;
   }
+  // Mig 167 — Invoice approval (OWNER): priced challans waiting for the owner's
+  // final sign-off before they become invoices + release the truck.
+  async function fetchInvoiceApprovalBadge(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error: iErr } = await supabase
+      .from("challans")
+      .select("*", { count: "exact", head: true })
+      .not("priced_at", "is", null)
+      .is("owner_approved_at", null)
+      .is("owner_rejected_at", null)
+      .is("cancelled_at", null)
+      .is("converted_invoice_id", null);
+    if (iErr) return null;
+    return count ?? 0;
+  }
 
   const [
     approvalsBadge,
@@ -433,6 +448,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     ownerReviewBadge,
     slabImportBadge,
     dispatchApprovalBadge,
+    invoiceApprovalBadge,
     templeCancelAlert,
   ] = await Promise.all([
     fetchApprovalsBadge(),
@@ -450,6 +466,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchOwnerReviewBadge(),
     fetchSlabImportBadge(),
     fetchDispatchApprovalBadge(),
+    fetchInvoiceApprovalBadge(),
     fetchTempleCancelAlert(),
   ]);
 
@@ -695,6 +712,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               ownerReviewBadge,
               slabImportBadge,
               dispatchApprovalBadge,
+              invoiceApprovalBadge,
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -824,6 +842,9 @@ function buildTopbarTaskItems(counts: {
   /** Provisional dispatches awaiting a senior's approval before the truck
    *  leaves. Owner / developer / carving_head / senior_incharge; null otherwise. */
   dispatchApprovalBadge: number | null;
+  /** Mig 167 — priced challans awaiting the OWNER's invoice approval.
+   *  Owner / developer only; null otherwise. */
+  invoiceApprovalBadge: number | null;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -1001,6 +1022,19 @@ function buildTopbarTaskItems(counts: {
       count: counts.dispatchApprovalBadge,
       icon: "🚚",
       department: "production",
+    });
+  }
+  // Mig 167 — Invoice approval (OWNER): priced challans waiting for your final
+  // sign-off before they become invoices and the truck is released.
+  if (counts.invoiceApprovalBadge !== null) {
+    items.push({
+      id: "invoice-approval",
+      href: "/invoicing/approval",
+      label: "Invoice Approval",
+      description: "Priced challans waiting for your approval to issue the invoice",
+      count: counts.invoiceApprovalBadge,
+      icon: "🧾",
+      department: "finance",
     });
   }
   // Mig 118 — slabs flagged to the owner during Carving Done Approval.

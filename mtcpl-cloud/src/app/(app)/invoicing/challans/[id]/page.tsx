@@ -16,9 +16,11 @@ import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
 } from "../../../accounts/_ui/components";
+import { challanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "../../_ui/challan-status-pill";
-import { cancelChallanAction } from "../../actions";
+import { cancelChallanAction, returnDispatchToWaitingAction } from "../../actions";
 import { CancelChallanButton } from "./cancel-button";
+import { ReturnToDispatchButton } from "../../_ui/return-to-dispatch-button";
 
 type Params = Promise<{ id: string }>;
 
@@ -33,7 +35,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     supabase
       .from("challans")
       .select(
-        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, source_dispatch_id, priced_at, temple, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
+        "id, challan_number, challan_date, invoice_party_id, notes, cancelled_at, cancel_reason, converted_invoice_id, converted_at, created_at, source_dispatch_id, priced_at, owner_approved_at, owner_rejected_at, owner_reject_reason, temple, invoice_parties(name, gstin, address, phone), invoices:converted_invoice_id(invoice_number)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -58,6 +60,9 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     created_at: string;
     source_dispatch_id: string | null;
     priced_at: string | null;
+    owner_approved_at: string | null;
+    owner_rejected_at: string | null;
+    owner_reject_reason: string | null;
     temple: string | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
@@ -91,13 +96,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
     position: number;
   }>;
 
-  const status: "open" | "invoiced" | "converted" | "cancelled" = c.cancelled_at
-    ? "cancelled"
-    : c.converted_invoice_id
-    ? "converted"
-    : c.priced_at
-    ? "invoiced"
-    : "open";
+  const status = challanStatus(c);
 
   return (
     <section className="page-card">
@@ -119,34 +118,57 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
           ← All challans
         </Link>
         <span style={{ marginLeft: 6 }}>
-          <ChallanStatusPill status={status} />
+          <ChallanStatusPill challan={c} />
         </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {/* Mig 157 — landscape tax invoice (priced challan). Always offered
-              once priced; the review screen is the primary path for open
-              challans. The legacy portrait "Convert to invoice" stays as a
-              secondary option. */}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Mig 157 — landscape tax invoice (priced challan). Once priced it's
+              always reviewable (watermarked UNDER APPROVAL until the owner signs
+              off — mig 167). */}
           {c.priced_at && (
             <Link href={`/invoicing/challan/${c.id}/print`} target="_blank" rel="noopener noreferrer" style={BUTTON_STYLES.secondary}>
               🖨 Tax invoice →
             </Link>
           )}
-          {(status === "open" || status === "invoiced") && (
+          {/* OPEN — price it (the primary path). Legacy portrait convert only for
+              old party-based challans that are NOT dispatch-sourced (mig 167:
+              dispatch-sourced challans go price → owner approval, never convert). */}
+          {status === "open" && (
             <>
               <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.primary}>
-                {status === "invoiced" ? "✏️ Re-price →" : "🧾 Review & price →"}
+                🧾 Review &amp; price →
               </Link>
-              {/* Legacy portrait flow only for old party-based, not-yet-priced
-                  challans; temple-based ones use Review & price → tax invoice. */}
-              {status === "open" && !c.temple && (
-                <Link
-                  href={`/invoicing/challans/${c.id}/convert`}
-                  style={BUTTON_STYLES.secondary}
-                >
+              {!c.temple && !c.source_dispatch_id && (
+                <Link href={`/invoicing/challans/${c.id}/convert`} style={BUTTON_STYLES.secondary}>
                   Convert to invoice →
                 </Link>
               )}
               <CancelChallanButton challanId={c.id} cancelAction={cancelChallanAction} />
+            </>
+          )}
+          {/* PENDING — sent to the owner; only a re-price is offered. */}
+          {status === "pending_approval" && (
+            <>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8, padding: "6px 10px" }}>
+                Sent to owner for approval.
+              </span>
+              <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.secondary}>
+                ✏️ Re-price →
+              </Link>
+            </>
+          )}
+          {/* INVOICED — owner approved; re-price still allowed (re-submits). */}
+          {status === "invoiced" && (
+            <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.secondary}>
+              ✏️ Re-price →
+            </Link>
+          )}
+          {/* REJECTED — owner bounced it back: re-price or cancel → dispatch. */}
+          {status === "rejected" && (
+            <>
+              <Link href={`/invoicing/challans/${c.id}/review`} style={BUTTON_STYLES.primary}>
+                ✏️ Re-price →
+              </Link>
+              <ReturnToDispatchButton challanId={c.id} action={returnDispatchToWaitingAction} />
             </>
           )}
           {status === "converted" && linkedInvoice && (
@@ -159,6 +181,17 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
           )}
         </span>
       </div>
+
+      {/* Mig 167 — owner reject reason (rejected challans go back to the
+          accountant here to re-price or cancel → dispatch). */}
+      {status === "rejected" && c.owner_reject_reason && (
+        <div
+          className="print-hide"
+          style={{ marginBottom: 14, fontSize: 13, color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px" }}
+        >
+          <strong>Owner rejected this invoice:</strong> {c.owner_reject_reason}
+        </div>
+      )}
 
       {/* Printable card */}
       <div

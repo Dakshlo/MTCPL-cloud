@@ -105,7 +105,6 @@ export async function createDispatchAction(formData: FormData) {
   const vehicleNo = String(formData.get("vehicle_no") || "").trim().toUpperCase() || null;
   const driverName = String(formData.get("driver_name") || "").trim() || null;
   const driverPhone = String(formData.get("driver_phone") || "").trim() || null;
-  const expectedDeliveryDate = String(formData.get("expected_delivery_date") || "").trim() || null;
   const notes = String(formData.get("notes") || "").trim() || null;
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];
   // Mig 130 — optional per-slab weights, entered in KG on the truck form.
@@ -202,7 +201,6 @@ export async function createDispatchAction(formData: FormData) {
         vehicle_no: vehicleNo,
         driver_name: driverName,
         driver_phone: driverPhone,
-        expected_delivery_date: expectedDeliveryDate,
         notes,
         dispatched_by: profile.id,
         load_number: candidate,
@@ -485,6 +483,10 @@ export async function approveDispatchAction(formData: FormData) {
     .update({
       approved_at: new Date().toISOString(),
       approved_by: profile.id,
+      // Mig 167 — verify no longer releases the truck; it moves to Invoice in
+      // process. Clear any prior "returned" flag from a re-check.
+      returned_at: null,
+      return_reason: null,
     })
     .eq("id", dispatchId);
   if (error) fail("/dispatch", `Failed to approve: ${error.message}`);
@@ -497,8 +499,8 @@ export async function approveDispatchAction(formData: FormData) {
     temple: dispatch.temple,
     challan_number: dispatch.challan_number,
   });
-  await notify("dispatch_approved", `${chalanLabel} approved for ${dispatch.temple}`, {
-    message: `Senior approved — truck cleared to leave`,
+  await notify("dispatch_approved", `${chalanLabel} → invoicing for ${dispatch.temple}`, {
+    message: `Verified — now in Invoice in process (pricing + owner approval)`,
     entityType: "dispatch",
     entityId: dispatchId,
     actorId: profile.id,
@@ -519,7 +521,7 @@ export async function approveDispatchAction(formData: FormData) {
   revalidatePath("/invoicing");
   revalidatePath("/invoicing/challans");
   redirect(
-    `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} approved — ${dispatch.temple}`)}`,
+    `/dispatch?tab=invoice_in_process&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} → Invoice in process — ${dispatch.temple}`)}`,
   );
 }
 
@@ -638,7 +640,7 @@ export async function verifyDispatchAction(formData: FormData) {
 
   const { error } = await admin
     .from("dispatches")
-    .update({ approved_at: new Date().toISOString(), approved_by: profile.id })
+    .update({ approved_at: new Date().toISOString(), approved_by: profile.id, returned_at: null, return_reason: null })
     .eq("id", dispatchId);
   if (error) fail(`/dispatch/${dispatchId}/check`, `Failed to verify: ${error.message}`);
 
@@ -684,8 +686,25 @@ export async function verifyDispatchAction(formData: FormData) {
   revalidatePath("/invoicing");
   revalidatePath("/invoicing/challans");
   redirect(
-    `/dispatch?tab=out_for_delivery&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} verified — ${dispatch.temple}`)}`,
+    `/dispatch?tab=invoice_in_process&dispatch_toast=${encodeURIComponent(`✓ ${chalanLabel} verified → Invoice in process — ${dispatch.temple}`)}`,
   );
+}
+
+// ─── acknowledgeHandoverAction ───────────────────────────────────────────
+// Mig 167 — dismiss the "Handover the documents to the driver" popup that shows
+// on a freshly-released (owner-approved) truck in the On-the-road tab.
+export async function acknowledgeHandoverAction(formData: FormData) {
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "dispatch"]);
+  const admin = createAdminSupabaseClient();
+  const dispatchId = String(formData.get("id") || "").trim();
+  if (!dispatchId) fail("/dispatch?tab=out_for_delivery", "Dispatch id is required");
+  await admin
+    .from("dispatches")
+    .update({ handover_ack_at: new Date().toISOString(), handover_ack_by: profile.id })
+    .eq("id", dispatchId)
+    .is("handover_ack_at", null);
+  revalidatePath("/dispatch");
+  redirect("/dispatch?tab=out_for_delivery&dispatch_toast=" + encodeURIComponent("Documents handed over to driver"));
 }
 
 // ─── removeSlabsFromDispatchAction ───────────────────────────────────────

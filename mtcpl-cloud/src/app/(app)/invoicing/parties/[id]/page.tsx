@@ -41,7 +41,7 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
       .maybeSingle(),
     supabase
       .from("challans")
-      .select("id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id")
+      .select("id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at")
       .eq("invoice_party_id", id)
       .order("challan_date", { ascending: false }),
     supabase
@@ -72,6 +72,9 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
     notes: string | null;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
+    priced_at: string | null;
+    owner_approved_at: string | null;
+    owner_rejected_at: string | null;
   }>;
   const invoices = (invoicesRaw ?? []) as Array<{
     id: string;
@@ -170,11 +173,6 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
               </thead>
               <tbody>
                 {challans.map((c, idx) => {
-                  const status: "open" | "converted" | "cancelled" = c.cancelled_at
-                    ? "cancelled"
-                    : c.converted_invoice_id
-                    ? "converted"
-                    : "open";
                   return (
                     <tr key={c.id} style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}>
                       <td style={{ ...TABLE_STYLES.td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
@@ -184,7 +182,7 @@ export default async function PartyDetailPage({ params }: { params: Params }) {
                       </td>
                       <td style={TABLE_STYLES.td}>{c.challan_date}</td>
                       <td style={TABLE_STYLES.td}>
-                        <ChallanStatusPill status={status} />
+                        <ChallanStatusPill challan={c} />
                       </td>
                       <td style={{ ...TABLE_STYLES.td, color: "var(--muted)", fontSize: 12 }}>
                         {c.notes ?? "—"}

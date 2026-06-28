@@ -47,6 +47,7 @@ export default async function InvoicingDashboardPage() {
     { count: partyCount },
     { count: openChallanCount },
     { count: convertedChallanCount },
+    { count: pendingApprovalCount },
     invoicesQ,
     recentChallansQ,
     recentInvoicesQ,
@@ -66,12 +67,21 @@ export default async function InvoicingDashboardPage() {
       .select("id", { count: "exact", head: true })
       .is("cancelled_at", null)
       .not("converted_invoice_id", "is", null),
+    // Mig 167 — priced challans waiting on owner approval.
+    supabase
+      .from("challans")
+      .select("id", { count: "exact", head: true })
+      .not("priced_at", "is", null)
+      .is("owner_approved_at", null)
+      .is("owner_rejected_at", null)
+      .is("cancelled_at", null)
+      .is("converted_invoice_id", null),
     supabase
       .from("invoices")
       .select("id, total"),
     supabase
       .from("challans")
-      .select("id, challan_number, challan_date, invoice_party_id, temple, cancelled_at, converted_invoice_id, invoice_parties(name)")
+      .select("id, challan_number, challan_date, invoice_party_id, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, invoice_parties(name)")
       .order("created_at", { ascending: false })
       .limit(6),
     supabase
@@ -93,6 +103,9 @@ export default async function InvoicingDashboardPage() {
     temple: string | null;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
+    priced_at: string | null;
+    owner_approved_at: string | null;
+    owner_rejected_at: string | null;
     invoice_parties: { name: string } | { name: string }[] | null;
   };
   const recentChallans = (recentChallansQ.data ?? []) as RecentChallan[];
@@ -115,6 +128,10 @@ export default async function InvoicingDashboardPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {/* New challan / New invoice live in the sidebar menu — kept off the
                 dashboard hero to avoid duplication (Daksh). */}
+            {/* Mig 167 — journey reads Challans → Approval → Invoices. */}
+            <Link href="/invoicing/approval" style={BUTTON_STYLES.secondary}>
+              🟡 Approval{pendingApprovalCount ? ` (${pendingApprovalCount})` : ""}
+            </Link>
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
@@ -209,11 +226,6 @@ export default async function InvoicingDashboardPage() {
                   : c.invoice_parties.name
                 : null;
               const partyName = c.temple ?? legacyParty ?? "—";
-              const status: "open" | "converted" | "cancelled" = c.cancelled_at
-                ? "cancelled"
-                : c.converted_invoice_id
-                ? "converted"
-                : "open";
               return (
                 <Link
                   key={c.id}
@@ -244,7 +256,7 @@ export default async function InvoicingDashboardPage() {
                   <VendorIdentity name={partyName} size={28} />
                   <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 12, color: "var(--muted)" }}>{c.challan_date}</span>
-                    <ChallanStatusPill status={status} />
+                    <ChallanStatusPill challan={c} />
                   </span>
                 </Link>
               );

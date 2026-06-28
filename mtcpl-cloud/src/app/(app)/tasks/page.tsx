@@ -171,6 +171,20 @@ export default async function TasksPage() {
     if (error) return null;
     return count ?? 0;
   }
+  // Mig 167 — priced challans awaiting the OWNER's invoice approval.
+  async function fetchInvoiceApproval(): Promise<number | null> {
+    if (profile.role !== "owner" && profile.role !== "developer") return null;
+    const { count, error } = await supabase
+      .from("challans")
+      .select("*", { count: "exact", head: true })
+      .not("priced_at", "is", null)
+      .is("owner_approved_at", null)
+      .is("owner_rejected_at", null)
+      .is("cancelled_at", null)
+      .is("converted_invoice_id", null);
+    if (error) return null;
+    return count ?? 0;
+  }
 
   const [
     approvals,
@@ -184,6 +198,7 @@ export default async function TasksPage() {
     ownerReviews,
     slabImports,
     slabCancels,
+    invoiceApproval,
   ] = await Promise.all([
     fetchApprovals(),
     fetchBillsAudit(),
@@ -196,6 +211,7 @@ export default async function TasksPage() {
     fetchOwnerReviews(),
     fetchSlabImports(),
     fetchSlabCancels(),
+    fetchInvoiceApproval(),
   ]);
 
   const cards: TaskCard[] = [];
@@ -285,6 +301,17 @@ export default async function TasksPage() {
       count: ownerReviews,
       icon: "👤",
       department: "production",
+    });
+  }
+  if (invoiceApproval !== null) {
+    cards.push({
+      id: "invoice-approval",
+      href: "/invoicing/approval",
+      label: "Invoice Approval",
+      description: "Priced challans waiting for your approval to issue the invoice",
+      count: invoiceApproval,
+      icon: "🧾",
+      department: "finance",
     });
   }
   if (slabImports !== null) {
