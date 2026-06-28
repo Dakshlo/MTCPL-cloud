@@ -56,6 +56,15 @@ export async function saveChallanPricingAction(formData: FormData) {
   const challanId = txt(formData, "challan_id");
   if (!challanId) redirect("/invoicing/challans");
 
+  // A converted or cancelled challan must not be (re-)priced — that would issue
+  // two invoice documents for one shipment. Re-pricing an already-priced (but
+  // not converted) challan is allowed.
+  const { data: guard } = await admin
+    .from("challans").select("converted_invoice_id, cancelled_at").eq("id", challanId).maybeSingle();
+  const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null } | null;
+  if (g?.converted_invoice_id) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Already converted to an invoice — cannot re-price")}`);
+  if (g?.cancelled_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Challan is cancelled — cannot price")}`);
+
   let rates: Record<string, number | string> = {};
   try {
     rates = JSON.parse(txt(formData, "rates") || "{}") as Record<string, number | string>;
@@ -507,7 +516,7 @@ export async function convertChallanToInvoiceAction(
   // Load challan + items + party.
   const { data: challan, error: chErr } = await supabase
     .from("challans")
-    .select("id, challan_number, invoice_party_id, cancelled_at, converted_invoice_id")
+    .select("id, challan_number, invoice_party_id, cancelled_at, converted_invoice_id, priced_at")
     .eq("id", challanId)
     .maybeSingle();
   if (chErr) return { ok: false, error: chErr.message };
@@ -518,10 +527,15 @@ export async function convertChallanToInvoiceAction(
     invoice_party_id: string;
     cancelled_at: string | null;
     converted_invoice_id: string | null;
+    priced_at: string | null;
   };
   if (c.cancelled_at) return { ok: false, error: "Challan is cancelled." };
   if (c.converted_invoice_id)
     return { ok: false, error: "Challan was already converted to an invoice." };
+  // Already priced ⇒ the priced challan IS its tax invoice; don't also mint a
+  // legacy invoices row (would double-bill the same goods).
+  if (c.priced_at)
+    return { ok: false, error: "Challan is already priced as a tax invoice." };
 
   const [{ data: items }, { data: party }] = await Promise.all([
     supabase

@@ -6,6 +6,29 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 
+// Page through a query (the invoices register can exceed the 1000-row cap over a
+// financial year — never silently truncate).
+async function pageAll<T>(
+  make: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let off = 0; off < 100_000; off += PAGE) {
+    const { data, error } = await make(off, off + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
+type PricedChallan = {
+  id: string; challan_number: string; challan_date: string; temple: string | null; priced_at: string;
+  gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
+};
+type LegacyInvoice = { id: string; invoice_number: string; invoice_date: string; customer_name: string; total: number };
+
 // Mig 038 → Mig 058. The /invoicing/ landing is the dashboard; this is the
 // dedicated invoices list. Daksh June 2026 — a PRICED challan IS a tax invoice
 // (mig 157) but never creates an `invoices` row, so it was missing here. We now
@@ -16,29 +39,25 @@ export default async function InvoicingListPage() {
   if (!canUseInvoicing(profile)) redirect("/");
   const supabase = createAdminSupabaseClient();
 
-  const [{ data: legacyData, error: legErr }, { data: pricedData, error: prErr }] = await Promise.all([
-    supabase
-      .from("invoices")
-      .select("id, invoice_number, invoice_date, customer_name, total, created_at")
-      .order("created_at", { ascending: false })
-      .limit(200),
-    supabase
-      .from("challans")
-      .select("id, challan_number, challan_date, temple, priced_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
-      .not("priced_at", "is", null)
-      .is("cancelled_at", null)
-      .is("converted_invoice_id", null)
-      .order("priced_at", { ascending: false })
-      .limit(300),
+  const [legacy, priced] = await Promise.all([
+    pageAll<LegacyInvoice>((from, to) =>
+      supabase
+        .from("invoices")
+        .select("id, invoice_number, invoice_date, customer_name, total, created_at")
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    ),
+    pageAll<PricedChallan>((from, to) =>
+      supabase
+        .from("challans")
+        .select("id, challan_number, challan_date, temple, priced_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
+        .not("priced_at", "is", null)
+        .is("cancelled_at", null)
+        .is("converted_invoice_id", null)
+        .order("priced_at", { ascending: false })
+        .range(from, to),
+    ),
   ]);
-  if (legErr) throw new Error(legErr.message);
-  if (prErr) throw new Error(prErr.message);
-
-  type PricedChallan = {
-    id: string; challan_number: string; challan_date: string; temple: string | null; priced_at: string;
-    gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
-  };
-  const priced = (pricedData ?? []) as PricedChallan[];
 
   // Compute each priced challan's grand total from its items + GST snapshot.
   const totalByChallan = new Map<string, number>();
@@ -68,7 +87,7 @@ export default async function InvoicingListPage() {
 
   type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
   const rows: Row[] = [
-    ...((legacyData ?? []) as Array<{ id: string; invoice_number: string; invoice_date: string; customer_name: string; total: number }>).map((r) => ({
+    ...legacy.map((r) => ({
       key: `inv:${r.id}`, code: r.invoice_number, date: r.invoice_date, customer: r.customer_name,
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
     })),

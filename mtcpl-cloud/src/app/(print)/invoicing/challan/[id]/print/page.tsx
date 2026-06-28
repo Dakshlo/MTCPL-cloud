@@ -1,9 +1,9 @@
 /**
- * Tax invoice from a priced challan (Mig 157) — A4 LANDSCAPE.
+ * Tax invoice from a priced challan (Mig 157) — A4 PORTRAIT.
  *
- * Same wide grid as the dispatch challan plus Rate + Amount, CFT and SFT rows
- * in separate tables, then subtotal + GST (IGST or CGST+SGST) + grand total.
- * Blanks print "-".
+ * Compact stone-wise grid (Code/Label/dims + Rate + Amount), CFT and SFT in
+ * separate tables, then subtotal + GST (IGST or CGST+SGST) + grand total.
+ * Bill To + Ship To address blocks; code shown as INV-<FY>-N. Blanks print "-".
  */
 
 import { notFound, redirect } from "next/navigation";
@@ -319,7 +319,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           </div>
           <div>
             <div className="num">{invCode}</div>
-            <div className="dt">Date {c.challan_date}<br />Printed {printDate}</div>
+            <div className="dt">Date {new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}<br />Printed {printDate}</div>
           </div>
         </div>
 

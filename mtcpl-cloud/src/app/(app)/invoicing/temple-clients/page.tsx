@@ -26,7 +26,7 @@ export default async function TempleClientsPage() {
   }
 
   const supabase = createAdminSupabaseClient();
-  const { data: temples } = await supabase
+  const { data: temples, error: templesErr } = await supabase
     .from("temples")
     .select(["id", "name", "code_prefix", "is_active", "site_location", ...ALL_FIELDS].join(", "))
     .order("name");
@@ -55,6 +55,11 @@ export default async function TempleClientsPage() {
           </div>
         }
       />
+      {templesErr && (
+        <div style={{ marginTop: 14, fontSize: 13, fontWeight: 700, color: "#92400e", background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 14px" }}>
+          ⚠ Billing columns aren’t in the database yet — run migration <code style={{ fontFamily: "ui-monospace, monospace" }}>165</code> on Supabase, then reload this page.
+        </div>
+      )}
       <TempleClientsClient temples={templeRows} />
     </section>
   );
