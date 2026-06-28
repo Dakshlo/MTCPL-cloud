@@ -23,6 +23,14 @@ function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+// Code column: at most 2 slab codes per line so a many-code row stays narrow.
+function CodeCell({ codes }: { codes: string[] }) {
+  if (codes.length === 0) return <>-</>;
+  const lines: string[] = [];
+  for (let i = 0; i < codes.length; i += 2) lines.push(codes.slice(i, i + 2).join(", "));
+  return <>{lines.map((ln, i) => (<span key={i}>{ln}{i < lines.length - 1 ? <br /> : null}</span>))}</>;
+}
+
 export default async function DispatchChallanPrintPage({ params, searchParams }: { params: Params; searchParams: Search }) {
   await requireAuth(["developer", "owner", "team_head", "senior_incharge", "carving_head", "cutting_operator", "dispatch"]);
   const { id } = await params;
@@ -200,7 +208,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
             {rows.map((g, i) => (
               <tr key={g.key}>
                 <td className="muted">{i + 1}</td>
-                <td className="mono">{g.codes.join(", ")}</td>
+                <td className="mono"><CodeCell codes={g.codes} /></td>
                 <td>{dash(g.label)}</td>
                 <td>{dash(g.description)}</td>
                 <td>{dash(g.additional_description)}</td>
@@ -279,6 +287,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.slab-table thead { display: table-header-group; }
+          /* Totals print ONCE at the table's true end, not on every page. */
+          table.slab-table tfoot { display: table-row-group; }
           table.slab-table tr { page-break-inside: avoid; }
           .signoff, .delivered, .stone-title { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 9mm; }

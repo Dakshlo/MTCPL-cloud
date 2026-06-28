@@ -13,7 +13,18 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { invoiceCode } from "@/lib/invoice-code";
 import { PrintBtn } from "./print-btn";
+
+// Code column: show at most 2 slab codes per line so a row with many codes
+// doesn't blow out the (portrait) width.
+function CodeCell({ codes }: { codes: string | null }) {
+  const list = (codes ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (list.length === 0) return <>-</>;
+  const lines: string[] = [];
+  for (let i = 0; i < list.length; i += 2) lines.push(list.slice(i, i + 2).join(", "));
+  return <>{lines.map((ln, i) => (<span key={i}>{ln}{i < lines.length - 1 ? <br /> : null}</span>))}</>;
+}
 
 type Params = Promise<{ id: string }>;
 
@@ -95,7 +106,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const amountOf = (it: Item) => (it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * measureOf(it));
   // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
   // it as INV-YYYY-N instead of the internal challan CH-YYYY-N code.
-  const invCode = (c.challan_number || "").replace(/^CH-/i, "INV-") || (c.challan_number ?? "—");
+  const invCode = invoiceCode(c.challan_number, c.challan_date);
 
   // Stone per item — derived from its slab codes (challan_items has no stone
   // column). One lookup for all codes; a group is single-stone so its first
@@ -159,7 +170,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
             {rows.map((it, i) => (
               <tr key={it.id}>
                 <td className="muted">{i + 1}</td>
-                <td className="mono">{dash(it.codes)}</td>
+                <td className="mono"><CodeCell codes={it.codes} /></td>
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
                 <td>{dash(it.additional_description)}</td>
@@ -194,13 +205,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #f0f0f0; }
-        .wrap { max-width: 1180px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
+        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
-        .brand-logo { height: 40px; }
-        .cn { font-size: 13.5px; font-weight: 800; color: #0f2540; }
-        .cl { font-size: 8.5px; color: #666; margin-top: 1px; line-height: 1.45; }
+        .brand-logo { height: 56px; }
+        .cn { font-size: 16px; font-weight: 800; color: #0f2540; }
+        .cl { font-size: 9.5px; color: #666; margin-top: 2px; line-height: 1.5; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
         .num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; }
         .dt { font-size: 9px; color: #888; text-align: right; }
@@ -213,9 +224,9 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
-        table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-        table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d3dae3; white-space: nowrap; }
-        table.t td { padding: 3px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
+        table.t { width: 100%; border-collapse: collapse; font-size: 8.5px; }
+        table.t th { background: #eef2f7; padding: 2px 4px; text-align: left; font-size: 7px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.02em; border: 1px solid #d3dae3; }
+        table.t td { padding: 2px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
         .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
@@ -234,15 +245,17 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.t thead { display: table-header-group; }
+          /* Totals print ONCE at the table's true end, not on every page. */
+          table.t tfoot { display: table-row-group; }
           table.t tr { page-break-inside: avoid; }
           .signoff, .totbox, .stone-title { page-break-inside: avoid; }
-          @page { size: A4 landscape; margin: 9mm; }
+          @page { size: A4 portrait; margin: 9mm; }
         }
         @media screen { body { padding: 0; } }
       `}</style>
 
       <div className="screen-bar">
-        <span className="screen-bar-title">Tax Invoice — {invCode} · {billing?.name ?? c.temple ?? "—"} · A4 landscape</span>
+        <span className="screen-bar-title">Tax Invoice — {invCode} · {billing?.name ?? c.temple ?? "—"} · A4 portrait</span>
         <PrintBtn />
       </div>
 
