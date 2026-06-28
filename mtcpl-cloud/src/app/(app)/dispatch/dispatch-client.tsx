@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState, useTransition, type CSSProperties } from 
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
 import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
+import { FormPendingOverlay } from "@/components/form-pending-overlay";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
 // Mig 132 — long-press a slab card to request a cancel (broken slab);
@@ -1122,6 +1123,7 @@ function TempleDispatchPeek({
             }}
             style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
           >
+            <FormPendingOverlay label="Sending for approval…" />
             <input type="hidden" name="temple" value={group.temple} />
             <input type="hidden" name="slab_ids" value={JSON.stringify(selectedIds)} />
             <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />

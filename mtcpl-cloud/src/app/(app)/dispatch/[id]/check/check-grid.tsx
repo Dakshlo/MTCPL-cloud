@@ -17,6 +17,7 @@ import {
   fetchTempleStorageSlabsAction,
 } from "../../actions";
 import { dash, type DispatchGroupRow } from "@/lib/dispatch-grouping";
+import { FormPendingOverlay } from "@/components/form-pending-overlay";
 
 export type AvailableSlab = {
   id: string;
@@ -518,6 +519,7 @@ export function CheckGrid({
             }
           }}
         >
+          <FormPendingOverlay label="Verifying…" />
           <input type="hidden" name="id" value={dispatchId} />
           <input type="hidden" name="units" value={unitsJson} />
           <input type="hidden" name="weights" value={weightsJson} />
@@ -525,7 +527,7 @@ export function CheckGrid({
           <input type="hidden" name="weight_mode" value={weightMode} />
           <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
           <button type="submit" disabled={!weightOk} title={weightOk ? undefined : "Enter weight first — per slab or whole truck"} style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: weightOk ? "#15803d" : "var(--border)", border: "none", borderRadius: 11, cursor: weightOk ? "pointer" : "not-allowed" }}>
-            ✅ Verify — create challan &amp; send truck
+            ✅ Verify — create challan &amp; send to invoicing
           </button>
         </form>
         <form
@@ -535,6 +537,7 @@ export function CheckGrid({
             if (!confirm(`Cancel ${challanLabel}? Every slab goes back to Make Dispatch.`)) e.preventDefault();
           }}
         >
+          <FormPendingOverlay label="Cancelling…" />
           <input type="hidden" name="id" value={dispatchId} />
           <button type="submit" style={{ fontSize: 13.5, padding: "12px 20px", fontWeight: 700, color: "#b91c1c", background: "var(--bg)", border: "1.5px solid rgba(220,38,38,0.4)", borderRadius: 11, cursor: "pointer" }}>
             ✕ Cancel dispatch — slabs back to Make Dispatch

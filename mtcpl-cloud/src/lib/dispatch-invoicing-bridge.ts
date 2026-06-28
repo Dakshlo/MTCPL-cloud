@@ -22,10 +22,16 @@ export async function createInvoicingChallanFromDispatch(
 ): Promise<"created" | "exists" | "empty"> {
   const { data: existing } = await admin
     .from("challans")
-    .select("id")
+    .select("id, cancelled_at")
     .eq("source_dispatch_id", dispatchId)
     .maybeSingle();
-  if (existing) return "exists";
+  // A live (non-cancelled) challan already exists → idempotent no-op. A lingering
+  // CANCELLED one (legacy soft-cancel) is removed so this re-verify recreates a
+  // fresh challan (Mig 167/168).
+  if (existing) {
+    if (!(existing as { cancelled_at: string | null }).cancelled_at) return "exists";
+    await admin.from("challans").delete().eq("id", (existing as { id: string }).id);
+  }
 
   // Per-slab logs carry the billing unit (cft/sft, chosen at Check) + weight.
   const { data: logs } = await admin

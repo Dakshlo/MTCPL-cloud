@@ -235,15 +235,18 @@ export async function returnDispatchToWaitingAction(formData: FormData): Promise
   if (ch.owner_approved_at) return { ok: false, error: "Owner already approved this invoice — cannot cancel here." };
 
   // Bounce the dispatch back to Waiting approval (un-verify), flagged returned.
+  // Stamp WHO cancelled so the header reads "Cancelled by <name>: <reason>".
+  const who = (profile.full_name ?? "").trim() || "someone";
+  const stamp = `Cancelled by ${who}: ${reason}`;
   if (ch.source_dispatch_id) {
     await admin
       .from("dispatches")
-      .update({ approved_at: null, approved_by: null, on_road_at: null, returned_at: new Date().toISOString(), return_reason: reason })
+      .update({ approved_at: null, approved_by: null, on_road_at: null, returned_at: new Date().toISOString(), return_reason: stamp })
       .eq("id", ch.source_dispatch_id)
       .is("delivered_at", null);
   }
 
-  await logAudit(profile.id, "challan_returned_to_dispatch", "challan", challanId, { temple: ch.temple, reason });
+  await logAudit(profile.id, "challan_returned_to_dispatch", "challan", challanId, { temple: ch.temple, reason: stamp });
   // Remove the challan (items cascade) so a re-verify recreates a fresh one.
   await admin.from("challans").delete().eq("id", challanId);
 
@@ -574,37 +577,60 @@ export async function cancelChallanAction(formData: FormData): Promise<ActionRes
     return { ok: false, error: "Invoicing access denied." };
   }
   const id = txt(formData, "id");
-  const reason = txt(formData, "reason") || null;
+  const reason = txt(formData, "reason");
   if (!id) return { ok: false, error: "Missing challan id." };
 
-  const supabase = createAdminSupabaseClient();
-  const { data: updated, error } = await supabase
+  const admin = createAdminSupabaseClient();
+  const { data: ch } = await admin
     .from("challans")
-    .update({
-      cancelled_at: new Date().toISOString(),
-      cancel_reason: reason,
-    })
+    .select("id, challan_number, invoice_party_id, source_dispatch_id, cancelled_at, converted_invoice_id, owner_approved_at")
+    .eq("id", id)
+    .maybeSingle();
+  const c = ch as {
+    id: string; challan_number: string | null; invoice_party_id: string | null; source_dispatch_id: string | null;
+    cancelled_at: string | null; converted_invoice_id: string | null; owner_approved_at: string | null;
+  } | null;
+  if (!c) return { ok: false, error: "Challan not found." };
+  if (c.cancelled_at) return { ok: false, error: "Challan is already cancelled." };
+  if (c.converted_invoice_id) return { ok: false, error: "Cannot cancel — already converted to an invoice." };
+  if (c.owner_approved_at) return { ok: false, error: "Owner already approved this invoice — cannot cancel here." };
+
+  // Stamp WHO cancelled + their reason so the dispatch's Waiting-approval header
+  // reads "Cancelled by <name>: <reason>".
+  const who = (profile.full_name ?? "").trim() || "someone";
+  const stamp = `Cancelled by ${who}${reason ? `: ${reason}` : ""}`;
+
+  if (c.source_dispatch_id) {
+    // Mig 167/168 — a DISPATCH challan: bounce the dispatch back to Waiting
+    // approval (flagged returned/cancelled), then remove the challan so a
+    // re-verify recreates a fresh one. (Was leaving the truck stuck in
+    // "Invoice in process" before — Daksh.)
+    await admin
+      .from("dispatches")
+      .update({ approved_at: null, approved_by: null, on_road_at: null, returned_at: new Date().toISOString(), return_reason: stamp })
+      .eq("id", c.source_dispatch_id)
+      .is("delivered_at", null);
+    void logAudit(profile.id, "challan_cancelled", "challan", id, { challan_number: c.challan_number, reason: stamp });
+    await admin.from("challans").delete().eq("id", id);
+    refreshInvoicingPaths({ challanId: id });
+    revalidatePath("/dispatch");
+    revalidatePath("/", "layout");
+    return { ok: true };
+  }
+
+  // Manual (non-dispatch) challan — soft-cancel, keep the record.
+  const { data: updated, error } = await admin
+    .from("challans")
+    .update({ cancelled_at: new Date().toISOString(), cancel_reason: reason || null })
     .eq("id", id)
     .is("cancelled_at", null)
     .is("converted_invoice_id", null)
-    .select("id, challan_number, invoice_party_id")
+    .select("id")
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
-  if (!updated)
-    return {
-      ok: false,
-      error:
-        "Cannot cancel — challan already cancelled or already converted to an invoice.",
-    };
-
-  void logAudit(profile.id, "challan_cancelled", "challan", id, {
-    challan_number: (updated as { challan_number?: string }).challan_number,
-    reason,
-  });
-  refreshInvoicingPaths({
-    challanId: id,
-    partyId: (updated as { invoice_party_id?: string }).invoice_party_id,
-  });
+  if (!updated) return { ok: false, error: "Cannot cancel — challan already cancelled or converted." };
+  void logAudit(profile.id, "challan_cancelled", "challan", id, { challan_number: c.challan_number, reason });
+  refreshInvoicingPaths({ challanId: id, partyId: c.invoice_party_id ?? undefined });
   return { ok: true };
 }
 
