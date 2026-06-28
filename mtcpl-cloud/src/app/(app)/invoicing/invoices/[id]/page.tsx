@@ -265,20 +265,6 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
           </div>
         )}
 
-        <div
-          style={{
-            marginTop: 28,
-            paddingTop: 16,
-            borderTop: "1px solid #e2e8f0",
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 10,
-            color: "#94a3b8",
-          }}
-        >
-          <span>This is a computer-generated invoice. No signature required.</span>
-          <span>Issued via MTCPL Cloud</span>
-        </div>
       </div>
 
       {/* Print-only CSS — hide app chrome when printing. The actual

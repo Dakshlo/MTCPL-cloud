@@ -244,22 +244,22 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .company-name { font-size: 13.5px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.02em; }
         .company-line { font-size: 8.5px; color: #666; margin-top: 1px; line-height: 1.45; }
         .doc-pill { font-size: 13px; font-weight: 800; color: #5b2e0a; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #7c4a1e; border-radius: 6px; padding: 4px 14px; background: #faf4ea; white-space: nowrap; }
-        .doc-num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; }
+        .doc-num { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 4px; white-space: nowrap; }
         .doc-dt { font-size: 9px; color: #888; text-align: right; }
 
         /* Tight info strip — every routing field in a compact grid */
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #fdfaf4; }
         .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
-        .info .v { font-size: 11px; font-weight: 600; color: #1a1a1a; line-height: 1.35; }
+        .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
         .info .v.big { font-size: 13px; font-weight: 800; }
         .info .mono { font-family: ui-monospace, monospace; }
 
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #5b2e0a; margin: 6px 0 3px; }
-        table.slab-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-        table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8px; font-weight: 800; color: #555; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
-        table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; }
+        table.slab-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+        table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
+        table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         table.slab-table tfoot td { font-weight: 800; background: #faf7f0; border: 1px solid #d8d2c4; }
         .slab-table .r { text-align: right; }
         .slab-table .mono { font-family: ui-monospace, monospace; }
@@ -267,7 +267,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .slab-table .muted { color: #999; }
 
         .totals { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; font-weight: 800; margin-top: 8px; padding: 6px 10px; border: 1px solid #d8d2c4; border-radius: 6px; background: #faf7f0; }
-        .signoff { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 18px; margin-top: 22px; }
+        .signoff { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 22px; }
         .sign { border-top: 1.5px solid #888; padding-top: 5px; font-size: 9px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         .sign .sub { font-size: 10px; color: #444; margin-top: 2px; text-transform: none; letter-spacing: 0; font-weight: 600; }
         .delivered { background: rgba(22,101,52,0.08); border: 1px solid rgba(22,101,52,0.3); color: #15803d; padding: 7px 12px; border-radius: 6px; margin-top: 10px; font-size: 10.5px; font-weight: 700; }
@@ -275,8 +275,12 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         @media print {
           body { background: #fff; }
           .screen-bar { display: none !important; }
-          .print-wrap { max-width: none; padding: 0; margin: 0; }
-          table.slab-table, .signoff, .delivered { page-break-inside: avoid; }
+          .print-wrap { max-width: none; padding: 0 2mm; margin: 0; }
+          /* Let long tables flow across pages (no big empty gaps); repeat the
+             header each page and keep individual rows whole. */
+          table.slab-table thead { display: table-header-group; }
+          table.slab-table tr { page-break-inside: avoid; }
+          .signoff, .delivered, .stone-title { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 9mm; }
         }
         @media screen { body { padding: 0; } }
@@ -363,11 +367,14 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           </div>
         )}
 
+        {/* Signature row (Daksh) — all boxes left blank to sign; only the
+            driver name and client (= temple) name are auto-printed. */}
         <div className="signoff">
-          <div className="sign">For MTCPL · Representative<div className="sub">{handlingMan?.name ?? "Authorised signatory"}</div></div>
+          <div className="sign">MTCPL Representative<div className="sub">&nbsp;</div></div>
+          <div className="sign">Challan Generated<div className="sub">&nbsp;</div></div>
+          <div className="sign">Account Signature<div className="sub">&nbsp;</div></div>
           <div className="sign">Driver Signature<div className="sub">{dash(dispatch.driver_name)}</div></div>
-          <div className="sign">Received · Site Engineer<div className="sub">{dispatch.receiver_name || "Name & date of receipt"}</div></div>
-          <div className="sign">Remarks<div className="sub">&nbsp;</div></div>
+          <div className="sign">Client Signature<div className="sub">{dash(dispatch.temple)}</div></div>
         </div>
       </div>
     </>

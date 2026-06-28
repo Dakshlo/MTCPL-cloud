@@ -1215,6 +1215,58 @@ export async function setDispatchInchargeAction(formData: FormData) {
   redirect(`/dispatch/${dispatchId}/check?dispatch_toast=${encodeURIComponent("✓ Incharge updated for this dispatch")}`);
 }
 
+// ── Edit Load No. on Check & verify (Daksh) ──────────────────────────────
+// load_number is a per-TEMPLE series with a (temple, load_number) unique
+// index. Editing rejects a number already used by another dispatch for the
+// same temple, suggesting the next free one in the series.
+const CAN_EDIT_LOAD = ["developer", "owner", "carving_head", "senior_incharge"];
+
+export async function updateDispatchLoadNumberAction(
+  dispatchId: string,
+  loadNo: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!CAN_EDIT_LOAD.includes(profile.role)) return { ok: false, error: "Not allowed." };
+  const n = Math.floor(Number(loadNo));
+  if (!Number.isFinite(n) || n <= 0) return { ok: false, error: "Enter a valid load number (1 or more)." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: disp } = await admin
+    .from("dispatches")
+    .select("id, temple, load_number")
+    .eq("id", dispatchId)
+    .maybeSingle();
+  if (!disp) return { ok: false, error: "Dispatch not found." };
+  const temple = (disp as { temple: string }).temple;
+  if ((disp as { load_number?: number | null }).load_number === n) return { ok: true }; // unchanged
+
+  const nextFree = async () => {
+    const { data: maxRow } = await admin
+      .from("dispatches").select("load_number").eq("temple", temple)
+      .not("load_number", "is", null).order("load_number", { ascending: false }).limit(1).maybeSingle();
+    return (Number((maxRow as { load_number?: number } | null)?.load_number) || 0) + 1;
+  };
+
+  // Reject a number already taken for this temple.
+  const { data: clash } = await admin
+    .from("dispatches").select("id").eq("temple", temple).eq("load_number", n).neq("id", dispatchId).limit(1).maybeSingle();
+  if (clash) {
+    return { ok: false, error: `Load no. ${n} is already created for ${temple}. Try the current series — next available is ${await nextFree()}.` };
+  }
+
+  const { error } = await admin.from("dispatches").update({ load_number: n }).eq("id", dispatchId);
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, error: `Load no. ${n} is already created for ${temple}. Try the current series — next available is ${await nextFree()}.` };
+    }
+    return { ok: false, error: error.message };
+  }
+  void logAudit(profile.id, "dispatch_load_number_edited", "dispatch", dispatchId, { load_number: n });
+  revalidatePath(`/dispatch/${dispatchId}/check`);
+  revalidatePath(`/dispatch/${dispatchId}/print`);
+  return { ok: true };
+}
+
 // ── Storage: ready (completed) slabs (Mig 125 follow-on) ─────────────────
 // Park "ready to dispatch" (status=completed) slabs OUT of Make Dispatch, to
 // declutter. Daksh June 2026 — there is now ONE "Main Storage" (/carving/

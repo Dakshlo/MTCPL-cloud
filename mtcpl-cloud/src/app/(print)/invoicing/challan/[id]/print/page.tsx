@@ -93,8 +93,31 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
   const measureOf = (it: Item) => (it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0);
   const amountOf = (it: Item) => (it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * measureOf(it));
-  const cftItems = items.filter((it) => unitOf(it) === "cft");
-  const sftItems = items.filter((it) => unitOf(it) === "sft");
+  // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
+  // it as INV-YYYY-N instead of the internal challan CH-YYYY-N code.
+  const invCode = (c.challan_number || "").replace(/^CH-/i, "INV-") || (c.challan_number ?? "—");
+
+  // Stone per item — derived from its slab codes (challan_items has no stone
+  // column). One lookup for all codes; a group is single-stone so its first
+  // code's stone represents it. Works for old + new challans, no migration.
+  const codeStone = new Map<string, string>();
+  const allCodes = [...new Set(items.flatMap((it) => (it.codes ?? "").split(",").map((s) => s.trim()).filter(Boolean)))];
+  for (let i = 0; i < allCodes.length; i += 300) {
+    const chunk = allCodes.slice(i, i + 300);
+    if (chunk.length === 0) break;
+    const { data: sr } = await admin.from("slab_requirements").select("id, stone").in("id", chunk);
+    for (const s of (sr ?? []) as Array<{ id: string; stone: string | null }>) codeStone.set(s.id, (s.stone ?? "").trim());
+  }
+  const stoneOf = (it: Item): string => {
+    const first = (it.codes ?? "").split(",").map((s) => s.trim()).filter(Boolean)[0];
+    return (first && codeStone.get(first)) || "—";
+  };
+  // Group items stone-wise (alphabetical); CFT + SFT sub-tables within each.
+  const stoneGroups = (() => {
+    const m = new Map<string, Item[]>();
+    for (const it of items) { const s = stoneOf(it); const arr = m.get(s) ?? []; arr.push(it); m.set(s, arr); }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
 
   const totals = computeInvoiceTotals(items.map(amountOf), {
     mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
@@ -183,13 +206,16 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .dt { font-size: 9px; color: #888; text-align: right; }
         .info { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px 16px; margin: 8px 0 4px; border: 1px solid #ccc; border-radius: 6px; padding: 7px 10px; background: #f7fafc; }
         .info .k { font-size: 7.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #999; }
-        .info .v { font-size: 11px; font-weight: 600; color: #1a1a1a; line-height: 1.35; }
+        .info .v { font-size: 11px; font-weight: 700; color: #1a1a1a; line-height: 1.35; }
         .info .v.big { font-size: 13px; font-weight: 800; }
         .info .mono { font-family: ui-monospace, monospace; }
+        .doc-title { text-align: center; font-size: 19px; font-weight: 800; letter-spacing: 0.18em; color: #0f2540; margin: 2px 0 8px; }
+        .stone-block { margin-top: 4px; }
+        .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
-        table.t { width: 100%; border-collapse: collapse; font-size: 10px; }
-        table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8px; font-weight: 800; color: #555; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d3dae3; white-space: nowrap; }
-        table.t td { padding: 3px 6px; border: 1px solid #e2e7ee; vertical-align: top; }
+        table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+        table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d3dae3; white-space: nowrap; }
+        table.t td { padding: 3px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
         .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
@@ -198,25 +224,30 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .totals .row.alt { background: #f7fafc; }
         .totals .row.grand { background: #0f2540; color: #fff; font-weight: 800; font-size: 14px; padding: 8px 14px; }
         .totals .mono { font-family: ui-monospace, monospace; }
-        .signoff { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 24px; }
+        .signoff { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 24px; }
         .sign { border-top: 1.5px solid #888; padding-top: 5px; font-size: 9px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         .sign .sub { font-size: 10px; color: #444; margin-top: 2px; text-transform: none; letter-spacing: 0; font-weight: 600; }
         @media print {
           body { background: #fff; }
           .screen-bar { display: none !important; }
-          .wrap { max-width: none; padding: 0; margin: 0; }
-          table.t, .signoff, .totbox { page-break-inside: avoid; }
+          .wrap { max-width: none; padding: 0 2mm; margin: 0; }
+          /* Let long tables flow across pages (no big empty gaps); repeat the
+             header each page and keep individual rows whole. */
+          table.t thead { display: table-header-group; }
+          table.t tr { page-break-inside: avoid; }
+          .signoff, .totbox, .stone-title { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 9mm; }
         }
         @media screen { body { padding: 0; } }
       `}</style>
 
       <div className="screen-bar">
-        <span className="screen-bar-title">Tax Invoice — {c.challan_number} · {billing?.name ?? c.temple ?? "—"} · A4 landscape</span>
+        <span className="screen-bar-title">Tax Invoice — {invCode} · {billing?.name ?? c.temple ?? "—"} · A4 landscape</span>
         <PrintBtn />
       </div>
 
       <div className="wrap">
+        <div className="doc-title">TAX INVOICE</div>
         <div className="head">
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -228,8 +259,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
             </div>
           </div>
           <div>
-            <span className="pill">Tax Invoice</span>
-            <div className="num">{c.challan_number}</div>
+            <div className="num">{invCode}</div>
             <div className="dt">Date {c.challan_date}<br />Printed {printDate}</div>
           </div>
         </div>
@@ -246,8 +276,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No items on this invoice.</p>
         ) : (
           <>
-            <Section rows={cftItems} unit="cft" />
-            <Section rows={sftItems} unit="sft" />
+            {stoneGroups.map(([stone, rows]) => (
+              <div key={stone} className="stone-block">
+                <div className="stone-title">🪨 {stone}</div>
+                <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
+                <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
+              </div>
+            ))}
             <div className="totbox">
               <div className="totals">
                 <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
@@ -267,9 +302,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         {c.notes && <p style={{ fontSize: 10, color: "#333", marginTop: 8 }}><strong>Notes:</strong> {c.notes}</p>}
 
         <div className="signoff">
+          <div className="sign">For MTCPL · Authorised Signatory<div className="sub">&nbsp;</div></div>
           <div className="sign">Customer Signature<div className="sub">{dash(billing?.name ?? c.temple)}</div></div>
-          <div className="sign">Remarks<div className="sub">&nbsp;</div></div>
-          <div className="sign">For MTCPL<div className="sub">Authorised signatory</div></div>
         </div>
       </div>
     </>

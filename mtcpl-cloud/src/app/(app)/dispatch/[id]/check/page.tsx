@@ -16,6 +16,7 @@ import { groupDispatchSlabs, dash, type DispatchSlabInput } from "@/lib/dispatch
 import { resolveDispatchIncharge, fetchInchargeOptions } from "@/lib/dispatch-incharge";
 import { CheckGrid } from "./check-grid";
 import { InchargePicker } from "./incharge-picker";
+import { LoadNumberEditor } from "./load-number-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -209,7 +210,7 @@ export default async function DispatchCheckPage({
     ["Site incharge", site.site_incharge_name ? `${site.site_incharge_name}${site.site_incharge_phone ? ` · ${site.site_incharge_phone}` : ""}` : "-"],
     ["Installation by", site.installer_name ? `${site.installer_name}${site.installer_phone ? ` · ${site.installer_phone}` : ""}` : "-"],
     ["MTCPL incharge", handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "-"],
-    ["Load no.", loadNumber != null ? String(loadNumber) : "-"],
+    // Load no. is rendered separately (editable) — see LoadNumberEditor below.
   ];
 
   return (
@@ -250,6 +251,7 @@ export default async function DispatchCheckPage({
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={val}>{val}</div>
           </div>
         ))}
+        <LoadNumberEditor dispatchId={id} initial={loadNumber} />
       </div>
 
       {/* Mig 159 — change the dispatch incharge for THIS truck (overrides the
