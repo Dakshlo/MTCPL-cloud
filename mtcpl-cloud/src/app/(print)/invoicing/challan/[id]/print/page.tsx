@@ -26,9 +26,10 @@ function CodeCell({ codes }: { codes: string | null }) {
   return <>{lines.map((ln, i) => (<span key={i}>{ln}{i < lines.length - 1 ? <br /> : null}</span>))}</>;
 }
 
-// Combined Category cell — Category 2 — Category 1 in one column to save width.
-function catText(el: string | null, section: string | null): string {
-  const parts = [el, section].map((v) => (v ?? "").trim()).filter(Boolean);
+// Combined Category cell — joins two parts with " — " in one column to save
+// width. Called as catText(Category 1, Category 2) → "MAIN TEMPLE — GROUND FLOOR".
+function catText(a: string | null, b: string | null): string {
+  const parts = [a, b].map((v) => (v ?? "").trim()).filter(Boolean);
   return parts.length ? parts.join(" — ") : "-";
 }
 
@@ -204,10 +205,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <thead>
             <tr>
               <th style={{ width: 20 }}>#</th>
-              <th>Code(s)</th>
+              <th>Category</th>
               <th>Label</th>
               <th>Description</th>
-              <th>Category</th>
+              <th>Code(s)</th>
               <th className="r">L</th>
               <th className="r">W</th>
               <th className="r">H</th>
@@ -221,10 +222,10 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
             {rows.map((it, i) => (
               <tr key={it.id}>
                 <td className="muted">{i + 1}</td>
-                <td className="mono"><CodeCell codes={it.codes} /></td>
+                <td>{catText(it.component_section, it.component_element)}</td>
                 <td>{dash(it.label)}</td>
                 <td>{dash(it.description)}</td>
-                <td>{catText(it.component_element, it.component_section)}</td>
+                <td className="mono"><CodeCell codes={it.codes} /></td>
                 <td className="r mono">{it.length_ft ?? "-"}</td>
                 <td className="r mono">{it.width_ft ?? "-"}</td>
                 <td className="r mono">{it.thickness_ft ?? "-"}</td>
@@ -300,8 +301,12 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .t th.hl1 { background: #c7ddf6; }
         .t td.hl2 { background: #fff7e0; }
         .t th.hl2 { background: #ffe6a8; }
-        .totbox { display: flex; justify-content: flex-end; margin-top: 10px; }
-        .totals { min-width: 280px; border: 1px solid #d3dae3; border-radius: 8px; overflow: hidden; }
+        .totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; }
+        .terms { flex: 1 1 auto; max-width: 58%; }
+        .terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
+        .terms-list { margin: 0; padding-left: 15px; }
+        .terms-list li { font-size: 9px; color: #444; line-height: 1.5; margin-bottom: 1px; }
+        .totals { min-width: 280px; flex: 0 0 auto; border: 1px solid #d3dae3; border-radius: 8px; overflow: hidden; }
         .totals .row { display: flex; justify-content: space-between; gap: 24px; padding: 5px 14px; font-size: 11.5px; }
         .totals .row.alt { background: #f7fafc; }
         .totals .row.grand { background: #0f2540; color: #fff; font-weight: 800; font-size: 14px; padding: 8px 14px; }
@@ -373,6 +378,17 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               </div>
             ))}
             <div className="totbox">
+              {/* Terms & conditions sit on the LEFT, opposite the totals (Daksh). */}
+              <div className="terms">
+                <div className="terms-title">Terms &amp; Conditions</div>
+                <ol className="terms-list">
+                  <li>Goods once sold will not be taken back.</li>
+                  <li>Interest will be charged @ 24% p.a. from the date of bill.</li>
+                  <li>All disputes are subject to PINDWARA jurisdiction only.</li>
+                  <li>C form will be required within 15 days otherwise you are liable as applicable.</li>
+                  <li>We are not responsible for any shortage or damage after the goods leaves our godown.</li>
+                </ol>
+              </div>
               <div className="totals">
                 <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
                 {c.gst_mode === "igst" && <div className="row alt"><span>IGST @ {Number(c.igst_percent) || 0}%</span><span className="mono">{rupee(totals.igstAmt)}</span></div>}
