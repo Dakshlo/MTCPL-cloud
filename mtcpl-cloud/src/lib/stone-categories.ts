@@ -40,23 +40,24 @@ export function isMarble(
 }
 
 /** Customer-facing stone label for the delivery challan + tax invoice prints
- *  (Daksh, June 2026):
+ *  (Daksh, June 2026) — shown UPPERCASE with camelCase split into words:
  *    • Yellow (Jaisalmer) stone is a SANDSTONE despite its "marble" name — it
- *      must NEVER print as "yellow marble"; always show "Jaiselmer-sandstone".
- *    • Every other sandstone-category stone gets a "/sandstone" suffix, e.g.
- *      "PinkStone" → "PinkStone/sandstone", "RedStone" → "RedStone/sandstone".
- *    • Marbles (white/black/etc.) print as-is.
- *  Stones missing from the category map default to sandstone (the app default),
- *  so they also get the "/sandstone" suffix. */
+ *      must NEVER print as "yellow marble"; always show "JAISELMER-SANDSTONE".
+ *    • Every other sandstone-category stone → "<NAME>/SAND STONE", e.g.
+ *      "PinkStone" → "PINK STONE/SAND STONE", "RedStone" → "RED STONE/SAND STONE".
+ *    • Marbles print as their uppercase name, e.g. "WhiteMarble" → "WHITE MARBLE".
+ *  Stones missing from the category map default to sandstone (the app default). */
 export function stonePrintLabel(
   stoneName: string | null | undefined,
   categoryMap: Record<string, StoneCategory>,
 ): string {
   const s = (stoneName ?? "").trim();
   if (!s) return "—";
-  if (/yellow/i.test(s)) return "Jaiselmer-sandstone";
-  if (!isMarble(s, categoryMap)) return `${s}/sandstone`;
-  return s;
+  if (/yellow/i.test(s)) return "JAISELMER-SANDSTONE";
+  // "PinkStone" → "PINK STONE" (split camelCase boundaries, then uppercase).
+  const human = s.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase();
+  if (!isMarble(s, categoryMap)) return `${human}/SAND STONE`;
+  return human;
 }
 
 /** Suggest the next block ID for a marble truck. Uses a stone-specific
