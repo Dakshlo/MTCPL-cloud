@@ -120,6 +120,8 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
         table.t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         .t .r { text-align: right; white-space: nowrap; font-family: ui-monospace, monospace; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
+        .t th.q { background: #c7ddf6; } .t td.q { background: #e6f0fb; }
+        .t th.a { background: #ffe6a8; } .t td.a { background: #fff7e0; }
         .totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; }
         .terms { flex: 1 1 auto; max-width: 58%; }
         .terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
@@ -198,9 +200,9 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
                   <th>Item / Particulars</th>
                   <th style={{ width: 80 }}>HSN</th>
                   <th style={{ width: 56 }}>Unit</th>
-                  <th className="r" style={{ width: 56 }}>Qty</th>
-                  <th className="r" style={{ width: 80 }}>Rate</th>
-                  <th className="r" style={{ width: 96 }}>Amount</th>
+                  <th className="r q" style={{ width: 56 }}>Qty</th>
+                  <th className="r q" style={{ width: 80 }}>Rate</th>
+                  <th className="r a" style={{ width: 96 }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -212,9 +214,9 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
                       <td>{dash(it.particulars)}</td>
                       <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
                       <td>{dash(it.unit)}</td>
-                      <td className="r">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
-                      <td className="r">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>
-                      <td className="r">{rupee(amt)}</td>
+                      <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
+                      <td className="r q">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>
+                      <td className="r a">{rupee(amt)}</td>
                     </tr>
                   );
                 })}

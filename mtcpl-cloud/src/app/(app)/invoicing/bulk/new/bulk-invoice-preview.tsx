@@ -68,7 +68,9 @@ export function BulkInvoicePreview({
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,23,42,0.55)", display: "flex", flexDirection: "column", alignItems: "center", padding: "18px 12px", overflowY: "auto" }}
+      // Anchor to the content area (right of the sidebar) via --content-left so the
+      // peek centers over the page, not the whole screen (Daksh).
+      style={{ position: "fixed", top: 0, right: 0, bottom: 0, left: "var(--content-left)", zIndex: 70, background: "rgba(15,23,42,0.55)", display: "flex", flexDirection: "column", alignItems: "center", padding: "18px 12px", overflowY: "auto" }}
     >
       <style>{`
         .bip-bar { width: min(840px, 100%); display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #fff; margin-bottom: 10px; }
@@ -96,6 +98,9 @@ export function BulkInvoicePreview({
         table.bip-t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         .bip-t .r { text-align: right; white-space: nowrap; font-family: ui-monospace, monospace; }
         table.bip-t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
+        /* Excel-style colour: Qty + Rate = blue, Amount = amber (Daksh). */
+        .bip-t th.bip-q { background: #c7ddf6; } .bip-t td.bip-q { background: #e6f0fb; }
+        .bip-t th.bip-a { background: #ffe6a8; } .bip-t td.bip-a { background: #fff7e0; }
         .bip-totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; position: relative; z-index: 6; }
         .bip-terms { flex: 1 1 auto; max-width: 58%; }
         .bip-terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
@@ -158,9 +163,9 @@ export function BulkInvoicePreview({
                   <th>Item / Particulars</th>
                   <th style={{ width: 80 }}>HSN</th>
                   <th style={{ width: 56 }}>Unit</th>
-                  <th className="r" style={{ width: 56 }}>Qty</th>
-                  <th className="r" style={{ width: 80 }}>Rate</th>
-                  <th className="r" style={{ width: 96 }}>Amount</th>
+                  <th className="r bip-q" style={{ width: 56 }}>Qty</th>
+                  <th className="r bip-q" style={{ width: 80 }}>Rate</th>
+                  <th className="r bip-a" style={{ width: 96 }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -170,9 +175,9 @@ export function BulkInvoicePreview({
                     <td>{dash(it.particulars)}</td>
                     <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
                     <td>{dash(it.unit)}</td>
-                    <td className="r">{it.quantity ? fmt(it.quantity) : "-"}</td>
-                    <td className="r">{it.rate ? fmt(it.rate) : "-"}</td>
-                    <td className="r">{rupee(it.amount)}</td>
+                    <td className="r bip-q">{it.quantity ? fmt(it.quantity) : "-"}</td>
+                    <td className="r bip-q">{it.rate ? fmt(it.rate) : "-"}</td>
+                    <td className="r bip-a">{rupee(it.amount)}</td>
                   </tr>
                 ))}
               </tbody>
