@@ -33,7 +33,7 @@ function fmt(n: number): string {
 }
 
 export function DprGrid({
-  report, title, shortUnit, longUnit,
+  report, title, shortUnit, longUnit, hideTotal,
 }: {
   report: DprSection;
   /** Cell A2 text, e.g. "BLOCK CUTTED". */
@@ -42,6 +42,9 @@ export function DprGrid({
   shortUnit: string;
   /** Noun for the tooltip, e.g. "block" / "slab". */
   longUnit: string;
+  /** Site-wise per-temple grids stack 3 sections in one grid (each section's
+   *  orange group row IS its total), so the grand TOTAL row is suppressed. */
+  hideTotal?: boolean;
 }) {
   // Per-cell toggle — keys (`${rowId}:${win}`) currently flipped from default.
   const [asCount, setAsCount] = useState<Set<string>>(new Set());
@@ -61,8 +64,10 @@ export function DprGrid({
     prevTone = ln.tone;
     anyData = true;
   }
-  disp.push({ kind: "blank" });
-  disp.push({ kind: "data", id: `d${rid++}`, tone: "total", label: "TOTAL", windows: report.total });
+  if (!hideTotal) {
+    disp.push({ kind: "blank" });
+    disp.push({ kind: "data", id: `d${rid++}`, tone: "total", label: "TOTAL", windows: report.total });
+  }
   disp.push({ kind: "blank" }, { kind: "blank" });
 
   if (report.lines.length === 0) {

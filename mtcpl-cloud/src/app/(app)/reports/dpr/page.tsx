@@ -17,7 +17,7 @@ import { buildBlockAddedReport } from "@/lib/dpr-block-added";
 import { buildBlockCuttedReport } from "@/lib/dpr-block-cutted";
 import { buildCarvingDoneReport } from "@/lib/dpr-carving-done";
 import { buildDispatchedReport } from "@/lib/dpr-dispatched";
-import type { DprSection } from "@/lib/dpr-section";
+import { emptyWindows, type DprSection, type DprLine, type TempleSlice } from "@/lib/dpr-section";
 import { DprTabs, type DprSectionKey } from "./dpr-tabs";
 import { DprGrid } from "./dpr-grid";
 
@@ -66,27 +66,51 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
       buildCarvingDoneReport(),
       buildDispatchedReport(),
     ]);
-    const stacked: Array<{ report: DprSection; title: string; shortUnit: string; longUnit: string }> = [
-      { report: cut, title: "BLOCK CUTTED", shortUnit: "slab", longUnit: "slab" },
-      { report: carve, title: "CARVING DONE", shortUnit: "slab", longUnit: "slab" },
-      { report: disp, title: "DISPATCHED", shortUnit: "slab", longUnit: "slab" },
-    ];
+    // Re-organise BY TEMPLE: one grid per temple, with BLOCK CUTTED / CARVING
+    // DONE / DISPATCHED as labelled sub-sections inside it (Daksh).
+    const cutBy = new Map((cut.byTemple ?? []).map((s) => [s.temple, s]));
+    const carveBy = new Map((carve.byTemple ?? []).map((s) => [s.temple, s]));
+    const dispBy = new Map((disp.byTemple ?? []).map((s) => [s.temple, s]));
+    const temples = [...new Set([...cutBy.keys(), ...carveBy.keys(), ...dispBy.keys()])];
+    const volOf = (t: string) =>
+      (cutBy.get(t)?.total.allTime.cft ?? 0) + (carveBy.get(t)?.total.allTime.cft ?? 0) + (dispBy.get(t)?.total.allTime.cft ?? 0);
+    temples.sort((a, b) => volOf(b) - volOf(a) || a.localeCompare(b));
+
+    const generatedAt = cut.generatedAt;
     return (
       <section style={{ paddingBottom: 24 }}>
         {header}
         <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 2px 10px" }}>
-          💡 Click any value cell to flip it to the slab count. Each section is grouped by temple.
+          💡 One temple per excel — each shows Block Cutted, Carving Done and Dispatched. Click any value cell to flip it to the slab count.
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-          {stacked.map((s) => (
-            <div key={s.title}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", margin: "0 2px 6px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {s.title}
-              </div>
-              <DprGrid report={s.report} title={s.title} shortUnit={s.shortUnit} longUnit={s.longUnit} />
-            </div>
-          ))}
-        </div>
+        {temples.length === 0 ? (
+          <div style={{ border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", padding: "16px 18px", fontSize: 13, color: "#555" }}>
+            Nothing to show yet.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+            {temples.map((temple) => {
+              const lines: DprLine[] = [];
+              const add = (slice: TempleSlice | undefined, label: string) => {
+                if (!slice || slice.lines.length === 0) return;
+                lines.push({ tone: "group", label, windows: slice.total });
+                lines.push(...slice.lines);
+              };
+              add(cutBy.get(temple), "BLOCK CUTTED");
+              add(carveBy.get(temple), "CARVING DONE");
+              add(dispBy.get(temple), "DISPATCHED");
+              const section: DprSection = { lines, total: emptyWindows(), generatedAt };
+              return (
+                <div key={temple}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", margin: "0 2px 6px" }}>
+                    🏛 {temple}
+                  </div>
+                  <DprGrid report={section} title={temple} shortUnit="slab" longUnit="slab" hideTotal />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     );
   }

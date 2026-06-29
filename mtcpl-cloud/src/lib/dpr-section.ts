@@ -19,7 +19,10 @@ export type DprWindows = { daily: DprWin; week: DprWin; month: DprWin; allTime: 
  *  total, cyan) · item = leaf (vendor, white). */
 export type DprTone = "group" | "subtotal" | "item";
 export type DprLine = { tone: DprTone; label: string; windows: DprWindows };
-export type DprSection = { lines: DprLine[]; total: DprWindows; generatedAt: string };
+/** One temple's slice of a section — its sub-rows (stones / vendors) WITHOUT the
+ *  temple group header, plus its total. Drives the per-temple Site-wise view. */
+export type TempleSlice = { temple: string; total: DprWindows; lines: DprLine[] };
+export type DprSection = { lines: DprLine[]; total: DprWindows; byTemple?: TempleSlice[]; generatedAt: string };
 
 const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
@@ -121,7 +124,7 @@ export type StoneItem = { temple: string | null; stone: string | null; cft: numb
 export function buildTempleStoneSection(
   items: StoneItem[],
   bounds: WinBounds,
-): { lines: DprLine[]; total: DprWindows } {
+): { lines: DprLine[]; total: DprWindows; byTemple: TempleSlice[] } {
   const temples = new Map<string, { windows: DprWindows; stones: Map<string, DprWindows> }>();
   const total = emptyWindows();
   for (const it of items) {
@@ -138,19 +141,23 @@ export function buildTempleStoneSection(
     addWin(sw, v, f);
   }
   const lines: DprLine[] = [];
+  const byTemple: TempleSlice[] = [];
   const sorted = [...temples.entries()].sort((a, b) => byVolume(a[1].windows, b[1].windows) || a[0].localeCompare(b[0]));
   for (const [temple, t] of sorted) {
     lines.push({ tone: "group", label: temple, windows: t.windows });
-    const stones = [...t.stones.entries()].sort((a, b) => byVolume(a[1], b[1]) || a[0].localeCompare(b[0]));
-    for (const [stone, sw] of stones) lines.push({ tone: "item", label: stone, windows: sw });
+    const stoneLines: DprLine[] = [...t.stones.entries()]
+      .sort((a, b) => byVolume(a[1], b[1]) || a[0].localeCompare(b[0]))
+      .map(([stone, sw]) => ({ tone: "item" as const, label: stone, windows: sw }));
+    lines.push(...stoneLines);
+    byTemple.push({ temple, total: t.windows, lines: stoneLines });
   }
-  return { lines, total };
+  return { lines, total, byTemple };
 }
 
 export function buildTempleVendorSection(
   items: VendorItem[],
   bounds: WinBounds,
-): { lines: DprLine[]; total: DprWindows } {
+): { lines: DprLine[]; total: DprWindows; byTemple: TempleSlice[] } {
   const temples = new Map<string, TempleAgg>();
   const total = emptyWindows();
 
@@ -177,22 +184,26 @@ export function buildTempleVendorSection(
   }
 
   const lines: DprLine[] = [];
+  const byTemple: TempleSlice[] = [];
   const sorted = [...temples.entries()].sort(
     (a, b) => byVolume(a[1].windows, b[1].windows) || a[0].localeCompare(b[0]),
   );
   for (const [temple, t] of sorted) {
-    lines.push({ tone: "group", label: temple, windows: t.windows });
+    const sub: DprLine[] = [];
     if (t.cnc.vendors.size > 0) {
-      lines.push({ tone: "subtotal", label: "CNC VENDOR TOTAL", windows: t.cnc.sum });
-      lines.push(...vendorLines(t.cnc.vendors));
+      sub.push({ tone: "subtotal", label: "CNC VENDOR TOTAL", windows: t.cnc.sum });
+      sub.push(...vendorLines(t.cnc.vendors));
     }
     if (t.out.vendors.size > 0) {
-      lines.push({ tone: "subtotal", label: "OUTSOURCE TOTAL", windows: t.out.sum });
-      lines.push(...vendorLines(t.out.vendors));
+      sub.push({ tone: "subtotal", label: "OUTSOURCE TOTAL", windows: t.out.sum });
+      sub.push(...vendorLines(t.out.vendors));
     }
     if (t.hasUnassigned) {
-      lines.push({ tone: "item", label: "NOT ASSIGNED TO CARVING", windows: t.unassigned });
+      sub.push({ tone: "item", label: "NOT ASSIGNED TO CARVING", windows: t.unassigned });
     }
+    lines.push({ tone: "group", label: temple, windows: t.windows });
+    lines.push(...sub);
+    byTemple.push({ temple, total: t.windows, lines: sub });
   }
-  return { lines, total };
+  return { lines, total, byTemple };
 }

@@ -72,6 +72,6 @@ export async function buildBlockCuttedReport(): Promise<DprSection> {
     };
   });
 
-  const { lines, total } = buildTempleStoneSection(items, bounds);
-  return { lines, total, generatedAt: new Date().toISOString() };
+  const { lines, total, byTemple } = buildTempleStoneSection(items, bounds);
+  return { lines, total, byTemple, generatedAt: new Date().toISOString() };
 }

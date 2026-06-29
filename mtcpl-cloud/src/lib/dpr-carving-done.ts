@@ -86,6 +86,6 @@ export async function buildCarvingDoneReport(): Promise<DprSection> {
     });
   }
 
-  const { lines, total } = buildTempleVendorSection(items, bounds);
-  return { lines, total, generatedAt: new Date().toISOString() };
+  const { lines, total, byTemple } = buildTempleVendorSection(items, bounds);
+  return { lines, total, byTemple, generatedAt: new Date().toISOString() };
 }

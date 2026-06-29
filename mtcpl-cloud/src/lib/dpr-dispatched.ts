@@ -82,6 +82,6 @@ export async function buildDispatchedReport(): Promise<DprSection> {
     items.push({ temple: d.temple, stone: s.stone, cft: cftOf(s.length_ft, s.width_ft, s.thickness_ft), date: d.on_road_at });
   }
 
-  const { lines, total } = buildTempleStoneSection(items, bounds);
-  return { lines, total, generatedAt: new Date().toISOString() };
+  const { lines, total, byTemple } = buildTempleStoneSection(items, bounds);
+  return { lines, total, byTemple, generatedAt: new Date().toISOString() };
 }
