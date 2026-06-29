@@ -13,21 +13,18 @@ import { useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { updateTempleAction, deleteTempleAction } from "./actions";
 import { BILLING_FIELDS, SHIPPING_FIELDS, SHARED_FIELDS } from "@/lib/temple-billing-fields";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Temple = Record<string, any>;
 
+// Save feedback now uses the SAME branded overlay as the Finance department
+// (the circular MTCPL mark in a glowing disc) instead of spinning the full
+// wordmark logo, which read oddly (Daksh). useFormStatus keeps it driven by the
+// surrounding <form>'s pending state.
 function SaveOverlay() {
   const { pending } = useFormStatus();
-  if (!pending) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(255,255,255,0.78)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo-mtcpl.png" alt="Saving…" style={{ height: 78, animation: "mtcpl-spin 1s linear infinite" }} />
-      <div style={{ fontSize: 14, fontWeight: 800, color: "#5b2e0a" }}>Saving…</div>
-      <style>{`@keyframes mtcpl-spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
+  return <FinanceLoadingOverlay show={pending} label="Saving…" />;
 }
 
 export function TempleEditModal({
