@@ -185,17 +185,14 @@ export function ReviewForm({
           company is a datalist combobox: pick an existing one or type a new one
           (a new name is saved to the master on Save, for next time). */}
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface)", marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 10 }}>🚚 Transportation</div>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 4 }}>🚚 Transportation</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>Vehicle no. &amp; driver are taken from the dispatch automatically.</div>
         <datalist id="transport-companies">
           {transportCompanies.map((n) => <option key={n} value={n} />)}
         </datalist>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
           <label style={tLabel}><span>Transport company</span><input name="transport_company" list="transport-companies" defaultValue={initTransport.company} placeholder="Pick or type new…" style={tInput} /></label>
-          <label style={tLabel}><span>Phone no.</span><input name="transport_phone" defaultValue={initTransport.phone} style={tInput} /></label>
           <label style={tLabel}><span>LR no.</span><input name="lr_no" defaultValue={initTransport.lr} style={tInput} /></label>
-          <label style={tLabel}><span>Vehicle no.</span><input name="transport_vehicle_no" defaultValue={initTransport.vehicle} style={tInput} /></label>
-          <label style={tLabel}><span>Driver name</span><input name="transport_driver_name" defaultValue={initTransport.driverName} style={tInput} /></label>
-          <label style={tLabel}><span>Driver no.</span><input name="transport_driver_phone" defaultValue={initTransport.driverPhone} style={tInput} /></label>
         </div>
       </div>
 

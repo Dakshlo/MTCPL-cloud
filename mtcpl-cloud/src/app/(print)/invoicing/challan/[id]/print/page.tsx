@@ -163,24 +163,29 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   // falls back to the billing name when there's no separate shipping party.
   const billName = billParty?.name ?? c.temple ?? "—";
   const shipName = (shipParty?.name ?? "").trim() || billName;
-  // Vehicle no — from the source dispatch (Daksh).
+  // Vehicle no + driver — from the source dispatch (Daksh; the transport card
+  // takes these from the challan/dispatch, only company + LR are entered).
   const { data: dispRow } = c.source_dispatch_id
-    ? await admin.from("dispatches").select("vehicle_no").eq("id", c.source_dispatch_id).maybeSingle()
+    ? await admin.from("dispatches").select("vehicle_no, driver_name, driver_phone").eq("id", c.source_dispatch_id).maybeSingle()
     : { data: null };
-  const vehicleNo = (dispRow as { vehicle_no?: string | null } | null)?.vehicle_no ?? null;
-  // Mig 169 — transportation details (best-effort; null if mig not applied or unset).
-  let transport: { company: string | null; phone: string | null; lr: string | null; vehicle: string | null; driverName: string | null; driverPhone: string | null } | null = null;
+  const disp = (dispRow as { vehicle_no?: string | null; driver_name?: string | null; driver_phone?: string | null } | null) ?? null;
+  const vehicleNo = disp?.vehicle_no ?? null;
+  const driverName = disp?.driver_name ?? null;
+  const driverPhone = disp?.driver_phone ?? null;
+  // Mig 169 — transportation: only the company + LR no are entered by the
+  // accountant; vehicle + driver come from the dispatch (above). Best-effort.
+  let transportCompany: string | null = null;
+  let lrNo: string | null = null;
   {
     const { data: tr, error } = await admin
       .from("challans")
-      .select("transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+      .select("transport_company, lr_no")
       .eq("id", id)
       .maybeSingle();
     if (!error && tr) {
       const t = tr as Record<string, string | null>;
-      if (t.transport_company || t.transport_phone || t.lr_no || t.transport_vehicle_no || t.transport_driver_name || t.transport_driver_phone) {
-        transport = { company: t.transport_company, phone: t.transport_phone, lr: t.lr_no, vehicle: t.transport_vehicle_no, driverName: t.transport_driver_name, driverPhone: t.transport_driver_phone };
-      }
+      transportCompany = (t.transport_company ?? "").trim() || null;
+      lrNo = (t.lr_no ?? "").trim() || null;
     }
   }
   const items = (itemRows ?? []) as Item[];
@@ -317,10 +322,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
-        .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
+        /* 3-column grid (logo | company | code) so the company name is centered
+           on the page AND never wraps (auto middle column sizes to it). */
+        .head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
+        .head > div:last-child { justify-self: end; }
         .brand-logo { height: 68px; width: auto; }
-        .company-block { flex: 1; text-align: center; }
-        .cn { font-size: 16.5px; font-weight: 800; color: #0f2540; }
+        .company-block { text-align: center; min-width: 0; }
+        .cn { font-size: 16px; font-weight: 800; color: #0f2540; white-space: nowrap; }
         .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
         .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; }
@@ -445,15 +453,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <Party label="Bill To" name={billName} p={billParty} vendorCode={billing?.vendor_code} workOrderNo={billing?.work_order_no} />
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
-        {transport && (
+        {(transportCompany || lrNo) && (
           <div className="transport">
             <div className="transport-k">Transportation</div>
             <div className="transport-grid">
-              {transport.company && <div><span className="tk">Company</span><span className="tv">{transport.company}</span></div>}
-              {transport.phone && <div><span className="tk">Phone</span><span className="tv">{transport.phone}</span></div>}
-              {transport.lr && <div><span className="tk">LR no.</span><span className="tv">{transport.lr}</span></div>}
-              {transport.vehicle && <div><span className="tk">Vehicle no.</span><span className="tv">{transport.vehicle}</span></div>}
-              {(transport.driverName || transport.driverPhone) && <div><span className="tk">Driver</span><span className="tv">{[transport.driverName, transport.driverPhone].filter(Boolean).join(" · ")}</span></div>}
+              {transportCompany && <div><span className="tk">Company</span><span className="tv">{transportCompany}</span></div>}
+              {lrNo && <div><span className="tk">LR no.</span><span className="tv">{lrNo}</span></div>}
+              {vehicleNo && <div><span className="tk">Vehicle no.</span><span className="tv">{vehicleNo}</span></div>}
+              {(driverName || driverPhone) && <div><span className="tk">Driver</span><span className="tv">{[driverName, driverPhone].filter(Boolean).join(" · ")}</span></div>}
             </div>
           </div>
         )}
