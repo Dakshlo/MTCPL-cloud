@@ -282,18 +282,19 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
            without needing the browser's "Background graphics" toggle. */
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; position: relative; }
-        /* Mig 167 — "UNDER APPROVAL — NOT VALID" watermark for a priced but
-           not-yet-owner-approved invoice. A tiled diagonal SVG layer covers the
-           whole page, sits OVER the content (low opacity, readable) and never
-           intercepts clicks. -webkit-print-color-adjust is forced globally (the
-           '*' rule above) so it survives printing. */
+        /* Mig 167 — "NOT VALID INVOICE" watermark for a priced but not-yet-owner-
+           approved invoice. REAL DOM text in a grid (NOT a CSS background image —
+           those print unreliably): a 4-column grid of rotated red labels spread
+           evenly over the page, sitting OVER the content at low opacity and never
+           intercepting clicks. position:fixed in print repeats it on every page. */
         .approval-wm {
-          position: absolute; inset: 0; z-index: 50; pointer-events: none;
-          opacity: 0.16;
-          background-repeat: repeat;
-          background-position: center;
-          background-size: 230px 175px;
-          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='230' height='175'><text x='115' y='90' font-family='Arial, sans-serif' font-size='18' font-weight='700' fill='%23d40000' text-anchor='middle' transform='rotate(-30 115 90)'>NOT VALID INVOICE</text></svg>");
+          position: absolute; inset: 0; z-index: 50; pointer-events: none; overflow: hidden;
+          display: grid; grid-template-columns: repeat(4, 1fr);
+          align-content: space-evenly; justify-items: center; padding: 26px 0;
+        }
+        .approval-wm span {
+          transform: rotate(-30deg); white-space: nowrap;
+          font: 800 15px/1 Arial, sans-serif; color: #d40000; opacity: 0.18;
         }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
@@ -361,7 +362,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
              ABSOLUTE layer only paints page 1 (and gets clipped to ~one line);
              position:fixed makes the browser repeat the whole tiled pattern on
              each printed page. */
-          .approval-wm { position: fixed; inset: 0; opacity: 0.2; background-size: 215px 165px; }
+          .approval-wm { position: fixed; inset: 0; }
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.t thead { display: table-header-group; }
@@ -385,7 +386,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       </div>
 
       <div className="wrap">
-        {underApproval && <div className="approval-wm" aria-hidden="true" />}
+        {underApproval && (
+          <div className="approval-wm" aria-hidden="true">
+            {Array.from({ length: 24 }).map((_, i) => <span key={i}>NOT VALID INVOICE</span>)}
+          </div>
+        )}
         <div className="doc-title"><span>TAX INVOICE</span></div>
         <div className="head">
           {/* eslint-disable-next-line @next/next/no-img-element */}

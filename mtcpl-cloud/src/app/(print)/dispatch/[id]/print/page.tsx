@@ -271,9 +271,12 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
            block + big logo + a "DELIVERY CHALLAN" title box. */
         .doc-title { text-align: center; margin: 0 0 7px; }
         .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; text-transform: uppercase; }
-        .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
+        /* 3-column grid (logo | company | code) so the company block is centered
+           on the PAGE, not just in the gap between logo and code. */
+        .head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
         .brand-logo { height: 68px; width: auto; display: block; }
-        .company-block { flex: 1; text-align: center; }
+        .company-block { text-align: center; min-width: 0; }
+        .head > div:last-child { justify-self: end; }
         .company-name { font-size: 15px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
         .company-line { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.45; }
         .doc-num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; white-space: nowrap; color: #1a1a1a; }
