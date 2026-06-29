@@ -277,8 +277,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .brand-logo { height: 68px; width: auto; display: block; }
         .company-block { text-align: center; min-width: 0; }
         .head > div:last-child { justify-self: end; }
-        .company-name { font-size: 15px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
-        .company-line { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.45; }
+        .company-name { font-size: 16.5px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
+        .company-line { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
         .doc-num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; white-space: nowrap; color: #1a1a1a; }
         .doc-load { text-align: right; margin-top: 3px; font-size: 13.5px; font-weight: 800; color: #1a1a1a; white-space: nowrap; }
         .doc-date { text-align: right; margin-top: 3px; font-size: 13.5px; font-weight: 800; color: #1a1a1a; white-space: nowrap; }
@@ -346,8 +346,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
           <div className="company-block">
             <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-            <div className="company-line">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-            <div className="company-line">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
+            <div className="company-line">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="company-line">GSTIN: 08AAFCM15Q1ZA · ☎ XXXXXXXXXX · temple@mtcpl.co</div>
           </div>
           <div>
             <div className="doc-num">{shortId}</div>

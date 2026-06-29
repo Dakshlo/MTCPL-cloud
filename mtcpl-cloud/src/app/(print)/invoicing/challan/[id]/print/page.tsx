@@ -16,6 +16,7 @@ import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
 
 // Code column: show at most 2 slab codes per line so a row with many codes
@@ -42,7 +43,7 @@ type PartyShape = {
 
 // One bill-to / ship-to address block. The temple `name` sits UNDER the label
 // (Daksh); `p` carries the address lines (null ⇒ show the fallback note).
-function Party({ label, name, p, fallback }: { label: string; name: string | null; p: PartyShape | null; fallback?: string }) {
+function Party({ label, name, p, fallback, vendorCode, workOrderNo }: { label: string; name: string | null; p: PartyShape | null; fallback?: string; vendorCode?: string | null; workOrderNo?: string | null }) {
   const loc = p ? [p.city, p.state, p.state_code ? `(code ${p.state_code})` : null].filter(Boolean).join(", ") : "";
   return (
     <div className="party">
@@ -57,6 +58,9 @@ function Party({ label, name, p, fallback }: { label: string; name: string | nul
         </>
       ) : (
         <div className="party-line muted">{fallback ?? "-"}</div>
+      )}
+      {(vendorCode || workOrderNo) && (
+        <div className="party-meta">{[vendorCode ? `Vendor code: ${vendorCode}` : null, workOrderNo ? `Work order no: ${workOrderNo}` : null].filter(Boolean).join(" · ")}</div>
       )}
     </div>
   );
@@ -301,8 +305,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .head { display: flex; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 6px; }
         .brand-logo { height: 68px; width: auto; }
         .company-block { flex: 1; text-align: center; }
-        .cn { font-size: 15px; font-weight: 800; color: #0f2540; }
-        .cl { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.4; }
+        .cn { font-size: 16.5px; font-weight: 800; color: #0f2540; }
+        .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
         .pill { font-size: 13px; font-weight: 800; color: #0f2540; letter-spacing: 0.1em; text-transform: uppercase; border: 2px solid #1e3a5f; border-radius: 6px; padding: 4px 14px; background: #eef3f9; white-space: nowrap; }
         .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; }
         .meta { text-align: right; margin-top: 3px; font-size: 10.5px; font-weight: 800; color: #1a1a1a; line-height: 1.5; }
@@ -316,20 +320,26 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .cust { font-size: 15px; font-weight: 800; color: #0f2540; margin: 8px 0 5px; }
         .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 4px; }
         .party { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; background: #f7fafc; }
-        .party-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
-        .party-name { font-size: 13px; font-weight: 800; color: #1a1a1a; }
-        .party-line { font-size: 10px; color: #333; margin-top: 1px; }
-        .party-meta { font-size: 9.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
+        .party-k { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
+        .party-name { font-size: 14.5px; font-weight: 800; color: #1a1a1a; }
+        .party-line { font-size: 11.5px; color: #333; margin-top: 1.5px; }
+        .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
         .vw { font-size: 9.5px; color: #444; margin: 5px 0 0; font-weight: 700; }
         .doc-title { text-align: center; margin: 0 0 7px; }
         .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
         .stone-block { margin-top: 4px; }
-        .stone-title { font-size: 11.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
-        .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
-        table.t { width: 100%; border-collapse: collapse; font-size: 8.5px; }
-        table.t th { background: #eef2f7; padding: 2px 4px; text-align: left; font-size: 7px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.02em; border: 1px solid #d3dae3; }
-        table.t td { padding: 2px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
+        .stone-title { font-size: 12.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
+        .grp-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
+        table.t { width: 100%; border-collapse: collapse; font-size: 9.5px; }
+        table.t th { background: #eef2f7; padding: 2px 4px; text-align: left; font-size: 8px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.02em; border: 1px solid #d3dae3; }
+        table.t td { padding: 2.5px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
+        /* Tax summary + amount in words (Daksh). */
+        .taxsum { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 12px; }
+        .taxsum th { background: #eef2f7; border: 1px solid #d3dae3; padding: 5px 9px; text-align: left; font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; color: #444; }
+        .taxsum td { border: 1px solid #d3dae3; padding: 6px 9px; font-weight: 700; color: #1a1a1a; }
+        .taxsum td.mono { font-family: ui-monospace, monospace; text-align: right; }
+        .amt-words { margin-top: 7px; font-size: 11.5px; color: #1a1a1a; border: 1px solid #d3dae3; border-radius: 6px; padding: 7px 11px; background: #f7fafc; }
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t .r { text-align: right; white-space: nowrap; } .t .mono { font-family: ui-monospace, monospace; } .t .b { font-weight: 800; } .t .muted { color: #999; }
         /* Highlighted columns — never wrap. Two colour groups:
@@ -397,30 +407,22 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
           <div className="company-block">
             <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-            <div className="cl">NH-27, Opposite Ajari Gate, Pindwara, Dist. Sirohi, Rajasthan</div>
-            <div className="cl">☎ +91 94141 52740 / +91 94143 74979 · temple@mtcpl.co</div>
+            <div className="cl">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="cl">GSTIN: 08AAFCM15Q1ZA · ☎ XXXXXXXXXX · temple@mtcpl.co</div>
           </div>
           <div>
             <div className="num">{invCode}</div>
             <div className="meta">
               <div className="meta-date">{new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
               {challanLabel ? <div>Challan {challanLabel}</div> : null}
-              {vehicleNo ? <div>Vehicle {vehicleNo}</div> : null}
             </div>
           </div>
         </div>
 
         <div className="parties">
-          <Party label="Bill To" name={billName} p={billParty} />
+          <Party label="Bill To" name={billName} p={billParty} vendorCode={billing?.vendor_code} workOrderNo={billing?.work_order_no} />
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
-        {(billing?.vendor_code || billing?.work_order_no) && (
-          <div className="vw">
-            {billing?.vendor_code ? `Vendor code: ${billing.vendor_code}` : ""}
-            {billing?.vendor_code && billing?.work_order_no ? "  ·  " : ""}
-            {billing?.work_order_no ? `Work order no: ${billing.work_order_no}` : ""}
-          </div>
-        )}
 
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No items on this invoice.</p>
@@ -456,6 +458,23 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                 <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
               </div>
             </div>
+
+            {/* Tax summary + amount in words (Daksh). Total tax shown combined,
+                with the GST type noted (IGST or CGST+SGST). */}
+            <table className="taxsum">
+              <thead>
+                <tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="mono">{rupee(totals.subtotal)}</td>
+                  <td>{c.gst_mode === "igst" ? `IGST @ ${Number(c.igst_percent) || 0}%` : c.gst_mode === "cgst_sgst" ? `CGST + SGST @ ${Number(c.cgst_percent) || 0}% + ${Number(c.sgst_percent) || 0}%` : "—"}</td>
+                  <td className="mono">{rupee(c.gst_mode === "igst" ? totals.igstAmt : c.gst_mode === "cgst_sgst" ? totals.cgstAmt + totals.sgstAmt : 0)}</td>
+                  <td className="mono">{rupee(totals.grand)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
           </>
         )}
 
