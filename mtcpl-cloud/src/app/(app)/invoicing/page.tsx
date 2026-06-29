@@ -142,6 +142,10 @@ export default async function InvoicingDashboardPage() {
             <Link href="/settings/temples" style={BUTTON_STYLES.secondary}>
               🛕 Client billing &amp; GST
             </Link>
+            {/* Mig 171 — HSN code per stone type (prints on the tax invoice). */}
+            <Link href="/invoicing/stone-hsn" style={BUTTON_STYLES.secondary}>
+              🪨 Stone &amp; HSN code
+            </Link>
             <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
               📝 Work Order Doc
             </Link>

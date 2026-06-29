@@ -139,6 +139,15 @@ export function TempleEditModal({
                       <label className="stack" style={{ flex: "0 0 130px" }}><span>SGST %</span><input name="sgst_percent" type="number" step="0.01" min="0" defaultValue={temple.sgst_percent ?? ""} /></label>
                     </>
                   )}
+                  {/* Mig 171 — which HSN to print for this temple. Vendor HSN
+                      forces an 18% GST slab when pricing. */}
+                  <label className="stack" style={{ flex: "0 0 240px" }}>
+                    <span>🪨 HSN on invoice</span>
+                    <select name="hsn_use_vendor" defaultValue={temple.hsn_use_vendor ? "true" : "false"}>
+                      <option value="false">HSN code (default)</option>
+                      <option value="true">Vendor HSN → 18% GST</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div className="settings-form-row" style={{ marginTop: 12, alignItems: "flex-end" }}>

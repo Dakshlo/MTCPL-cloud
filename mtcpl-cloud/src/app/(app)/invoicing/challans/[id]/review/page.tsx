@@ -132,15 +132,35 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
       };
     }
   }
+  // Mig 171 — if the temple bills with the vendor HSN, the GST slab is forced to
+  // 18% (IGST 18% or CGST 9% + SGST 9%). Best-effort fetch (separate column).
+  let hsnUseVendor = false;
+  if (c.temple) {
+    const { data: hv, error } = await admin.from("temples").select("hsn_use_vendor").eq("name", c.temple).maybeSingle();
+    if (!error && hv) hsnUseVendor = !!(hv as { hsn_use_vendor?: boolean }).hsn_use_vendor;
+  }
   const priced = !!c.priced_at;
   const challanHasGst = c.gst_mode === "igst" || c.gst_mode === "cgst_sgst";
   const templeHasGst = templeGst.mode === "igst" || templeGst.mode === "cgst_sgst";
-  const initGst = {
-    mode: (priced ? (challanHasGst ? c.gst_mode : null) : (templeHasGst ? templeGst.mode : null)) as GstMode,
-    igst: priced && c.igst_percent != null ? Number(c.igst_percent) : (templeGst.igst ?? 18),
-    cgst: priced && c.cgst_percent != null ? Number(c.cgst_percent) : (templeGst.cgst ?? 9),
-    sgst: priced && c.sgst_percent != null ? Number(c.sgst_percent) : (templeGst.sgst ?? 9),
-  };
+  const initGst = priced
+    ? {
+        mode: (challanHasGst ? c.gst_mode : null) as GstMode,
+        igst: c.igst_percent != null ? Number(c.igst_percent) : 18,
+        cgst: c.cgst_percent != null ? Number(c.cgst_percent) : 9,
+        sgst: c.sgst_percent != null ? Number(c.sgst_percent) : 9,
+      }
+    : hsnUseVendor
+    ? {
+        // Vendor HSN → 18% total, keeping the temple's mode (default IGST).
+        mode: (templeHasGst ? templeGst.mode : "igst") as GstMode,
+        igst: 18, cgst: 9, sgst: 9,
+      }
+    : {
+        mode: (templeHasGst ? templeGst.mode : null) as GstMode,
+        igst: templeGst.igst ?? 18,
+        cgst: templeGst.cgst ?? 9,
+        sgst: templeGst.sgst ?? 9,
+      };
 
   // Mig 169 — transport companies master + this challan's saved transport
   // details. Best-effort (separate selects, error-checked) so a pre-migration

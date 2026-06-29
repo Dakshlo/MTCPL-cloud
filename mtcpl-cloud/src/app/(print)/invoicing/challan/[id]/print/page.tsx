@@ -188,6 +188,26 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
       lrNo = (t.lr_no ?? "").trim() || null;
     }
   }
+
+  // Mig 171 — HSN per stone + this temple's HSN choice (best-effort). Vendor HSN
+  // prints (and 18% GST) only when the temple is set to use it.
+  const stoneHsn = new Map<string, { hsn: string | null; vendor: string | null }>();
+  {
+    const { data: hs, error } = await admin.from("stone_types").select("name, hsn_code, hsn_vendor_code");
+    if (!error) for (const r of (hs ?? []) as Array<{ name: string; hsn_code: string | null; hsn_vendor_code: string | null }>) stoneHsn.set(r.name, { hsn: r.hsn_code, vendor: r.hsn_vendor_code });
+  }
+  let templeHsnUseVendor = false;
+  if (c.temple) {
+    const { data: tv, error } = await admin.from("temples").select("hsn_use_vendor").eq("name", c.temple).maybeSingle();
+    if (!error && tv) templeHsnUseVendor = !!(tv as { hsn_use_vendor?: boolean }).hsn_use_vendor;
+  }
+  const hsnFor = (stone: string): string | null => {
+    const h = stoneHsn.get(stone);
+    if (!h) return null;
+    const v = (h.vendor ?? "").trim();
+    return templeHsnUseVendor && v ? v : ((h.hsn ?? "").trim() || null);
+  };
+
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -471,7 +491,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <>
             {stoneGroups.map(([stone, rows]) => (
               <div key={stone} className="stone-block">
-                <div className="stone-title">{stonePrintLabel(stone, stoneCatMap)}</div>
+                <div className="stone-title">{stonePrintLabel(stone, stoneCatMap)}{hsnFor(stone) ? <span style={{ fontWeight: 600, color: "#555" }}> · HSN: {hsnFor(stone)}</span> : null}</div>
                 <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
                 <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
               </div>

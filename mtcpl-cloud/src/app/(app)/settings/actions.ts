@@ -306,6 +306,12 @@ export async function updateTempleAction(formData: FormData) {
     }).eq("id", id);
   }
 
+  // Mig 171 — which HSN this temple prints (vendor HSN forces 18% GST). Separate
+  // best-effort update so a pre-migration schema never blocks the temple edit.
+  if (formData.has("hsn_use_vendor")) {
+    await admin.from("temples").update({ hsn_use_vendor: text(formData, "hsn_use_vendor") === "true" }).eq("id", id);
+  }
+
   revalidatePath("/settings");
   revalidatePath("/settings/temples");
   revalidatePath("/slabs");

@@ -971,3 +971,24 @@ export async function createInvoiceAction(formData: FormData) {
   // Redirect to the detail page where the user can review + print.
   redirect(`/invoicing/invoices/${header.id}`);
 }
+
+// ── Stone HSN codes (Mig 171) — accountant-managed, shown on the tax invoice ──
+// HSN belongs to the stone type (same across temples). Each stone may carry a
+// normal HSN and a vendor HSN; the per-temple toggle picks which prints.
+export async function setStoneHsnAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/stone-hsn?toast=Missing+id");
+
+  const { error } = await admin
+    .from("stone_types")
+    .update({ hsn_code: txt(formData, "hsn_code") || null, hsn_vendor_code: txt(formData, "hsn_vendor_code") || null })
+    .eq("id", id);
+  if (error) redirect(`/invoicing/stone-hsn?toast=${encodeURIComponent(error.message)}`);
+
+  void logAudit(profile.id, "stone_hsn_set", "stone_type", id, {});
+  revalidatePath("/invoicing/stone-hsn");
+  redirect("/invoicing/stone-hsn?toast=HSN+saved");
+}
