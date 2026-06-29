@@ -117,7 +117,6 @@ export default async function InvoicingDashboardPage() {
     <section className="page-card">
       <AccountsHero
         title="Invoicing"
-        description="Customer parties · delivery challans · invoices. The starred-accountant workflow."
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {/* New challan / New invoice live in the sidebar menu — kept off the

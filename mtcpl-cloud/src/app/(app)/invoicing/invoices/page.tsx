@@ -153,10 +153,6 @@ export default async function InvoicingListPage() {
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
           <h1>Invoicing</h1>
-          <p className="muted">
-            Outgoing customer tax invoices — priced challans plus any legacy converted invoices. Different from
-            Finance, which handles incoming supplier bills.
-          </p>
         </div>
         <Link href="/invoicing/invoices/new" style={{ textDecoration: "none", fontSize: 13, padding: "10px 18px", background: "var(--gold)", color: "#fff", border: "1px solid var(--gold-dark)", borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>
           🧾 + New invoice
