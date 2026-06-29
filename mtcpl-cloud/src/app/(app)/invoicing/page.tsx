@@ -135,6 +135,10 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/approval" style={BUTTON_STYLES.secondary}>
               🟡 Approval{pendingApprovalCount ? ` (${pendingApprovalCount})` : ""}
             </Link>
+            {/* Mig 173 — challans parked for periodic bulk billing. */}
+            <Link href="/invoicing/bulk" style={BUTTON_STYLES.secondary}>
+              📦 Bulk challans
+            </Link>
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>

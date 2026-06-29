@@ -24,7 +24,7 @@ import {
 import { challanStatus } from "@/lib/challan-status";
 import { challanCode } from "@/lib/doc-code";
 import { ChallanStatusPill } from "../_ui/challan-status-pill";
-import { syncDispatchChallansAction, returnDispatchToWaitingAction } from "../actions";
+import { syncDispatchChallansAction, returnDispatchToWaitingAction, sendChallanToBulkAction } from "../actions";
 import { ReturnToDispatchButton } from "../_ui/return-to-dispatch-button";
 
 type StatusFilter = "open" | "pending_approval" | "rejected" | "invoiced" | "converted" | "cancelled" | "all";
@@ -111,10 +111,18 @@ export default async function ChallansListPage({
       : null;
     return c.temple ?? legacy ?? "—";
   };
+  // Mig 173 — challans "sent to bulk" leave the Challans page (they live on the
+  // Bulk page until invoiced / sent back). Best-effort filter.
+  const bulkIds = new Set<string>();
+  {
+    const { data, error } = await supabase.from("challans").select("id").not("sent_to_bulk_at", "is", null);
+    if (!error) for (const r of (data ?? []) as Array<{ id: string }>) bulkIds.add(r.id);
+  }
+
   // Temple-wise grouping (Daksh) — one section per client/temple, alphabetical.
   const grouped = (() => {
     const m = new Map<string, ChallanRow[]>();
-    for (const c of challans) { const k = clientNameOf(c); const a = m.get(k) ?? []; a.push(c); m.set(k, a); }
+    for (const c of challans) { if (bulkIds.has(c.id)) continue; const k = clientNameOf(c); const a = m.get(k) ?? []; a.push(c); m.set(k, a); }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   })();
 
@@ -133,6 +141,10 @@ export default async function ChallansListPage({
             {/* Mig 167 — journey reads Challans → Approval → Invoices. */}
             <Link href="/invoicing/approval" style={BUTTON_STYLES.secondary}>
               🟡 Approval
+            </Link>
+            {/* Mig 173 — challans parked for periodic bulk billing. */}
+            <Link href="/invoicing/bulk" style={BUTTON_STYLES.secondary}>
+              📦 Bulk challans
             </Link>
             <Link href="/invoicing/invoices" style={BUTTON_STYLES.secondary}>
               🧾 Invoices
@@ -251,6 +263,18 @@ export default async function ChallansListPage({
                           <Link href="/invoicing/approval" style={{ fontSize: 12, fontWeight: 700, color: "#92400e", textDecoration: "none" }}>
                             Awaiting approval →
                           </Link>
+                        ) : st === "open" ? (
+                          // Mig 173 — an open challan must pick ONE path: convert to a
+                          // single invoice now, or send to Bulk to invoice later.
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <Link href={`/invoicing/challans/${c.id}/review`} style={{ ...BUTTON_STYLES.secondary, fontSize: 12 }}>
+                              🧾 Convert to invoice
+                            </Link>
+                            <form action={sendChallanToBulkAction} style={{ display: "inline" }}>
+                              <input type="hidden" name="id" value={c.id} />
+                              <button type="submit" style={{ ...BUTTON_STYLES.secondary, fontSize: 12, cursor: "pointer" }}>📦 Send to bulk</button>
+                            </form>
+                          </span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontSize: 12 }}>—</span>
                         )}

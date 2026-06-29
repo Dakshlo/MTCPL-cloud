@@ -1008,3 +1008,43 @@ export async function setStoneHsnAction(formData: FormData): Promise<void> {
   revalidatePath("/invoicing/stone-hsn");
   redirect("/invoicing/stone-hsn?toast=HSN+saved");
 }
+
+// ════════════════════════════════════════════════════════════════
+// Mig 173 — Bulk invoices. An OPEN challan can be "sent to bulk" (leaves the
+// Challans page → Bulk page), where the accountant later bills several together
+// on one tax invoice with manual line items. createBulkInvoiceAction below.
+// ════════════════════════════════════════════════════════════════
+
+/** Move an OPEN challan to the bulk pool (off the Challans page). */
+export async function sendChallanToBulkAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/challans");
+  const { data: c } = await admin.from("challans").select("priced_at, converted_invoice_id, cancelled_at").eq("id", id).maybeSingle();
+  const g = c as { priced_at: string | null; converted_invoice_id: string | null; cancelled_at: string | null } | null;
+  if (!g) redirect("/invoicing/challans?toast=Challan+not+found");
+  if (g.priced_at || g.converted_invoice_id || g.cancelled_at) {
+    redirect(`/invoicing/challans/${id}?toast=${encodeURIComponent("Only an open challan can be sent to bulk")}`);
+  }
+  await admin.from("challans").update({ sent_to_bulk_at: new Date().toISOString() }).eq("id", id);
+  void logAudit(profile.id, "challan_sent_to_bulk", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/invoicing/bulk");
+  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Challan moved to Bulk")}`);
+}
+
+/** Send a bulk challan back to the Challans page. */
+export async function sendChallanBackFromBulkAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/bulk");
+  await admin.from("challans").update({ sent_to_bulk_at: null }).eq("id", id);
+  void logAudit(profile.id, "challan_back_from_bulk", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/invoicing/bulk");
+  redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan returned to Challans")}`);
+}
