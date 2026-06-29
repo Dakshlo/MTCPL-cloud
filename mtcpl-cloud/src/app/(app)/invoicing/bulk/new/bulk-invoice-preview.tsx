@@ -92,7 +92,7 @@ export function BulkInvoicePreview({
         .bip-name { font-size: 14px; font-weight: 800; color: #1a1a1a; }
         .bip-line { font-size: 11px; color: #333; margin-top: 1.5px; }
         .bip-meta { font-size: 10px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
-        .bip-covers { font-size: 10px; color: #444; margin: 7px 0 2px; font-weight: 700; position: relative; z-index: 6; }
+        .bip-covers { font-size: 10.5px; color: #0f2540; margin: 8px 0 4px; font-weight: 800; position: relative; z-index: 6; background: #eef5fd; border: 1px solid #c7ddf6; border-radius: 6px; padding: 6px 10px; }
         table.bip-t { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; position: relative; z-index: 6; }
         table.bip-t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; border: 1px solid #d3dae3; }
         table.bip-t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
@@ -150,7 +150,7 @@ export function BulkInvoicePreview({
           <Party label="Bill To" name={billName} p={bill} vendorCode={vendorCode} workOrderNo={workOrderNo} />
           <Party label="Ship To" name={shipName} p={ship} fallback="Same as billing address" />
         </div>
-        {coveredCodes.length > 0 && <div className="bip-covers">Against delivery challan(s): {coveredCodes.join(", ")}</div>}
+        {coveredCodes.length > 0 && <div className="bip-covers">Against delivery challan(s): {coveredCodes.map((c) => `(${c})`).join(" ")}</div>}
 
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12, position: "relative", zIndex: 6 }}>No line items yet.</p>

@@ -114,7 +114,7 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
         .party-line { font-size: 11.5px; color: #333; margin-top: 1.5px; }
         .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
-        .covers { font-size: 10px; color: #444; margin: 7px 0 2px; font-weight: 700; }
+        .covers { font-size: 10.5px; color: #0f2540; margin: 8px 0 4px; font-weight: 800; background: #eef5fd; border: 1px solid #c7ddf6; border-radius: 6px; padding: 6px 10px; }
         table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
         table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; border: 1px solid #d3dae3; }
         table.t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
@@ -186,7 +186,7 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
         {coveredCodes.length > 0 && (
-          <div className="covers">Against delivery challan(s): {coveredCodes.join(", ")}</div>
+          <div className="covers">Against delivery challan(s): {coveredCodes.map((c) => `(${c})`).join(" ")}</div>
         )}
 
         {items.length === 0 ? (
