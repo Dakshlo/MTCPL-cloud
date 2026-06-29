@@ -292,8 +292,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           opacity: 0.16;
           background-repeat: repeat;
           background-position: center;
-          background-size: 420px 300px;
-          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='300'><text x='210' y='150' font-family='Arial, sans-serif' font-size='30' font-weight='700' fill='%23d40000' text-anchor='middle' transform='rotate(-32 210 150)'>UNDER APPROVAL - NOT VALID</text></svg>");
+          background-size: 230px 175px;
+          background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='230' height='175'><text x='115' y='90' font-family='Arial, sans-serif' font-size='18' font-weight='700' fill='%23d40000' text-anchor='middle' transform='rotate(-30 115 90)'>NOT VALID INVOICE</text></svg>");
         }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
@@ -361,7 +361,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
              ABSOLUTE layer only paints page 1 (and gets clipped to ~one line);
              position:fixed makes the browser repeat the whole tiled pattern on
              each printed page. */
-          .approval-wm { position: fixed; inset: 0; opacity: 0.2; background-size: 360px 250px; }
+          .approval-wm { position: fixed; inset: 0; opacity: 0.2; background-size: 215px 165px; }
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.t thead { display: table-header-group; }
