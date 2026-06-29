@@ -116,11 +116,30 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     };
   });
 
+  // Mig 170 — default GST for a not-yet-priced challan comes from the TEMPLE's
+  // saved GST (Settings → Temple Codes). Best-effort. Once priced, the challan's
+  // own saved GST is respected instead.
+  let templeGst: { mode: string | null; igst: number | null; cgst: number | null; sgst: number | null } = { mode: null, igst: null, cgst: null, sgst: null };
+  if (c.temple) {
+    const { data: tg, error } = await admin.from("temples").select("gst_mode, igst_percent, cgst_percent, sgst_percent").eq("name", c.temple).maybeSingle();
+    if (!error && tg) {
+      const t = tg as Record<string, unknown>;
+      templeGst = {
+        mode: (t.gst_mode as string) || null,
+        igst: t.igst_percent != null ? Number(t.igst_percent) : null,
+        cgst: t.cgst_percent != null ? Number(t.cgst_percent) : null,
+        sgst: t.sgst_percent != null ? Number(t.sgst_percent) : null,
+      };
+    }
+  }
+  const priced = !!c.priced_at;
+  const challanHasGst = c.gst_mode === "igst" || c.gst_mode === "cgst_sgst";
+  const templeHasGst = templeGst.mode === "igst" || templeGst.mode === "cgst_sgst";
   const initGst = {
-    mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
-    igst: c.igst_percent != null ? Number(c.igst_percent) : 18,
-    cgst: c.cgst_percent != null ? Number(c.cgst_percent) : 9,
-    sgst: c.sgst_percent != null ? Number(c.sgst_percent) : 9,
+    mode: (priced ? (challanHasGst ? c.gst_mode : null) : (templeHasGst ? templeGst.mode : null)) as GstMode,
+    igst: priced && c.igst_percent != null ? Number(c.igst_percent) : (templeGst.igst ?? 18),
+    cgst: priced && c.cgst_percent != null ? Number(c.cgst_percent) : (templeGst.cgst ?? 9),
+    sgst: priced && c.sgst_percent != null ? Number(c.sgst_percent) : (templeGst.sgst ?? 9),
   };
 
   // Mig 169 — transport companies master + this challan's saved transport

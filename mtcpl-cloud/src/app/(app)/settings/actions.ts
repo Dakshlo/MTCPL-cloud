@@ -246,7 +246,10 @@ export async function setTransferTruckActiveAction(formData: FormData) {
 }
 
 export async function updateTempleAction(formData: FormData) {
-  await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head"]);
+  // Mig 170 — accountants ("account" + "account plus") can edit a temple's
+  // billing / shipping / installation / vendor / GST info (read-only on other
+  // settings sections; they reach the editor at /settings/temples).
+  await requireAuth(["owner", "team_head", "senior_incharge", "developer", "carving_head", "accountant", "accountant_star"]);
   const admin = createAdminSupabaseClient();
 
   const id = text(formData, "id");
@@ -290,10 +293,24 @@ export async function updateTempleAction(formData: FormData) {
     .eq("id", id);
   if (error) redirect(`/settings?toast=${encodeURIComponent(error.message)}`);
 
+  // Mig 170 — default GST for this temple-as-client. Separate best-effort update
+  // so a pre-migration schema (no gst_mode columns) never blocks the temple edit.
+  if (formData.has("gst_mode")) {
+    const gm = text(formData, "gst_mode");
+    const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+    await admin.from("temples").update({
+      gst_mode: gstMode,
+      igst_percent: gstMode === "igst" ? (Number(text(formData, "igst_percent")) || null) : null,
+      cgst_percent: gstMode === "cgst_sgst" ? (Number(text(formData, "cgst_percent")) || null) : null,
+      sgst_percent: gstMode === "cgst_sgst" ? (Number(text(formData, "sgst_percent")) || null) : null,
+    }).eq("id", id);
+  }
+
   revalidatePath("/settings");
+  revalidatePath("/settings/temples");
   revalidatePath("/slabs");
   revalidatePath("/dispatch");
-  redirect("/settings?toast=Temple+updated");
+  redirect(formData.get("return") === "temples" ? "/settings/temples?toast=Temple+updated" : "/settings?toast=Temple+updated");
 }
 
 // (Mig 130 follow-on: the dispatch-incharge editor moved to the

@@ -553,6 +553,15 @@ const navEntries: NavEntry[] = [
     department: "invoicing",
   },
   {
+    // Mig 170 — per-temple billing/shipping/installation/vendor + default GST.
+    // Edit-only editor (add/delete/rename stay in Settings → Temple Codes).
+    href: "/settings/temples",
+    label: "Client billing & GST",
+    icon: "🛕",
+    roles: ["developer", "owner", "accountant_star", "accountant"],
+    department: "invoicing",
+  },
+  {
     // Mig 105 — standalone manual Work Order Document generator. Moved to a
     // dashboard button for dashboard roles; kept in the menu ONLY for plain
     // accountant, whose sole invoicing surface this is (no dashboard access).

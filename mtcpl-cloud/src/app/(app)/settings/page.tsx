@@ -1352,6 +1352,32 @@ export default async function SettingsPage() {
                       </fieldset>
                     </div>
 
+                    {/* Mig 170 — default GST for this temple-as-client. Pre-selects
+                        the mode + % when pricing this temple's invoice (editable
+                        there). Fill only the % for the chosen mode. */}
+                    <div className="settings-form-row" style={{ marginTop: 12 }}>
+                      <label className="stack" style={{ flex: "0 0 190px" }}>
+                        <span>🧾 GST type (client)</span>
+                        <select name="gst_mode" defaultValue={(temple as any).gst_mode ?? "none"}>
+                          <option value="none">No GST</option>
+                          <option value="igst">IGST</option>
+                          <option value="cgst_sgst">CGST + SGST</option>
+                        </select>
+                      </label>
+                      <label className="stack" style={{ flex: "0 0 110px" }}>
+                        <span>IGST %</span>
+                        <input name="igst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).igst_percent ?? ""} placeholder="18" />
+                      </label>
+                      <label className="stack" style={{ flex: "0 0 110px" }}>
+                        <span>CGST %</span>
+                        <input name="cgst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).cgst_percent ?? ""} placeholder="9" />
+                      </label>
+                      <label className="stack" style={{ flex: "0 0 110px" }}>
+                        <span>SGST %</span>
+                        <input name="sgst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).sgst_percent ?? ""} placeholder="9" />
+                      </label>
+                    </div>
+
                     <div className="settings-form-row" style={{ marginTop: 12, alignItems: "flex-end" }}>
                       {SHARED_FIELDS.map((f) => (
                         <label key={f.key} className="stack" style={{ flex: 1 }}>
