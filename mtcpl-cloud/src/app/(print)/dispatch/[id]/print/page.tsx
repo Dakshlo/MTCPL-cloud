@@ -348,7 +348,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           </div>
           <div>
             <div className="doc-num">{shortId}</div>
-            <div className="doc-load">Load no. {loadNumber != null ? loadNumber : "-"}</div>
+            <div className="doc-load">LOAD NO. {loadNumber != null ? loadNumber : "-"}</div>
             <div className="doc-date">{dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
           </div>
         </div>
