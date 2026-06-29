@@ -383,9 +383,9 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
 
           <div className="party">
             <div className="party-k">Dispatch details</div>
-            <div className="ib"><span className="ibk">MTCPL Incharge</span><span className="ibv">Rajesh Kumar - 9636004903<br />Parth Kumar - 9106054650</span></div>
+            <div className="ib"><span className="ibk">MTCPL Incharge</span><span className="ibv">RAJESH KUMAR - 9636004903<br />PARTH KUMAR - 9106054650</span></div>
             <div className="ib"><span className="ibk">Vehicle no.</span><span className="ibv mono">{dash(dispatch.vehicle_no)}</span></div>
-            <div className="ib"><span className="ibk">Driver</span><span className="ibv">{contact(dispatch.driver_name, dispatch.driver_phone)}</span></div>
+            <div className="ib"><span className="ibk">Driver</span><span className="ibv">{contact(dispatch.driver_name ? dispatch.driver_name.toUpperCase() : null, dispatch.driver_phone)}</span></div>
             <div className="ib"><span className="ibk">Installation by</span><span className="ibv">{contact(site.installer_name, site.installer_phone)}</span></div>
           </div>
         </div>
