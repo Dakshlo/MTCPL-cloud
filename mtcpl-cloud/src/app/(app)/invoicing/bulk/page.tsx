@@ -110,7 +110,7 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
                       {c.source_dispatch_id && (
                         <Link href={`/dispatch/${c.source_dispatch_id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...BUTTON_STYLES.secondary, fontSize: 12 }}>🖨 Download</Link>
                       )}
-                      <BulkSendBack id={c.id} />
+                      <BulkSendBack id={c.id} code={challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number} />
                     </span>
                   </div>
                 ))}

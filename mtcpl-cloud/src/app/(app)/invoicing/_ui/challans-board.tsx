@@ -10,9 +10,11 @@
  *    no matter how far you've scrolled). Drop → custom confirm → bulk pool.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BUTTON_STYLES } from "../../accounts/_ui/components";
+import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { challanStatus, type ChallanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "./challan-status-pill";
 import { ReturnToDispatchButton } from "./return-to-dispatch-button";
@@ -57,6 +59,10 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
   const [pendingDrop, setPendingDrop] = useState<{ id: string; code: string } | null>(null);
   const [sending, setSending] = useState(false);
 
+  const router = useRouter();
+  const [navPending, startNav] = useTransition();
+  const goConvert = (id: string) => startNav(() => router.push(`/invoicing/challans/${id}/review`));
+
   const formRef = useRef<HTMLFormElement>(null);
   const idRef = useRef<HTMLInputElement>(null);
 
@@ -100,6 +106,7 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
 
   return (
     <>
+      <FinanceLoadingOverlay show={navPending || sending} label={sending ? "Sending to bulk…" : "Opening…"} />
       <style>{`
         .chl-card { transition: transform .12s ease, box-shadow .12s ease; }
         .chl-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,0.12); }
@@ -190,7 +197,7 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
                 {open && (
                   <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(262px, 1fr))", gap: 12 }}>
                     {g.rows.map((c) => (
-                      <Card key={c.id} c={c} dragging={dragId === c.id} onDragStart={() => beginDrag(c.id)} onDragEnd={endDrag} />
+                      <Card key={c.id} c={c} dragging={dragId === c.id} onDragStart={() => beginDrag(c.id)} onDragEnd={endDrag} onConvert={() => goConvert(c.id)} />
                     ))}
                   </div>
                 )}
@@ -252,7 +259,7 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
   );
 }
 
-function Card({ c, dragging, onDragStart, onDragEnd }: { c: BoardChallan; dragging: boolean; onDragStart: () => void; onDragEnd: () => void }) {
+function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChallan; dragging: boolean; onDragStart: () => void; onDragEnd: () => void; onConvert: () => void }) {
   const st = challanStatus(c);
   const open = st === "open";
   const accent = ACCENT[st];
@@ -299,9 +306,9 @@ function Card({ c, dragging, onDragStart, onDragEnd }: { c: BoardChallan; draggi
       <div style={{ marginTop: "auto", paddingTop: 4 }}>
         {open ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            <Link href={`/invoicing/challans/${c.id}/review`} style={{ textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, textDecoration: "none", color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)" }}>
+            <button type="button" onClick={onConvert} style={{ width: "100%", textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)", cursor: "pointer" }}>
               🧾 Convert to invoice
-            </Link>
+            </button>
             <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
             </span>
