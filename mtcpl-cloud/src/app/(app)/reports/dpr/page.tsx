@@ -81,14 +81,14 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
       <section style={{ paddingBottom: 24 }}>
         {header}
         <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 2px 10px" }}>
-          💡 One temple per excel — each shows Block Cutted, Carving Done and Dispatched. Click any value cell to flip it to the slab count.
+          💡 Click a temple to open its excel — Block Cutted, Carving Done and Dispatched together. Click any value cell to flip it to the slab count.
         </div>
         {temples.length === 0 ? (
           <div style={{ border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", padding: "16px 18px", fontSize: 13, color: "#555" }}>
             Nothing to show yet.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {temples.map((temple) => {
               const lines: DprLine[] = [];
               const add = (slice: TempleSlice | undefined, label: string) => {
@@ -100,13 +100,19 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
               add(carveBy.get(temple), "CARVING DONE");
               add(dispBy.get(temple), "DISPATCHED");
               const section: DprSection = { lines, total: emptyWindows(), generatedAt };
+              const cft = volOf(temple);
               return (
-                <div key={temple}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", margin: "0 2px 6px" }}>
+                <details key={temple} style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", overflow: "hidden" }}>
+                  <summary style={{ cursor: "pointer", padding: "12px 14px", fontSize: 15, fontWeight: 800, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 }}>
                     🏛 {temple}
+                    <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                      {cft > 0 ? `${cft.toLocaleString("en-IN", { maximumFractionDigits: 0 })} CFT all-time` : ""}
+                    </span>
+                  </summary>
+                  <div style={{ padding: "0 12px 12px" }}>
+                    <DprGrid report={section} title={temple} shortUnit="slab" longUnit="slab" hideTotal />
                   </div>
-                  <DprGrid report={section} title={temple} shortUnit="slab" longUnit="slab" hideTotal />
-                </div>
+                </details>
               );
             })}
           </div>

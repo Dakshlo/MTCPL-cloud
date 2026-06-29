@@ -277,7 +277,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .company-name { font-size: 15px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
         .company-line { font-size: 9px; color: #666; margin-top: 1px; line-height: 1.45; }
         .doc-num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; white-space: nowrap; color: #1a1a1a; }
-        .doc-date { width: fit-content; margin-left: auto; margin-top: 4px; font-size: 12px; font-weight: 800; color: #0f2540; background: #ffe08a; border: 1.5px solid #d4982a; border-radius: 6px; padding: 2px 9px; white-space: nowrap; }
+        .doc-date { text-align: right; margin-top: 4px; font-size: 13px; font-weight: 700; color: #1a1a1a; white-space: nowrap; }
         .doc-dt { font-size: 8.5px; color: #888; text-align: right; margin-top: 3px; }
 
         /* Billing To · Shipping To · routing — three address-style boxes. */
@@ -347,7 +347,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           </div>
           <div>
             <div className="doc-num">{shortId}</div>
-            <div className="doc-date">📅 {dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+            <div className="doc-date">{dispatchedDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
             <div className="doc-dt">
               by {dispatcherName}
               <br />Printed {printDate}
