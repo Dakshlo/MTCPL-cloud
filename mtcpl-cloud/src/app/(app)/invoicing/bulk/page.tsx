@@ -9,9 +9,10 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { challanCode } from "@/lib/doc-code";
+import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { BUTTON_STYLES } from "../../accounts/_ui/components";
 import { BulkSendBack } from "./bulk-send-back";
+import { BulkCancel } from "./bulk-cancel";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,18 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
   for (const c of pool) { const k = c.temple ?? "—"; const a = byTemple.get(k) ?? []; a.push(c); byTemple.set(k, a); }
   const temples = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
+  // Owner-rejected bulk invoices waiting on the accountant to cancel (→ challans
+  // return to the pool) and re-bill. Best-effort.
+  type RejBulk = { id: string; temple: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; owner_reject_reason: string | null };
+  let rejected: RejBulk[] = [];
+  {
+    const { data, error } = await admin.from("bulk_invoices")
+      .select("id, temple, inv_fy, inv_seq, invoice_no_override, owner_reject_reason")
+      .not("owner_rejected_at", "is", null).is("cancelled_at", null)
+      .order("created_at", { ascending: false });
+    if (!error) rejected = (data ?? []) as RejBulk[];
+  }
+
   return (
     <section className="page-card">
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -59,6 +72,22 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
       {sp.toast && (
         <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
           {sp.toast}
+        </div>
+      )}
+
+      {rejected.length > 0 && (
+        <div style={{ marginTop: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fef2f2", padding: "12px 14px" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#991b1b", marginBottom: 8 }}>⚠ Owner-rejected bulk invoices — cancel to return the challans and re-bill</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {rejected.map((b) => (
+              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", border: "1px solid #fecaca", borderRadius: 8, background: "#fff" }}>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{(b.invoice_no_override ?? "").trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`}</span>
+                <span className="muted" style={{ fontSize: 12 }}>🏛 {b.temple}</span>
+                {b.owner_reject_reason && <span style={{ fontSize: 12, color: "#991b1b" }}>Reason: {b.owner_reject_reason}</span>}
+                <span style={{ marginLeft: "auto" }}><BulkCancel id={b.id} /></span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

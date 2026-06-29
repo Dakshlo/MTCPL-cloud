@@ -1111,3 +1111,47 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   refreshInvoicingPaths();
   redirect(`/invoicing/bulk/${bulkId}/print`);
 }
+
+// ── Bulk invoice owner approval (Mig 173) ────────────────────────────────
+export async function ownerApproveBulkAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/approval");
+  await admin.from("bulk_invoices")
+    .update({ owner_approved_at: new Date().toISOString(), owner_approved_by: profile.id, owner_rejected_at: null, owner_reject_reason: null })
+    .eq("id", id).is("owner_approved_at", null);
+  void logAudit(profile.id, "bulk_invoice_approved", "bulk_invoice", id, {});
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Bulk invoice approved")}`);
+}
+
+export async function ownerRejectBulkAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  const reason = txt(formData, "reason") || null;
+  if (!id) redirect("/invoicing/approval");
+  await admin.from("bulk_invoices")
+    .update({ owner_rejected_at: new Date().toISOString(), owner_reject_reason: reason })
+    .eq("id", id).is("owner_approved_at", null);
+  void logAudit(profile.id, "bulk_invoice_rejected", "bulk_invoice", id, { reason });
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Bulk invoice rejected")}`);
+}
+
+/** Cancel a bulk invoice and RETURN its challans to the bulk pool. */
+export async function cancelBulkInvoiceAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/bulk");
+  await admin.from("bulk_invoice_challans").delete().eq("bulk_invoice_id", id);
+  await admin.from("bulk_invoices").update({ cancelled_at: new Date().toISOString() }).eq("id", id);
+  void logAudit(profile.id, "bulk_invoice_cancelled", "bulk_invoice", id, {});
+  revalidatePath("/invoicing/bulk");
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Bulk invoice cancelled — challans returned to the pool")}`);
+}

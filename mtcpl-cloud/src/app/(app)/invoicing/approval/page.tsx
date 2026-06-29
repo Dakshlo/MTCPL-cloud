@@ -22,7 +22,7 @@ import {
   BUTTON_STYLES,
   EmptyState,
 } from "../../accounts/_ui/components";
-import { ownerApproveChallanAction, ownerRejectChallanAction } from "../actions";
+import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAction, ownerRejectBulkAction } from "../actions";
 import { OwnerRejectButton } from "../_ui/owner-reject-button";
 
 // Page through a query — the approval queue can in theory exceed the 1000-row
@@ -135,6 +135,37 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   })();
 
+  // Mig 173 — pending BULK invoices (manual multi-challan invoices). Best-effort.
+  type BulkPending = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+  let bulkPending: BulkPending[] = [];
+  {
+    const { data, error } = await supabase
+      .from("bulk_invoices")
+      .select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .is("owner_approved_at", null).is("owner_rejected_at", null).is("cancelled_at", null)
+      .order("created_at", { ascending: false });
+    if (!error) bulkPending = (data ?? []) as BulkPending[];
+  }
+  const bulkTotal = new Map<string, number>();
+  if (bulkPending.length) {
+    const ids = bulkPending.map((b) => b.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300); if (!chunk.length) break;
+      const { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk);
+      const byB = new Map<string, number[]>();
+      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null }>) {
+        const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
+        const a = byB.get(it.bulk_invoice_id) ?? []; a.push(amt); byB.set(it.bulk_invoice_id, a);
+      }
+      for (const b of bulkPending) {
+        if (!chunk.includes(b.id)) continue;
+        const t = computeInvoiceTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
+        bulkTotal.set(b.id, t.grand);
+      }
+    }
+  }
+  const bulkCodeOf = (b: BulkPending) => (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`);
+
   return (
     <section className="page-card">
       <AccountsHero
@@ -164,7 +195,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
       )}
 
       <div style={{ marginTop: 18 }}>
-        {pending.length === 0 ? (
+        {pending.length === 0 && bulkPending.length === 0 ? (
           <EmptyState
             icon="✅"
             title="Nothing waiting for approval."
@@ -172,6 +203,37 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
           />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {bulkPending.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  📦 Bulk invoices
+                  <span style={{ color: "var(--muted)", fontWeight: 600, fontSize: 12 }}>· {bulkPending.length} waiting</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {bulkPending.map((b) => (
+                    <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface, #fff)", border: `1px solid ${ACCOUNTS_TOKENS.border}`, borderRadius: 10 }}>
+                      <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, color: ACCOUNTS_TOKENS.accent, minWidth: 120 }}>{bulkCodeOf(b)}</span>
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>🏛 {b.temple}</span>
+                      <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>₹{(bulkTotal.get(b.id) ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <Link href={`/invoicing/bulk/${b.id}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark, #92400e)", textDecoration: "none" }}>🖨 Review invoice →</Link>
+                      <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {isOwner ? (
+                          <>
+                            <form action={ownerApproveBulkAction}>
+                              <input type="hidden" name="id" value={b.id} />
+                              <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: "#16a34a", color: "#fff", border: "1px solid #15803d", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✅ Approve</button>
+                            </form>
+                            <OwnerRejectButton challanId={b.id} action={ownerRejectBulkAction} idField="id" />
+                          </>
+                        ) : (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#92400e", background: "#fef3c7", borderRadius: 999, padding: "4px 10px" }}>Awaiting owner approval</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {grouped.map(([temple, rows]) => (
               <div key={temple}>
                 <div style={{ fontWeight: 800, fontSize: 13, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>

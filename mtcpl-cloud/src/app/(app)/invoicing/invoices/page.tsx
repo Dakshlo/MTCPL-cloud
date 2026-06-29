@@ -101,6 +101,35 @@ export default async function InvoicingListPage() {
     for (const r of (data ?? []) as Array<{ id: string; inv_fy: string | null; inv_seq: number | null }>) invByChallan.set(r.id, { fy: r.inv_fy, seq: r.inv_seq });
   }
 
+  // Mig 173 — approved BULK invoices (best-effort).
+  type BulkRow = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+  let bulkApproved: BulkRow[] = [];
+  {
+    const { data, error } = await supabase.from("bulk_invoices")
+      .select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .not("owner_approved_at", "is", null).is("cancelled_at", null)
+      .order("invoice_date", { ascending: false });
+    if (!error) bulkApproved = (data ?? []) as BulkRow[];
+  }
+  const bulkTotal = new Map<string, number>();
+  if (bulkApproved.length) {
+    const ids = bulkApproved.map((b) => b.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300); if (!chunk.length) break;
+      const { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk);
+      const byB = new Map<string, number[]>();
+      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null }>) {
+        const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
+        const a = byB.get(it.bulk_invoice_id) ?? []; a.push(amt); byB.set(it.bulk_invoice_id, a);
+      }
+      for (const b of bulkApproved) {
+        if (!chunk.includes(b.id)) continue;
+        const t = computeInvoiceTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
+        bulkTotal.set(b.id, t.grand);
+      }
+    }
+  }
+
   type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
   const rows: Row[] = [
     ...legacy.map((r) => ({
@@ -111,6 +140,11 @@ export default async function InvoicingListPage() {
       key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
       customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
+    })),
+    ...bulkApproved.map((b) => ({
+      key: `bulk:${b.id}`, code: (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`), date: b.invoice_date,
+      customer: b.temple ?? "—", total: bulkTotal.get(b.id) ?? 0,
+      href: `/invoicing/bulk/${b.id}/print`, external: true,
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 

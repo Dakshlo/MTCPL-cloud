@@ -15,9 +15,12 @@ import { BUTTON_STYLES } from "../../accounts/_ui/components";
 export function OwnerRejectButton({
   challanId,
   action,
+  idField = "challan_id",
 }: {
   challanId: string;
   action: (formData: FormData) => void | Promise<void>;
+  /** Hidden field name for the id (Mig 173 — bulk invoices post "id"). */
+  idField?: string;
 }) {
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -40,7 +43,7 @@ export function OwnerRejectButton({
       action={action}
       style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}
     >
-      <input type="hidden" name="challan_id" value={challanId} />
+      <input type="hidden" name={idField} value={challanId} />
       <input
         name="reason"
         placeholder="Reason (optional)"
