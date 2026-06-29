@@ -113,8 +113,20 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
     }
   }
 
+  // Mig 172 — independent invoice number (inv_fy/inv_seq), best-effort batch fetch.
+  const invByChallan = new Map<string, { fy: string | null; seq: number | null }>();
+  {
+    const ids = pending.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300);
+      if (chunk.length === 0) break;
+      const { data, error } = await supabase.from("challans").select("id, inv_fy, inv_seq").in("id", chunk);
+      if (error) break;
+      for (const r of (data ?? []) as Array<{ id: string; inv_fy: string | null; inv_seq: number | null }>) invByChallan.set(r.id, { fy: r.inv_fy, seq: r.inv_seq });
+    }
+  }
   const codeOf = (c: PendingChallan) =>
-    (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
+    (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
 
   // Temple-wise sections (alphabetical), newest priced first within each.
   const grouped = (() => {

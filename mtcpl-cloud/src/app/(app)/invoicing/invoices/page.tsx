@@ -91,6 +91,16 @@ export default async function InvoicingListPage() {
     }
   }
 
+  // Mig 172 — independent invoice number (inv_fy/inv_seq), best-effort batch fetch.
+  const invByChallan = new Map<string, { fy: string | null; seq: number | null }>();
+  for (let i = 0; i < challanIds.length; i += 300) {
+    const chunk = challanIds.slice(i, i + 300);
+    if (chunk.length === 0) break;
+    const { data, error } = await supabase.from("challans").select("id, inv_fy, inv_seq").in("id", chunk);
+    if (error) break;
+    for (const r of (data ?? []) as Array<{ id: string; inv_fy: string | null; inv_seq: number | null }>) invByChallan.set(r.id, { fy: r.inv_fy, seq: r.inv_seq });
+  }
+
   type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
   const rows: Row[] = [
     ...legacy.map((r) => ({
@@ -98,7 +108,7 @@ export default async function InvoicingListPage() {
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
     })),
     ...priced.map((c) => ({
-      key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
+      key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
       customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
     })),

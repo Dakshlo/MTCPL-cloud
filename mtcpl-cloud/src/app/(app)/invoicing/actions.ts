@@ -25,6 +25,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { financialYear } from "@/lib/doc-code";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -130,6 +131,21 @@ export async function saveChallanPricingAction(formData: FormData) {
     if (!trErr && transportCompany) {
       await admin.from("transport_companies").upsert({ name: transportCompany }, { onConflict: "name" });
     }
+  }
+
+  // Mig 172 — assign an INDEPENDENT invoice number (INV series) ONCE on first
+  // pricing, separate from the challan's CH number. Best-effort: if mig 172
+  // isn't applied the select errors and the code falls back to the challan no.
+  try {
+    const { data: inv } = await admin.from("challans").select("inv_seq, challan_date").eq("id", challanId).maybeSingle();
+    const row = inv as { inv_seq?: number | null; challan_date?: string } | null;
+    if (row && row.inv_seq == null) {
+      const fy = financialYear(row.challan_date || new Date());
+      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+      if (typeof seq === "number") await admin.from("challans").update({ inv_fy: fy, inv_seq: seq }).eq("id", challanId);
+    }
+  } catch {
+    /* mig 172 not applied — invoice code falls back to the challan-derived number */
   }
 
   await logAudit(profile.id, "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });

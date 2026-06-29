@@ -213,10 +213,16 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
   const measureOf = (it: Item) => (it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0);
   const amountOf = (it: Item) => (it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * measureOf(it));
-  // Tax-invoice number (Daksh) — the priced challan IS the invoice, so present
-  // it as INV-<FY>-N instead of the internal challan CH-<FY>-N code. Override
-  // wins, then the unified per-FY code (mig 168), then the legacy fallback.
-  const invCode = (c.invoice_no_override?.trim() || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
+  // Mig 172 — the invoice number now runs its OWN series (inv_fy/inv_seq),
+  // independent of the challan's CH number. Best-effort fetch (survives a
+  // pre-migration schema). Override wins → INV series → legacy doc/challan code.
+  let invFy: string | null = null;
+  let invSeq: number | null = null;
+  {
+    const { data: iv, error } = await admin.from("challans").select("inv_fy, inv_seq").eq("id", id).maybeSingle();
+    if (!error && iv) { const t = iv as { inv_fy?: string | null; inv_seq?: number | null }; invFy = t.inv_fy ?? null; invSeq = t.inv_seq ?? null; }
+  }
+  const invCode = (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invFy, invSeq) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
   // Source challan no. (the priced challan IS this invoice) — shown under the
   // date so the floor links the bill to its delivery challan at a glance.
   const challanLabel = c.challan_number != null && String(c.challan_number).trim() !== ""
