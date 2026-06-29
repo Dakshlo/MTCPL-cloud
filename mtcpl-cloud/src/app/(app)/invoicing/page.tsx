@@ -138,8 +138,10 @@ export default async function InvoicingDashboardPage() {
             <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
               📜 Install contract
             </Link>
-            {/* Daksh: client billing moved to Settings → Temple Codes (one place
-                for every temple address). The button was removed from here. */}
+            {/* Mig 170 — per-temple billing/shipping/installation + default GST. */}
+            <Link href="/settings/temples" style={BUTTON_STYLES.secondary}>
+              🛕 Client billing &amp; GST
+            </Link>
             <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
               📝 Work Order Doc
             </Link>

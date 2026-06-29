@@ -537,12 +537,12 @@ const navEntries: NavEntry[] = [
     department: "invoicing",
   },
   {
-    // Mig 167/168 — owner / account-plus approve priced challans here; plain
-    // accountant sees it READ-ONLY (canApproveInvoice gates the buttons).
+    // Mig 167/168 — owner / account-plus approve priced challans. Daksh: kept
+    // off the accountants' menu (it's a dashboard button) — dev/owner only here.
     href: "/invoicing/approval",
     label: "Approval",
     icon: "✅",
-    roles: ["developer", "owner", "accountant_star", "accountant"],
+    roles: ["developer", "owner"],
     department: "invoicing",
   },
   {
@@ -554,23 +554,16 @@ const navEntries: NavEntry[] = [
   },
   {
     // Mig 170 — per-temple billing/shipping/installation/vendor + default GST.
-    // Edit-only editor (add/delete/rename stay in Settings → Temple Codes).
+    // Daksh: for accountants this is a dashboard button (Client billing & GST),
+    // not a menu entry; dev/owner keep the quick link here.
     href: "/settings/temples",
     label: "Client billing & GST",
     icon: "🛕",
-    roles: ["developer", "owner", "accountant_star", "accountant"],
+    roles: ["developer", "owner"],
     department: "invoicing",
   },
-  {
-    // Mig 105 — standalone manual Work Order Document generator. Moved to a
-    // dashboard button for dashboard roles; kept in the menu ONLY for plain
-    // accountant, whose sole invoicing surface this is (no dashboard access).
-    href: "/invoicing/work-order-doc",
-    label: "Work Order Doc",
-    icon: "📝",
-    roles: ["accountant"],
-    department: "invoicing",
-  },
+  // Work Order Doc + Approval + Client billing & GST are dashboard buttons for
+  // accountants (Daksh) — no menu entries for them.
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
   // Deliberately minimal: one entry per role. The scaffolding board
   // itself surfaces a horizontal sub-nav (Board / Issue / Return /
