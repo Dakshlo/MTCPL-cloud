@@ -525,7 +525,7 @@ const navEntries: NavEntry[] = [
     href: "/invoicing",
     label: "Dashboard",
     icon: "📊",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
   // Parties moved to a dashboard button (Daksh) — no menu entry.
@@ -533,14 +533,23 @@ const navEntries: NavEntry[] = [
     href: "/invoicing/challans",
     label: "Challans",
     icon: "📋",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant_star", "accountant"],
+    department: "invoicing",
+  },
+  {
+    // Mig 167/168 — owner / account-plus approve priced challans here; plain
+    // accountant sees it READ-ONLY (canApproveInvoice gates the buttons).
+    href: "/invoicing/approval",
+    label: "Approval",
+    icon: "✅",
+    roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
   {
     href: "/invoicing/invoices",
     label: "Invoices",
     icon: "🧾",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
   {
