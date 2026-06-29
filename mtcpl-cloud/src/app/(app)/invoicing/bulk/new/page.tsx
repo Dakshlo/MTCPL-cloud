@@ -11,6 +11,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { challanCode } from "@/lib/doc-code";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
 import { BulkInvoiceForm, type TempleData } from "./bulk-invoice-form";
 
@@ -58,13 +59,30 @@ export default async function NewBulkInvoicePage() {
     }
   }
 
+  // Per-temple billing/shipping so the live preview can render Bill To / Ship To
+  // (best-effort — fetchTempleBilling falls back to the temple name on its own).
+  const billingByTemple = new Map<string, Awaited<ReturnType<typeof fetchTempleBilling>>>();
+  await Promise.all(
+    names.map(async (name) => { billingByTemple.set(name, await fetchTempleBilling(admin, name)); }),
+  );
+
   const temples: TempleData[] = [...byTemple.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([temple, list]) => ({
-      temple,
-      gst: gstByTemple.get(temple) ?? { mode: null, igst: 18, cgst: 9, sgst: 9 },
-      challans: list.map((c) => ({ id: c.id, code: challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number, date: c.challan_date })),
-    }));
+    .map(([temple, list]) => {
+      const bg = billingByTemple.get(temple) ?? null;
+      const bill = bg
+        ? { name: bg.name, address: bg.address, city: bg.city, state: bg.state, state_code: bg.state_code, gstin: bg.gstin, pan: bg.pan, phone: bg.phone, email: bg.email }
+        : { name: temple, address: null, city: null, state: null, state_code: null, gstin: null, pan: null, phone: null, email: null };
+      return {
+        temple,
+        gst: gstByTemple.get(temple) ?? { mode: null, igst: 18, cgst: 9, sgst: 9 },
+        challans: list.map((c) => ({ id: c.id, code: challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number, date: c.challan_date })),
+        bill,
+        ship: bg?.shipping ?? null,
+        vendorCode: bg?.vendor_code ?? null,
+        workOrderNo: bg?.work_order_no ?? null,
+      };
+    });
 
   return (
     <section className="page-card">
