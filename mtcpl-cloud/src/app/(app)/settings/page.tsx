@@ -4,6 +4,7 @@ import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserActi
 import { ensureDevTransferBucket } from "./dev-transfer-shared";
 import { listDevTransferBaskets, type DevBasket } from "./dev-transfer-list";
 import { TempleRenameForm } from "./temple-rename-form";
+import { TempleEditModal } from "./temple-edit-modal";
 import { DevFileTransfer } from "./dev-file-transfer";
 import { DevTransferRemoveAll } from "./dev-transfer-remove-all";
 import {
@@ -1210,199 +1211,15 @@ export default async function SettingsPage() {
         {templeList.length === 0 ? (
           <div className="banner">No temples configured yet. Add your first temple above.</div>
         ) : (
-          <div className="settings-table">
-            <div className="settings-table-head">
-              <span>Temple Name</span>
-              <span>Code Prefix</span>
-              <span>Slab ID Format</span>
-              <span>Status</span>
-              <span></span>
-            </div>
-            {templeList.map(temple => (
-              <details key={temple.id} className="settings-table-row">
-                <summary className="settings-table-row-face">
-                  <span className="settings-temple-name">{temple.name}</span>
-                  <span><code className="code-badge">{temple.code_prefix}</code></span>
-                  <span className="muted" style={{ fontSize: 13 }}>
-                    {temple.code_prefix}-0001, {temple.code_prefix}-0002…
-                  </span>
-                  <span>
-                    <span className={`role-pill ${temple.is_active ? "badge-available" : "badge-discarded"}`}>
-                      {temple.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </span>
-                  <span className="muted" style={{ fontSize: 12 }}>Edit ▾</span>
-                </summary>
-
-                <div className="settings-table-edit">
-                  {(() => {
-                    const sc = templeSlabCount[temple.name] ?? 0;
-                    if (sc > 0) return (
-                      <p style={{ fontSize: 12, color: "#b87333", margin: "0 0 10px", fontWeight: 600 }}>
-                        ⚠️ {sc} slab{sc !== 1 ? "s" : ""} belong to this temple — delete is blocked until all slabs are completed or removed.
-                      </p>
-                    );
-                    return null;
-                  })()}
-                  {/* Mig 161 — owner/dev can rename the temple NAME (cascades
-                      everywhere); the code prefix stays locked. */}
-                  {canRenameTemple && <TempleRenameForm templeId={temple.id} currentName={temple.name} />}
-                  <form action={updateTempleAction}>
-                    <div className="settings-form-row">
-                    <input type="hidden" name="id" value={temple.id} />
-                    <input type="hidden" name="temple_name" value={temple.name} />
-                    {/* Daksh: temple name / code prefix / stone type are
-                        LOCKED after creation. Changing them mid-flow
-                        caused problems with existing slab IDs and
-                        references. The fields render as read-only with
-                        a 🔒 hint; only Status (and Delete) stay
-                        actionable. The server action also ignores any
-                        attempt to send new values for these three. */}
-                    <label className="stack" style={{ flex: 2 }}>
-                      <span>Temple Name 🔒</span>
-                      <input
-                        name="name"
-                        defaultValue={temple.name}
-                        readOnly
-                        disabled
-                        title="Locked after creation"
-                        style={{ background: "#f5f1e6", color: "#4a4a4a", cursor: "not-allowed" }}
-                      />
-                    </label>
-                    <label className="stack" style={{ flex: 1 }}>
-                      <span>Code Prefix 🔒</span>
-                      <input
-                        name="code_prefix"
-                        defaultValue={temple.code_prefix}
-                        maxLength={6}
-                        readOnly
-                        disabled
-                        title="Locked after creation"
-                        style={{
-                          textTransform: "uppercase",
-                          fontFamily: "ui-monospace, monospace",
-                          fontWeight: 700,
-                          background: "#f5f1e6",
-                          color: "#4a4a4a",
-                          cursor: "not-allowed",
-                        }}
-                      />
-                    </label>
-                    <label className="stack" style={{ flex: "0 0 auto" }}>
-                      <span>Stone Type 🔒</span>
-                      <select
-                        name="default_stone"
-                        defaultValue={(temple as any).default_stone ?? "PinkStone"}
-                        disabled
-                        title="Locked after creation"
-                        style={{ background: "#f5f1e6", color: "#4a4a4a", cursor: "not-allowed" }}
-                      >
-                        {stoneList.length > 0
-                          ? stoneList.map(st => <option key={st.name} value={st.name}>{st.name}</option>)
-                          : <>
-                              <option value="PinkStone">PinkStone</option>
-                              <option value="WhiteStone">WhiteStone</option>
-                            </>
-                        }
-                      </select>
-                    </label>
-                    <label className="stack" style={{ flex: "0 0 auto" }}>
-                      <span>Status</span>
-                      <select name="is_active" defaultValue={String(temple.is_active)}>
-                        <option value="true">Active</option>
-                        <option value="false">Inactive</option>
-                      </select>
-                    </label>
-                    </div>
-                    {/* Installation contractor (our side) — feeds the challan. */}
-                    <div className="settings-form-row" style={{ marginTop: 10 }}>
-                      <label className="stack" style={{ flex: 1 }}>
-                        <span>Installation By</span>
-                        <input name="installer_name" defaultValue={(temple as any).installer_name ?? ""} placeholder="Our installation contractor" />
-                      </label>
-                      <label className="stack" style={{ flex: "0 0 170px" }}>
-                        <span>Installation Mobile No.</span>
-                        <input name="installer_phone" type="tel" defaultValue={(temple as any).installer_phone ?? ""} placeholder="98…" />
-                      </label>
-                    </div>
-
-                    {/* Mig 165 — Billing + Shipping for this temple-as-client.
-                        The single source of truth for the tax invoice + delivery
-                        challan addresses (the old "Client billing" page was
-                        retired). Shipping left blank ⇒ both prints fall back to
-                        the billing address. */}
-                    <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
-                      <fieldset style={{ flex: "1 1 320px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7 }}>
-                        <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>🧾 Billing To</legend>
-                        {BILLING_FIELDS.map((f) => (
-                          <label key={f.key} className="stack">
-                            <span>{f.label}</span>
-                            <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
-                          </label>
-                        ))}
-                      </fieldset>
-                      <fieldset style={{ flex: "1 1 320px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7 }}>
-                        <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>📦 Shipping To <span className="muted" style={{ fontWeight: 600 }}>· blank = same as billing</span></legend>
-                        {SHIPPING_FIELDS.map((f) => (
-                          <label key={f.key} className="stack">
-                            <span>{f.label}</span>
-                            <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
-                          </label>
-                        ))}
-                      </fieldset>
-                    </div>
-
-                    {/* Mig 170 — default GST for this temple-as-client. Pre-selects
-                        the mode + % when pricing this temple's invoice (editable
-                        there). Fill only the % for the chosen mode. */}
-                    <div className="settings-form-row" style={{ marginTop: 12 }}>
-                      <label className="stack" style={{ flex: "0 0 190px" }}>
-                        <span>🧾 GST type (client)</span>
-                        <select name="gst_mode" defaultValue={(temple as any).gst_mode ?? "none"}>
-                          <option value="none">No GST</option>
-                          <option value="igst">IGST</option>
-                          <option value="cgst_sgst">CGST + SGST</option>
-                        </select>
-                      </label>
-                      <label className="stack" style={{ flex: "0 0 110px" }}>
-                        <span>IGST %</span>
-                        <input name="igst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).igst_percent ?? ""} placeholder="18" />
-                      </label>
-                      <label className="stack" style={{ flex: "0 0 110px" }}>
-                        <span>CGST %</span>
-                        <input name="cgst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).cgst_percent ?? ""} placeholder="9" />
-                      </label>
-                      <label className="stack" style={{ flex: "0 0 110px" }}>
-                        <span>SGST %</span>
-                        <input name="sgst_percent" type="number" step="0.01" min="0" defaultValue={(temple as any).sgst_percent ?? ""} placeholder="9" />
-                      </label>
-                    </div>
-
-                    <div className="settings-form-row" style={{ marginTop: 12, alignItems: "flex-end" }}>
-                      {SHARED_FIELDS.map((f) => (
-                        <label key={f.key} className="stack" style={{ flex: 1 }}>
-                          <span>{f.label}</span>
-                          <input name={f.key} defaultValue={(temple as any)[f.key] ?? ""} />
-                        </label>
-                      ))}
-                      <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-                        <button className="secondary-button" type="submit">Save</button>
-                        <button className="ghost-button danger-ghost" formAction={deleteTempleAction} formNoValidate type="submit">
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  </form>
-                  <p style={{ fontSize: 11, color: "var(--muted)", margin: "8px 2px 0", lineHeight: 1.5 }}>
-                    🔒 Code prefix and stone type stay locked after creation —
-                    slab IDs embed the prefix. The <strong>name</strong> CAN be
-                    changed with <strong>✏️ Rename temple name</strong> above
-                    {canRenameTemple ? "" : " (owner / developer only)"}: it
-                    cascades the new name to every slab, dispatch, challan and
-                    image, so the client name shows correctly on invoices too.
-                  </p>
-                </div>
-              </details>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {templeList.map((temple) => (
+              <TempleEditModal
+                key={temple.id}
+                temple={temple}
+                canDelete
+                returnTo="settings"
+                renameSlot={canRenameTemple ? <TempleRenameForm templeId={temple.id} currentName={temple.name} /> : null}
+              />
             ))}
           </div>
         )}
