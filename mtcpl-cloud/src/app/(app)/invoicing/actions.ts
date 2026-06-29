@@ -1048,3 +1048,66 @@ export async function sendChallanBackFromBulkAction(formData: FormData): Promise
   revalidatePath("/invoicing/bulk");
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan returned to Challans")}`);
 }
+
+/** Create ONE bulk tax invoice covering several of a temple's bulk challans,
+ *  with manual line items. Pending owner approval (Mig 173). */
+export async function createBulkInvoiceAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+
+  const temple = txt(formData, "temple");
+  if (!temple) redirect("/invoicing/bulk/new?toast=Pick+a+temple");
+
+  let challanIds: string[] = [];
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string }> = [];
+  try { challanIds = JSON.parse(txt(formData, "challan_ids") || "[]") as string[]; } catch { challanIds = []; }
+  try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
+  items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
+  if (items.length === 0) redirect("/invoicing/bulk/new?toast=Add+at+least+one+line+item");
+
+  const gm = txt(formData, "gst_mode");
+  const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  const invoiceDate = txt(formData, "invoice_date") || null;
+  const fy = financialYear(invoiceDate || new Date());
+  let invSeq: number | null = null;
+  try { const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` }); if (typeof seq === "number") invSeq = seq; } catch { /* mig not applied */ }
+
+  const insert: Record<string, unknown> = {
+    temple,
+    inv_fy: invSeq != null ? fy : null,
+    inv_seq: invSeq,
+    invoice_no_override: txt(formData, "invoice_no_override") || null,
+    gst_mode: gstMode,
+    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
+    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
+    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    notes: txt(formData, "notes") || null,
+    created_by: profile.id,
+  };
+  if (invoiceDate) insert.invoice_date = invoiceDate;
+  const { data: bi, error } = await admin.from("bulk_invoices").insert(insert).select("id").single();
+  if (error || !bi) redirect(`/invoicing/bulk/new?toast=${encodeURIComponent(error?.message || "Failed to create invoice")}`);
+  const bulkId = (bi as { id: string }).id;
+
+  const itemRows = items.map((it, i) => ({
+    bulk_invoice_id: bulkId,
+    position: i,
+    particulars: (it.particulars ?? "").toString() || null,
+    hsn: (it.hsn ?? "").toString() || null,
+    unit: (it.unit ?? "").toString() || null,
+    quantity: Number(it.quantity) || null,
+    rate: Number(it.rate) || null,
+    amount: it.amount != null && it.amount !== "" ? Number(it.amount) : ((Number(it.quantity) || 0) * (Number(it.rate) || 0)),
+  }));
+  await admin.from("bulk_invoice_items").insert(itemRows);
+  if (challanIds.length) {
+    await admin.from("bulk_invoice_challans").insert(challanIds.map((cid) => ({ bulk_invoice_id: bulkId, challan_id: cid })));
+  }
+
+  void logAudit(profile.id, "bulk_invoice_created", "bulk_invoice", bulkId, { temple, challans: challanIds.length, items: items.length });
+  revalidatePath("/invoicing/bulk");
+  revalidatePath("/invoicing/approval");
+  refreshInvoicingPaths();
+  redirect(`/invoicing/bulk/${bulkId}/print`);
+}
