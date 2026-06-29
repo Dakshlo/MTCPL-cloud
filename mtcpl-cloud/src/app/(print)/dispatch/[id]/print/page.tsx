@@ -431,7 +431,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           <div className="sign">Challan Generated<div className="sub">&nbsp;</div></div>
           <div className="sign">Account Signature<div className="sub">&nbsp;</div></div>
           <div className="sign">Driver Signature<div className="sub">{dash(dispatch.driver_name)}</div></div>
-          <div className="sign">Client Signature<div className="sub">{dash(dispatch.temple)}</div></div>
+          <div className="sign">Client Signature<div className="sub">{billName}</div></div>
         </div>
       </div>
     </>
