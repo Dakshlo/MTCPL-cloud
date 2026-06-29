@@ -42,12 +42,16 @@ export function ReviewForm({
   initGst,
   initInvoiceNo,
   autoCode,
+  transportCompanies = [],
+  initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" },
 }: {
   challanId: string;
   items: PriceItem[];
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
   initInvoiceNo: string;
   autoCode: string;
+  transportCompanies?: string[];
+  initTransport?: { company: string; phone: string; lr: string; vehicle: string; driverName: string; driverPhone: string };
 }) {
   // One rate per stone+unit group (key = `${stone}|${unit}`).
   const groups = useMemo(() => {
@@ -99,6 +103,8 @@ export function ReviewForm({
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
   const numCell: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+  const tLabel: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 11.5, fontWeight: 700, color: "var(--muted)" };
+  const tInput: React.CSSProperties = { fontSize: 13, padding: "7px 9px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" };
 
   const ItemRow = (it: PriceItem) => (
     <tr key={it.id}>
@@ -174,6 +180,24 @@ export function ReviewForm({
       {items.length === 0 && (
         <div className="muted" style={{ textAlign: "center", padding: "24px 10px", fontSize: 13, border: "1px dashed var(--border)", borderRadius: 12, marginBottom: 16 }}>No items on this challan.</div>
       )}
+
+      {/* Mig 169 — transportation details (printed on the tax invoice). The
+          company is a datalist combobox: pick an existing one or type a new one
+          (a new name is saved to the master on Save, for next time). */}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface)", marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 10 }}>🚚 Transportation</div>
+        <datalist id="transport-companies">
+          {transportCompanies.map((n) => <option key={n} value={n} />)}
+        </datalist>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <label style={tLabel}><span>Transport company</span><input name="transport_company" list="transport-companies" defaultValue={initTransport.company} placeholder="Pick or type new…" style={tInput} /></label>
+          <label style={tLabel}><span>Phone no.</span><input name="transport_phone" defaultValue={initTransport.phone} style={tInput} /></label>
+          <label style={tLabel}><span>LR no.</span><input name="lr_no" defaultValue={initTransport.lr} style={tInput} /></label>
+          <label style={tLabel}><span>Vehicle no.</span><input name="transport_vehicle_no" defaultValue={initTransport.vehicle} style={tInput} /></label>
+          <label style={tLabel}><span>Driver name</span><input name="transport_driver_name" defaultValue={initTransport.driverName} style={tInput} /></label>
+          <label style={tLabel}><span>Driver no.</span><input name="transport_driver_phone" defaultValue={initTransport.driverPhone} style={tInput} /></label>
+        </div>
+      </div>
 
       {/* GST + totals */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>

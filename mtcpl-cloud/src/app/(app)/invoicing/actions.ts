@@ -111,6 +111,27 @@ export async function saveChallanPricingAction(formData: FormData) {
     })
     .eq("id", challanId);
 
+  // Mig 169 — transport details (separate best-effort update so a pre-migration
+  // schema never blocks pricing). A new company name is added to the master so
+  // it appears in the review-form dropdown next time.
+  {
+    const transportCompany = txt(formData, "transport_company") || null;
+    const { error: trErr } = await admin
+      .from("challans")
+      .update({
+        transport_company: transportCompany,
+        transport_phone: txt(formData, "transport_phone") || null,
+        lr_no: txt(formData, "lr_no") || null,
+        transport_vehicle_no: txt(formData, "transport_vehicle_no") || null,
+        transport_driver_name: txt(formData, "transport_driver_name") || null,
+        transport_driver_phone: txt(formData, "transport_driver_phone") || null,
+      })
+      .eq("id", challanId);
+    if (!trErr && transportCompany) {
+      await admin.from("transport_companies").upsert({ name: transportCompany }, { onConflict: "name" });
+    }
+  }
+
   await logAudit(profile.id, "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });
   refreshInvoicingPaths({ challanId });
   revalidatePath("/invoicing/approval");

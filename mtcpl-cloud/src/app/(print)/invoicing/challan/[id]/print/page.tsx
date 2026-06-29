@@ -168,6 +168,21 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     ? await admin.from("dispatches").select("vehicle_no").eq("id", c.source_dispatch_id).maybeSingle()
     : { data: null };
   const vehicleNo = (dispRow as { vehicle_no?: string | null } | null)?.vehicle_no ?? null;
+  // Mig 169 — transportation details (best-effort; null if mig not applied or unset).
+  let transport: { company: string | null; phone: string | null; lr: string | null; vehicle: string | null; driverName: string | null; driverPhone: string | null } | null = null;
+  {
+    const { data: tr, error } = await admin
+      .from("challans")
+      .select("transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+      .eq("id", id)
+      .maybeSingle();
+    if (!error && tr) {
+      const t = tr as Record<string, string | null>;
+      if (t.transport_company || t.transport_phone || t.lr_no || t.transport_vehicle_no || t.transport_driver_name || t.transport_driver_phone) {
+        transport = { company: t.transport_company, phone: t.transport_phone, lr: t.lr_no, vehicle: t.transport_vehicle_no, driverName: t.transport_driver_name, driverPhone: t.transport_driver_phone };
+      }
+    }
+  }
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -326,6 +341,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
         .vw { font-size: 9.5px; color: #444; margin: 5px 0 0; font-weight: 700; }
+        /* Transportation card under Bill To / Ship To (Mig 169). */
+        .transport { border: 1px solid #ccc; border-radius: 6px; padding: 7px 11px; background: #f7fafc; margin: 8px 0 4px; }
+        .transport-k { font-size: 8.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 4px; }
+        .transport-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 5px 18px; }
+        .transport-grid > div { display: flex; flex-direction: column; }
+        .transport .tk { font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #999; }
+        .transport .tv { font-size: 11.5px; font-weight: 700; color: #1a1a1a; }
         .doc-title { text-align: center; margin: 0 0 7px; }
         .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
         .stone-block { margin-top: 4px; }
@@ -423,6 +445,18 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <Party label="Bill To" name={billName} p={billParty} vendorCode={billing?.vendor_code} workOrderNo={billing?.work_order_no} />
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
+        {transport && (
+          <div className="transport">
+            <div className="transport-k">Transportation</div>
+            <div className="transport-grid">
+              {transport.company && <div><span className="tk">Company</span><span className="tv">{transport.company}</span></div>}
+              {transport.phone && <div><span className="tk">Phone</span><span className="tv">{transport.phone}</span></div>}
+              {transport.lr && <div><span className="tk">LR no.</span><span className="tv">{transport.lr}</span></div>}
+              {transport.vehicle && <div><span className="tk">Vehicle no.</span><span className="tv">{transport.vehicle}</span></div>}
+              {(transport.driverName || transport.driverPhone) && <div><span className="tk">Driver</span><span className="tv">{[transport.driverName, transport.driverPhone].filter(Boolean).join(" · ")}</span></div>}
+            </div>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No items on this invoice.</p>

@@ -123,6 +123,30 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     sgst: c.sgst_percent != null ? Number(c.sgst_percent) : 9,
   };
 
+  // Mig 169 — transport companies master + this challan's saved transport
+  // details. Best-effort (separate selects, error-checked) so a pre-migration
+  // schema never 404s the review page.
+  let transportCompanies: string[] = [];
+  {
+    const { data: tc, error } = await admin.from("transport_companies").select("name").eq("is_active", true).order("name");
+    if (!error) transportCompanies = ((tc ?? []) as Array<{ name: string }>).map((r) => r.name).filter(Boolean);
+  }
+  let initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" };
+  {
+    const { data: tr, error } = await admin
+      .from("challans")
+      .select("transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+      .eq("id", id)
+      .maybeSingle();
+    if (!error && tr) {
+      const t = tr as Record<string, string | null>;
+      initTransport = {
+        company: t.transport_company ?? "", phone: t.transport_phone ?? "", lr: t.lr_no ?? "",
+        vehicle: t.transport_vehicle_no ?? "", driverName: t.transport_driver_name ?? "", driverPhone: t.transport_driver_phone ?? "",
+      };
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 40, maxWidth: 1280 }}>
       <div>
@@ -157,6 +181,8 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
         initGst={initGst}
         initInvoiceNo={c.invoice_no_override ?? ""}
         autoCode={invoiceCode(c.challan_number, c.challan_date)}
+        transportCompanies={transportCompanies}
+        initTransport={initTransport}
       />
     </div>
   );
