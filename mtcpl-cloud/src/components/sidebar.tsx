@@ -537,33 +537,15 @@ const navEntries: NavEntry[] = [
     department: "invoicing",
   },
   {
-    // Mig 167/168 — owner / account-plus approve priced challans. Daksh: kept
-    // off the accountants' menu (it's a dashboard button) — dev/owner only here.
-    href: "/invoicing/approval",
-    label: "Approval",
-    icon: "✅",
-    roles: ["developer", "owner"],
-    department: "invoicing",
-  },
-  {
     href: "/invoicing/invoices",
     label: "Invoices",
     icon: "🧾",
     roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
-  {
-    // Mig 170 — per-temple billing/shipping/installation/vendor + default GST.
-    // Daksh: for accountants this is a dashboard button (Client billing & GST),
-    // not a menu entry; dev/owner keep the quick link here.
-    href: "/settings/temples",
-    label: "Client billing & GST",
-    icon: "🛕",
-    roles: ["developer", "owner"],
-    department: "invoicing",
-  },
-  // Work Order Doc + Approval + Client billing & GST are dashboard buttons for
-  // accountants (Daksh) — no menu entries for them.
+  // Daksh: the invoicing menu is lean for EVERYONE (incl. owner/developer) —
+  // Approval, Client billing & GST, Work Order Doc and Install contract are all
+  // dashboard buttons, not menu entries.
   // ── INVENTORY section (Migration 041 — Scaffolding v1) ──────────
   // Deliberately minimal: one entry per role. The scaffolding board
   // itself surfaces a horizontal sub-nav (Board / Issue / Return /
