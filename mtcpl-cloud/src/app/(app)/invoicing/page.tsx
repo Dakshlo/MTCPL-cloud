@@ -27,6 +27,7 @@ import {
   VendorIdentity,
 } from "../accounts/_ui/components";
 import { ChallanStatusPill } from "./_ui/challan-status-pill";
+import { HeroMenu } from "./_ui/hero-menu";
 import { challanCode } from "@/lib/doc-code";
 
 export default async function InvoicingDashboardPage() {
@@ -48,7 +49,6 @@ export default async function InvoicingDashboardPage() {
     { count: partyCount },
     { count: openChallanCount },
     { count: convertedChallanCount },
-    { count: pendingApprovalCount },
     invoicesQ,
     recentChallansQ,
     recentInvoicesQ,
@@ -68,15 +68,6 @@ export default async function InvoicingDashboardPage() {
       .select("id", { count: "exact", head: true })
       .is("cancelled_at", null)
       .not("converted_invoice_id", "is", null),
-    // Mig 167 — priced challans waiting on owner approval.
-    supabase
-      .from("challans")
-      .select("id", { count: "exact", head: true })
-      .not("priced_at", "is", null)
-      .is("owner_approved_at", null)
-      .is("owner_rejected_at", null)
-      .is("cancelled_at", null)
-      .is("converted_invoice_id", null),
     supabase
       .from("invoices")
       .select("id, total"),
@@ -130,29 +121,26 @@ export default async function InvoicingDashboardPage() {
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {/* New challan / New invoice live in the sidebar menu — kept off the
-                dashboard hero to avoid duplication (Daksh). */}
-            {/* Mig 167 — journey reads Challans → Approval → Invoices. */}
-            <Link href="/invoicing/approval" style={BUTTON_STYLES.secondary}>
-              🟡 Approval{pendingApprovalCount ? ` (${pendingApprovalCount})` : ""}
-            </Link>
-            {/* Mig 173 — challans parked for periodic bulk billing. */}
-            <Link href="/invoicing/bulk" style={BUTTON_STYLES.secondary}>
-              📦 Bulk challans
-            </Link>
-            <Link href="/invoicing/install-contract" style={BUTTON_STYLES.secondary}>
-              📜 Install contract
-            </Link>
-            {/* Mig 170 — per-temple billing/shipping/installation + default GST. */}
-            <Link href="/settings/temples" style={BUTTON_STYLES.secondary}>
-              🛕 Client billing &amp; GST
-            </Link>
-            {/* Mig 171 — HSN code per stone type (prints on the tax invoice). */}
-            <Link href="/invoicing/stone-hsn" style={BUTTON_STYLES.secondary}>
-              🪨 Stone &amp; HSN code
-            </Link>
-            <Link href="/invoicing/work-order-doc" style={BUTTON_STYLES.secondary}>
-              📝 Work Order Doc
-            </Link>
+                dashboard hero to avoid duplication (Daksh).
+                Approval + Bulk challans moved to the Challans page (Daksh) — they
+                belong with the challan workflow, not duplicated here.
+                The remaining shortcuts fold into two HeroMenu buttons: each opens
+                a small popover so the hero stays compact. */}
+            {/* Mig 170 client billing + Mig 171 stone HSN. */}
+            <HeroMenu
+              label="🛕 Client & GST setup"
+              items={[
+                { href: "/settings/temples", label: "🛕 Client billing & GST", hint: "Per-temple billing, shipping & default GST" },
+                { href: "/invoicing/stone-hsn", label: "🪨 Stone & HSN code", hint: "HSN code per stone (prints on the invoice)" },
+              ]}
+            />
+            <HeroMenu
+              label="📄 Documents"
+              items={[
+                { href: "/invoicing/install-contract", label: "📜 Installation contract", hint: "Generate an installation contract" },
+                { href: "/invoicing/work-order-doc", label: "📝 Work Order Doc", hint: "Generate a work order document" },
+              ]}
+            />
           </div>
         }
       />
