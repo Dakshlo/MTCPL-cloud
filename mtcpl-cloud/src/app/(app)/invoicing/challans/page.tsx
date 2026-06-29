@@ -25,11 +25,19 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
 
   const supabase = createAdminSupabaseClient();
 
+  // Daksh — the Challans page is the WORK queue: only challans NOT yet on a final
+  // invoice. Exclude owner-approved (invoiced → they live on the Invoices page),
+  // legacy converted, and cancelled. What's left = open / under-review / rejected
+  // (a priced challan stays here while the owner reviews it, and only leaves once
+  // approved). Bulk-parked challans are filtered out separately (best-effort).
   const { data: challansRaw, error } = await supabase
     .from("challans")
     .select(
       "id, challan_number, doc_fy, doc_seq, challan_date, invoice_party_id, temple, notes, source_dispatch_id, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, owner_reject_reason, invoice_parties(name)",
     )
+    .is("cancelled_at", null)
+    .is("converted_invoice_id", null)
+    .is("owner_approved_at", null)
     .order("challan_date", { ascending: false })
     .limit(500);
   if (error) throw new Error(error.message);
