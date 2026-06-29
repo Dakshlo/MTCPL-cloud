@@ -1032,7 +1032,10 @@ export async function sendChallanToBulkAction(formData: FormData): Promise<void>
   void logAudit(profile.id, "challan_sent_to_bulk", "challan", id, {});
   refreshInvoicingPaths({ challanId: id });
   revalidatePath("/invoicing/bulk");
-  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Challan moved to Bulk")}`);
+  revalidatePath("/invoicing/challans");
+  // Daksh — stay on the Challans page (the card just leaves the list); don't yank
+  // the user over to the Bulk page.
+  redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan moved to Bulk")}`);
 }
 
 /** Send a bulk challan back to the Challans page. */

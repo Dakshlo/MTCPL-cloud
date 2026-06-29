@@ -1,7 +1,9 @@
 /**
  * Bulk challans (Mig 173). Open challans "sent to bulk" land here, grouped by
- * temple. Each can be downloaded (the delivery challan) or sent back. "Create
- * tax invoice" bills several of a temple's bulk challans on one invoice.
+ * temple in a card board (same look as the Challans page — search + collapsible
+ * temple sections + cards). Each card downloads the delivery challan or sends it
+ * back. "Create tax invoice" bills several of a temple's bulk challans on one
+ * invoice.
  */
 
 import Link from "next/link";
@@ -11,7 +13,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { BUTTON_STYLES } from "../../accounts/_ui/components";
-import { BulkSendBack } from "./bulk-send-back";
+import { BulkBoard, type BulkGroup, type BulkCard } from "./bulk-board";
 import { BulkCancel } from "./bulk-cancel";
 
 export const dynamic = "force-dynamic";
@@ -43,9 +45,40 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
   }
   const pool = all.filter((c) => !invoiced.has(c.id));
 
-  const byTemple = new Map<string, BulkRow[]>();
-  for (const c of pool) { const k = c.temple ?? "—"; const a = byTemple.get(k) ?? []; a.push(c); byTemple.set(k, a); }
-  const temples = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  // Slab codes / labels per challan → folded into the search blob (parity with
+  // the Challans page search). challan_items.codes is comma-separated text.
+  const codesByChallan = new Map<string, string>();
+  {
+    const ids = pool.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data, error } = await admin.from("challan_items").select("challan_id, codes, label, description").in("challan_id", chunk);
+      if (error) break;
+      for (const it of (data ?? []) as Array<{ challan_id: string; codes: string | null; label: string | null; description: string | null }>) {
+        const extra = [it.codes, it.label, it.description].filter(Boolean).join(" ");
+        const prev = codesByChallan.get(it.challan_id) ?? "";
+        codesByChallan.set(it.challan_id, `${prev} ${extra}`.trim());
+      }
+    }
+  }
+
+  const byTemple = new Map<string, BulkCard[]>();
+  for (const c of pool) {
+    const temple = c.temple ?? "—";
+    const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
+    const card: BulkCard = {
+      id: c.id,
+      code,
+      date: c.challan_date,
+      sourceDispatchId: c.source_dispatch_id,
+      search: `${temple} ${code} ${c.challan_number} ${codesByChallan.get(c.id) ?? ""}`.toLowerCase(),
+    };
+    const a = byTemple.get(temple) ?? [];
+    a.push(card);
+    byTemple.set(temple, a);
+  }
+  const groups: BulkGroup[] = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([temple, list]) => ({ temple, rows: list }));
 
   // Owner-rejected bulk invoices. Their challans are ALREADY back in the pool
   // (reject returns them); this list just shows the reason + a dismiss. Best-effort.
@@ -61,23 +94,20 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
 
   return (
     <section className="page-card">
-      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div>
-          <h1>Bulk challans</h1>
-          <p className="muted">Challans parked here are billed together later. Use <strong>Create tax invoice</strong> to bill several of a temple&apos;s challans on one invoice.</p>
-        </div>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <h1>Bulk challans</h1>
         <Link href="/invoicing/bulk/new" style={BUTTON_STYLES.primary}>🧾 Create tax invoice</Link>
       </div>
 
       {sp.toast && (
-        <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
+        <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
           {sp.toast}
         </div>
       )}
 
       {rejected.length > 0 && (
-        <div style={{ marginTop: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fef2f2", padding: "12px 14px" }}>
-          <div style={{ fontWeight: 800, fontSize: 13, color: "#991b1b", marginBottom: 8 }}>⚠ Owner-rejected bulk invoices — their challans are back in the pool above; re-bill them, then dismiss</div>
+        <div style={{ marginTop: 14, marginBottom: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fef2f2", padding: "12px 14px" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#991b1b", marginBottom: 8 }}>⚠ Owner-rejected bulk invoices — their challans are back in the pool below; re-bill them, then dismiss</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {rejected.map((b) => (
               <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", border: "1px solid #fecaca", borderRadius: 8, background: "#fff" }}>
@@ -91,34 +121,9 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
         </div>
       )}
 
-      {temples.length === 0 ? (
-        <div className="banner" style={{ marginTop: 14 }}>No bulk challans. Send open challans here from the Challans page.</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 14 }}>
-          {temples.map(([temple, list]) => (
-            <div key={temple} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-              <div style={{ padding: "10px 14px", background: "var(--surface)", borderBottom: "1px solid var(--border)", fontWeight: 800, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <span>🏛 {temple}</span>
-                <span className="muted" style={{ fontWeight: 600, fontSize: 12.5 }}>{list.length} challan{list.length !== 1 ? "s" : ""}</span>
-              </div>
-              <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                {list.map((c) => (
-                  <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)" }}>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number}</span>
-                    <span className="muted" style={{ fontSize: 12 }}>{c.challan_date}</span>
-                    <span style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {c.source_dispatch_id && (
-                        <Link href={`/dispatch/${c.source_dispatch_id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...BUTTON_STYLES.secondary, fontSize: 12 }}>🖨 Download</Link>
-                      )}
-                      <BulkSendBack id={c.id} code={challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number} />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <div style={{ marginTop: 14 }}>
+        <BulkBoard groups={groups} total={pool.length} />
+      </div>
 
       <p style={{ marginTop: 16, fontSize: 12 }}>
         <Link href="/invoicing/challans" style={{ color: "var(--muted)", textDecoration: "none" }}>← Challans</Link>
