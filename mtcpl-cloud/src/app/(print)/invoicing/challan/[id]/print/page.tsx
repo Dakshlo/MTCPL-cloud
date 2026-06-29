@@ -357,6 +357,11 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           body { background: #fff; }
           .screen-bar { display: none !important; }
           .wrap { max-width: none; padding: 0 2mm; margin: 0; }
+          /* Mig 167 — print the "NOT VALID" watermark on EVERY page, tiled. An
+             ABSOLUTE layer only paints page 1 (and gets clipped to ~one line);
+             position:fixed makes the browser repeat the whole tiled pattern on
+             each printed page. */
+          .approval-wm { position: fixed; inset: 0; opacity: 0.2; background-size: 360px 250px; }
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.t thead { display: table-header-group; }
