@@ -47,8 +47,8 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
   for (const c of pool) { const k = c.temple ?? "—"; const a = byTemple.get(k) ?? []; a.push(c); byTemple.set(k, a); }
   const temples = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
-  // Owner-rejected bulk invoices waiting on the accountant to cancel (→ challans
-  // return to the pool) and re-bill. Best-effort.
+  // Owner-rejected bulk invoices. Their challans are ALREADY back in the pool
+  // (reject returns them); this list just shows the reason + a dismiss. Best-effort.
   type RejBulk = { id: string; temple: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; owner_reject_reason: string | null };
   let rejected: RejBulk[] = [];
   {
@@ -77,7 +77,7 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
 
       {rejected.length > 0 && (
         <div style={{ marginTop: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fef2f2", padding: "12px 14px" }}>
-          <div style={{ fontWeight: 800, fontSize: 13, color: "#991b1b", marginBottom: 8 }}>⚠ Owner-rejected bulk invoices — cancel to return the challans and re-bill</div>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#991b1b", marginBottom: 8 }}>⚠ Owner-rejected bulk invoices — their challans are back in the pool above; re-bill them, then dismiss</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {rejected.map((b) => (
               <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", border: "1px solid #fecaca", borderRadius: 8, background: "#fff" }}>

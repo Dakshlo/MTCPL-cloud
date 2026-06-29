@@ -1136,9 +1136,14 @@ export async function ownerRejectBulkAction(formData: FormData): Promise<void> {
   await admin.from("bulk_invoices")
     .update({ owner_rejected_at: new Date().toISOString(), owner_reject_reason: reason })
     .eq("id", id).is("owner_approved_at", null);
+  // Daksh: rejecting RETURNS the covered challans to the bulk pool right away so
+  // they can be re-billed. The rejected invoice stays visible (with the reason)
+  // on the Bulk page until dismissed.
+  await admin.from("bulk_invoice_challans").delete().eq("bulk_invoice_id", id);
   void logAudit(profile.id, "bulk_invoice_rejected", "bulk_invoice", id, { reason });
   revalidatePath("/invoicing/approval");
-  redirect(`/invoicing/approval?toast=${encodeURIComponent("Bulk invoice rejected")}`);
+  revalidatePath("/invoicing/bulk");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Bulk invoice rejected — challans returned to the pool")}`);
 }
 
 /** Cancel a bulk invoice and RETURN its challans to the bulk pool. */
