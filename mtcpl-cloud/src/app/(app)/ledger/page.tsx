@@ -31,6 +31,7 @@ type Row = {
   transfer_group: string | null;
   requires_approval: boolean;
   entry_date: string;
+  note: string | null;
 };
 
 export default async function LedgerPage({ searchParams }: { searchParams: Promise<{ toast?: string }> }) {
@@ -43,7 +44,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const accounts: Array<"home" | "office"> = scope === "both" ? ["home", "office"] : ["office"];
   const { data } = await admin
     .from("personal_ledger_entries")
-    .select("id, account, direction, amount, counterparty, status, is_transfer, transfer_group, requires_approval, entry_date")
+    .select("id, account, direction, amount, counterparty, status, is_transfer, transfer_group, requires_approval, entry_date, note")
     .in("account", accounts)
     .neq("status", "rejected")
     .order("created_at", { ascending: false });
@@ -57,7 +58,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const viewOf = (acc: "home" | "office"): EntryView[] =>
     rows
       .filter((r) => r.account === acc)
-      .map((r) => ({ id: r.id, date: r.entry_date, direction: r.direction, amount: Number(r.amount), counterparty: r.counterparty, status: r.status, isTransfer: r.is_transfer }));
+      .map((r) => ({ id: r.id, date: r.entry_date, direction: r.direction, amount: Number(r.amount), counterparty: r.counterparty, status: r.status, isTransfer: r.is_transfer, note: r.note }));
 
   // Pending approvals (owner/dev) — the manager-receiving-from-home halves.
   const pending = scope === "both"
@@ -126,10 +127,10 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
 
         <div style={{ display: "grid", gridTemplateColumns: scope === "both" ? "minmax(0, 1fr) minmax(0, 1fr)" : "1fr", gap: 16, maxWidth: scope === "both" ? "none" : 520, margin: scope === "both" ? "0" : "0 auto" }}>
           {scope === "both" && (
-            <LedgerCard account="home" title="Home" emoji="🏠" balance={balanceOf("home")} entries={viewOf("home")} canEdit options={["OFFICE", "OTHER"]} />
+            <LedgerCard account="home" title="Home" emoji="🏠" balance={balanceOf("home")} entries={viewOf("home")} canEdit canCancel={scope === "both"} options={["OFFICE", "OTHER"]} />
           )}
           {/* Owner/dev can act on Office too (Daksh) — not just the manager. */}
-          <LedgerCard account="office" title="Office" emoji="🏢" balance={balanceOf("office")} entries={viewOf("office")} canEdit options={["HOME", "OTHER"]} />
+          <LedgerCard account="office" title="Office" emoji="🏢" balance={balanceOf("office")} entries={viewOf("office")} canEdit canCancel={scope === "both"} options={["HOME", "OTHER"]} />
         </div>
       </div>
     </div>

@@ -7,11 +7,11 @@
  * peek modal.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { rupee } from "@/lib/challan-pricing";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
-import { addLedgerEntryAction } from "./actions";
+import { addLedgerEntryAction, deleteLedgerEntryAction } from "./actions";
 
 export type EntryView = {
   id: string;
@@ -21,6 +21,7 @@ export type EntryView = {
   counterparty: string;
   status: "confirmed" | "pending" | "rejected";
   isTransfer: boolean;
+  note: string | null;
 };
 
 // Branded spinning overlay while the form's action runs (useFormStatus must be a
@@ -31,7 +32,7 @@ function FormPending() {
 }
 
 export function LedgerCard({
-  account, title, emoji, balance, entries, canEdit, options,
+  account, title, emoji, balance, entries, canEdit, canCancel = false, options,
 }: {
   account: "home" | "office";
   title: string;
@@ -39,6 +40,7 @@ export function LedgerCard({
   balance: number;
   entries: EntryView[];
   canEdit: boolean;
+  canCancel?: boolean;
   options: string[];
 }) {
   const [direction, setDirection] = useState<"receive" | "pay">("receive");
@@ -143,64 +145,121 @@ export function LedgerCard({
       </button>
 
       {showDetails && (
-        <DetailsModal title={title} emoji={emoji} balance={balance} positive={positive} entries={entries} onClose={() => setShowDetails(false)} />
+        <DetailsModal title={title} emoji={emoji} balance={balance} positive={positive} entries={entries} canCancel={canCancel} onClose={() => setShowDetails(false)} />
       )}
     </div>
   );
 }
 
-function DetailsModal({ title, emoji, balance, positive, entries, onClose }: { title: string; emoji: string; balance: number; positive: boolean; entries: EntryView[]; onClose: () => void }) {
+function DetailsModal({ title, emoji, balance, positive, entries, canCancel, onClose }: { title: string; emoji: string; balance: number; positive: boolean; entries: EntryView[]; canCancel: boolean; onClose: () => void }) {
+  const [cancelEntry, setCancelEntry] = useState<EntryView | null>(null);
+  const [stage, setStage] = useState<1 | 2>(1);
+  const [pending, start] = useTransition();
+
+  function doDelete() {
+    if (!cancelEntry) return;
+    start(async () => {
+      const fd = new FormData();
+      fd.set("id", cancelEntry.id);
+      await deleteLedgerEntryAction(fd); // redirects to /ledger
+    });
+  }
+
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(540px, 100%)", maxHeight: "85vh", display: "flex", flexDirection: "column", background: "var(--surface, #fff)", borderRadius: 18, overflow: "hidden", boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>{emoji} {title} · Details</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: positive ? "#15803d" : "#b91c1c", fontFamily: "ui-monospace, monospace", marginTop: 2 }}>{rupee(balance)}</div>
-          </div>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "var(--muted)", lineHeight: 1 }}>✕</button>
-        </div>
-        <div style={{ padding: 16, overflowY: "auto" }}>
-          <style>{`@keyframes ledgerPending { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0.6); } 50% { box-shadow: 0 0 0 6px rgba(217,119,6,0); } }`}</style>
-          {entries.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No entries yet.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              {entries.map((e) => {
-                const recv = e.direction === "receive";
-                const pend = e.status === "pending";
-                return (
-                  <div key={e.id} style={{
-                    display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 10,
-                    border: pend ? "1.5px dashed #9ca3af" : `1px solid ${e.isTransfer ? "rgba(99,102,241,0.35)" : "var(--border)"}`,
-                    borderLeft: !pend && e.isTransfer ? "3px solid #6366f1" : undefined,
-                    background: pend ? "rgba(148,163,184,0.18)" : e.isTransfer ? "rgba(99,102,241,0.08)" : "var(--bg)",
-                    animation: pend ? "ledgerPending 1.3s ease-in-out infinite" : undefined,
-                  }}>
-                    <span style={{ fontSize: 17, color: pend ? "#9ca3af" : recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, display: "block", color: pend ? "#6b7280" : "var(--text)" }}>
-                        {recv ? "From" : "To"} {e.counterparty}
-                        {e.isTransfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: pend ? "#6b7280" : "#4f46e5", background: pend ? "rgba(107,114,128,0.15)" : "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6, verticalAlign: "middle" }}>⇄ Transfer</span>}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                        {new Date(`${e.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
-                        {pend && <span style={{ marginLeft: 6, color: "#b45309", fontWeight: 800 }}>· ⏳ Pending approval</span>}
-                      </span>
-                    </span>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: pend ? "#6b7280" : recv ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>
-                      {recv ? "+" : "−"}{rupee(e.amount)}
-                    </span>
-                  </div>
-                );
-              })}
+    <>
+      <FinanceLoadingOverlay show={pending} label="Cancelling…" />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: "min(540px, 100%)", maxHeight: "85vh", display: "flex", flexDirection: "column", background: "var(--surface, #fff)", borderRadius: 18, overflow: "hidden", boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>{emoji} {title} · Details</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: positive ? "#15803d" : "#b91c1c", fontFamily: "ui-monospace, monospace", marginTop: 2 }}>{rupee(balance)}</div>
             </div>
-          )}
+            <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "var(--muted)", lineHeight: 1 }}>✕</button>
+          </div>
+          <div style={{ padding: 16, overflowY: "auto" }}>
+            <style>{`@keyframes ledgerPending { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0.6); } 50% { box-shadow: 0 0 0 6px rgba(217,119,6,0); } }`}</style>
+            {entries.length === 0 ? (
+              <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No entries yet.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {entries.map((e) => {
+                  const recv = e.direction === "receive";
+                  const pend = e.status === "pending";
+                  return (
+                    <div key={e.id} style={{
+                      display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 10,
+                      border: pend ? "1.5px dashed #9ca3af" : `1px solid ${e.isTransfer ? "rgba(99,102,241,0.35)" : "var(--border)"}`,
+                      borderLeft: !pend && e.isTransfer ? "3px solid #6366f1" : undefined,
+                      background: pend ? "rgba(148,163,184,0.18)" : e.isTransfer ? "rgba(99,102,241,0.08)" : "var(--bg)",
+                      animation: pend ? "ledgerPending 1.3s ease-in-out infinite" : undefined,
+                    }}>
+                      <span style={{ fontSize: 17, color: pend ? "#9ca3af" : recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, display: "block", color: pend ? "#6b7280" : "var(--text)" }}>
+                          {recv ? "From" : "To"} {e.counterparty}
+                          {e.isTransfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: pend ? "#6b7280" : "#4f46e5", background: pend ? "rgba(107,114,128,0.15)" : "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6, verticalAlign: "middle" }}>⇄ Transfer</span>}
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--muted)", display: "block" }}>
+                          {new Date(`${e.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
+                          {pend && <span style={{ marginLeft: 6, color: "#b45309", fontWeight: 800 }}>· ⏳ Pending approval</span>}
+                        </span>
+                        {e.note && <span style={{ fontSize: 11.5, color: "var(--muted)", display: "block", marginTop: 2 }}>📝 {e.note}</span>}
+                      </span>
+                      <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: pend ? "#6b7280" : recv ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>
+                        {recv ? "+" : "−"}{rupee(e.amount)}
+                      </span>
+                      {canCancel && (
+                        <button type="button" onClick={() => { setCancelEntry(e); setStage(1); }} title="Cancel entry" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#b91c1c", fontSize: 15, fontWeight: 800, padding: "4px 4px", lineHeight: 1 }}>✕</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Two-step cancel confirm (owner only). */}
+      {cancelEntry && (
+        <div onClick={() => { if (!pending) setCancelEntry(null); }} style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "min(420px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
+            {stage === 1 ? (
+              <>
+                <div style={{ fontSize: 30, marginBottom: 6 }}>🗑️</div>
+                <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>Cancel this entry?</div>
+                <div style={{ fontSize: 13.5, color: "var(--text)", lineHeight: 1.5 }}>
+                  <strong>{cancelEntry.direction === "receive" ? "From" : "To"} {cancelEntry.counterparty}</strong> · <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(cancelEntry.amount)}</strong>
+                  {cancelEntry.isTransfer && <span style={{ display: "block", marginTop: 6, fontSize: 12, color: "#4f46e5", fontWeight: 700 }}>⇄ This is a transfer — its matching half in the other account will be cancelled too.</span>}
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+                  <button type="button" onClick={() => setCancelEntry(null)} style={ghostBtn}>Keep it</button>
+                  <button type="button" onClick={() => setStage(2)} style={{ ...dangerBtn, background: "#b45309" }}>Continue →</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 30, marginBottom: 6 }}>⚠️</div>
+                <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 8 }}>Are you absolutely sure?</div>
+                <div style={{ fontSize: 13.5, color: "var(--text)", lineHeight: 1.5 }}>
+                  This <strong>permanently</strong> removes the entry{cancelEntry.isTransfer ? " and its matching transfer half" : ""}. It can&apos;t be undone.
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+                  <button type="button" disabled={pending} onClick={() => setCancelEntry(null)} style={ghostBtn}>No, keep it</button>
+                  <button type="button" disabled={pending} onClick={doDelete} style={dangerBtn}>{pending ? "Cancelling…" : "✕ Yes, cancel it"}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
+
+const ghostBtn: React.CSSProperties = { fontSize: 13, fontWeight: 700, padding: "10px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" };
+const dangerBtn: React.CSSProperties = { fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "#b91c1c", cursor: "pointer" };
 
 // Indian digit grouping as you type: 100000 → 1,00,000 (lakh/crore). Submitted
 // with commas; the server strips them. Keeps up to 2 decimals.

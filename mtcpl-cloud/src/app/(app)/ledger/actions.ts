@@ -105,6 +105,25 @@ export async function approveLedgerTransferAction(formData: FormData): Promise<v
   redirect(`/ledger?toast=${encodeURIComponent("Approved")}`);
 }
 
+/** Cancel (permanently delete) an entry — owner/developer only. If it's part of
+ *  a transfer, BOTH halves go so the two balances stay consistent. */
+export async function deleteLedgerEntryAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (ledgerScope(profile) !== "both") redirect("/"); // owner / developer only
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/ledger");
+  const { data: row } = await admin.from("personal_ledger_entries").select("transfer_group").eq("id", id).maybeSingle();
+  const group = (row as { transfer_group: string | null } | null)?.transfer_group ?? null;
+  const { error } = group
+    ? await admin.from("personal_ledger_entries").delete().eq("transfer_group", group)
+    : await admin.from("personal_ledger_entries").delete().eq("id", id);
+  if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not cancel — try again")}`);
+  void logAudit(profile.id, "ledger_entry_delete", "personal_ledger", group ?? id, {});
+  revalidatePath("/ledger");
+  redirect(`/ledger?toast=${encodeURIComponent("Entry cancelled")}`);
+}
+
 export async function rejectLedgerTransferAction(formData: FormData): Promise<void> {
   const { profile } = await requireAuth();
   if (ledgerScope(profile) !== "both") redirect("/");
