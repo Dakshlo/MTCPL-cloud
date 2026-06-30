@@ -78,7 +78,9 @@ export default async function MaintenancePage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 32 }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 22 }}>🛠️ Maintenance — Machines</h1>
+        {/* data-secret-spot: hidden personal-ledger entry (mig 174) — hover here
+            + type the code. Plain heading; nothing visually marks it. */}
+        <h1 data-secret-spot="office" style={{ margin: 0, fontSize: 22 }}>🛠️ Maintenance — Machines</h1>
         <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 720 }}>
           Group your machines (CNC, Cranes, Vehicles…), nest sub-groups if needed (CNC → Mohit CNC). Mark each
           machine <strong>Working</strong> or <strong>Under maintenance</strong> from its page — the board shows

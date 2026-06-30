@@ -26,6 +26,8 @@ import { TvFullscreenGate } from "@/components/tv-fullscreen-gate";
 // Idle auto-logout for accounts-desk users (handle money) — 10 min of
 // inactivity signs them out, active use keeps the session alive.
 import { IdleLogout } from "@/components/idle-logout";
+import { LedgerSecretTrigger } from "@/components/ledger-secret-trigger";
+import { ledgerScope } from "@/lib/ledger-access";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
 import { canUseMessenger } from "@/lib/messenger-permissions";
@@ -538,6 +540,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           fires useSignOut(). Mounts as a portal off document.body
           so it sits above every page surface. */}
       <SignOutOverlayHost />
+      {/* Mig 174 — secret hover+key+password entry to the private personal
+          ledger. Mounted ONLY for users with ledger access so the keyboard
+          listener doesn't exist for anyone else. */}
+      {ledgerScope(profile) && <LedgerSecretTrigger />}
       {/* Idle auto-logout (mig 113 — per-user window). Developer is
           always exempt (0 = off). Everyone else uses their
           idle_logout_minutes if the developer set one in Settings, else

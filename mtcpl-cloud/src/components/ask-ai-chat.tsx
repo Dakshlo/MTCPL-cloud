@@ -901,6 +901,7 @@ export function AskAiChat({
           }}
         >
           <div
+            data-secret-spot="owner"
             style={{
               padding: "14px 14px 12px",
               borderBottom: `1px solid ${C.border}`,
