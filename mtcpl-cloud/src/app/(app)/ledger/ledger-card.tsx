@@ -161,26 +161,34 @@ function DetailsModal({ title, emoji, balance, positive, entries, onClose }: { t
           <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "var(--muted)", lineHeight: 1 }}>✕</button>
         </div>
         <div style={{ padding: 16, overflowY: "auto" }}>
+          <style>{`@keyframes ledgerPending { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0.6); } 50% { box-shadow: 0 0 0 6px rgba(217,119,6,0); } }`}</style>
           {entries.length === 0 ? (
             <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No entries yet.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {entries.map((e) => {
                 const recv = e.direction === "receive";
+                const pend = e.status === "pending";
                 return (
-                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", border: `1px solid ${e.isTransfer ? "rgba(99,102,241,0.35)" : "var(--border)"}`, borderLeft: e.isTransfer ? "3px solid #6366f1" : undefined, borderRadius: 10, background: e.isTransfer ? "rgba(99,102,241,0.08)" : "var(--bg)", opacity: e.status === "pending" ? 0.75 : 1 }}>
-                    <span style={{ fontSize: 17, color: recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
+                  <div key={e.id} style={{
+                    display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 10,
+                    border: pend ? "1.5px dashed #9ca3af" : `1px solid ${e.isTransfer ? "rgba(99,102,241,0.35)" : "var(--border)"}`,
+                    borderLeft: !pend && e.isTransfer ? "3px solid #6366f1" : undefined,
+                    background: pend ? "rgba(148,163,184,0.18)" : e.isTransfer ? "rgba(99,102,241,0.08)" : "var(--bg)",
+                    animation: pend ? "ledgerPending 1.3s ease-in-out infinite" : undefined,
+                  }}>
+                    <span style={{ fontSize: 17, color: pend ? "#9ca3af" : recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
                     <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, display: "block" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, display: "block", color: pend ? "#6b7280" : "var(--text)" }}>
                         {recv ? "From" : "To"} {e.counterparty}
-                        {e.isTransfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: "#4f46e5", background: "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6, verticalAlign: "middle" }}>⇄ Transfer</span>}
+                        {e.isTransfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: pend ? "#6b7280" : "#4f46e5", background: pend ? "rgba(107,114,128,0.15)" : "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6, verticalAlign: "middle" }}>⇄ Transfer</span>}
                       </span>
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>
                         {new Date(`${e.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
-                        {e.status === "pending" && <span style={{ marginLeft: 6, color: "#b45309", fontWeight: 800 }}>· ⏳ Pending approval</span>}
+                        {pend && <span style={{ marginLeft: 6, color: "#b45309", fontWeight: 800 }}>· ⏳ Pending approval</span>}
                       </span>
                     </span>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: recv ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: pend ? "#6b7280" : recv ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>
                       {recv ? "+" : "−"}{rupee(e.amount)}
                     </span>
                   </div>
