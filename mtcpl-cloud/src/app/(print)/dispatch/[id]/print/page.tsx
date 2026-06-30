@@ -203,49 +203,49 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
     const wt = rows.reduce((a, g) => a + g.weightTonnes, 0);
     return (
       <>
-        <div className="grp-title">{unit === "cft" ? "CFT · volume billed" : "SFT · area billed"}</div>
+        <div className="grp-title">{unit === "cft" ? "CFT" : "SFT"}</div>
         <table className="slab-table">
           <thead>
             <tr>
               <th style={{ width: 22 }}>#</th>
-              <th>Code(s)</th>
+              <th>Category 1</th>
+              <th>Category 2</th>
               <th>Label</th>
               <th>Description</th>
               <th>Additional</th>
-              <th>Cat 2</th>
-              <th>Cat 1</th>
-              <th className="r">L</th>
-              <th className="r">W</th>
-              <th className="r">H</th>
-              <th className="r">Qty</th>
+              <th>Code(s)</th>
+              <th className="r cwh">L</th>
+              <th className="r cwh">W</th>
+              <th className="r cwh">H</th>
               <th className="r">Wt (kg)</th>
-              <th className="r">{unit.toUpperCase()}</th>
+              <th className="r cqty">Qty</th>
+              <th className="r cqty">{unit.toUpperCase()}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((g, i) => (
               <tr key={g.key}>
                 <td className="muted">{i + 1}</td>
-                <td className="mono"><CodeCell codes={g.codes} /></td>
+                <td>{dash(g.component_section)}</td>
+                <td>{dash(g.component_element)}</td>
                 <td>{dash(g.label)}</td>
                 <td>{dash(g.description)}</td>
                 <td>{dash(g.additional_description)}</td>
-                <td>{dash(g.component_element)}</td>
-                <td>{dash(g.component_section)}</td>
-                <td className="r mono">{g.length_ft}</td>
-                <td className="r mono">{g.width_ft}</td>
-                <td className="r mono">{g.thickness_ft}</td>
-                <td className="r mono b">{g.qty}</td>
+                <td className="mono"><CodeCell codes={g.codes} /></td>
+                <td className="r mono cwh">{g.length_ft}</td>
+                <td className="r mono cwh">{g.width_ft}</td>
+                <td className="r mono cwh">{g.thickness_ft}</td>
                 <td className="r mono">{g.weightTonnes > 0 ? Math.round(g.weightTonnes * 1000).toLocaleString("en-IN") : "-"}</td>
-                <td className="r mono b">{fmt(g.measureQty)}</td>
+                <td className="r mono b cqty">{g.qty}</td>
+                <td className="r mono b cqty">{fmt(g.measureQty)}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
               <td colSpan={10} className="r">Total</td>
-              <td className="r mono b">{rows.reduce((a, g) => a + g.qty, 0)}</td>
               <td className="r mono">{wt > 0 ? Math.round(wt * 1000).toLocaleString("en-IN") : "-"}</td>
+              <td className="r mono b">{rows.reduce((a, g) => a + g.qty, 0)}</td>
               <td className="r mono b">{fmt(total)}</td>
             </tr>
           </tfoot>
@@ -308,6 +308,12 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .slab-table .mono { font-family: ui-monospace, monospace; }
         .slab-table .b { font-weight: 800; }
         .slab-table .muted { color: #999; }
+        /* Column colour groups (Daksh): L/W/H share a blue tint; Qty + CFT/SFT
+           share an amber tint. */
+        table.slab-table th.cwh { background: #d6e6f7; }
+        table.slab-table td.cwh { background: #eef5fd; }
+        table.slab-table th.cqty { background: #f6e5c4; }
+        table.slab-table td.cqty { background: #fdf6ea; }
 
         .totals { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; font-weight: 800; margin-top: 8px; padding: 6px 10px; border: 1px solid #d8d2c4; border-radius: 6px; background: #faf7f0; }
         .signoff { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-top: 22px; }
