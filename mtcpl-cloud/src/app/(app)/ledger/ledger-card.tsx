@@ -71,7 +71,7 @@ export function LedgerCard({
 
       {/* Receive / Pay form */}
       {canEdit && (
-        <form action={addLedgerEntryAction} style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 13, borderBottom: "1px solid var(--border)" }}>
+        <form action={addLedgerEntryAction} autoComplete="off" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 13, borderBottom: "1px solid var(--border)" }}>
           <input type="hidden" name="account" value={account} />
           <input type="hidden" name="direction" value={direction} />
 
@@ -91,7 +91,7 @@ export function LedgerCard({
 
           <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <span style={lbl}>Note <span style={{ fontWeight: 500 }}>(optional)</span></span>
-            <input name="note" placeholder="What's this for?" style={inp} />
+            <input name="note" autoComplete="off" placeholder="What's this for?" style={inp} />
           </label>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}><SubmitBtn /></div>
@@ -177,7 +177,7 @@ function AmountField() {
       <span style={lbl}>Amount</span>
       <span style={{ position: "relative", display: "block" }}>
         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: "var(--muted)", fontWeight: 700 }}>₹</span>
-        <input name="amount" inputMode="decimal" required value={v} onChange={(e) => setV(groupIndian(e.target.value))} placeholder="0" style={{ ...inp, paddingLeft: 28, fontSize: 16, fontWeight: 700, fontFamily: "ui-monospace, monospace" }} />
+        <input name="amount" inputMode="decimal" required autoComplete="off" data-1p-ignore data-lpignore="true" value={v} onChange={(e) => setV(groupIndian(e.target.value))} placeholder="0" style={{ ...inp, paddingLeft: 28, fontSize: 16, fontWeight: 700, fontFamily: "ui-monospace, monospace" }} />
       </span>
     </label>
   );
