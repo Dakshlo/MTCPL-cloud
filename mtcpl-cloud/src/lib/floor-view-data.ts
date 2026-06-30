@@ -49,11 +49,19 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
       .order("assigned_at", { ascending: true }),
     admin
       .from("carving_items")
-      .select("id, vendor_id, slab_requirement_id, completed_at, review_approved_at")
+      .select("id, vendor_id, slab_requirement_id, completed_at, review_approved_at, completed_on_cnc_machine_id")
       .not("completed_at", "is", null)
       .order("completed_at", { ascending: false })
       .limit(500),
   ]);
+
+  // Most-recent completion per machine → "free since" for an idle tile (Daksh).
+  // `completed` is ordered newest-first, so the first hit per machine is latest.
+  const lastDoneByMachine = new Map<string, string>();
+  for (const c of (completed ?? []) as Array<{ completed_on_cnc_machine_id?: string | null; completed_at: string | null }>) {
+    const mid = c.completed_on_cnc_machine_id;
+    if (mid && c.completed_at && !lastDoneByMachine.has(mid)) lastDoneByMachine.set(mid, c.completed_at);
+  }
 
   // Cut-offs.
   const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
@@ -155,6 +163,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
     const machineCards: FloorMachine[] = vMachines.map((m) => {
       const mt = m.machine_type ?? "single_head";
       const st = m.status ?? "idle";
+      const isIdle = !(st === "carving" || st === "maintenance" || st === "inactive");
       return {
         id: m.id,
         machine_code: m.machine_code,
@@ -168,6 +177,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
         maintenance_reason: m.maintenance_reason,
         cnc_axes: m.cnc_axes ?? null,
         maintenance_flagged_at: m.maintenance_flagged_at,
+        idle_since: isIdle ? (lastDoneByMachine.get(m.id) ?? null) : null,
         current_jobs: activeByMachine.get(m.id) ?? [],
       };
     });

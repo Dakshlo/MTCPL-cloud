@@ -83,6 +83,10 @@ export type FloorMachine = {
   cnc_axes: number | null;
   maintenance_reason: string | null;
   maintenance_flagged_at: string | null;
+  /** When this machine last finished a job → drives "free for X" on idle tiles
+   *  (Daksh). Derived from the latest completed carving_item on the machine;
+   *  null when unknown (e.g. never carved, or older than the recent window). */
+  idle_since: string | null;
   // A machine can run more than one slab at once (multi_head_2 carves two),
   // so this is every in-progress job on the machine, not just one.
   current_jobs: Array<{
@@ -1348,6 +1352,11 @@ function CompactMachineTile({ machine, now }: { machine: FloorMachine; now: numb
           })()}
         </div>
       )}
+      {machine.status === "idle" && machine.idle_since && (
+        <div style={{ fontSize: 10.5, color: "#0369a1", fontWeight: 700 }}>
+          💤 free for {fmtDuration((now - new Date(machine.idle_since).getTime()) / 60000)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1431,9 +1440,11 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         </span>
         <span
           style={{
-            fontSize: 15,
-            fontWeight: 800,
-            padding: "5px 14px",
+            // FREE reads BIG on the wall so an idle CNC is obvious from across
+            // the floor (Daksh); other statuses stay at the normal pill size.
+            fontSize: machine.status === "idle" ? 28 : 15,
+            fontWeight: 900,
+            padding: machine.status === "idle" ? "8px 26px" : "5px 14px",
             borderRadius: 999,
             color: "#fff",
             background: accent,
@@ -1556,6 +1567,20 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           <div style={{ fontSize: 17, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 400 }}>
             {prog ? "🗂 No programming file" : (machine.maintenance_reason ?? "—")}
           </div>
+        </div>
+      )}
+      {machine.status === "idle" && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", paddingTop: 4 }}>
+          {machine.idle_since ? (
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: sub2Color, letterSpacing: "0.14em", textTransform: "uppercase" }}>Idle for</div>
+              <div style={{ fontSize: 42, fontWeight: 900, color: accent, fontFamily: "ui-monospace, monospace", lineHeight: 1.05, marginTop: 2 }}>
+                {fmtDuration((now - new Date(machine.idle_since).getTime()) / 60000)}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 24, fontWeight: 800, color: sub2Color }}>Ready</div>
+          )}
         </div>
       )}
     </div>
