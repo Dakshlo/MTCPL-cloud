@@ -325,7 +325,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .from("carving_items")
       .select("*", { count: "exact", head: true })
       .not("completed_at", "is", null)
-      .is("review_approved_at", null);
+      .is("review_approved_at", null)
+      // Match the Carving Done Approval LIST exactly (carving/page.tsx): a "Still
+      // Pending Work" slab (mig 097) leaves the queue into its own tab, and a
+      // cancelled slab keeps its completed_at — neither shows in the list, so
+      // neither should inflate this badge. This was the "always one extra". (Daksh)
+      .is("pending_work_at", null)
+      .neq("status", "cancelled");
     if (reviewErr) return null;
     return count ?? 0;
   }
