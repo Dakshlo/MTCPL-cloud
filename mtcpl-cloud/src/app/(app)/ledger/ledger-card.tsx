@@ -23,16 +23,11 @@ export type EntryView = {
   isTransfer: boolean;
 };
 
-function SubmitBtn() {
+// Branded spinning overlay while the form's action runs (useFormStatus must be a
+// child of the <form>).
+function FormPending() {
   const { pending } = useFormStatus();
-  return (
-    <>
-      <FinanceLoadingOverlay show={pending} label="Saving entry…" />
-      <button type="submit" disabled={pending} style={{ fontSize: 14, fontWeight: 800, padding: "11px 20px", borderRadius: 11, border: "none", color: "#fff", background: "#0f172a", cursor: pending ? "default" : "pointer", opacity: pending ? 0.7 : 1, whiteSpace: "nowrap" }}>
-        {pending ? "Saving…" : "＋ Add entry"}
-      </button>
-    </>
-  );
+  return <FinanceLoadingOverlay show={pending} label="Saving entry…" />;
 }
 
 export function LedgerCard({
@@ -48,8 +43,21 @@ export function LedgerCard({
 }) {
   const [direction, setDirection] = useState<"receive" | "pay">("receive");
   const [showDetails, setShowDetails] = useState(false);
+  const [confirm, setConfirm] = useState<{ amount: number; counterparty: string; note: string } | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const positive = balance >= 0;
   const confirmedCount = entries.filter((e) => e.status === "confirmed").length;
+
+  // "Add entry" → read the current form values and open OUR confirm modal first.
+  function openConfirm() {
+    const f = formRef.current;
+    if (!f) return;
+    const fd = new FormData(f);
+    const amount = Math.round((Number(String(fd.get("amount") ?? "").replace(/,/g, "")) || 0) * 100) / 100;
+    if (!(amount > 0)) { f.reportValidity(); return; } // nudge the required amount field
+    setConfirm({ amount, counterparty: String(fd.get("counterparty") ?? "").trim(), note: String(fd.get("note") ?? "").trim() });
+  }
+  const isTransfer = !!confirm && confirm.counterparty.toUpperCase() === options[0];
 
   const segBtn = (active: boolean, color: string): React.CSSProperties => ({
     flex: 1, padding: "11px 12px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, cursor: "pointer",
@@ -71,7 +79,7 @@ export function LedgerCard({
 
       {/* Receive / Pay form */}
       {canEdit && (
-        <form action={addLedgerEntryAction} autoComplete="off" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 13, borderBottom: "1px solid var(--border)" }}>
+        <form ref={formRef} action={addLedgerEntryAction} autoComplete="off" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 13, borderBottom: "1px solid var(--border)" }}>
           <input type="hidden" name="account" value={account} />
           <input type="hidden" name="direction" value={direction} />
 
@@ -94,8 +102,38 @@ export function LedgerCard({
             <input name="note" autoComplete="off" placeholder="What's this for?" style={inp} />
           </label>
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}><SubmitBtn /></div>
+          <FormPending />
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="button" onClick={openConfirm} style={{ fontSize: 14, fontWeight: 800, padding: "11px 20px", borderRadius: 11, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer", whiteSpace: "nowrap" }}>
+              ＋ Add entry
+            </button>
+          </div>
         </form>
+      )}
+
+      {/* Our own confirmation (not window.confirm) before the entry is saved. */}
+      {confirm && (
+        <div onClick={() => setConfirm(null)} style={{ position: "fixed", inset: 0, zIndex: 3300, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "min(420px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
+            <div style={{ fontSize: 30, marginBottom: 6 }}>{direction === "receive" ? "↓" : "↑"}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Confirm this entry?</div>
+            <div style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.55, marginBottom: 4 }}>
+              <strong style={{ color: direction === "receive" ? "#15803d" : "#b45309" }}>{direction === "receive" ? "Receive" : "Pay / give"}</strong>{" "}
+              <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(confirm.amount)}</strong>{" "}
+              {direction === "receive" ? "from" : "to"} <strong>{confirm.counterparty || "—"}</strong> on <strong>{emoji} {title}</strong>.
+            </div>
+            {confirm.note && <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 4 }}>Note: {confirm.note}</div>}
+            {isTransfer && (
+              <div style={{ fontSize: 12, color: "#4f46e5", fontWeight: 700, background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, padding: "7px 10px", marginTop: 8 }}>
+                ⇄ This moves money between Home and Office.
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+              <button type="button" onClick={() => setConfirm(null)} style={{ fontSize: 13, fontWeight: 700, padding: "10px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => { setConfirm(null); formRef.current?.requestSubmit(); }} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer" }}>✓ Confirm &amp; add</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Details opener */}
