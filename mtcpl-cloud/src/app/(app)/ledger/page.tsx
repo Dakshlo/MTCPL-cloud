@@ -128,7 +128,8 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
           {scope === "both" && (
             <LedgerCard account="home" title="Home" emoji="🏠" balance={balanceOf("home")} entries={viewOf("home")} canEdit options={["OFFICE", "Other"]} />
           )}
-          <LedgerCard account="office" title="Office" emoji="🏢" balance={balanceOf("office")} entries={viewOf("office")} canEdit={scope === "office"} options={["HOME", "Other"]} />
+          {/* Owner/dev can act on Office too (Daksh) — not just the manager. */}
+          <LedgerCard account="office" title="Office" emoji="🏢" balance={balanceOf("office")} entries={viewOf("office")} canEdit options={["HOME", "Other"]} />
         </div>
       </div>
     </div>
