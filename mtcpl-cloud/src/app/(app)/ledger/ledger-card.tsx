@@ -130,7 +130,7 @@ function DetailsModal({ title, emoji, balance, positive, entries, onClose }: { t
               {entries.map((e) => {
                 const recv = e.direction === "receive";
                 return (
-                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg)", opacity: e.status === "pending" ? 0.75 : 1 }}>
+                  <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", border: `1px solid ${e.isTransfer ? "rgba(99,102,241,0.35)" : "var(--border)"}`, borderLeft: e.isTransfer ? "3px solid #6366f1" : undefined, borderRadius: 10, background: e.isTransfer ? "rgba(99,102,241,0.08)" : "var(--bg)", opacity: e.status === "pending" ? 0.75 : 1 }}>
                     <span style={{ fontSize: 17, color: recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
                     <span style={{ minWidth: 0, flex: 1 }}>
                       <span style={{ fontSize: 13, fontWeight: 700, display: "block" }}>
@@ -199,7 +199,7 @@ function WhomField({ label, options, placeholder, helper }: { label: string; opt
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
       <span style={lbl}>{label}</span>
       <div ref={ref} style={{ position: "relative" }}>
-        <input name="counterparty" value={value} onChange={(e) => setValue(e.target.value)} onFocus={() => setOpen(true)} placeholder={placeholder} autoComplete="off" style={{ ...inp, paddingRight: 36 }} />
+        <input name="counterparty" value={value} onChange={(e) => setValue(e.target.value.toUpperCase())} onFocus={() => setOpen(true)} placeholder={placeholder} autoComplete="off" style={{ ...inp, paddingRight: 36, textTransform: "uppercase" }} />
         <button type="button" tabIndex={-1} onClick={() => setOpen((o) => !o)} aria-label="Pick" style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 11, padding: 9 }}>▾</button>
         {open && (
           <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 14px 32px rgba(0,0,0,0.18)", padding: 5, display: "flex", flexDirection: "column", gap: 2 }}>
