@@ -38,7 +38,8 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
   if (account === "home" && scope !== "both") redirect("/ledger");
 
   const direction = txt(formData, "direction") === "pay" ? "pay" : "receive";
-  const amount = Math.round((Number(txt(formData, "amount")) || 0) * 100) / 100;
+  // The amount field arrives Indian-grouped (e.g. "1,00,000.50") — strip commas.
+  const amount = Math.round((Number(txt(formData, "amount").replace(/,/g, "")) || 0) * 100) / 100;
   // Lower + upper bound (numeric(14,2) max) + finiteness — a bad value must never
   // slip through to a failed insert that we'd otherwise report as success.
   if (!Number.isFinite(amount) || amount <= 0 || amount > 999999999999.99) {

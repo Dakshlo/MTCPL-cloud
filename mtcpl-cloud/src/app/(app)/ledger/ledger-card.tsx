@@ -7,7 +7,7 @@
  * peek modal.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import { rupee } from "@/lib/challan-pricing";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
@@ -48,7 +48,6 @@ export function LedgerCard({
 }) {
   const [direction, setDirection] = useState<"receive" | "pay">("receive");
   const [showDetails, setShowDetails] = useState(false);
-  const listId = `cp-${account}`;
   const positive = balance >= 0;
   const confirmedCount = entries.filter((e) => e.status === "confirmed").length;
 
@@ -81,22 +80,14 @@ export function LedgerCard({
             <button type="button" onClick={() => setDirection("pay")} style={segBtn(direction === "pay", "#b45309")}>↑ Pay / Give</button>
           </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={lbl}>Amount</span>
-            <span style={{ position: "relative", display: "block" }}>
-              <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: "var(--muted)", fontWeight: 700 }}>₹</span>
-              <input name="amount" inputMode="decimal" required placeholder="0" style={{ ...inp, paddingLeft: 28, fontSize: 16, fontWeight: 700, fontFamily: "ui-monospace, monospace" }} />
-            </span>
-          </label>
+          <AmountField />
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={lbl}>{direction === "receive" ? "Received from" : "Paid / given to"}</span>
-            <input name="counterparty" list={listId} placeholder="Type a name, or pick…" style={inp} />
-            <datalist id={listId}>{options.map((o) => <option key={o} value={o} />)}</datalist>
-            <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
-              Pick <strong>{options[0]}</strong> to move money between the two accounts; anything else is just a note.
-            </span>
-          </label>
+          <WhomField
+            label={direction === "receive" ? "Received from" : "Paid / given to"}
+            options={options}
+            placeholder="Type a name, or pick…"
+            helper={<>Pick <strong>{options[0]}</strong> to move money between the two accounts; anything else is just a note.</>}
+          />
 
           <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <span style={lbl}>Note <span style={{ fontWeight: 500 }}>(optional)</span></span>
@@ -161,6 +152,66 @@ function DetailsModal({ title, emoji, balance, positive, entries, onClose }: { t
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Indian digit grouping as you type: 100000 → 1,00,000 (lakh/crore). Submitted
+// with commas; the server strips them. Keeps up to 2 decimals.
+function groupIndian(s: string): string {
+  const cleaned = s.replace(/,/g, "");
+  if (cleaned === "") return "";
+  const neg = cleaned.startsWith("-");
+  const body = neg ? cleaned.slice(1) : cleaned;
+  const dot = body.indexOf(".");
+  const intDigits = (dot >= 0 ? body.slice(0, dot) : body).replace(/\D/g, "");
+  const decDigits = dot >= 0 ? body.slice(dot + 1).replace(/\D/g, "").slice(0, 2) : "";
+  const grouped = intDigits ? Number(intDigits).toLocaleString("en-IN") : (dot >= 0 ? "0" : "");
+  return (neg ? "-" : "") + grouped + (dot >= 0 ? "." + decDigits : "");
+}
+
+function AmountField() {
+  const [v, setV] = useState("");
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <span style={lbl}>Amount</span>
+      <span style={{ position: "relative", display: "block" }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: "var(--muted)", fontWeight: 700 }}>₹</span>
+        <input name="amount" inputMode="decimal" required value={v} onChange={(e) => setV(groupIndian(e.target.value))} placeholder="0" style={{ ...inp, paddingLeft: 28, fontSize: 16, fontWeight: 700, fontFamily: "ui-monospace, monospace" }} />
+      </span>
+    </label>
+  );
+}
+
+// Custom combobox for "to whom" — our own styled dropdown (NOT the browser
+// datalist), still free-typeable.
+function WhomField({ label, options, placeholder, helper }: { label: string; options: string[]; placeholder: string; helper?: ReactNode }) {
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <span style={lbl}>{label}</span>
+      <div ref={ref} style={{ position: "relative" }}>
+        <input name="counterparty" value={value} onChange={(e) => setValue(e.target.value)} onFocus={() => setOpen(true)} placeholder={placeholder} autoComplete="off" style={{ ...inp, paddingRight: 36 }} />
+        <button type="button" tabIndex={-1} onClick={() => setOpen((o) => !o)} aria-label="Pick" style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 11, padding: 9 }}>▾</button>
+        {open && (
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 14px 32px rgba(0,0,0,0.18)", padding: 5, display: "flex", flexDirection: "column", gap: 2 }}>
+            {options.map((o) => (
+              <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }} style={{ textAlign: "left", padding: "9px 11px", borderRadius: 7, border: "none", background: "transparent", cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: "var(--text)" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+                {o}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {helper && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{helper}</span>}
     </div>
   );
 }
