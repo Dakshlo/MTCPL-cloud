@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const SPOT_CODE: Record<string, string> = { owner: "home", office: "office" };
+const SPOT_CODE: Record<string, string> = { owner: "home", office: "aadesh" };
 const PASSWORD = "125500";
 
 export function LedgerSecretTrigger() {

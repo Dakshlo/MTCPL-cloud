@@ -60,9 +60,11 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
       .filter((r) => r.account === acc)
       .map((r) => ({ id: r.id, date: r.entry_date, direction: r.direction, amount: Number(r.amount), counterparty: r.counterparty, status: r.status, isTransfer: r.is_transfer, note: r.note }));
 
-  // Pending approvals (owner/dev) — the manager-receiving-from-home halves.
+  // Pending approvals (owner/dev) — EVERY manager entry now waits here (receive
+  // or pay, transfer or local). Each row is the office-account side of the
+  // action; approving a transfer's group confirms both halves.
   const pending = scope === "both"
-    ? rows.filter((r) => r.status === "pending" && r.account === "office" && r.direction === "receive")
+    ? rows.filter((r) => r.status === "pending" && r.account === "office")
     : [];
   const homeBalance = balanceOf("home");
 
@@ -93,28 +95,36 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
 
         {pending.length > 0 && (
           <div style={{ marginBottom: 16, border: "1px solid #fcd34d", borderRadius: 14, background: "#fffbeb", padding: "13px 15px" }}>
-            <div style={{ fontWeight: 800, fontSize: 13, color: "#92400e", marginBottom: 4 }}>⏳ Office wants to receive from Home — needs your approval</div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#92400e", marginBottom: 4 }}>⏳ Office (manager) entries waiting for your approval</div>
             <div style={{ fontSize: 11.5, color: "#92400e", marginBottom: 10 }}>Current Home balance: <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(homeBalance)}</strong></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {pending.map((p) => {
                 const amt = Number(p.amount);
-                const after = homeBalance - amt;
+                const recv = p.direction === "receive";
+                const homeDelta = p.is_transfer ? (recv ? -amt : amt) : 0; // office receive ⇒ home pays
+                const after = homeBalance + homeDelta;
+                const idField = p.transfer_group ? "group" : "id";
+                const idValue = p.transfer_group ?? p.id;
                 return (
                   <div key={p.transfer_group ?? p.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "11px 13px", border: "1px solid #fde68a", borderRadius: 10, background: "#fff" }}>
-                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15 }}>{rupee(amt)}</span>
-                    <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                      Home → Office · {new Date(`${p.entry_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15, color: recv ? "#15803d" : "#b45309" }}>{recv ? "+" : "−"}{rupee(amt)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                      {recv ? "Received from" : "Paid to"} {p.counterparty}
+                      {p.is_transfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: "#4f46e5", background: "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6 }}>⇄ Transfer</span>}
                     </span>
-                    <span style={{ fontSize: 11.5, fontWeight: 700, color: after < 0 ? "#b91c1c" : "var(--muted)" }}>
-                      Home after: {rupee(after)}{after < 0 ? " ⚠ goes negative" : ""}
-                    </span>
+                    <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{new Date(`${p.entry_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</span>
+                    {p.is_transfer && (
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: after < 0 ? "#b91c1c" : "var(--muted)" }}>
+                        Home after: {rupee(after)}{after < 0 ? " ⚠ goes negative" : ""}
+                      </span>
+                    )}
                     <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                       <form action={approveLedgerTransferAction}>
-                        <input type="hidden" name="group" value={p.transfer_group ?? ""} />
+                        <input type="hidden" name={idField} value={idValue} />
                         <button type="submit" style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, border: "none", color: "#fff", background: "#15803d", cursor: "pointer" }}>✓ Approve</button>
                       </form>
                       <form action={rejectLedgerTransferAction}>
-                        <input type="hidden" name="group" value={p.transfer_group ?? ""} />
+                        <input type="hidden" name={idField} value={idValue} />
                         <button type="submit" style={{ fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, border: "1.5px solid rgba(220,38,38,0.4)", color: "#b91c1c", background: "var(--bg)", cursor: "pointer" }}>✕ Reject</button>
                       </form>
                     </span>
