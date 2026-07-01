@@ -569,6 +569,15 @@ export async function verifyDispatchAction(formData: FormData) {
   const weightMode = String(formData.get("weight_mode") || "slab") === "truck" ? "truck" : "slab";
   const truckTonnes = Math.max(0, Math.round((Number(formData.get("truck_weight")) || 0) * 1000) / 1000);
 
+  // Vehicle + driver now captured HERE at verify (moved off Make Dispatch, Daksh).
+  // Vehicle + driver name mandatory; phone optional. Load no editable (per-temple
+  // continuing series — the next dispatch derives max+1).
+  const vehicleNo = String(formData.get("vehicle_no") || "").trim();
+  const driverName = String(formData.get("driver_name") || "").trim();
+  const driverPhone = String(formData.get("driver_phone") || "").trim() || null;
+  if (!vehicleNo) fail(`/dispatch/${dispatchId}/check`, "Vehicle no. is required to verify.");
+  if (!driverName) fail(`/dispatch/${dispatchId}/check`, "Driver name is required to verify.");
+
   const { data: dispatch } = await admin
     .from("dispatches")
     .select("id, temple, challan_number, approved_at, delivered_at")
@@ -654,7 +663,10 @@ export async function verifyDispatchAction(formData: FormData) {
 
   const { error } = await admin
     .from("dispatches")
-    .update({ approved_at: new Date().toISOString(), approved_by: profile.id, returned_at: null, return_reason: null })
+    .update({
+      approved_at: new Date().toISOString(), approved_by: profile.id, returned_at: null, return_reason: null,
+      vehicle_no: vehicleNo, driver_name: driverName, driver_phone: driverPhone,
+    })
     .eq("id", dispatchId);
   if (error) fail(`/dispatch/${dispatchId}/check`, `Failed to verify: ${error.message}`);
 

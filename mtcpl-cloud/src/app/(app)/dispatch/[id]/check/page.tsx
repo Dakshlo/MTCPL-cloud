@@ -286,7 +286,7 @@ export default async function DispatchCheckPage({
         resolvedLabel={handlingMan?.name ? `${handlingMan.name}${handlingMan.phone ? ` · ${handlingMan.phone}` : ""}` : "—"}
       />
 
-      <CheckGrid dispatchId={id} groups={groups} challanLabel={unifiedLabel} available={available} temple={dispatch.temple} vendorSheds={vendorSheds} canUseStorage={canUseStorage} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} />
+      <CheckGrid dispatchId={id} groups={groups} challanLabel={unifiedLabel} available={available} temple={dispatch.temple} vendorSheds={vendorSheds} canUseStorage={canUseStorage} initialWeightMode={initialWeightMode} initialLoadTonnes={initialLoadTonnes} initialVehicleNo={dispatch.vehicle_no ?? ""} initialDriverName={dispatch.driver_name ?? ""} initialDriverPhone={dispatch.driver_phone ?? ""} />
     </div>
   );
 }

@@ -38,6 +38,10 @@ function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+const fieldWrap: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
+const fieldLbl: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" };
+const fieldInp: React.CSSProperties = { padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14 };
+
 export function CheckGrid({
   dispatchId,
   groups,
@@ -48,6 +52,9 @@ export function CheckGrid({
   canUseStorage = false,
   initialWeightMode = "slab",
   initialLoadTonnes = 0,
+  initialVehicleNo = "",
+  initialDriverName = "",
+  initialDriverPhone = "",
 }: {
   dispatchId: string;
   groups: DispatchGroupRow[];
@@ -61,6 +68,11 @@ export function CheckGrid({
   /** Mig 163 — saved weight mode + whole-truck weight (for undo→re-check). */
   initialWeightMode?: "slab" | "truck";
   initialLoadTonnes?: number;
+  /** Truck details, captured here at verify (Daksh). Load no + challan no are
+   *  edited by their own editors above the grid. */
+  initialVehicleNo?: string;
+  initialDriverName?: string;
+  initialDriverPhone?: string;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -68,6 +80,11 @@ export function CheckGrid({
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
   // Station filter (Mig 160) — main only by default; "All dispatch" includes sheds.
   const [allDispatch, setAllDispatch] = useState(false);
+  // Truck + load — captured here at verify (Daksh). Vehicle + driver mandatory.
+  const [vehicleNo, setVehicleNo] = useState(initialVehicleNo);
+  const [driverName, setDriverName] = useState(initialDriverName);
+  const [driverPhone, setDriverPhone] = useState(initialDriverPhone);
+  const truckOk = vehicleNo.trim().length > 0 && driverName.trim().length > 0;
   const shedName = useMemo(() => {
     const m: Record<string, string> = {};
     for (const v of vendorSheds) m[v.id] = v.name;
@@ -111,7 +128,7 @@ export function CheckGrid({
   const filteredAvail = mergedAvail.filter((s) => {
     const q = addQuery.trim().toLowerCase();
     if (!q) return true;
-    return s.id.toLowerCase().includes(q) || (s.label ?? "").toLowerCase().includes(q);
+    return s.id.toLowerCase().includes(q) || (s.label ?? "").toLowerCase().includes(q) || (s.dimensions ?? "").toLowerCase().includes(q);
   });
   // Only currently-visible picks are submitted — a slab picked from a storage
   // source/station that's since been toggled off is NOT silently added (matches
@@ -457,7 +474,7 @@ export function CheckGrid({
               <input
                 value={addQuery}
                 onChange={(e) => setAddQuery(e.target.value)}
-                placeholder="🔍 Search code / label…"
+                placeholder="🔍 Search code / label / size…"
                 style={{ width: "100%", maxWidth: 340, padding: "8px 10px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)", marginBottom: 10 }}
               />
               {filteredAvail.length === 0 ? (
@@ -505,12 +522,26 @@ export function CheckGrid({
         )}
       </div>
 
+      {/* Truck & load — vehicle + driver captured HERE at verify (moved off Make
+          Dispatch, Daksh). Vehicle + driver mandatory; load no editable + auto-
+          suggested as the per-temple next. */}
+      <div style={{ marginTop: 14, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface, #fff)", padding: "14px 16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>🚚 Truck &amp; load <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>· prints on the challan</span></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+          <label style={fieldWrap}><span style={fieldLbl}>Vehicle no. <span style={{ color: "#dc2626" }}>*</span></span><input value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value.toUpperCase())} placeholder="RJ24 GA 1234" style={{ ...fieldInp, fontFamily: "ui-monospace, monospace" }} /></label>
+          <label style={fieldWrap}><span style={fieldLbl}>Driver name <span style={{ color: "#dc2626" }}>*</span></span><input value={driverName} onChange={(e) => setDriverName(e.target.value)} style={fieldInp} /></label>
+          <label style={fieldWrap}><span style={fieldLbl}>Driver phone <span style={{ fontWeight: 500 }}>(optional)</span></span><input value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} inputMode="tel" style={fieldInp} /></label>
+        </div>
+        {!truckOk && <div style={{ fontSize: 11.5, color: "#b45309", fontWeight: 700, marginTop: 8 }}>⚠ Vehicle no. and driver name are required to verify.</div>}
+      </div>
+
       {/* Verify / Cancel */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
         <form
           action={verifyDispatchAction}
           style={{ display: "inline" }}
           onSubmit={(e) => {
+            if (!truckOk) { e.preventDefault(); alert("Vehicle no. and driver name are required to verify."); return; }
             if (!weightOk) {
               e.preventDefault();
               alert(weightMode === "truck"
@@ -526,7 +557,10 @@ export function CheckGrid({
           <input type="hidden" name="descs" value={descsJson} />
           <input type="hidden" name="weight_mode" value={weightMode} />
           <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
-          <button type="submit" disabled={!weightOk} title={weightOk ? undefined : "Enter weight first — per slab or whole truck"} style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: weightOk ? "#15803d" : "var(--border)", border: "none", borderRadius: 11, cursor: weightOk ? "pointer" : "not-allowed" }}>
+          <input type="hidden" name="vehicle_no" value={vehicleNo} />
+          <input type="hidden" name="driver_name" value={driverName} />
+          <input type="hidden" name="driver_phone" value={driverPhone} />
+          <button type="submit" disabled={!weightOk || !truckOk} title={weightOk && truckOk ? undefined : "Enter vehicle, driver & weight first"} style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: weightOk && truckOk ? "#15803d" : "var(--border)", border: "none", borderRadius: 11, cursor: weightOk && truckOk ? "pointer" : "not-allowed" }}>
             ✅ Verify — create challan &amp; send to invoicing
           </button>
         </form>
