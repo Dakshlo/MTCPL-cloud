@@ -94,7 +94,7 @@ export function LedgerSecretTrigger() {
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          if (pwd === PASSWORD) { setAsk(false); router.push("/ledger"); }
+          if (pwd === PASSWORD) { setAsk(false); router.push("/x3k9q27z"); }
           else setErr(true);
         }}
         style={{ width: "min(320px, 100%)", background: "var(--surface, #fff)", borderRadius: 14, padding: 20, boxShadow: "0 24px 60px rgba(0,0,0,0.35)" }}

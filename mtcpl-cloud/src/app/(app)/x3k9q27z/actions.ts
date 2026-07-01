@@ -34,8 +34,8 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
   const account = txt(formData, "account") === "home" ? "home" : "office";
   // Scope gate: a manager (office scope) may only touch the Office account; the
   // Home account is owner/developer (both) only.
-  if (scope === "office" && account !== "office") redirect("/ledger");
-  if (account === "home" && scope !== "both") redirect("/ledger");
+  if (scope === "office" && account !== "office") redirect("/x3k9q27z");
+  if (account === "home" && scope !== "both") redirect("/x3k9q27z");
 
   const direction = txt(formData, "direction") === "pay" ? "pay" : "receive";
   // The amount field arrives Indian-grouped (e.g. "1,00,000.50") — strip commas.
@@ -43,7 +43,7 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
   // Lower + upper bound (numeric(14,2) max) + finiteness — a bad value must never
   // slip through to a failed insert that we'd otherwise report as success.
   if (!Number.isFinite(amount) || amount <= 0 || amount > 999999999999.99) {
-    redirect(`/ledger?toast=${encodeURIComponent("Enter a valid amount")}`);
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Enter a valid amount")}`);
   }
   const counterparty = txt(formData, "counterparty").trim();
   const note = txt(formData, "note").trim() || null;
@@ -63,10 +63,10 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
       counterparty: counterparty || "—",
       note, status, is_transfer: false, requires_approval: needsApproval, created_by: profile.id,
     });
-    if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not save — try again")}`);
+    if (error) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not save — try again")}`);
     void logAudit(profile.id, "ledger_entry_add", "personal_ledger", account, { direction, amount, needsApproval });
-    revalidatePath("/ledger");
-    redirect(`/ledger?toast=${encodeURIComponent(needsApproval ? "Sent for owner approval" : "Entry added")}`);
+    revalidatePath("/x3k9q27z");
+    redirect(`/x3k9q27z?toast=${encodeURIComponent(needsApproval ? "Sent for owner approval" : "Entry added")}`);
   }
 
   // --- Home <-> Office transfer (a linked pair). ---
@@ -83,10 +83,10 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
     { account, direction, amount, counterparty: thisCp, note, status, is_transfer: true, transfer_group: group, requires_approval: needsApproval, created_by: profile.id },
     { account: other, direction: peerDirection, amount, counterparty: peerCp, note, status, is_transfer: true, transfer_group: group, requires_approval: needsApproval, created_by: profile.id },
   ]);
-  if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not save — try again")}`);
+  if (error) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not save — try again")}`);
   void logAudit(profile.id, "ledger_transfer_add", "personal_ledger", group, { from: account, direction, amount, needsApproval });
-  revalidatePath("/ledger");
-  redirect(`/ledger?toast=${encodeURIComponent(needsApproval ? "Sent for owner approval" : "Transfer recorded")}`);
+  revalidatePath("/x3k9q27z");
+  redirect(`/x3k9q27z?toast=${encodeURIComponent(needsApproval ? "Sent for owner approval" : "Transfer recorded")}`);
 }
 
 export async function approveLedgerTransferAction(formData: FormData): Promise<void> {
@@ -95,16 +95,16 @@ export async function approveLedgerTransferAction(formData: FormData): Promise<v
   const admin = createAdminSupabaseClient();
   const group = txt(formData, "group");
   const id = txt(formData, "id");
-  if (!group && !id) redirect("/ledger");
+  if (!group && !id) redirect("/x3k9q27z");
   const base = admin
     .from("personal_ledger_entries")
     .update({ status: "confirmed", approved_by: profile.id, approved_at: new Date().toISOString() })
     .eq("status", "pending");
   const { error } = group ? await base.eq("transfer_group", group) : await base.eq("id", id);
-  if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not approve — try again")}`);
+  if (error) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not approve — try again")}`);
   void logAudit(profile.id, "ledger_transfer_approve", "personal_ledger", group, {});
-  revalidatePath("/ledger");
-  redirect(`/ledger?toast=${encodeURIComponent("Approved")}`);
+  revalidatePath("/x3k9q27z");
+  redirect(`/x3k9q27z?toast=${encodeURIComponent("Approved")}`);
 }
 
 /** Cancel (permanently delete) an entry — owner/developer only. If it's part of
@@ -114,16 +114,16 @@ export async function deleteLedgerEntryAction(formData: FormData): Promise<void>
   if (ledgerScope(profile) !== "both") redirect("/"); // owner / developer only
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "id");
-  if (!id) redirect("/ledger");
+  if (!id) redirect("/x3k9q27z");
   const { data: row } = await admin.from("personal_ledger_entries").select("transfer_group").eq("id", id).maybeSingle();
   const group = (row as { transfer_group: string | null } | null)?.transfer_group ?? null;
   const { error } = group
     ? await admin.from("personal_ledger_entries").delete().eq("transfer_group", group)
     : await admin.from("personal_ledger_entries").delete().eq("id", id);
-  if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not cancel — try again")}`);
+  if (error) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not cancel — try again")}`);
   void logAudit(profile.id, "ledger_entry_delete", "personal_ledger", group ?? id, {});
-  revalidatePath("/ledger");
-  redirect(`/ledger?toast=${encodeURIComponent("Entry cancelled")}`);
+  revalidatePath("/x3k9q27z");
+  redirect(`/x3k9q27z?toast=${encodeURIComponent("Entry cancelled")}`);
 }
 
 export async function rejectLedgerTransferAction(formData: FormData): Promise<void> {
@@ -132,14 +132,14 @@ export async function rejectLedgerTransferAction(formData: FormData): Promise<vo
   const admin = createAdminSupabaseClient();
   const group = txt(formData, "group");
   const id = txt(formData, "id");
-  if (!group && !id) redirect("/ledger");
+  if (!group && !id) redirect("/x3k9q27z");
   const base = admin
     .from("personal_ledger_entries")
     .update({ status: "rejected", rejected_by: profile.id, rejected_at: new Date().toISOString() })
     .eq("status", "pending");
   const { error } = group ? await base.eq("transfer_group", group) : await base.eq("id", id);
-  if (error) redirect(`/ledger?toast=${encodeURIComponent("Could not reject — try again")}`);
+  if (error) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not reject — try again")}`);
   void logAudit(profile.id, "ledger_transfer_reject", "personal_ledger", group, {});
-  revalidatePath("/ledger");
-  redirect(`/ledger?toast=${encodeURIComponent("Rejected")}`);
+  revalidatePath("/x3k9q27z");
+  redirect(`/x3k9q27z?toast=${encodeURIComponent("Rejected")}`);
 }
