@@ -6,8 +6,8 @@
  * DESKTOP: hover the dot and type the secret code ("aadesh").
  *
  * TABLET: only the royalty-PROGRAM dot is reachable, and via a TAP PATTERN —
- * tap twice just ABOVE the dot, then twice just BELOW it (passive listener, so
- * it never blocks other taps). The net-reveal dots pass touchPattern={false},
+ * tap twice just LEFT of the dot, then twice just RIGHT of it (passive listener,
+ * so it never blocks other taps). The net-reveal dots pass touchPattern={false},
  * so they have NO touch access at all (not needed on the floor tablets).
  *
  * A plain click never opens anything.
@@ -31,7 +31,7 @@ export function SecretDot({
   const buf = useRef("");
   const lastTs = useRef(0);
   const dotRef = useRef<HTMLSpanElement>(null);
-  const seq = useRef<Array<"above" | "below">>([]);
+  const seq = useRef<Array<"left" | "right">>([]);
   const seqTs = useRef(0);
   const cb = useRef(onUnlock);
   cb.current = onUnlock;
@@ -53,8 +53,8 @@ export function SecretDot({
     return () => document.removeEventListener("keydown", onKey);
   }, [code]);
 
-  // Tablet — tap pattern: 2 taps above the dot, then 2 below. Passive listener
-  // (never preventDefault), so it just observes taps near the dot.
+  // Tablet — tap pattern: 2 taps LEFT of the dot, then 2 to the RIGHT. Passive
+  // listener (never preventDefault), so it just observes taps near the dot.
   useEffect(() => {
     if (!touchPattern) return;
     function onTouch(e: TouchEvent) {
@@ -64,17 +64,17 @@ export function SecretDot({
       const r = dot.getBoundingClientRect();
       const dx = t.clientX - (r.left + r.width / 2);
       const dy = t.clientY - (r.top + r.height / 2);
-      if (Math.abs(dx) > 80) return; // not roughly over the dot
-      let zone: "above" | "below" | null = null;
-      if (dy <= -8 && dy >= -90) zone = "above";
-      else if (dy >= 8 && dy <= 90) zone = "below";
+      if (Math.abs(dy) > 80) return; // not roughly level with the dot
+      let zone: "left" | "right" | null = null;
+      if (dx <= -8 && dx >= -90) zone = "left";
+      else if (dx >= 8 && dx <= 90) zone = "right";
       if (!zone) return;
       const now = Date.now();
       if (now - seqTs.current > 3000) seq.current = [];
       seqTs.current = now;
       seq.current.push(zone);
       if (seq.current.length > 4) seq.current = seq.current.slice(-4);
-      if (seq.current.join(",") === "above,above,below,below") {
+      if (seq.current.join(",") === "left,left,right,right") {
         seq.current = [];
         cb.current();
       }
