@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { SecretDot } from "./secret-dot";
 
 const REVEAL_SECONDS = 10;
 
@@ -82,35 +83,7 @@ export function RoyaltyNetPeek({
     );
   }
 
-  return (
-    <button
-      type="button"
-      onClick={() => setRevealed(true)}
-      aria-label="Reveal royalty net balance for 10 seconds"
-      title="Royalty net — click to reveal for 10s"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 12,
-        height: 12,
-        border: "none",
-        background: "transparent",
-        borderRadius: "50%",
-        cursor: "pointer",
-        padding: 0,
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          display: "inline-block",
-          width: 3,
-          height: 3,
-          borderRadius: "50%",
-          background: "#000",
-        }}
-      />
-    </button>
-  );
+  // Reveal only on hover + the secret code "aadesh" (or long-press on touch) —
+  // no longer a plain click (Daksh).
+  return <SecretDot onUnlock={() => setRevealed(true)} />;
 }

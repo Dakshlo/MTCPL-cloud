@@ -20,6 +20,7 @@
 // of the client flag (defence in depth).
 
 import { useEffect, useState, useTransition } from "react";
+import { SecretDot } from "./secret-dot";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
@@ -386,42 +387,9 @@ export function PrivateNotesModal({
   // stopPropagation on click + mousedown so the parent <summary>
   // element on the vendor profile page doesn't toggle <details>
   // when the user clicks the dot. Same for preventDefault.
-  const triggerButton = (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        open();
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      title="Private notes & royalty"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 12,
-        height: 12,
-        border: "none",
-        background: "transparent",
-        borderRadius: "50%",
-        cursor: "pointer",
-        padding: 0,
-      }}
-      aria-label="Private notes & royalty"
-    >
-      <span
-        aria-hidden
-        style={{
-          display: "inline-block",
-          width: 3,
-          height: 3,
-          borderRadius: "50%",
-          background: "#000",
-        }}
-      />
-    </button>
-  );
+  // Opens only on hover + the secret code "aadesh" (or long-press on touch) —
+  // no longer a plain click (Daksh). The passphrase prompt still follows.
+  const triggerButton = <SecretDot onUnlock={() => { void open(); }} />;
 
   if (mode === "closed") return triggerButton;
 
