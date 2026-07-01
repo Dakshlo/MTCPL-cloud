@@ -3689,6 +3689,8 @@ export async function addVendorRoyaltyEntryAction(
   const entryType = String(formData.get("entry_type") || "").trim();
   const amountRaw = String(formData.get("amount") || "").trim();
   const description = String(formData.get("description") || "").trim() || null;
+  // Mig 175 — optional on-screen vendor signature (PNG data-URL).
+  const signatureData = String(formData.get("signature_data") || "").trim() || null;
   const plain = String(formData.get("passphrase") || "");
   // Daksh May 2026 — mig 068. New first-class entry_date so people
   // stop encoding the date inside the description string. Empty
@@ -3753,21 +3755,28 @@ export async function addVendorRoyaltyEntryAction(
   const isAutoApprove =
     profile.role === "owner" || profile.role === "developer";
   const nowIso = new Date().toISOString();
-  const { data, error } = await admin
+  const baseRow = {
+    bill_vendor_id: vendorId,
+    amount,
+    entry_type: entryType,
+    description,
+    entry_date: entryDate,
+    created_by: profile.id,
+    status: isAutoApprove ? "approved" : "pending_approval",
+    approved_at: isAutoApprove ? nowIso : null,
+    approved_by: isAutoApprove ? profile.id : null,
+  };
+  let ins = await admin
     .from("vendor_royalty_entries")
-    .insert({
-      bill_vendor_id: vendorId,
-      amount,
-      entry_type: entryType,
-      description,
-      entry_date: entryDate,
-      created_by: profile.id,
-      status: isAutoApprove ? "approved" : "pending_approval",
-      approved_at: isAutoApprove ? nowIso : null,
-      approved_by: isAutoApprove ? profile.id : null,
-    })
+    .insert(signatureData ? { ...baseRow, signature_data: signatureData } : baseRow)
     .select("id")
     .single();
+  if (ins.error && signatureData) {
+    // signature_data column may not exist yet (pre-mig-175) — save the entry
+    // WITHOUT the signature rather than losing it entirely (best-effort).
+    ins = await admin.from("vendor_royalty_entries").insert(baseRow).select("id").single();
+  }
+  const { data, error } = ins;
   if (error) return { ok: false, error: error.message };
 
   void logAudit(
@@ -4205,6 +4214,7 @@ export async function listPendingRoyaltyEntriesAction(
         entryDate: string | null;
         createdAt: string;
         createdByName: string | null;
+        signature: string | null;
       }>;
     }
   | { ok: false; error: string }
@@ -4259,6 +4269,24 @@ export async function listPendingRoyaltyEntriesAction(
     }
   }
 
+  // Signatures (mig 175) — best-effort SEPARATE fetch so a pre-migration schema
+  // (no signature_data column yet) can't break the whole approval queue.
+  const sigById = new Map<string, string>();
+  {
+    const ids = rows.map((r) => r.id);
+    if (ids.length) {
+      const { data: sigs, error: sigErr } = await admin
+        .from("vendor_royalty_entries")
+        .select("id, signature_data")
+        .in("id", ids);
+      if (!sigErr) {
+        for (const s of (sigs ?? []) as Array<{ id: string; signature_data: string | null }>) {
+          if (s.signature_data) sigById.set(s.id, s.signature_data);
+        }
+      }
+    }
+  }
+
   void logAudit(
     profile.id,
     "royalty_approval_queue_viewed",
@@ -4285,6 +4313,7 @@ export async function listPendingRoyaltyEntriesAction(
         entryDate: r.entry_date,
         createdAt: r.created_at,
         createdByName: r.created_by ? profilesMap.get(r.created_by) ?? null : null,
+        signature: sigById.get(r.id) ?? null,
       };
     }),
   };

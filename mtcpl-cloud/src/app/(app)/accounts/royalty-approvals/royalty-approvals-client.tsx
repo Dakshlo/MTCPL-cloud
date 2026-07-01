@@ -39,6 +39,7 @@ type ListResult =
         entryDate: string | null;
         createdAt: string;
         createdByName: string | null;
+        signature: string | null;
       }>;
     }
   | { ok: false; error: string };
@@ -358,6 +359,13 @@ export function RoyaltyApprovalsClient({
                       {e.description && (
                         <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 4 }}>
                           {e.description}
+                        </div>
+                      )}
+                      {e.signature && (
+                        <div style={{ marginTop: 4, marginBottom: 6 }}>
+                          <div style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 3 }}>✍️ VENDOR SIGNATURE</div>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={e.signature} alt="Vendor signature" style={{ height: 54, maxWidth: 240, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }} />
                         </div>
                       )}
                       {/* Mig 068 — show the business date prominently

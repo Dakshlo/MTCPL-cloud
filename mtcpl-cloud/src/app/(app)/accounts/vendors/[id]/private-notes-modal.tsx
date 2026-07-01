@@ -21,6 +21,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { SecretDot } from "./secret-dot";
+import { SignatureCaptureButton } from "@/components/signature-pad";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
@@ -134,6 +135,8 @@ export function PrivateNotesModal({
   const [newEntryType, setNewEntryType] = useState<"received" | "given">("received");
   const [newEntryAmount, setNewEntryAmount] = useState<string>("");
   const [newEntryDescription, setNewEntryDescription] = useState<string>("");
+  // On-screen vendor signature (optional for now, mig 175). PNG data-URL.
+  const [newEntrySignature, setNewEntrySignature] = useState<string | null>(null);
   // Mig 068 — date the entry represents. Pre-filled to today (IST)
   // so adding "right now" is one less click; the user can adjust if
   // they're back-filling a past day.
@@ -227,6 +230,7 @@ export function PrivateNotesModal({
       fd.set("amount", String(amount));
       fd.set("entry_date", newEntryDate);
       if (newEntryDescription.trim()) fd.set("description", newEntryDescription.trim());
+      if (newEntrySignature) fd.set("signature_data", newEntrySignature);
       fd.set("passphrase", passphrase);
       const r = await addVendorRoyaltyEntryAction(fd);
       if (!r.ok) {
@@ -235,6 +239,7 @@ export function PrivateNotesModal({
       }
       setNewEntryAmount("");
       setNewEntryDescription("");
+      setNewEntrySignature(null);
       // Reset the date back to today so the next entry starts fresh.
       // (User who's back-filling many old entries can just adjust
       // the date again per row — most adds are for "today".)
@@ -743,6 +748,13 @@ export function PrivateNotesModal({
                     >
                       {pending ? "Adding…" : "+ Add"}
                     </button>
+                  </div>
+
+                  {/* Optional on-screen vendor signature (mig 175) — owner sees
+                      it when approving. Works on tablet (finger/stylus) + desktop. */}
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>Vendor signature <span style={{ fontWeight: 400 }}>(optional)</span>:</span>
+                    <SignatureCaptureButton value={newEntrySignature} onChange={setNewEntrySignature} />
                   </div>
 
                   {error && <ErrorBox text={error} />}
