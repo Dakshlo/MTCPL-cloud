@@ -1529,13 +1529,13 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                       marginTop: 6,
                     }}
                   >
-                    <span style={{ fontSize: 22, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
+                    <span style={{ fontSize: 34, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
                       ▶ {fmtDuration(elapsed)}
                     </span>
                     {remaining != null && (
                       <span
                         style={{
-                          fontSize: 26,
+                          fontSize: 36,
                           fontWeight: 800,
                           color: remaining < 0
                             ? (dark ? "#fca5a5" : "#dc2626")
@@ -1559,7 +1559,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.maintenance_flagged_at && (() => {
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
-              <div style={{ fontSize: 20, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
+              <div style={{ fontSize: 34, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
                 {prog ? "⏱ waiting " : "⏱ down for "}{fmtDuration(downMin)}
               </div>
             );
@@ -1573,8 +1573,8 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", paddingTop: 4 }}>
           {machine.idle_since ? (
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: sub2Color, letterSpacing: "0.14em", textTransform: "uppercase" }}>Idle for</div>
-              <div style={{ fontSize: 42, fontWeight: 900, color: accent, fontFamily: "ui-monospace, monospace", lineHeight: 1.05, marginTop: 2 }}>
+              <div style={{ fontSize: 21, fontWeight: 800, color: sub2Color, letterSpacing: "0.14em", textTransform: "uppercase" }}>Idle for</div>
+              <div style={{ fontSize: 58, fontWeight: 900, color: accent, fontFamily: "ui-monospace, monospace", lineHeight: 1.05, marginTop: 2 }}>
                 {fmtDuration((now - new Date(machine.idle_since).getTime()) / 60000)}
               </div>
             </div>
@@ -1653,10 +1653,10 @@ function TvBigStat({ label, value, fg, dark = false }: { label: string; value: n
       borderRadius: 12,
       textAlign: "center",
     }}>
-      <div style={{ fontSize: 14, color: dark ? "rgba(255,255,255,0.6)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 800, lineHeight: 1.15 }}>
+      <div style={{ fontSize: 22, color: dark ? "rgba(255,255,255,0.72)" : "#8a7a55", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 800, lineHeight: 1.15 }}>
         {label}
       </div>
-      <div style={{ fontSize: 54, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
+      <div style={{ fontSize: 66, fontWeight: 800, color: fg, lineHeight: 1, marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
         {value}
       </div>
     </div>
