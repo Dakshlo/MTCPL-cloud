@@ -156,6 +156,21 @@ function fmtDuration(minutes: number): string {
   return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
 }
 
+// Spelled-out variant for the TV wall — "4day 45minute" reads clearer from
+// across the floor than "4d 45m" (Daksh). Used only in TvMachineTile.
+function fmtDurationLong(minutes: number): string {
+  const m = Math.abs(Math.round(minutes));
+  if (m < 60) return `${m}minute`;
+  if (m < 60 * 24) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return mm > 0 ? `${h}hour ${mm}minute` : `${h}hour`;
+  }
+  const d = Math.floor(m / (60 * 24));
+  const remH = Math.floor((m % (60 * 24)) / 60);
+  return remH > 0 ? `${d}day ${remH}hour` : `${d}day`;
+}
+
 // Daksh May 2026 — palette swap (mirrors STATUS_TINT in the vendor
 // cockpit): idle is now a low-key light-blue (waiting state), carving
 // is confident green (healthy active work), maintenance stays red.
@@ -1459,10 +1474,10 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.machine_type !== "single_head" && (
             <span
               style={{
-                fontSize: 14,
+                fontSize: 20,
                 fontWeight: 800,
-                padding: "3px 10px",
-                borderRadius: 4,
+                padding: "5px 14px",
+                borderRadius: 5,
                 background: machine.machine_type === "lathe" ? "rgba(124,58,237,0.12)" : "rgba(180,115,51,0.15)",
                 color: machine.machine_type === "lathe" ? (dark ? "#c4b5fd" : "#7c3aed") : (dark ? "#fbbf24" : "#b45309"),
                 letterSpacing: "0.08em",
@@ -1475,10 +1490,10 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
           {machine.cnc_axes != null && (
             <span
               style={{
-                fontSize: 14,
+                fontSize: 20,
                 fontWeight: 800,
-                padding: "3px 10px",
-                borderRadius: 4,
+                padding: "5px 14px",
+                borderRadius: 5,
                 background: dark ? "rgba(99,102,241,0.20)" : "rgba(99,102,241,0.12)",
                 color: dark ? "#c7d2fe" : "#4338ca",
                 letterSpacing: "0.08em",
@@ -1499,7 +1514,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
         <div style={{ paddingTop: 8, borderTop: `1px solid ${dividerColor}`, display: "flex", flexDirection: "column", gap: 8 }}>
           {machine.current_jobs.map((job, ji) => (
             <div key={job.id} style={ji > 0 ? { paddingTop: 8, borderTop: `1px dashed ${dividerColor}` } : undefined}>
-              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 22, color: codeColor }}>
+              <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 32, color: codeColor }}>
                 {machine.current_jobs.length > 1 && (
                   <span style={{ color: accent, marginRight: 4 }}>{ji + 1}.</span>
                 )}
@@ -1530,7 +1545,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                     }}
                   >
                     <span style={{ fontSize: 34, fontWeight: 800, color: dark ? "#4ade80" : "#15803d" }}>
-                      ▶ {fmtDuration(elapsed)}
+                      ▶ {fmtDurationLong(elapsed)}
                     </span>
                     {remaining != null && (
                       <span
@@ -1544,7 +1559,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
                               : (dark ? "#4ade80" : "#15803d"),
                         }}
                       >
-                        ⏱ {remaining < 0 ? `${fmtDuration(remaining)} over` : fmtDuration(remaining) + " left"}
+                        ⏱ {remaining < 0 ? `${fmtDurationLong(remaining)} over` : fmtDurationLong(remaining) + " left"}
                       </span>
                     )}
                   </div>
@@ -1560,7 +1575,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
             const downMin = (now - new Date(machine.maintenance_flagged_at).getTime()) / 60000;
             return (
               <div style={{ fontSize: 34, fontWeight: 800, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : (dark ? "#fca5a5" : "#b91c1c"), fontFamily: "ui-monospace, monospace" }}>
-                {prog ? "⏱ waiting " : "⏱ down for "}{fmtDuration(downMin)}
+                {prog ? "⏱ waiting " : "⏱ down for "}{fmtDurationLong(downMin)}
               </div>
             );
           })()}
@@ -1575,7 +1590,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 21, fontWeight: 800, color: sub2Color, letterSpacing: "0.14em", textTransform: "uppercase" }}>Idle for</div>
               <div style={{ fontSize: 58, fontWeight: 900, color: accent, fontFamily: "ui-monospace, monospace", lineHeight: 1.05, marginTop: 2 }}>
-                {fmtDuration((now - new Date(machine.idle_since).getTime()) / 60000)}
+                {fmtDurationLong((now - new Date(machine.idle_since).getTime()) / 60000)}
               </div>
             </div>
           ) : (
