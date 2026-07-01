@@ -93,17 +93,17 @@ function SignatureModal({ onClose, onSave }: { onClose: () => void; onSave: (v: 
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 6000, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 18, boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(920px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 18, boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 10, color: "var(--text)" }}>✍️ Vendor signature</div>
         <canvas
           ref={canvasRef}
-          width={560}
-          height={220}
+          width={880}
+          height={380}
           onPointerDown={down}
           onPointerMove={move}
           onPointerUp={up}
           onPointerLeave={up}
-          style={{ width: "100%", height: 220, border: "1.5px dashed var(--border)", borderRadius: 10, background: "#fff", touchAction: "none", cursor: "crosshair", display: "block" }}
+          style={{ width: "100%", height: 380, border: "1.5px dashed var(--border)", borderRadius: 10, background: "#fff", touchAction: "none", cursor: "crosshair", display: "block" }}
         />
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Sign above with a finger, stylus, or mouse.</div>
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 14 }}>
