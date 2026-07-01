@@ -7,7 +7,7 @@
  * peek modal.
  */
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { rupee } from "@/lib/challan-pricing";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
@@ -43,7 +43,8 @@ export function LedgerCard({
   canCancel?: boolean;
   options: string[];
 }) {
-  const [direction, setDirection] = useState<"receive" | "pay">("receive");
+  const [direction, setDirection] = useState<"receive" | "pay" | null>(null);
+  const [dirErr, setDirErr] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [confirm, setConfirm] = useState<{ amount: number; counterparty: string; note: string } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -54,10 +55,14 @@ export function LedgerCard({
   function openConfirm() {
     const f = formRef.current;
     if (!f) return;
+    if (direction !== "receive" && direction !== "pay") { setDirErr(true); return; } // must pick one
+    if (!f.reportValidity()) return; // required amount + counterparty select
     const fd = new FormData(f);
     const amount = Math.round((Number(String(fd.get("amount") ?? "").replace(/,/g, "")) || 0) * 100) / 100;
-    if (!(amount > 0)) { f.reportValidity(); return; } // nudge the required amount field
-    setConfirm({ amount, counterparty: String(fd.get("counterparty") ?? "").trim(), note: String(fd.get("note") ?? "").trim() });
+    if (!(amount > 0)) { f.reportValidity(); return; }
+    const counterparty = String(fd.get("counterparty") ?? "").trim();
+    if (!counterparty) { f.reportValidity(); return; }
+    setConfirm({ amount, counterparty, note: String(fd.get("note") ?? "").trim() });
   }
   const isTransfer = !!confirm && confirm.counterparty.toUpperCase() === options[0];
 
@@ -83,21 +88,26 @@ export function LedgerCard({
       {canEdit && (
         <form ref={formRef} action={addLedgerEntryAction} autoComplete="off" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 13, borderBottom: "1px solid var(--border)" }}>
           <input type="hidden" name="account" value={account} />
-          <input type="hidden" name="direction" value={direction} />
+          <input type="hidden" name="direction" value={direction ?? ""} />
 
-          <div style={{ display: "flex", gap: 9 }}>
-            <button type="button" onClick={() => setDirection("receive")} style={segBtn(direction === "receive", "#15803d")}>↓ Receive</button>
-            <button type="button" onClick={() => setDirection("pay")} style={segBtn(direction === "pay", "#b45309")}>↑ Pay / Give</button>
+          <div>
+            <div style={{ display: "flex", gap: 9 }}>
+              <button type="button" onClick={() => { setDirection("receive"); setDirErr(false); }} style={segBtn(direction === "receive", "#15803d")}>↓ Receive</button>
+              <button type="button" onClick={() => { setDirection("pay"); setDirErr(false); }} style={segBtn(direction === "pay", "#b45309")}>↑ Pay / Give</button>
+            </div>
+            {dirErr && <div style={{ fontSize: 11.5, color: "#b91c1c", fontWeight: 700, marginTop: 5 }}>Choose Receive or Pay first.</div>}
           </div>
 
           <AmountField />
 
-          <WhomField
-            label={direction === "receive" ? "Received from" : "Paid / given to"}
-            options={options}
-            placeholder="Type a name, or pick…"
-            helper={<>Pick <strong>{options[0]}</strong> to move money between the two accounts; anything else is just a note.</>}
-          />
+          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={lbl}>{direction === "pay" ? "Paid / given to" : "Received from"}</span>
+            <select name="counterparty" required defaultValue="" style={{ ...inp, cursor: "pointer" }}>
+              <option value="" disabled>Select…</option>
+              {options.map((o) => <option key={o} value={o}>{`${WHOM_EMOJI[o] ?? ""} ${o}`.trim()}</option>)}
+            </select>
+            <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Pick <strong>{`${WHOM_EMOJI[options[0]] ?? ""} ${options[0]}`.trim()}</strong> to move money between the two accounts. For a party&apos;s name, put it in the Note.</span>
+          </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <span style={lbl}>Note <span style={{ fontWeight: 500 }}>(optional)</span></span>
@@ -288,38 +298,9 @@ function AmountField() {
   );
 }
 
-// Custom combobox for "to whom" — our own styled dropdown (NOT the browser
-// datalist), still free-typeable.
-function WhomField({ label, options, placeholder, helper }: { label: string; options: string[]; placeholder: string; helper?: ReactNode }) {
-  const [value, setValue] = useState("");
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      <span style={lbl}>{label}</span>
-      <div ref={ref} style={{ position: "relative" }}>
-        <input name="counterparty" value={value} onChange={(e) => setValue(e.target.value.toUpperCase())} onFocus={() => setOpen(true)} placeholder={placeholder} autoComplete="off" style={{ ...inp, paddingRight: 36, textTransform: "uppercase" }} />
-        <button type="button" tabIndex={-1} onClick={() => setOpen((o) => !o)} aria-label="Pick" style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", fontSize: 11, padding: 9 }}>▾</button>
-        {open && (
-          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 14px 32px rgba(0,0,0,0.18)", padding: 5, display: "flex", flexDirection: "column", gap: 2 }}>
-            {options.map((o) => (
-              <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }} style={{ textAlign: "left", padding: "9px 11px", borderRadius: 7, border: "none", background: "transparent", cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: "var(--text)" }} onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-                {o}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      {helper && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{helper}</span>}
-    </div>
-  );
-}
+// "To whom" is a mandatory pick (no free typing) — party names go in the Note.
+// Emoji makes Home / Office / Other easy to tell apart in the dropdown.
+const WHOM_EMOJI: Record<string, string> = { OFFICE: "🏢", HOME: "🏠", OTHER: "✏️" };
 
 const inp: React.CSSProperties = {
   width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)",

@@ -37,7 +37,11 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
   if (scope === "office" && account !== "office") redirect("/x3k9q27z");
   if (account === "home" && scope !== "both") redirect("/x3k9q27z");
 
-  const direction = txt(formData, "direction") === "pay" ? "pay" : "receive";
+  // Direction is now a REQUIRED explicit choice (no default receive).
+  const direction = txt(formData, "direction");
+  if (direction !== "receive" && direction !== "pay") {
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Choose Receive or Pay")}`);
+  }
   // The amount field arrives Indian-grouped (e.g. "1,00,000.50") — strip commas.
   const amount = Math.round((Number(txt(formData, "amount").replace(/,/g, "")) || 0) * 100) / 100;
   // Lower + upper bound (numeric(14,2) max) + finiteness — a bad value must never
@@ -46,6 +50,9 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
     redirect(`/x3k9q27z?toast=${encodeURIComponent("Enter a valid amount")}`);
   }
   const counterparty = txt(formData, "counterparty").trim();
+  if (!counterparty) {
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Choose who this is with")}`);
+  }
   const note = txt(formData, "note").trim() || null;
 
   // Transfer when "to whom" is the OTHER account keyword.

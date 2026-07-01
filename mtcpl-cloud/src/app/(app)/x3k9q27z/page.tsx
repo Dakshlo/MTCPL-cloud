@@ -16,6 +16,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { ledgerScope } from "@/lib/ledger-access";
 import { rupee } from "@/lib/challan-pricing";
 import { LedgerCard, type EntryView } from "./ledger-card";
+import { LedgerAutoRefresh } from "./auto-refresh";
 import { approveLedgerTransferAction, rejectLedgerTransferAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,8 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "var(--bg)", overflowY: "auto" }}>
+      <LedgerAutoRefresh />
+
       <div style={{ maxWidth: 1040, margin: "0 auto", padding: "18px 18px 48px" }}>
         {/* Header — back arrow (the only way out, menu is hidden) + title */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
