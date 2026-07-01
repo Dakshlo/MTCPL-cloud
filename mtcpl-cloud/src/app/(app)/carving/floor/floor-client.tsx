@@ -1564,7 +1564,7 @@ function TvMachineTile({ machine, now, dark }: { machine: FloorMachine; now: num
               </div>
             );
           })()}
-          <div style={{ fontSize: 17, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 400 }}>
+          <div style={{ fontSize: 26, color: prog ? (dark ? "#c7d2fe" : "#4338ca") : sub2Color, marginTop: 4, fontWeight: prog ? 700 : 600 }}>
             {prog ? "🗂 No programming file" : (machine.maintenance_reason ?? "—")}
           </div>
         </div>
