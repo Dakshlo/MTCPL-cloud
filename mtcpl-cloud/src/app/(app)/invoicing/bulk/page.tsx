@@ -63,16 +63,68 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
     }
   }
 
+  // Mig 175 — full_challan_at (Tab-2 = challan ready) + transport per challan.
+  // Best-effort: a pre-migration schema errors here and every card stays Tab-1.
+  const fullByChallan = new Map<string, { ready: boolean; company: string; phone: string; lr: string; vehicle: string; driver: string; driverPhone: string }>();
+  {
+    const ids = pool.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data, error } = await admin.from("challans").select("id, full_challan_at, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone").in("id", chunk);
+      if (error) break;
+      for (const r of (data ?? []) as Array<Record<string, string | null>>) {
+        fullByChallan.set(r.id as string, {
+          ready: !!r.full_challan_at,
+          company: r.transport_company ?? "", phone: r.transport_phone ?? "", lr: r.lr_no ?? "",
+          vehicle: r.transport_vehicle_no ?? "", driver: r.transport_driver_name ?? "", driverPhone: r.transport_driver_phone ?? "",
+        });
+      }
+    }
+  }
+
+  // Dispatch vehicle/driver → prefill the Get-challan form.
+  const dispById = new Map<string, { vehicle: string; driver: string; driverPhone: string }>();
+  {
+    const dispIds = [...new Set(pool.map((c) => c.source_dispatch_id).filter(Boolean) as string[])];
+    for (let i = 0; i < dispIds.length; i += 300) {
+      const chunk = dispIds.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data } = await admin.from("dispatches").select("id, vehicle_no, driver_name, driver_phone").in("id", chunk);
+      for (const d of (data ?? []) as Array<{ id: string; vehicle_no: string | null; driver_name: string | null; driver_phone: string | null }>) {
+        dispById.set(d.id, { vehicle: d.vehicle_no ?? "", driver: d.driver_name ?? "", driverPhone: d.driver_phone ?? "" });
+      }
+    }
+  }
+
+  // Transport company master for the Get-challan datalist.
+  let companies: string[] = [];
+  {
+    const { data } = await admin.from("transport_companies").select("name").order("name");
+    companies = ((data ?? []) as Array<{ name: string }>).map((r) => r.name);
+  }
+
   const byTemple = new Map<string, BulkCard[]>();
   for (const c of pool) {
     const temple = c.temple ?? "—";
     const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
+    const full = fullByChallan.get(c.id);
+    const disp = c.source_dispatch_id ? dispById.get(c.source_dispatch_id) : undefined;
     const card: BulkCard = {
       id: c.id,
       code,
       date: c.challan_date,
       sourceDispatchId: c.source_dispatch_id,
       search: `${temple} ${code} ${c.challan_number} ${codesByChallan.get(c.id) ?? ""}`.toLowerCase(),
+      ready: full?.ready ?? false,
+      transport: {
+        company: full?.company ?? "",
+        phone: full?.phone ?? "",
+        lr: full?.lr ?? "",
+        vehicle: (full?.vehicle || disp?.vehicle) ?? "",
+        driver: (full?.driver || disp?.driver) ?? "",
+        driverPhone: (full?.driverPhone || disp?.driverPhone) ?? "",
+      },
     };
     const a = byTemple.get(temple) ?? [];
     a.push(card);
@@ -122,7 +174,7 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
       )}
 
       <div style={{ marginTop: 14 }}>
-        <BulkBoard groups={groups} total={pool.length} />
+        <BulkBoard groups={groups} companies={companies} />
       </div>
 
       <p style={{ marginTop: 16, fontSize: 12 }}>
