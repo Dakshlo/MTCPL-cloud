@@ -373,6 +373,21 @@ export default async function DispatchPage({
     (d) => (d as { on_road_at?: string | null }).on_road_at != null,
   );
 
+  // Mig 175 — how each on-road dispatch was released: 'challan' (bulk Get-challan)
+  // vs 'invoice' (convert → owner approve). Best-effort so a pre-migration schema
+  // (no release_mode column) never breaks this core page.
+  const releaseModeById = new Map<string, string>();
+  {
+    const ids = onRoadDispatches.map((d) => d.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data, error } = await admin.from("dispatches").select("id, release_mode").in("id", chunk);
+      if (error) break;
+      for (const r of (data ?? []) as Array<{ id: string; release_mode: string | null }>) if (r.release_mode) releaseModeById.set(r.id, r.release_mode);
+    }
+  }
+
   // Mig 167 — derive each invoice-in-process dispatch's invoicing sub-status
   // from its challan (source_dispatch_id). Map dispatchId → human label.
   type IipChallan = {
@@ -465,6 +480,7 @@ export default async function DispatchPage({
       // NOT dispatched_at/approved_at. handoverAckAt gates the handover popup.
       onRoadAt: (d as { on_road_at?: string | null }).on_road_at ?? null,
       handoverAckAt: (d as { handover_ack_at?: string | null }).handover_ack_at ?? null,
+      releaseMode: releaseModeById.get(d.id) ?? null,
     };
   });
 

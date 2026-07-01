@@ -37,7 +37,25 @@ export default async function NewBulkInvoicePage() {
     const { data, error } = await admin.from("bulk_invoice_challans").select("challan_id");
     if (!error) for (const r of (data ?? []) as Array<{ challan_id: string }>) invoiced.add(r.challan_id);
   }
-  const pool = all.filter((c) => !invoiced.has(c.id));
+  const notInvoiced = all.filter((c) => !invoiced.has(c.id));
+
+  // Mig 175 — ONLY challans with a full challan generated (transport filled, Tab-2
+  // on the Bulk page) can be bulk-invoiced. Best-effort: if the migration isn't
+  // applied the select errors and we fall back to letting all through.
+  const ready = new Set<string>();
+  let readyKnown = false;
+  {
+    const ids = notInvoiced.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 300) {
+      const chunk = ids.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data, error } = await admin.from("challans").select("id, full_challan_at").in("id", chunk);
+      if (error) { readyKnown = false; break; }
+      readyKnown = true;
+      for (const r of (data ?? []) as Array<{ id: string; full_challan_at: string | null }>) if (r.full_challan_at) ready.add(r.id);
+    }
+  }
+  const pool = readyKnown ? notInvoiced.filter((c) => ready.has(c.id)) : notInvoiced;
 
   const byTemple = new Map<string, typeof pool>();
   for (const c of pool) { const k = c.temple ?? "—"; const a = byTemple.get(k) ?? []; a.push(c); byTemple.set(k, a); }

@@ -166,6 +166,9 @@ export type OutForDeliveryRow = ProvisionalRow & {
   /** Mig 167 — when the documents were handed to the driver. NULL → show the
    *  handover popup for this truck. */
   handoverAckAt?: string | null;
+  /** Mig 175 — how the truck was released: 'challan' (bulk Get-challan, goods out
+   *  on a challan) vs 'invoice' (convert → owner approve). */
+  releaseMode?: string | null;
 };
 
 /** Mig 167 — a verified dispatch the invoicing dept is pricing (owner must
@@ -1621,6 +1624,12 @@ function DispatchRow({
               ⏱ on road {timeAgoLabel(row.onRoadAt)}
             </span>
           )}
+          {/* Mig 175 — released with just a challan (bulk) vs with an approved invoice. */}
+          {row.releaseMode === "challan" ? (
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#92400e", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>🚚 Dispatched with challan</span>
+          ) : row.releaseMode === "invoice" ? (
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#15803d", background: "rgba(22,101,52,0.1)", border: "1px solid rgba(22,101,52,0.35)", borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>🧾 Dispatched with invoice</span>
+          ) : null}
         </div>
         <div style={{ marginTop: 5, fontSize: 13, color: "var(--muted)" }}>
           {row.vehicle_no && (
