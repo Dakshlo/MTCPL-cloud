@@ -19,7 +19,7 @@
 // re-verifies the passphrase on every read/save call regardless
 // of the client flag (defence in depth).
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { SecretDot } from "./secret-dot";
 import { SignatureCaptureButton } from "@/components/signature-pad";
 import { createPortal } from "react-dom";
@@ -385,17 +385,40 @@ export function PrivateNotesModal({
     };
   }, [mode]);
 
-  // ── The tiny entry button. Mig 061 follow-on (Daksh): was a 🔒
-  // emoji button — too visible. Now a 14px hit-area with a 6px
-  // gray dot inside, so the trigger reads as "neutral marker"
-  // rather than "click me". Same passphrase flow on open. */
-  // stopPropagation on click + mousedown so the parent <summary>
-  // element on the vendor profile page doesn't toggle <details>
-  // when the user clicks the dot. Same for preventDefault.
-  // Opens only on hover + the secret code "aadesh" (desktop), or the tablet tap
-  // pattern (2 taps left of the dot, then 2 right) — never a plain click (Daksh).
-  // The passphrase prompt still follows.
-  const triggerButton = <SecretDot onUnlock={() => { void open(); }} touchPattern />;
+  // ── Tablet unlock SEQUENCE (Daksh). On the vendor profile: double-tap the
+  // vendor NAME → 2 taps on the TDS value → 2 taps on the DOT → opens (then the
+  // passphrase). The name/TDS elements carry data-unlock="name"/"tds"; the dot
+  // reports its taps via onTap. Any wrong tap or a >4s pause resets the sequence.
+  const seq = useRef<string[]>([]);
+  const seqTs = useRef(0);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const bumpRef = useRef<(step: string) => void>(() => {});
+  useEffect(() => {
+    function bump(step: string) {
+      const now = Date.now();
+      if (now - seqTs.current > 4000) seq.current = [];
+      seqTs.current = now;
+      seq.current.push(step);
+      if (seq.current.length > 6) seq.current = seq.current.slice(-6);
+      if (seq.current.join(",") === "name,name,tds,tds,dot,dot") {
+        seq.current = [];
+        void openRef.current();
+      }
+    }
+    bumpRef.current = bump;
+    function onClick(e: MouseEvent) {
+      const el = (e.target as HTMLElement | null)?.closest?.("[data-unlock]");
+      const step = el?.getAttribute("data-unlock");
+      if (step === "name" || step === "tds") bump(step);
+    }
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, []);
+
+  // ── The tiny entry dot. DESKTOP: hover + type "aadesh". TABLET: the tap
+  // sequence above (its last two taps land here via onTap). Never a plain click.
+  const triggerButton = <SecretDot onUnlock={() => { void open(); }} onTap={() => bumpRef.current("dot")} />;
 
   if (mode === "closed") return triggerButton;
 

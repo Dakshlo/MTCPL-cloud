@@ -388,7 +388,9 @@ export default async function BillVendorDetailPage({
           <VendorAvatar name={vendor.name} size={56} />
           <div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em" }}>
+              {/* data-unlock="name" — step 1 of the tablet royalty-unlock tap
+                  sequence (double-tap here → TDS → dot). Cosmetically inert. */}
+              <h1 data-unlock="name" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.02em" }}>
                 {vendor.name}
               </h1>
               <span
@@ -493,16 +495,20 @@ export default async function BillVendorDetailPage({
             marginBottom: 18,
           }}
         >
-          <TaxSummaryCard
-            label="TDS deducted lifetime"
-            value={totalTdsDeducted}
-            sub={
-              vendor.tds_applicable
-                ? `Vendor flagged${vendor.default_tds_percent != null ? ` @ default ${vendor.default_tds_percent}%` : ""}`
-                : "Not flagged for TDS"
-            }
-            tone="danger"
-          />
+          {/* data-unlock="tds" — step 2 of the tablet royalty-unlock tap sequence
+              (name → 2 taps HERE → dot). display:contents keeps the grid layout. */}
+          <div data-unlock="tds" style={{ display: "contents" }}>
+            <TaxSummaryCard
+              label="TDS deducted lifetime"
+              value={totalTdsDeducted}
+              sub={
+                vendor.tds_applicable
+                  ? `Vendor flagged${vendor.default_tds_percent != null ? ` @ default ${vendor.default_tds_percent}%` : ""}`
+                  : "Not flagged for TDS"
+              }
+              tone="danger"
+            />
+          </div>
           <TaxSummaryCard
             label="TCS collected lifetime"
             value={totalTcsCollected}
