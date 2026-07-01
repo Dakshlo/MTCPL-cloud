@@ -195,10 +195,12 @@ export async function ownerApproveChallanAction(formData: FormData) {
     .eq("id", challanId);
 
   // Release the truck — only if the dispatch isn't already on the road/delivered.
+  // Mig 175 — this is the INVOICE path, so mark release_mode='invoice' (unless the
+  // bulk "Get challan" flow already put it on the road with a challan).
   if (ch!.source_dispatch_id) {
     await admin
       .from("dispatches")
-      .update({ on_road_at: now, returned_at: null, return_reason: null, handover_ack_at: null })
+      .update({ on_road_at: now, release_mode: "invoice", returned_at: null, return_reason: null, handover_ack_at: null })
       .eq("id", ch!.source_dispatch_id)
       .is("on_road_at", null)
       .is("delivered_at", null);
@@ -1050,6 +1052,50 @@ export async function sendChallanBackFromBulkAction(formData: FormData): Promise
   refreshInvoicingPaths({ challanId: id });
   revalidatePath("/invoicing/bulk");
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan returned to Challans")}`);
+}
+
+/** Mig 175 — "Get challan" for a bulk challan: capture the transport details, mark
+ *  it a FULL challan (Tab-2, ready for the driver), and release the linked dispatch
+ *  On-the-road WITH THE CHALLAN (release_mode='challan') — goods leave now, the tax
+ *  invoice is billed later from bulk. */
+export async function saveBulkTransportAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/bulk");
+
+  // Transport (mig 169 columns — always present).
+  const transportCompany = txt(formData, "transport_company") || null;
+  const { error: trErr } = await admin.from("challans").update({
+    transport_company: transportCompany,
+    transport_phone: txt(formData, "transport_phone") || null,
+    lr_no: txt(formData, "lr_no") || null,
+    transport_vehicle_no: txt(formData, "transport_vehicle_no") || null,
+    transport_driver_name: txt(formData, "transport_driver_name") || null,
+    transport_driver_phone: txt(formData, "transport_driver_phone") || null,
+  }).eq("id", id);
+  if (trErr) redirect(`/invoicing/bulk?toast=${encodeURIComponent("Could not save — try again")}`);
+  if (transportCompany) await admin.from("transport_companies").upsert({ name: transportCompany }, { onConflict: "name" });
+
+  // Mark it a full challan (mig 175 — best-effort so a pre-migration deploy still
+  // saves the transport, it just won't move to Tab-2 until the migration runs).
+  await admin.from("challans").update({ full_challan_at: new Date().toISOString(), full_challan_by: profile.id }).eq("id", id);
+
+  // Release the truck On-the-road WITH THE CHALLAN (only if not already out).
+  const { data: ch } = await admin.from("challans").select("source_dispatch_id").eq("id", id).maybeSingle();
+  const dispId = (ch as { source_dispatch_id: string | null } | null)?.source_dispatch_id ?? null;
+  if (dispId) {
+    await admin.from("dispatches")
+      .update({ on_road_at: new Date().toISOString(), release_mode: "challan", returned_at: null, return_reason: null })
+      .eq("id", dispId).is("on_road_at", null).is("delivered_at", null);
+  }
+
+  void logAudit(profile.id, "bulk_full_challan", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/invoicing/bulk");
+  revalidatePath("/dispatch");
+  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Challan ready — transport saved, dispatch on the road")}`);
 }
 
 /** Create ONE bulk tax invoice covering several of a temple's bulk challans,

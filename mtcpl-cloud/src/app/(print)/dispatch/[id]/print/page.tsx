@@ -20,7 +20,7 @@ import { challanCode } from "@/lib/doc-code";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string }>;
+type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string; draft?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -39,7 +39,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
-  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam } = await searchParams;
+  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam, draft: draftParam } = await searchParams;
+  const isDraft = draftParam === "1";
   const admin = createAdminSupabaseClient();
 
   const { data: dispatch, error } = await admin
@@ -50,6 +51,24 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
     .eq("id", id)
     .maybeSingle();
   if (error || !dispatch) notFound();
+
+  // Mig 169/175 — transport (Company/LR + vehicle/driver overrides) lives on the
+  // linked invoicing challan, captured at "Get challan" (bulk) or at pricing.
+  // Best-effort so a pre-migration schema just prints blanks.
+  let transport: { company: string | null; phone: string | null; lr: string | null; vehicle: string | null; driver: string | null; driverPhone: string | null } | null = null;
+  {
+    const { data: trRow, error: trErr } = await admin
+      .from("challans")
+      .select("transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+      .eq("source_dispatch_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!trErr && trRow) {
+      const t = trRow as Record<string, string | null>;
+      transport = { company: t.transport_company, phone: t.transport_phone, lr: t.lr_no, vehicle: t.transport_vehicle_no, driver: t.transport_driver_name, driverPhone: t.transport_driver_phone };
+    }
+  }
 
   // Mig 163 — weight mode + whole-truck weight. Best-effort (separate select) so
   // a pre-migration schema just falls back to per-slab. The Check-page preview
@@ -261,7 +280,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #f0f0f0; }
         /* Print the on-screen colours exactly (no "Background graphics" toggle). */
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .print-wrap { max-width: 1180px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; }
+        .print-wrap { max-width: 1180px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; position: relative; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
 
@@ -297,6 +316,17 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         .ib .ibv { font-weight: 700; color: #1a1a1a; text-align: right; }
         .ib .ibv.mono { font-family: ui-monospace, monospace; }
 
+        /* Transportation — full-width horizontal strip under the address boxes. */
+        .transport { border: 1px solid #d8d2c4; border-radius: 6px; background: #faf7f0; padding: 6px 10px; margin: 4px 0; }
+        .transport-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #8a6a45; margin-bottom: 3px; }
+        .transport-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.4fr; gap: 12px; }
+        .transport-grid > div { display: flex; flex-direction: column; min-width: 0; }
+        .transport-grid .tk { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #8a6a45; }
+        .transport-grid .tv { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+        .transport-grid .tv.mono { font-family: ui-monospace, monospace; }
+        .draft-wm { position: absolute; inset: 0; z-index: 40; pointer-events: none; overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); align-content: space-evenly; justify-items: center; padding: 26px 0; }
+        .draft-wm span { transform: rotate(-30deg); white-space: nowrap; font: 800 15px/1 Arial, sans-serif; color: #d40000; opacity: 0.16; }
+
         .stone-block { margin-top: 4px; }
         .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #5b2e0a; margin: 6px 0 3px; }
@@ -325,6 +355,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           body { background: #fff; }
           .screen-bar { display: none !important; }
           .print-wrap { max-width: none; padding: 0 2mm; margin: 0; }
+          .draft-wm { position: fixed; inset: 0; }
           /* Let long tables flow across pages (no big empty gaps); repeat the
              header each page and keep individual rows whole. */
           table.slab-table thead { display: table-header-group; }
@@ -343,6 +374,11 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
       </div>
 
       <div className="print-wrap">
+        {isDraft && (
+          <div className="draft-wm" aria-hidden="true">
+            {Array.from({ length: 24 }).map((_, i) => <span key={i}>NOT VALID CHALLAN</span>)}
+          </div>
+        )}
         {pending && (
           <div className="pending-banner">⚠ Approval pending — preview only · not valid for dispatch until verified</div>
         )}
@@ -393,9 +429,19 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
           <div className="party">
             <div className="party-k">Dispatch details</div>
             <div className="ib"><span className="ibk">MTCPL Incharge</span><span className="ibv">RAJESH KUMAR - 9636004903<br />PARTH KUMAR - 9106054650</span></div>
-            <div className="ib"><span className="ibk">Vehicle no.</span><span className="ibv mono">{dash(dispatch.vehicle_no)}</span></div>
-            <div className="ib"><span className="ibk">Driver</span><span className="ibv">{contact(dispatch.driver_name ? dispatch.driver_name.toUpperCase() : null, dispatch.driver_phone)}</span></div>
             <div className="ib"><span className="ibk">Installation by</span><span className="ibv">{contact(site.installer_name, site.installer_phone)}</span></div>
+          </div>
+        </div>
+
+        {/* Transportation — horizontal strip: Company · LR no · Vehicle no · Driver.
+            Vehicle/driver fall back to the dispatch's own values (Daksh, mig 175). */}
+        <div className="transport">
+          <div className="transport-k">🚚 Transportation</div>
+          <div className="transport-grid">
+            <div><span className="tk">Company</span><span className="tv">{dash(transport?.company)}{transport?.phone ? ` · ${transport.phone}` : ""}</span></div>
+            <div><span className="tk">LR no.</span><span className="tv mono">{dash(transport?.lr)}</span></div>
+            <div><span className="tk">Vehicle no.</span><span className="tv mono">{dash(transport?.vehicle || dispatch.vehicle_no)}</span></div>
+            <div><span className="tk">Driver</span><span className="tv">{(() => { const drv = transport?.driver || dispatch.driver_name; const ph = transport?.driverPhone || dispatch.driver_phone; return contact(drv ? drv.toUpperCase() : null, ph); })()}</span></div>
           </div>
         </div>
 
