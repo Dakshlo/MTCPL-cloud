@@ -392,9 +392,10 @@ export function PrivateNotesModal({
   // stopPropagation on click + mousedown so the parent <summary>
   // element on the vendor profile page doesn't toggle <details>
   // when the user clicks the dot. Same for preventDefault.
-  // Opens only on hover + the secret code "aadesh" (or long-press on touch) —
-  // no longer a plain click (Daksh). The passphrase prompt still follows.
-  const triggerButton = <SecretDot onUnlock={() => { void open(); }} />;
+  // Opens only on hover + the secret code "aadesh" (desktop), or the tablet tap
+  // pattern (2 taps above the dot, then 2 below) — never a plain click (Daksh).
+  // The passphrase prompt still follows.
+  const triggerButton = <SecretDot onUnlock={() => { void open(); }} touchPattern />;
 
   if (mode === "closed") return triggerButton;
 
