@@ -171,7 +171,7 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
           <div className="company-block">
             <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
             <div className="cl">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
-            <div className="cl">GSTIN: 08AAFCM15Q1ZA · ☎ XXXXXXXXXX · temple@mtcpl.co</div>
+            <div className="cl">GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965 · temple@mtcpl.co</div>
           </div>
           <div>
             <div className="num">{invCode}</div>
