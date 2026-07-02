@@ -18,7 +18,9 @@ import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { challanStatus, type ChallanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "./challan-status-pill";
 import { ReturnToDispatchButton } from "./return-to-dispatch-button";
-import { sendChallanToBulkAction, returnDispatchToWaitingAction } from "../actions";
+import { sendChallanToBulkAction, returnDispatchToWaitingAction, dropChallanAction } from "../actions";
+import type { GstMode } from "@/lib/challan-pricing";
+import { DroppedSection } from "./dropped-section";
 
 export type BoardChallan = {
   id: string;
@@ -35,6 +37,12 @@ export type BoardChallan = {
 };
 export type BoardGroup = { temple: string; rows: BoardChallan[] };
 
+export type DroppedItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number };
+export type DroppedChallan = {
+  id: string; code: string; temple: string; date: string; customBilled: boolean;
+  gstMode: GstMode; igst: number; cgst: number; sgst: number; items: DroppedItem[];
+};
+
 const ACCENT: Record<ChallanStatus, string> = {
   open: "#6366f1",
   pending_approval: "#f59e0b",
@@ -50,13 +58,14 @@ function templeHue(name: string): number {
   return h;
 }
 
-export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: number }) {
+export function ChallansBoard({ groups, total, dropped }: { groups: BoardGroup[]; total: number; dropped: DroppedChallan[] }) {
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [isOver, setIsOver] = useState(false);
+  const [isOverDrop, setIsOverDrop] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [allExpanded, setAllExpanded] = useState(false);
-  const [pendingDrop, setPendingDrop] = useState<{ id: string; code: string } | null>(null);
+  const [pendingDrop, setPendingDrop] = useState<{ id: string; code: string; target: "bulk" | "drop" } | null>(null);
   const [sending, setSending] = useState(false);
 
   const router = useRouter();
@@ -65,6 +74,8 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
 
   const formRef = useRef<HTMLFormElement>(null);
   const idRef = useRef<HTMLInputElement>(null);
+  const dropFormRef = useRef<HTMLFormElement>(null);
+  const dropIdRef = useRef<HTMLInputElement>(null);
 
   const dragging = dragId != null;
   const q = query.trim().toLowerCase();
@@ -84,29 +95,35 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
   const toggle = (t: string) => setExpanded((p) => ({ ...p, [t]: !(p[t] ?? allExpanded) }));
 
   function beginDrag(id: string) { setDragId(id); }
-  function endDrag() { setDragId(null); setIsOver(false); }
+  function endDrag() { setDragId(null); setIsOver(false); setIsOverDrop(false); }
 
-  function onDrop() {
+  function onDrop(target: "bulk" | "drop") {
     setIsOver(false);
+    setIsOverDrop(false);
     const id = dragId;
     setDragId(null);
     if (!id) return;
     for (const g of groups) {
       const hit = g.rows.find((r) => r.id === id);
-      if (hit) { setPendingDrop({ id: hit.id, code: hit.code }); return; }
+      if (hit) { setPendingDrop({ id: hit.id, code: hit.code, target }); return; }
     }
   }
 
   function confirmSend() {
-    if (!pendingDrop || !idRef.current) return;
+    if (!pendingDrop) return;
     setSending(true);
-    idRef.current.value = pendingDrop.id;
-    formRef.current?.requestSubmit();
+    if (pendingDrop.target === "drop") {
+      if (dropIdRef.current) dropIdRef.current.value = pendingDrop.id;
+      dropFormRef.current?.requestSubmit();
+    } else {
+      if (idRef.current) idRef.current.value = pendingDrop.id;
+      formRef.current?.requestSubmit();
+    }
   }
 
   return (
     <>
-      <FinanceLoadingOverlay show={navPending || sending} label={sending ? "Sending to bulk…" : "Opening…"} />
+      <FinanceLoadingOverlay show={navPending || sending} label={sending ? (pendingDrop?.target === "drop" ? "Dropping…" : "Sending to bulk…") : "Opening…"} />
       <style>{`
         .chl-card { transition: transform .12s ease, box-shadow .12s ease; }
         .chl-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,0.12); }
@@ -120,6 +137,9 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
       <form ref={formRef} action={sendChallanToBulkAction} style={{ display: "none" }}>
         <input ref={idRef} type="hidden" name="id" />
       </form>
+      <form ref={dropFormRef} action={dropChallanAction} style={{ display: "none" }}>
+        <input ref={dropIdRef} type="hidden" name="id" />
+      </form>
 
       {/* Top action bar — Approval + Bulk (Bulk is also a drop target). */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
@@ -128,7 +148,7 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
           href="/invoicing/bulk"
           onDragOver={(e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOver(true); } }}
           onDragLeave={() => setIsOver(false)}
-          onDrop={(e) => { e.preventDefault(); onDrop(); }}
+          onDrop={(e) => { e.preventDefault(); onDrop("bulk"); }}
           style={{
             ...BUTTON_STYLES.secondary,
             display: "inline-flex", alignItems: "center", gap: 6,
@@ -210,27 +230,49 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
       {/* Floating drop zone — appears while dragging, fixed to the viewport so it's
           reachable from any scroll position (Daksh). */}
       {dragging && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOver(true); }}
-          onDragEnter={(e) => { e.preventDefault(); setIsOver(true); }}
-          onDragLeave={() => setIsOver(false)}
-          onDrop={(e) => { e.preventDefault(); onDrop(); }}
-          style={{
-            position: "fixed", left: "50%", bottom: 30, transform: `translateX(-50%) scale(${isOver ? 1.06 : 1})`,
-            zIndex: 80, width: "min(440px, 92vw)", textAlign: "center", cursor: "copy",
-            padding: "20px 24px", borderRadius: 16,
-            border: `2.5px dashed ${isOver ? "#b45309" : "#f59e0b"}`,
-            background: isOver ? "#b45309" : "rgba(255,251,235,0.97)",
-            color: isOver ? "#fff" : "#92400e",
-            boxShadow: "0 18px 50px rgba(15,23,42,0.28)",
-            animation: isOver ? "none" : "chlFloat 1.1s ease-in-out infinite",
-            transition: "transform .12s ease, background .12s ease, color .12s ease",
-            backdropFilter: "blur(2px)",
-          }}
-        >
-          <div style={{ fontSize: 28, lineHeight: 1 }}>📦</div>
-          <div style={{ fontSize: 15.5, fontWeight: 800, marginTop: 6 }}>{isOver ? "Release to send to Bulk" : "Drop here → Bulk challans"}</div>
-          <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.85, marginTop: 2 }}>parks this challan to bill together later</div>
+        <div style={{ position: "fixed", left: "50%", bottom: 30, transform: "translateX(-50%)", zIndex: 80, display: "flex", gap: 14, width: "min(760px, 94vw)", justifyContent: "center", flexWrap: "wrap" }}>
+          {/* Send to Bulk */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOver(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setIsOver(true); }}
+            onDragLeave={() => setIsOver(false)}
+            onDrop={(e) => { e.preventDefault(); onDrop("bulk"); }}
+            style={{
+              flex: "1 1 300px", textAlign: "center", cursor: "copy", padding: "18px 20px", borderRadius: 16,
+              transform: `scale(${isOver ? 1.05 : 1})`,
+              border: `2.5px dashed ${isOver ? "#b45309" : "#f59e0b"}`,
+              background: isOver ? "#b45309" : "rgba(255,251,235,0.97)",
+              color: isOver ? "#fff" : "#92400e",
+              boxShadow: "0 18px 50px rgba(15,23,42,0.28)",
+              animation: isOver ? "none" : "chlFloat 1.1s ease-in-out infinite",
+              transition: "transform .12s ease, background .12s ease, color .12s ease", backdropFilter: "blur(2px)",
+            }}
+          >
+            <div style={{ fontSize: 26, lineHeight: 1 }}>📦</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 5 }}>{isOver ? "Release → Bulk" : "Drop here → Bulk challans"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginTop: 2 }}>bill together later on one invoice</div>
+          </div>
+          {/* Drop → custom whole-piece bill */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOverDrop(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setIsOverDrop(true); }}
+            onDragLeave={() => setIsOverDrop(false)}
+            onDrop={(e) => { e.preventDefault(); onDrop("drop"); }}
+            style={{
+              flex: "1 1 300px", textAlign: "center", cursor: "copy", padding: "18px 20px", borderRadius: 16,
+              transform: `scale(${isOverDrop ? 1.05 : 1})`,
+              border: `2.5px dashed ${isOverDrop ? "#6d28d9" : "#8b5cf6"}`,
+              background: isOverDrop ? "#6d28d9" : "rgba(245,243,255,0.97)",
+              color: isOverDrop ? "#fff" : "#5b21b6",
+              boxShadow: "0 18px 50px rgba(15,23,42,0.28)",
+              animation: isOverDrop ? "none" : "chlFloat 1.1s ease-in-out infinite",
+              transition: "transform .12s ease, background .12s ease, color .12s ease", backdropFilter: "blur(2px)",
+            }}
+          >
+            <div style={{ fontSize: 26, lineHeight: 1 }}>🎯</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 5 }}>{isOverDrop ? "Release → Drop" : "Drop here → Custom bill"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginTop: 2 }}>re-bill as one whole piece &amp; deliver</div>
+          </div>
         </div>
       )}
 
@@ -241,20 +283,25 @@ export function ChallansBoard({ groups, total }: { groups: BoardGroup[]; total: 
           onClick={() => { if (!sending) setPendingDrop(null); }}
         >
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(440px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ fontSize: 34, marginBottom: 6 }}>📦</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>Send to Bulk challans?</div>
+            <div style={{ fontSize: 34, marginBottom: 6 }}>{pendingDrop.target === "drop" ? "🎯" : "📦"}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>{pendingDrop.target === "drop" ? "Drop this challan?" : "Send to Bulk challans?"}</div>
             <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, margin: "0 0 18px" }}>
-              <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{pendingDrop.code}</strong> will leave this page and wait on the <strong>Bulk challans</strong> page, where it can be billed together with the temple&apos;s other challans on one tax invoice. You can send it back anytime.
+              <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{pendingDrop.code}</strong>{" "}
+              {pendingDrop.target === "drop"
+                ? <>moves to the <strong>Dropped</strong> section below, where you re-bill it as ONE whole-piece bill in the client&apos;s format. Creating that bill delivers the production dispatch (no on-road leg) — the <strong>challan number stays the same</strong>.</>
+                : <>will leave this page and wait on the <strong>Bulk challans</strong> page, where it can be billed together with the temple&apos;s other challans on one tax invoice. You can send it back anytime.</>}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" disabled={sending} onClick={() => setPendingDrop(null)} style={{ ...BUTTON_STYLES.ghost, opacity: sending ? 0.5 : 1 }}>Cancel</button>
-              <button type="button" disabled={sending} onClick={confirmSend} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "#b45309", cursor: sending ? "default" : "pointer", opacity: sending ? 0.7 : 1 }}>
-                {sending ? "Sending…" : "📦 Send to bulk"}
+              <button type="button" disabled={sending} onClick={confirmSend} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: pendingDrop.target === "drop" ? "#6d28d9" : "#b45309", cursor: sending ? "default" : "pointer", opacity: sending ? 0.7 : 1 }}>
+                {sending ? (pendingDrop.target === "drop" ? "Dropping…" : "Sending…") : (pendingDrop.target === "drop" ? "🎯 Drop the challan" : "📦 Send to bulk")}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {dropped.length > 0 && <DroppedSection dropped={dropped} />}
     </>
   );
 }

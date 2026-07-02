@@ -131,8 +131,28 @@ export default async function InvoicingListPage() {
     }
   }
 
+  // Mig 177 — invoiced custom (dropped) bills: temple challans re-billed as a
+  // whole piece then invoiced. Best-effort so a pre-migration deploy skips them.
   type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
+  const customRows: Row[] = [];
+  {
+    const { data, error } = await supabase.from("challans")
+      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
+      .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
+      .order("challan_date", { ascending: false });
+    if (!error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const r of (data ?? []) as any[]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const amounts = ((r.challan_custom_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
+        const t = computeInvoiceTotals(amounts, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
+        customRows.push({ key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`, date: r.challan_date, customer: r.temple ?? "—", total: t.grand, href: `/invoicing/challan/${r.id}/custom/print`, external: true });
+      }
+    }
+  }
+
   const rows: Row[] = [
+    ...customRows,
     ...legacy.map((r) => ({
       key: `inv:${r.id}`, code: r.invoice_number, date: r.invoice_date, customer: r.customer_name,
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
