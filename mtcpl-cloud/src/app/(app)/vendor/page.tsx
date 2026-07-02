@@ -19,7 +19,7 @@ import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
-import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite, type ReworkPendingItem, type RejectedItem } from "./cockpit-client";
+import { VendorCockpitClient, type CarvingJobLite, type CncMachineLive, type SlabLite, type HeldSlabLite, type ReworkPendingItem, type RejectedItem, type CarvedItem } from "./cockpit-client";
 
 type SearchParams = Promise<{ vendor_id?: string; toast?: string }>;
 
@@ -616,10 +616,13 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
   ];
+  // Dimensions print in inches (columns are *_ft but hold inches); drop a
+  // trailing ".0" so 8.0 shows as 8. e.g. 26.5×17.5×8"
+  const dimNum = (n: number) => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2))));
   async function carvedInWindow(
     startIso: string,
     endIso: string,
-  ): Promise<{ sft: number; cft: number; slabs: number }> {
+  ): Promise<{ sft: number; cft: number; slabs: number; items: CarvedItem[] }> {
     const { data: appr } = await admin
       .from("carving_items")
       .select("slab_requirement_id, review_approved_at, carving_sides")
@@ -629,19 +632,44 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       .lt("review_approved_at", endIso);
     const rowsAppr = (appr ?? []) as Array<{
       slab_requirement_id: string;
+      review_approved_at: string;
       carving_sides?: number | null;
     }>;
     const ids = [...new Set(rowsAppr.map((r) => r.slab_requirement_id))];
     let sft = 0;
     let cft = 0;
+    const items: CarvedItem[] = [];
     if (ids.length > 0) {
       const { data: dims } = await admin
         .from("slab_requirements")
-        .select("id, length_ft, width_ft, thickness_ft")
+        .select(
+          "id, temple, stone, label, description, additional_description, component_section, component_element, length_ft, width_ft, thickness_ft",
+        )
         .in("id", ids);
-      const dimById = new Map<string, { l: number; w: number; t: number }>();
+      const dimById = new Map<
+        string,
+        {
+          l: number;
+          w: number;
+          t: number;
+          temple: string | null;
+          stone: string | null;
+          label: string | null;
+          description: string | null;
+          additional: string | null;
+          section: string | null;
+          element: string | null;
+        }
+      >();
       for (const d of (dims ?? []) as Array<{
         id: string;
+        temple: string | null;
+        stone: string | null;
+        label: string | null;
+        description: string | null;
+        additional_description: string | null;
+        component_section: string | null;
+        component_element: string | null;
         length_ft: number | string;
         width_ft: number | string;
         thickness_ft: number | string;
@@ -650,6 +678,13 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
           l: Number(d.length_ft) || 0,
           w: Number(d.width_ft) || 0,
           t: Number(d.thickness_ft) || 0,
+          temple: d.temple,
+          stone: d.stone,
+          label: d.label,
+          description: d.description,
+          additional: d.additional_description,
+          section: d.component_section,
+          element: d.component_element,
         });
       }
       for (const r of rowsAppr) {
@@ -657,11 +692,30 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         if (!dim) continue;
         // Mig 088 — double-side carving counts output x2.
         const sides = Number(r.carving_sides) === 2 ? 2 : 1;
-        sft += ((dim.l * dim.w) / 144) * sides;
-        cft += ((dim.l * dim.w * dim.t) / 1728) * sides;
+        const s = ((dim.l * dim.w) / 144) * sides;
+        const c = ((dim.l * dim.w * dim.t) / 1728) * sides;
+        sft += s;
+        cft += c;
+        items.push({
+          id: r.slab_requirement_id,
+          approvedAt: r.review_approved_at,
+          temple: dim.temple,
+          stone: dim.stone,
+          section: dim.section,
+          element: dim.element,
+          label: dim.label,
+          description: dim.description,
+          additional: dim.additional,
+          dims: `${dimNum(dim.l)}×${dimNum(dim.w)}×${dimNum(dim.t)}"`,
+          sft: s,
+          cft: c,
+          sides,
+        });
       }
     }
-    return { sft, cft, slabs: rowsAppr.length };
+    // Recent completed first — newest approval at the top.
+    items.sort((a, b) => (a.approvedAt < b.approvedAt ? 1 : a.approvedAt > b.approvedAt ? -1 : 0));
+    return { sft, cft, slabs: rowsAppr.length, items };
   }
 
   // IST calendar-month bounds (IST = UTC+5:30). Date.UTC handles the

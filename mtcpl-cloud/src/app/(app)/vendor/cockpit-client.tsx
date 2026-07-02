@@ -174,6 +174,27 @@ export type RejectedItem = {
   slab: SlabLite | null;
 };
 
+/** Daksh Jul 2026 — one approved carved slab, for the cockpit's carved-output
+ *  drill-down (click the monthly stat → daily breakdown → per-slab detail). */
+export type CarvedItem = {
+  id: string;
+  approvedAt: string;
+  temple: string | null;
+  stone: string | null;
+  /** component_section = category 1 */
+  section: string | null;
+  /** component_element = category 2 */
+  element: string | null;
+  label: string | null;
+  description: string | null;
+  additional: string | null;
+  /** pre-formatted L×W×H in inches, e.g. 26.5×17.5×8" */
+  dims: string;
+  sft: number;
+  cft: number;
+  sides: number;
+};
+
 export type CarvingJobLite = {
   id: string;
   slab_id: string;
@@ -501,6 +522,44 @@ function TempleGroupHeader({ temple, count }: { temple: string; count: number })
   );
 }
 
+// ── Carved-output drill-down helpers (IST calendar day) ─────────────
+const IST_MS = 5.5 * 60 * 60 * 1000;
+/** YYYY-MM-DD in IST for grouping approvals by the day they happened. */
+function istDayKey(iso: string): string {
+  return new Date(new Date(iso).getTime() + IST_MS).toISOString().slice(0, 10);
+}
+/** "Tue · 2 Jul 2026" from a YYYY-MM-DD day key. */
+function istDayLabel(key: string): string {
+  return new Date(`${key}T00:00:00Z`).toLocaleDateString("en-IN", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+/** Time-of-day (IST) for a single approval, e.g. "4:12 PM". */
+function istTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+const num1 = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+/** Group carved items into [dayKey, items][] sorted newest-day first. Items
+ *  arrive already newest-first, so each day's list stays latest-first too. */
+function groupCarvedByDay(items: CarvedItem[]): Array<[string, CarvedItem[]]> {
+  const m = new Map<string, CarvedItem[]>();
+  for (const it of items) {
+    const k = istDayKey(it.approvedAt);
+    const arr = m.get(k);
+    if (arr) arr.push(it);
+    else m.set(k, [it]);
+  }
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+}
+
 // ── Main client component ───────────────────────────────────────────
 
 export function VendorCockpitClient({
@@ -554,8 +613,8 @@ export function VendorCockpitClient({
    *  calendar month. Current month shows by default; a small button
    *  toggles to last month. Approval-only (reworked / rejected slabs
    *  excluded). */
-  carvedThisMonth: { sft: number; cft: number; slabs: number };
-  carvedLastMonth: { sft: number; cft: number; slabs: number };
+  carvedThisMonth: { sft: number; cft: number; slabs: number; items: CarvedItem[] };
+  carvedLastMonth: { sft: number; cft: number; slabs: number; items: CarvedItem[] };
   thisMonthLabel: string;
   lastMonthLabel: string;
   /** Daksh June 2026 — power-cut state. TRUE when the global "all
@@ -587,6 +646,21 @@ export function VendorCockpitClient({
   // Daksh June 2026 — header carved-output stat shows the current month
   // by default; this flips it to last month.
   const [statsShowLast, setStatsShowLast] = useState(false);
+  // Daksh Jul 2026 — carved-output drill-down: click the monthly stat to open
+  // a day-by-day list; each day expands to the full slab detail. openDays holds
+  // the expanded day keys (latest day auto-opens when the modal opens).
+  const [carvedPeek, setCarvedPeek] = useState(false);
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
+  const activeCarved = statsShowLast ? carvedLastMonth : carvedThisMonth;
+  const activeCarvedLabel = statsShowLast ? lastMonthLabel : thisMonthLabel;
+  const carvedDayGroups = useMemo(() => groupCarvedByDay(activeCarved.items), [activeCarved]);
+  // When the drill-down opens (or the month flips while open), expand the most
+  // recent day by default so the newest work shows without a tap.
+  useEffect(() => {
+    if (!carvedPeek) return;
+    setOpenDays(new Set(carvedDayGroups.length ? [carvedDayGroups[0][0]] : []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carvedPeek, statsShowLast]);
   // Daksh June 2026 — custom (non-browser) confirm dialog for the
   // power-cut "pause all" action.
   const [powerCutConfirm, setPowerCutConfirm] = useState(false);
@@ -976,6 +1050,16 @@ export function VendorCockpitClient({
           const statLabel = statsShowLast ? lastMonthLabel : thisMonthLabel;
           return (
             <div
+              onClick={() => setCarvedPeek(true)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setCarvedPeek(true);
+                }
+              }}
+              title="Tap for the day-by-day carved list"
               style={{
                 marginTop: 12,
                 display: "flex",
@@ -986,6 +1070,7 @@ export function VendorCockpitClient({
                 background: "rgba(74,222,128,0.10)",
                 border: "1px solid rgba(74,222,128,0.28)",
                 borderRadius: 10,
+                cursor: "pointer",
               }}
             >
               <span
@@ -1014,12 +1099,17 @@ export function VendorCockpitClient({
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
                 {stat.slabs} slab{stat.slabs === 1 ? "" : "s"} approved
               </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#86efac", marginLeft: "auto", whiteSpace: "nowrap" }}>
+                🔍 daily detail →
+              </span>
               <button
                 type="button"
-                onClick={() => setStatsShowLast((v) => !v)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setStatsShowLast((v) => !v);
+                }}
                 title={statsShowLast ? "Back to this month" : "See last month"}
                 style={{
-                  marginLeft: "auto",
                   padding: "5px 11px",
                   fontSize: 11,
                   fontWeight: 700,
@@ -1455,6 +1545,124 @@ export function VendorCockpitClient({
                 ))}
               </div>
             ))}
+        </CenterPeekModal>
+      )}
+      {/* Daksh Jul 2026 — carved-output drill-down: month → day → slab detail.
+          Newest day first; each day expands to the full slab list (category 1/2,
+          label, description, dimensions, sft/cft). */}
+      {carvedPeek && (
+        <CenterPeekModal
+          title={`✅ Carved · ${activeCarvedLabel}`}
+          subtitle={`${activeCarved.slabs} slab${activeCarved.slabs === 1 ? "" : "s"} approved · ${num1(activeCarved.sft)} sft · ${num1(activeCarved.cft)} cft — newest first`}
+          onClose={() => setCarvedPeek(false)}
+        >
+          {/* Month switch inside the drill-down. */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {([[false, thisMonthLabel], [true, lastMonthLabel]] as const).map(([last, lbl]) => (
+              <button
+                key={String(last)}
+                type="button"
+                onClick={() => setStatsShowLast(last)}
+                style={{
+                  flex: 1,
+                  padding: "8px 10px",
+                  fontSize: 12.5,
+                  fontWeight: 800,
+                  borderRadius: 8,
+                  border: `1.5px solid ${statsShowLast === last ? "#22c55e" : "var(--border)"}`,
+                  background: statsShowLast === last ? "rgba(34,197,94,0.12)" : "var(--bg)",
+                  color: statsShowLast === last ? "#15803d" : "var(--muted)",
+                  cursor: "pointer",
+                }}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {carvedDayGroups.length === 0 ? (
+            <Empty text={`Nothing carved & approved in ${activeCarvedLabel} yet.`} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {carvedDayGroups.map(([dayKey, dayItems]) => {
+                const open = openDays.has(dayKey);
+                const daySft = dayItems.reduce((a, b) => a + b.sft, 0);
+                const dayCft = dayItems.reduce((a, b) => a + b.cft, 0);
+                return (
+                  <div key={dayKey} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenDays((prev) => {
+                          const n = new Set(prev);
+                          if (n.has(dayKey)) n.delete(dayKey);
+                          else n.add(dayKey);
+                          return n;
+                        })
+                      }
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "10px 12px",
+                        background: open ? "rgba(34,197,94,0.08)" : "var(--surface)",
+                        border: "none",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        color: "var(--text)",
+                      }}
+                    >
+                      <span style={{ fontSize: 11, display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }}>▶</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 800 }}>{istDayLabel(dayKey)}</span>
+                      <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>
+                        {dayItems.length} slab{dayItems.length === 1 ? "" : "s"}
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>
+                        {num1(daySft)} sft · {num1(dayCft)} cft
+                      </span>
+                    </button>
+                    {open && (
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        {dayItems.map((it, i) => (
+                          <div key={`${it.id}-${i}`} style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 3 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>{it.id}</span>
+                              {it.sides === 2 && (
+                                <span style={{ fontSize: 9.5, fontWeight: 800, color: "#7c3aed", background: "rgba(124,58,237,0.12)", borderRadius: 5, padding: "1px 6px" }}>2 SIDES</span>
+                              )}
+                              <span style={{ fontSize: 11, color: "var(--muted)" }}>{istTime(it.approvedAt)}</span>
+                              <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>
+                                {num1(it.sft)} sft · {num1(it.cft)} cft
+                              </span>
+                            </div>
+                            {(it.section || it.element) && (
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                {it.section && (
+                                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "#0369a1", background: "rgba(3,105,161,0.1)", border: "1px solid rgba(3,105,161,0.25)", borderRadius: 6, padding: "1px 7px" }}>{it.section}</span>
+                                )}
+                                {it.element && (
+                                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "#0d9488", background: "rgba(13,148,136,0.1)", border: "1px solid rgba(13,148,136,0.28)", borderRadius: 6, padding: "1px 7px" }}>{it.element}</span>
+                                )}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+                              {it.label || "— (no label)"}
+                              <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--muted)", fontWeight: 500 }}> · {it.dims}</span>
+                            </div>
+                            {it.description && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{it.description}</div>}
+                            {it.additional && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{it.additional}</div>}
+                            <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                              🏛 {it.temple || "—"}{it.stone ? ` · ${it.stone}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CenterPeekModal>
       )}
       {/* Mig 069 — Reload-from-hold picker. Defaults to held_from
