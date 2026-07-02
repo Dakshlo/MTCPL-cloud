@@ -69,6 +69,34 @@ export default async function DispatchPage({
 
   const admin = createAdminSupabaseClient();
 
+  // Ready ("Make Dispatch") slabs — paginate so PostgREST's 1000-row response
+  // cap can't silently truncate the pool. `.limit()` does NOT raise that cap, and
+  // once TOTAL completed slabs (all temples) pass 1000, a temple past the boundary
+  // showed only a PARTIAL set in the picker (e.g. 461 of RAMALAYAM's 672). Ranging
+  // in 1000-row pages, ordered by id LAST for stable paging, returns them all.
+  const readyQuery = () =>
+    admin
+      .from("slab_requirements")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
+      .eq("status", "completed")
+      .eq("is_parked", false)
+      .order("priority", { ascending: false })
+      .order("updated_at", { ascending: true })
+      .order("id", { ascending: true });
+  async function fetchAllReadySlabs() {
+    type Row = NonNullable<Awaited<ReturnType<typeof readyQuery>>["data"]>[number];
+    const out: Row[] = [];
+    const PAGE = 1000;
+    for (let from = 0; from < 1_000_000; from += PAGE) {
+      const { data, error } = await readyQuery().range(from, from + PAGE - 1);
+      if (error) break;
+      const rows = (data ?? []) as Row[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  }
+
   const [
     { data: completedSlabs },
     { data: provisionalDispatches },
@@ -80,15 +108,9 @@ export default async function DispatchPage({
     { data: handlingManRow },
     { data: inchargeRows },
   ] = await Promise.all([
-    // Ready ("Make Dispatch") = status=completed slabs waiting to be packed.
-    // Mig 125 follow-on — parked (dispatch storage) slabs are hidden here.
-    admin
-      .from("slab_requirements")
-      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
-      .eq("status", "completed")
-      .eq("is_parked", false)
-      .order("priority", { ascending: false })
-      .order("updated_at", { ascending: true }),
+    // Ready ("Make Dispatch") = completed, un-parked slabs. Paginated (see
+    // fetchAllReadySlabs) so the 1000-row cap never truncates the picker.
+    fetchAllReadySlabs().then((rows) => ({ data: rows })),
     // Provisional = dispatch created but senior hasn't verified yet (or it was
     // RETURNED from invoicing — Mig 167 — to be re-checked / cancelled).
     admin
