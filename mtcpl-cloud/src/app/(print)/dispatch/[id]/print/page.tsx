@@ -197,6 +197,10 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const ship = billing?.shipping ?? null;
   const shipName = (ship?.name ?? "").trim() || billName;
   const loadNumber = (dispatch as { load_number?: number | null }).load_number ?? null;
+  // Dispatch incharge chosen on Check & verify (mig 159 resolution) — printed
+  // under the "Dispatch by" signature box so they sign against their own name.
+  const inchargeName = (handlingMan?.name ?? "").trim();
+  const inchargePhone = (handlingMan?.phone ?? "").trim();
 
   const profilesMap = await getProfilesMap();
   const dispatcherName = dispatch.dispatched_by ? profilesMap[dispatch.dispatched_by] ?? "—" : "—";
@@ -483,8 +487,8 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
             driver name and client (= temple) name are auto-printed. */}
         <div className="signoff">
           <div className="sign">MTCPL Representative<div className="sub">&nbsp;</div></div>
-          <div className="sign">Challan Generated<div className="sub">&nbsp;</div></div>
-          <div className="sign">Account Signature<div className="sub">&nbsp;</div></div>
+          <div className="sign">Dispatch by<div className="sub">{inchargeName || " "}{inchargePhone ? <><br />{inchargePhone}</> : null}</div></div>
+          <div className="sign">Account Signature<div className="sub">VIRENDRA PAL</div></div>
           <div className="sign">Driver Signature<div className="sub">{dash(dispatch.driver_name)}</div></div>
           <div className="sign">Client Signature<div className="sub">{billName}</div></div>
         </div>
