@@ -17,18 +17,26 @@ import type { DroppedChallan } from "./challans-board";
 type Item = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
 const blank = (): Item => ({ particulars: "", hsn: "", unit: "", quantity: "", rate: "" });
 
-export function DroppedSection({ dropped }: { dropped: DroppedChallan[] }) {
+export function DroppedSection({ dropped, showHeader = true }: { dropped: DroppedChallan[]; showHeader?: boolean }) {
   const [billing, setBilling] = useState<DroppedChallan | null>(null);
   const [converting, setConverting] = useState<DroppedChallan | null>(null);
 
   return (
-    <div style={{ marginTop: 24 }}>
-      <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "#5b21b6", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-        🎯 Dropped — custom whole-piece bills <span style={pill}>{dropped.length}</span>
-      </div>
+    <div style={{ marginTop: showHeader ? 24 : 0 }}>
+      {showHeader && (
+        <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "#5b21b6", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          🎯 Dropped — custom whole-piece bills <span style={pill}>{dropped.length}</span>
+        </div>
+      )}
+      {dropped.length === 0 ? (
+        <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "30px 22px", textAlign: "center", color: "var(--muted)" }}>
+          No dropped challans. On the <strong>Challans</strong> page, drag a challan onto the <strong>🎯 Custom bill</strong> drop zone.
+        </div>
+      ) : (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
         {dropped.map((d) => <DroppedCard key={d.id} d={d} onBill={() => setBilling(d)} onConvert={() => setConverting(d)} />)}
       </div>
+      )}
       {billing && <BillForm d={billing} onClose={() => setBilling(null)} />}
       {converting && <ConvertModal d={converting} onClose={() => setConverting(null)} />}
     </div>

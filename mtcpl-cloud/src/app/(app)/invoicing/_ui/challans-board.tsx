@@ -20,7 +20,6 @@ import { ChallanStatusPill } from "./challan-status-pill";
 import { ReturnToDispatchButton } from "./return-to-dispatch-button";
 import { sendChallanToBulkAction, returnDispatchToWaitingAction, dropChallanAction } from "../actions";
 import type { GstMode } from "@/lib/challan-pricing";
-import { DroppedSection } from "./dropped-section";
 
 export type BoardChallan = {
   id: string;
@@ -58,7 +57,7 @@ function templeHue(name: string): number {
   return h;
 }
 
-export function ChallansBoard({ groups, total, dropped }: { groups: BoardGroup[]; total: number; dropped: DroppedChallan[] }) {
+export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGroup[]; total: number; droppedCount: number }) {
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [isOver, setIsOver] = useState(false);
@@ -157,6 +156,23 @@ export function ChallansBoard({ groups, total, dropped }: { groups: BoardGroup[]
           }}
         >
           📦 Bulk challans
+        </Link>
+        <Link
+          href="/invoicing/dropped"
+          onDragOver={(e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOverDrop(true); } }}
+          onDragLeave={() => setIsOverDrop(false)}
+          onDrop={(e) => { e.preventDefault(); onDrop("drop"); }}
+          style={{
+            ...BUTTON_STYLES.secondary,
+            display: "inline-flex", alignItems: "center", gap: 6,
+            borderColor: dragging ? "#8b5cf6" : undefined,
+            background: dragging ? "rgba(139,92,246,0.12)" : undefined,
+          }}
+        >
+          🎯 Dropped
+          {droppedCount > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5b21b6", background: "rgba(139,92,246,0.16)", borderRadius: 999, padding: "1px 8px" }}>{droppedCount}</span>
+          )}
         </Link>
       </div>
 
@@ -301,7 +317,6 @@ export function ChallansBoard({ groups, total, dropped }: { groups: BoardGroup[]
         </div>
       )}
 
-      {dropped.length > 0 && <DroppedSection dropped={dropped} />}
     </>
   );
 }

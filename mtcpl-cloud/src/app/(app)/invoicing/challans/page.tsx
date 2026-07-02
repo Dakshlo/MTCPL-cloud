@@ -14,7 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { AccountsHero } from "../../accounts/_ui/components";
 import { challanCode } from "@/lib/doc-code";
-import { ChallansBoard, type BoardGroup, type BoardChallan, type DroppedChallan } from "../_ui/challans-board";
+import { ChallansBoard, type BoardGroup, type BoardChallan } from "../_ui/challans-board";
 
 type SearchParams = Promise<{ toast?: string }>;
 
@@ -77,33 +77,21 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
   }
 
   // Mig 177 — "dropped" challans (custom whole-piece bill) leave the board into a
-  // Dropped section. Best-effort so a pre-migration deploy just shows no section.
+  // Dropped section lives on its own page (/invoicing/dropped). Here we only
+  // need the ids to EXCLUDE dropped challans from the board + a count for the
+  // "🎯 Dropped" nav button. Best-effort so a pre-mig deploy just shows none.
   const droppedIds = new Set<string>();
-  const dropped: DroppedChallan[] = [];
+  let droppedCount = 0;
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await supabase
       .from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, custom_billed_at, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), challan_custom_items(position, particulars, hsn, unit, quantity, rate, amount)")
+      .select("id, inv_seq")
       .not("dropped_at", "is", null)
-      .is("cancelled_at", null)
-      .order("dropped_at", { ascending: false });
+      .is("cancelled_at", null);
     if (!error) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const r of (data ?? []) as any[]) {
+      for (const r of (data ?? []) as Array<{ id: string; inv_seq: number | null }>) {
         droppedIds.add(r.id);
-        if (r.inv_seq != null) continue; // invoiced → shows on Invoices, not the Dropped section
-        const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties;
-        const gm = r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const items = ((r.challan_custom_items ?? []) as any[])
-          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-          .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0 }));
-        dropped.push({
-          id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number, temple: r.temple ?? p?.name ?? "—",
-          date: r.challan_date, customBilled: !!r.custom_billed_at, gstMode: gm,
-          igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0, items,
-        });
+        if (r.inv_seq == null) droppedCount++; // un-invoiced = shown on the Dropped page
       }
     }
   }
@@ -167,7 +155,7 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
       )}
 
       <div style={{ marginTop: 14 }}>
-        <ChallansBoard groups={groups} total={visible.length} dropped={dropped} />
+        <ChallansBoard groups={groups} total={visible.length} droppedCount={droppedCount} />
       </div>
     </section>
   );
