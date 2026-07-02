@@ -128,7 +128,11 @@ export function CheckGrid({
   const filteredAvail = mergedAvail.filter((s) => {
     const q = addQuery.trim().toLowerCase();
     if (!q) return true;
-    return s.id.toLowerCase().includes(q) || (s.label ?? "").toLowerCase().includes(q) || (s.dimensions ?? "").toLowerCase().includes(q);
+    // Dimension search normalises ×/x/* + strips spaces & " / in so "24x18"
+    // matches a stored 24" × 18" (mirrors the Make Dispatch picker).
+    const dimNorm = (s.dimensions ?? "").toLowerCase().replace(/[×x]/g, "x").replace(/["\s]|in\b/g, "");
+    const hay = `${s.id} ${s.label ?? ""}`.toLowerCase();
+    return q.split(/\s+/).every((tok) => hay.includes(tok) || dimNorm.includes(tok.replace(/[×x*]/g, "x")));
   });
   // Only currently-visible picks are submitted — a slab picked from a storage
   // source/station that's since been toggled off is NOT silently added (matches
