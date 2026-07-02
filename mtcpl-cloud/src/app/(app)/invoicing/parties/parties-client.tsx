@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { Combobox, CATEGORY_HINTS } from "../_ui/combobox";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -311,17 +312,7 @@ function PartyForm({
         />
       </Field>
       <Field label="Category / head">
-        <input
-          type="text"
-          list="party-cat-hints"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          placeholder="e.g. Maintenance & repair, Stone wastage"
-          style={INPUT_STYLE}
-        />
-        <datalist id="party-cat-hints">
-          {["Maintenance & repair", "Stone wastage", "Scrap sale", "Machinery / spares", "Consumables", "Other"].map((c) => <option key={c} value={c} />)}
-        </datalist>
+        <Combobox value={category} onChange={setCategory} options={CATEGORY_HINTS} placeholder="e.g. Maintenance & repair, Stone wastage" inputStyle={INPUT_STYLE} />
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="GSTIN">

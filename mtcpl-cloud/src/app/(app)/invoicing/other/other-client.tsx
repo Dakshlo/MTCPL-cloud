@@ -12,6 +12,7 @@ import Link from "next/link";
 import { createOtherChallanAction, updateOtherChallanAction, convertOtherChallanAction, cancelOtherChallanAction } from "./actions";
 import { upsertInvoicePartyAction } from "../actions";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { Combobox, CATEGORY_HINTS } from "../_ui/combobox";
 
 export type Party = {
   id: string; name: string; category: string | null; gstin: string | null; pan: string | null;
@@ -26,8 +27,6 @@ export type OtherChallan = {
   items: OtherItem[]; converted: boolean; invoiceCode: string | null;
 };
 
-/** Common heads for classifying non-temple sales (free text — datalist hints). */
-const CATEGORY_HINTS = ["Maintenance & repair", "Stone wastage", "Scrap sale", "Machinery / spares", "Consumables", "Other"];
 
 type Item = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
 const blankItem = (): Item => ({ particulars: "", hsn: "", unit: "", quantity: "", rate: "" });
@@ -45,7 +44,7 @@ export function OtherSalesClient({
   const [editId, setEditId] = useState<string | null>(null);
   const [party, setParty] = useState(preselectId ?? "");
   const [date, setDate] = useState(todayIST());
-  const [items, setItems] = useState<Item[]>([blankItem(), blankItem()]);
+  const [items, setItems] = useState<Item[]>([blankItem()]);
   const [mode, setMode] = useState<GstMode>(null);
   const [igst, setIgst] = useState("18");
   const [cgst, setCgst] = useState("9");
@@ -329,6 +328,7 @@ function NewClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: (n
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<GstMode>(null);
+  const [cat, setCat] = useState("");
 
   function submit(fd: FormData) {
     const name = String(fd.get("name") || "").trim();
@@ -348,10 +348,9 @@ function NewClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: (n
     <div onMouseDown={() => { if (!pending) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20, overflowY: "auto" }}>
       <form action={submit} onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(620px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 20, boxShadow: "0 24px 60px rgba(0,0,0,0.3)", maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 12 }}>＋ New client</div>
-        <datalist id="os-cat-hints">{CATEGORY_HINTS.map((c) => <option key={c} value={c} />)}</datalist>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
           <label className="stack">{lbl("Client name *")}<input name="name" required style={fld} /></label>
-          <label className="stack">{lbl("Category / head")}<input name="category" list="os-cat-hints" placeholder="e.g. Maintenance & repair" style={fld} /></label>
+          <label className="stack">{lbl("Category / head")}<Combobox name="category" value={cat} onChange={setCat} options={CATEGORY_HINTS} placeholder="e.g. Maintenance & repair" inputStyle={fld} /></label>
           <label className="stack">{lbl("GSTIN")}<input name="gstin" style={fld} /></label>
           <label className="stack">{lbl("PAN")}<input name="pan" style={fld} /></label>
           <label className="stack">{lbl("Phone")}<input name="phone" style={fld} /></label>

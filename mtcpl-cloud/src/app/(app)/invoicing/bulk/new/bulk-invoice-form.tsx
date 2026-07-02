@@ -30,7 +30,7 @@ const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/
 export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: TempleData[]; invPrefix: string; autoNum: string }) {
   const [temple, setTemple] = useState("");
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const [items, setItems] = useState<Item[]>([blankItem(), blankItem()]);
+  const [items, setItems] = useState<Item[]>([blankItem()]);
   const [mode, setMode] = useState<GstMode>(null);
   const [igst, setIgst] = useState("18");
   const [cgst, setCgst] = useState("9");
