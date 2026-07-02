@@ -71,7 +71,7 @@ async function writeItems(admin: ReturnType<typeof createAdminSupabaseClient>, c
   );
 }
 
-/** Create a new "other" challan (OC-<fy>-<n>) with free-typed line items. */
+/** Create a new "other" challan (CH-<fy>-<n>, shared series) with line items. */
 export async function createOtherChallanAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
@@ -84,9 +84,11 @@ export async function createOtherChallanAction(formData: FormData) {
 
   const challanDate = txt(formData, "challan_date") || null;
   const fy = financialYear(challanDate || new Date());
+  // Share the SAME per-FY challan counter as dispatch challans (mig 168), so the
+  // number continues the CH-<fy>-n series instead of a separate OC one (Daksh).
   let docSeq: number | null = null;
   try {
-    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `OC:${fy}` });
+    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: fy });
     if (typeof seq === "number") docSeq = seq;
   } catch { /* counter unavailable — leave null */ }
 
@@ -109,7 +111,7 @@ export async function createOtherChallanAction(formData: FormData) {
 
   await logAudit(profile.id, "other_challan_created", "other_challan", id, { fy, docSeq });
   refresh(id);
-  redirect(`/invoicing/other?toast=${encodeURIComponent(`Challan created — OC-${fy}-${String(docSeq ?? 0).padStart(2, "0")}`)}`);
+  redirect(`/invoicing/other?toast=${encodeURIComponent(`Challan created — CH-${fy}-${String(docSeq ?? 0).padStart(2, "0")}`)}`);
 }
 
 /** Edit an unconverted challan (replaces its line items). */

@@ -11,7 +11,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { financialYear } from "@/lib/doc-code";
+import { financialYear, challanCode } from "@/lib/doc-code";
 import { OtherSalesClient, type Party, type OtherChallan } from "./other-client";
 
 export const dynamic = "force-dynamic";
@@ -31,14 +31,14 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
   {
     const { data, error } = await admin
       .from("invoice_parties")
-      .select("id, name, gstin, pan, address, city, state, state_code, phone, email, ship_name, ship_address, ship_city, ship_state, ship_state_code, ship_gstin, ship_phone, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .select("id, name, category, gstin, pan, address, city, state, state_code, phone, email, ship_name, ship_address, ship_city, ship_state, ship_state_code, ship_gstin, ship_phone, gst_mode, igst_percent, cgst_percent, sgst_percent")
       .eq("is_active", true)
       .order("name");
     if (error) {
       needsMigration = true;
       const { data: base } = await admin.from("invoice_parties").select("id, name, gstin, pan, address, phone, email").eq("is_active", true).order("name");
       clients = ((base ?? []) as any[]).map((c) => ({
-        id: c.id, name: c.name, gstin: c.gstin ?? null, pan: c.pan ?? null, address: c.address ?? null,
+        id: c.id, name: c.name, category: null, gstin: c.gstin ?? null, pan: c.pan ?? null, address: c.address ?? null,
         city: null, state: null, state_code: null, phone: c.phone ?? null, email: c.email ?? null,
         ship_name: null, ship_address: null, ship_city: null, ship_state: null, ship_state_code: null, ship_gstin: null, ship_phone: null,
         gst_mode: null, igst_percent: null, cgst_percent: null, sgst_percent: null,
@@ -53,14 +53,14 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
   {
     const { data, error } = await admin
       .from("other_challans")
-      .select("id, party_id, challan_date, doc_fy, doc_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name), other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)")
+      .select("id, party_id, challan_date, doc_fy, doc_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name, category), other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)")
       .is("cancelled_at", null)
       .order("created_at", { ascending: false });
     if (error) {
       needsMigration = true;
     } else {
       challans = ((data ?? []) as any[]).map((r) => {
-        const code = r.doc_fy && r.doc_seq != null ? `OC-${r.doc_fy}-${pad(r.doc_seq)}` : `OC-${String(r.id).slice(0, 6).toUpperCase()}`;
+        const code = challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`;
         const invoiceCode = r.inv_fy && r.inv_seq != null ? `INV-${r.inv_fy}-${pad(r.inv_seq)}` : null;
         const gm = r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null;
         const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties;
@@ -68,7 +68,7 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
           .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
           .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0 }));
         return {
-          id: r.id, code, date: r.challan_date, partyId: r.party_id, partyName: p?.name ?? "—",
+          id: r.id, code, date: r.challan_date, partyId: r.party_id, partyName: p?.name ?? "—", category: p?.category ?? null,
           gstMode: gm, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0,
           notes: r.notes ?? null, items, converted: !!r.converted_at, invoiceCode,
         };
@@ -78,13 +78,13 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
 
   // Preview numbers for the forms.
   const fy = financialYear(new Date());
-  const ocPrefix = `OC-${fy}-`;
+  const chPrefix = `CH-${fy}-`;
   const invPrefix = `INV-${fy}-`;
   const nextOf = async (key: string) => {
     const { data } = await admin.from("doc_counters").select("last_seq").eq("fy", key).maybeSingle();
     return String((Number((data as any)?.last_seq) || 0) + 1).padStart(2, "0");
   };
-  const ocAuto = await nextOf(`OC:${fy}`);
+  const chAuto = await nextOf(`${fy}`);       // shared CH counter (same as dispatch)
   const invAuto = await nextOf(`INV:${fy}`);
 
   return (
@@ -107,8 +107,8 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
         <OtherSalesClient
           clients={clients}
           challans={challans}
-          ocPrefix={ocPrefix}
-          ocAuto={ocAuto}
+          chPrefix={chPrefix}
+          chAuto={chAuto}
           invPrefix={invPrefix}
           invAuto={invAuto}
           preselectId={sp.client}

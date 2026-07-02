@@ -33,7 +33,9 @@ export default async function PartiesListPage() {
   const [{ data: partiesRaw }, { data: challanCounts }, { data: invoiceCounts }] = await Promise.all([
     supabase
       .from("invoice_parties")
-      .select("id, name, gstin, pan, address, phone, email, notes, is_active, created_at")
+      // select * so the mig-176 columns (category/city/state/state_code) come
+      // through when present but the page still works before the migration.
+      .select("*")
       .order("is_active", { ascending: false })
       .order("name"),
     supabase
@@ -56,23 +58,17 @@ export default async function PartiesListPage() {
     invoiceByParty.set(r.invoice_party_id, (invoiceByParty.get(r.invoice_party_id) ?? 0) + 1);
   }
 
-  const parties: PartyRow[] = ((partiesRaw ?? []) as Array<{
-    id: string;
-    name: string;
-    gstin: string | null;
-    pan: string | null;
-    address: string | null;
-    phone: string | null;
-    email: string | null;
-    notes: string | null;
-    is_active: boolean;
-    created_at: string;
-  }>).map((p) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const parties: PartyRow[] = ((partiesRaw ?? []) as any[]).map((p) => ({
     id: p.id,
     name: p.name,
+    category: p.category ?? null,
     gstin: p.gstin,
     pan: p.pan,
     address: p.address,
+    city: p.city ?? null,
+    state: p.state ?? null,
+    stateCode: p.state_code ?? null,
     phone: p.phone,
     email: p.email,
     notes: p.notes,

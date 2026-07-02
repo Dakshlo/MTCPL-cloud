@@ -12,7 +12,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
-import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
 
@@ -39,7 +39,6 @@ function Party({ label, name, p, fallback }: { label: string; name: string | nul
   );
 }
 function fmt(n: number, dp = 2): string { return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp }); }
-const pad = (n: number | null | undefined) => (n == null ? "" : String(n).padStart(2, "0"));
 
 export default async function OtherPrintPage({ params }: { params: Params }) {
   const { profile } = await requireAuth();
@@ -66,7 +65,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
   const docTitle = converted ? "TAX INVOICE" : "CHALLAN";
   const docNum = converted
     ? (invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${id.slice(0, 6).toUpperCase()}`)
-    : (o.doc_fy && o.doc_seq != null ? `OC-${o.doc_fy}-${pad(o.doc_seq)}` : `OC-${id.slice(0, 6).toUpperCase()}`);
+    : (challanCode(o.doc_fy, o.doc_seq) ?? `CH-${id.slice(0, 6).toUpperCase()}`);
 
   const gstMode = (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode;
   const amounts = items.map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));

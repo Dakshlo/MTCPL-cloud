@@ -14,27 +14,30 @@ import { upsertInvoicePartyAction } from "../actions";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 
 export type Party = {
-  id: string; name: string; gstin: string | null; pan: string | null;
+  id: string; name: string; category: string | null; gstin: string | null; pan: string | null;
   address: string | null; city: string | null; state: string | null; state_code: string | null; phone: string | null; email: string | null;
   ship_name: string | null; ship_address: string | null; ship_city: string | null; ship_state: string | null; ship_state_code: string | null; ship_gstin: string | null; ship_phone: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
 export type OtherItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number };
 export type OtherChallan = {
-  id: string; code: string; date: string; partyId: string; partyName: string;
+  id: string; code: string; date: string; partyId: string; partyName: string; category: string | null;
   gstMode: GstMode; igst: number; cgst: number; sgst: number; notes: string | null;
   items: OtherItem[]; converted: boolean; invoiceCode: string | null;
 };
+
+/** Common heads for classifying non-temple sales (free text — datalist hints). */
+const CATEGORY_HINTS = ["Maintenance & repair", "Stone wastage", "Scrap sale", "Machinery / spares", "Consumables", "Other"];
 
 type Item = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
 const blankItem = (): Item => ({ particulars: "", hsn: "", unit: "", quantity: "", rate: "" });
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
 export function OtherSalesClient({
-  clients, challans, ocPrefix, ocAuto, invPrefix, invAuto, preselectId, openNew, needsMigration,
+  clients, challans, chPrefix, chAuto, invPrefix, invAuto, preselectId, openNew, needsMigration,
 }: {
   clients: Party[]; challans: OtherChallan[];
-  ocPrefix: string; ocAuto: string; invPrefix: string; invAuto: string;
+  chPrefix: string; chAuto: string; invPrefix: string; invAuto: string;
   preselectId?: string; openNew?: boolean; needsMigration?: boolean;
 }) {
   const router = useRouter();
@@ -51,6 +54,7 @@ export function OtherSalesClient({
   const [convert, setConvert] = useState<OtherChallan | null>(null);
   const [clientModal, setClientModal] = useState(false);
   const [pendingClient, setPendingClient] = useState<string | null>(null);
+  const [preview, setPreview] = useState(false);
 
   // After creating a client (which router.refresh()es the server data), auto-
   // select it once the refreshed clients list includes it + reopen the form.
@@ -132,7 +136,7 @@ export function OtherSalesClient({
           <input type="hidden" name="party_id" value={party} />
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>{editId ? "Edit challan" : "New challan"} <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>· {editId ? "" : `${ocPrefix}${ocAuto}`}</span></h2>
+            <h2 style={{ margin: 0, fontSize: 16 }}>{editId ? "Edit challan" : "New challan"} <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>· {editId ? "" : `${chPrefix}${chAuto}`}</span></h2>
             <button type="button" onClick={() => { setFormOpen(false); resetForm(); }} style={btnGhost}>Close</button>
           </div>
 
@@ -221,6 +225,7 @@ export function OtherSalesClient({
           </div>
 
           <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" onClick={() => setPreview(true)} disabled={!party} style={{ ...btnGhost, opacity: party ? 1 : 0.5, cursor: party ? "pointer" : "default" }}>👁 Preview</button>
             <button type="submit" disabled={!canSubmit} style={{ ...btnPrimary, background: canSubmit ? "#0f172a" : "var(--border)", cursor: canSubmit ? "pointer" : "default" }}>
               {editId ? "💾 Save changes" : "🧾 Create challan"}
             </button>
@@ -253,6 +258,19 @@ export function OtherSalesClient({
 
       {convert && <ConvertModal ch={convert} invPrefix={invPrefix} invAuto={invAuto} onClose={() => setConvert(null)} />}
       {clientModal && <NewClientModal onClose={() => setClientModal(false)} onSaved={(name) => { setClientModal(false); setPendingClient(name); router.refresh(); }} />}
+      {preview && cur && (
+        <OtherPreview
+          client={cur}
+          date={date}
+          docCode={editId ? "DRAFT" : `${chPrefix}${chAuto}`}
+          items={items.map((it) => ({ particulars: it.particulars, hsn: it.hsn, unit: it.unit, quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: amountOf(it) }))}
+          mode={mode}
+          igst={Number(igst) || 0}
+          cgst={Number(cgst) || 0}
+          sgst={Number(sgst) || 0}
+          onClose={() => setPreview(false)}
+        />
+      )}
     </div>
   );
 }
@@ -267,7 +285,7 @@ function ChallanCard({ ch, onEdit, onConvert }: { ch: OtherChallan; onEdit?: () 
           ? <span style={{ fontSize: 10, fontWeight: 800, color: "#15803d", background: "rgba(22,101,52,0.12)", borderRadius: 999, padding: "2px 9px" }}>✓ INVOICED</span>
           : <span style={{ fontSize: 10, fontWeight: 800, color: "#6d28d9", background: "rgba(124,58,237,0.12)", borderRadius: 999, padding: "2px 9px" }}>CHALLAN</span>}
       </div>
-      <div style={{ fontSize: 12.5, fontWeight: 700 }}>🏢 {ch.partyName}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 700 }}>🏢 {ch.partyName}{ch.category ? <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: "#6d28d9", background: "rgba(124,58,237,0.1)", borderRadius: 6, padding: "1px 7px" }}>{ch.category}</span> : null}</div>
       <div style={{ fontSize: 11.5, color: "var(--muted)" }}>📅 {new Date(`${ch.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })} · {ch.items.length} item{ch.items.length !== 1 ? "s" : ""} · <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{rupee(total)}</strong></div>
       <div style={{ marginTop: 2, display: "flex", gap: 7, flexWrap: "wrap" }}>
         <Link href={`/invoicing/other/${ch.id}/print`} target="_blank" rel="noopener noreferrer" style={btnLink}>🖨 {ch.converted ? "Invoice" : "Challan"}</Link>
@@ -330,8 +348,10 @@ function NewClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: (n
     <div onMouseDown={() => { if (!pending) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20, overflowY: "auto" }}>
       <form action={submit} onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(620px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 20, boxShadow: "0 24px 60px rgba(0,0,0,0.3)", maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 12 }}>＋ New client</div>
+        <datalist id="os-cat-hints">{CATEGORY_HINTS.map((c) => <option key={c} value={c} />)}</datalist>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
           <label className="stack">{lbl("Client name *")}<input name="name" required style={fld} /></label>
+          <label className="stack">{lbl("Category / head")}<input name="category" list="os-cat-hints" placeholder="e.g. Maintenance & repair" style={fld} /></label>
           <label className="stack">{lbl("GSTIN")}<input name="gstin" style={fld} /></label>
           <label className="stack">{lbl("PAN")}<input name="pan" style={fld} /></label>
           <label className="stack">{lbl("Phone")}<input name="phone" style={fld} /></label>
@@ -371,6 +391,80 @@ function NewClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: (n
           <button type="submit" disabled={pending} style={{ ...btnPrimary, background: "#0f172a" }}>{pending ? "Saving…" : "Save client"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function OtherPreview({ client, date, docCode, items, mode, igst, cgst, sgst, onClose }: {
+  client: Party; date: string; docCode: string;
+  items: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number }>;
+  mode: GstMode; igst: number; cgst: number; sgst: number; onClose: () => void;
+}) {
+  const rows = items.filter((it) => it.particulars.trim() || it.amount > 0);
+  const totals = computeInvoiceTotals(rows.map((it) => it.amount), { mode, igst, cgst, sgst });
+  const shipName = (client.ship_name ?? "").trim() || client.name;
+  const pcell: React.CSSProperties = { padding: "4px 6px", border: "1px solid #e2e7ee", textAlign: "center", fontWeight: 700, color: "#1a1a1a" };
+  const ptot: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 20, padding: "5px 12px", fontSize: 12 };
+  return (
+    <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
+      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(820px, 100%)", background: "#fff", color: "#1a1a1a", borderRadius: 12, padding: "18px 20px", boxShadow: "0 24px 60px rgba(0,0,0,0.35)", position: "relative", maxHeight: "92vh", overflowY: "auto" }}>
+        <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 5, pointerEvents: "none", overflow: "hidden", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", alignContent: "space-evenly", justifyItems: "center", padding: "30px 0" }}>
+          {Array.from({ length: 18 }).map((_, i) => <span key={i} style={{ transform: "rotate(-30deg)", whiteSpace: "nowrap", font: "800 15px/1 Arial, sans-serif", color: "#d40000", opacity: 0.16 }}>NOT VALID</span>)}
+        </div>
+        <div style={{ position: "relative", zIndex: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, borderBottom: "2px solid #1e3a5f", paddingBottom: 8, marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#0f2540" }}>MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+              <div style={{ fontSize: 10.5, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.1em", color: "#fff", background: "#0f2540", borderRadius: 6, padding: "3px 12px", display: "inline-block" }}>PREVIEW</div>
+              <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", marginTop: 4 }}>{docCode}</div>
+              <div style={{ fontSize: 11, color: "#666" }}>{new Date(`${date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div style={{ border: "1px solid #ccc", borderRadius: 6, padding: "7px 9px", background: "#f7fafc" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", color: "#888" }}>Bill To</div>
+              <div style={{ fontSize: 13.5, fontWeight: 800 }}>{client.name}</div>
+              {client.address && <div style={{ fontSize: 11.5, color: "#333" }}>{client.address}</div>}
+              {(client.city || client.state) && <div style={{ fontSize: 11.5, color: "#333" }}>{[client.city, client.state, client.state_code ? `(code ${client.state_code})` : null].filter(Boolean).join(", ")}</div>}
+              {client.gstin && <div style={{ fontSize: 10.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>GSTIN: {client.gstin}</div>}
+            </div>
+            <div style={{ border: "1px solid #ccc", borderRadius: 6, padding: "7px 9px", background: "#f7fafc" }}>
+              <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", color: "#888" }}>Ship To</div>
+              <div style={{ fontSize: 13.5, fontWeight: 800 }}>{shipName}</div>
+              <div style={{ fontSize: 11.5, color: "#333" }}>{client.ship_address ?? client.address ?? "Same as billing"}</div>
+            </div>
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr style={{ background: "#eef2f7" }}>
+              <th style={pcell}>#</th><th style={{ ...pcell, textAlign: "left" }}>Particulars</th><th style={pcell}>HSN</th><th style={pcell}>Unit</th><th style={{ ...pcell, textAlign: "right" }}>Qty</th><th style={{ ...pcell, textAlign: "right" }}>Rate</th><th style={{ ...pcell, textAlign: "right" }}>Amount</th>
+            </tr></thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td style={{ ...pcell, textAlign: "center", color: "#999" }} colSpan={7}>No line items yet.</td></tr>
+              ) : rows.map((it, i) => (
+                <tr key={i}>
+                  <td style={pcell}>{i + 1}</td><td style={{ ...pcell, textAlign: "left" }}>{it.particulars || "—"}</td><td style={pcell}>{it.hsn || "-"}</td><td style={pcell}>{it.unit || "-"}</td>
+                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{it.quantity || "-"}</td><td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{it.rate || "-"}</td><td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{rupee(it.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+            <div style={{ minWidth: 240, border: "1px solid #d3dae3", borderRadius: 8, overflow: "hidden" }}>
+              <div style={ptot}><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
+              {mode === "igst" && <div style={ptot}><span>IGST @ {igst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.igstAmt)}</span></div>}
+              {mode === "cgst_sgst" && <><div style={ptot}><span>CGST @ {cgst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.cgstAmt)}</span></div><div style={ptot}><span>SGST @ {sgst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.sgstAmt)}</span></div></>}
+              <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+            <button type="button" onClick={onClose} style={btnPrimary}>Close preview</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

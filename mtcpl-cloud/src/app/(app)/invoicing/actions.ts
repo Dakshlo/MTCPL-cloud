@@ -341,6 +341,7 @@ export async function upsertInvoicePartyAction(
   // ONLY when the form actually sends the field, so a form that omits them (the
   // original parties form) never wipes values set elsewhere.
   const setIfPresent = (key: string, val: unknown) => { if (formData.has(key)) payload[key] = val; };
+  setIfPresent("category", txt(formData, "category") || null);
   setIfPresent("city", txt(formData, "city") || null);
   setIfPresent("state", txt(formData, "state") || null);
   setIfPresent("state_code", txt(formData, "state_code") || null);

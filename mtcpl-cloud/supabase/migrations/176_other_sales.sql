@@ -8,8 +8,10 @@
 -- every invoice (temple + bulk + other) stays on one continuous series.
 -- Additive + idempotent.
 
--- 1 — invoice_parties: billing city/state + a shipping block + GST default.
+-- 1 — invoice_parties: billing city/state + a shipping block + GST default +
+--     a category/head (e.g. "Maintenance & repair", "Stone wastage") for data.
 alter table public.invoice_parties
+  add column if not exists category        text,
   add column if not exists city            text,
   add column if not exists state           text,
   add column if not exists state_code      text,

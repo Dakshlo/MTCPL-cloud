@@ -29,9 +29,13 @@ import {
 export type PartyRow = {
   id: string;
   name: string;
+  category?: string | null;
   gstin: string | null;
   pan: string | null;
   address: string | null;
+  city?: string | null;
+  state?: string | null;
+  stateCode?: string | null;
   phone: string | null;
   email: string | null;
   notes: string | null;
@@ -246,6 +250,10 @@ function PartyForm({
   const [gstin, setGstin] = useState(party?.gstin ?? "");
   const [pan, setPan] = useState(party?.pan ?? "");
   const [address, setAddress] = useState(party?.address ?? "");
+  const [category, setCategory] = useState(party?.category ?? "");
+  const [city, setCity] = useState(party?.city ?? "");
+  const [stateName, setStateName] = useState(party?.state ?? "");
+  const [stateCode, setStateCode] = useState(party?.stateCode ?? "");
   const [phone, setPhone] = useState(party?.phone ?? "");
   const [email, setEmail] = useState(party?.email ?? "");
   const [notes, setNotes] = useState(party?.notes ?? "");
@@ -262,6 +270,10 @@ function PartyForm({
       fd.set("gstin", gstin.trim());
       fd.set("pan", pan.trim());
       fd.set("address", address.trim());
+      fd.set("category", category.trim());
+      fd.set("city", city.trim());
+      fd.set("state", stateName.trim());
+      fd.set("state_code", stateCode.trim());
       fd.set("phone", phone.trim());
       fd.set("email", email.trim());
       fd.set("notes", notes.trim());
@@ -298,6 +310,19 @@ function PartyForm({
           style={{ ...INPUT_STYLE, fontWeight: 600 }}
         />
       </Field>
+      <Field label="Category / head">
+        <input
+          type="text"
+          list="party-cat-hints"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          placeholder="e.g. Maintenance & repair, Stone wastage"
+          style={INPUT_STYLE}
+        />
+        <datalist id="party-cat-hints">
+          {["Maintenance & repair", "Stone wastage", "Scrap sale", "Machinery / spares", "Consumables", "Other"].map((c) => <option key={c} value={c} />)}
+        </datalist>
+      </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="GSTIN">
           <input
@@ -318,15 +343,26 @@ function PartyForm({
           />
         </Field>
       </div>
-      <Field label="Address">
+      <Field label="Billing address">
         <textarea
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           rows={2}
-          placeholder="Street, city, state, PIN"
+          placeholder="Street / area / PIN"
           style={{ ...INPUT_STYLE, resize: "vertical", fontFamily: "inherit" }}
         />
       </Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <Field label="City">
+          <input type="text" value={city} onChange={(e) => setCity(e.target.value)} style={INPUT_STYLE} />
+        </Field>
+        <Field label="State">
+          <input type="text" value={stateName} onChange={(e) => setStateName(e.target.value)} style={INPUT_STYLE} />
+        </Field>
+        <Field label="State code">
+          <input type="text" value={stateCode} onChange={(e) => setStateCode(e.target.value.slice(0, 4))} placeholder="08" style={{ ...INPUT_STYLE, fontFamily: "ui-monospace, monospace" }} />
+        </Field>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="Phone">
           <input
