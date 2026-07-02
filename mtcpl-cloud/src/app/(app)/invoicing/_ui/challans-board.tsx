@@ -37,9 +37,14 @@ export type BoardChallan = {
 export type BoardGroup = { temple: string; rows: BoardChallan[] };
 
 export type DroppedItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number };
+export type DroppedTransport = { company: string; vehicle: string; driver: string; driverPhone: string; lr: string; phone: string };
 export type DroppedChallan = {
   id: string; code: string; temple: string; date: string; customBilled: boolean;
   gstMode: GstMode; igst: number; cgst: number; sgst: number; items: DroppedItem[];
+  /** Source dispatch (for the draft delivery-challan download). */
+  sourceDispatchId: string | null;
+  /** Transport prefilled from the challan (mig 169) → dispatch fallback. */
+  transport: DroppedTransport;
 };
 
 const ACCENT: Record<ChallanStatus, string> = {

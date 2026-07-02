@@ -30,22 +30,41 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
   {
     const { data, error } = await supabase
       .from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, custom_billed_at, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), challan_custom_items(position, particulars, hsn, unit, quantity, rate, amount)")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, custom_billed_at, gst_mode, igst_percent, cgst_percent, sgst_percent, source_dispatch_id, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone, invoice_parties(name), challan_custom_items(position, particulars, hsn, unit, quantity, rate, amount)")
       .not("dropped_at", "is", null)
       .is("cancelled_at", null)
       .is("inv_seq", null) // invoiced ones live on the Invoices page
       .order("dropped_at", { ascending: false });
     if (!error) {
-      for (const r of (data ?? []) as any[]) {
+      const rows = (data ?? []) as any[];
+      // Vehicle/driver fall back to the source dispatch when the challan's own
+      // mig-169 transport columns are empty.
+      const dispIds = [...new Set(rows.map((r) => r.source_dispatch_id).filter(Boolean))] as string[];
+      const dispById = new Map<string, { vehicle_no: string | null; driver_name: string | null; driver_phone: string | null }>();
+      if (dispIds.length > 0) {
+        const { data: disp } = await supabase.from("dispatches").select("id, vehicle_no, driver_name, driver_phone").in("id", dispIds);
+        for (const d of (disp ?? []) as any[]) dispById.set(d.id, { vehicle_no: d.vehicle_no ?? null, driver_name: d.driver_name ?? null, driver_phone: d.driver_phone ?? null });
+      }
+      for (const r of rows) {
         const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties;
         const gm = r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null;
         const items = ((r.challan_custom_items ?? []) as any[])
           .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
           .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0 }));
+        const disp = r.source_dispatch_id ? dispById.get(r.source_dispatch_id) : null;
         dropped.push({
           id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number, temple: r.temple ?? p?.name ?? "—",
           date: r.challan_date, customBilled: !!r.custom_billed_at, gstMode: gm,
           igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0, items,
+          sourceDispatchId: r.source_dispatch_id ?? null,
+          transport: {
+            company: (r.transport_company ?? "").trim(),
+            vehicle: ((r.transport_vehicle_no ?? "") || (disp?.vehicle_no ?? "")).trim(),
+            driver: ((r.transport_driver_name ?? "") || (disp?.driver_name ?? "")).trim(),
+            driverPhone: ((r.transport_driver_phone ?? "") || (disp?.driver_phone ?? "")).trim(),
+            lr: (r.lr_no ?? "").trim(),
+            phone: (r.transport_phone ?? "").trim(),
+          },
         });
       }
     }

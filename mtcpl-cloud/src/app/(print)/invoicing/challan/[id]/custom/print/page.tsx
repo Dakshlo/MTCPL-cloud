@@ -49,7 +49,7 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
 
   const { data: chRow } = await admin
     .from("challans")
-    .select("id, challan_number, doc_fy, doc_seq, temple, challan_date, gst_mode, igst_percent, cgst_percent, sgst_percent, inv_fy, inv_seq, custom_billed_at")
+    .select("id, challan_number, doc_fy, doc_seq, temple, challan_date, gst_mode, igst_percent, cgst_percent, sgst_percent, inv_fy, inv_seq, custom_billed_at, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
     .eq("id", id)
     .maybeSingle();
   const c = chRow as any;
@@ -169,6 +169,12 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
           <Party label="Bill To" name={billName} p={billParty} />
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
+
+        {(c.transport_company || c.transport_vehicle_no || c.transport_driver_name || c.lr_no) && (
+          <div style={{ fontSize: 10.5, color: "#0f2540", margin: "8px 0 4px", fontWeight: 700, background: "#eef5fd", border: "1px solid #c7ddf6", borderRadius: 6, padding: "6px 10px" }}>
+            🚚 Transport: {[c.transport_company, c.lr_no ? `LR ${c.lr_no}` : "", c.transport_vehicle_no, c.transport_driver_name, c.transport_driver_phone].filter(Boolean).join("  ·  ")}
+          </div>
+        )}
 
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No line items.</p>

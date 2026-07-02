@@ -396,6 +396,13 @@ export async function createCustomBillAction(formData: FormData) {
     igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
     cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
     sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    // Transport (mig 169) — captured on the custom-bill form, printed on the bill.
+    transport_company: txt(formData, "transport_company") || null,
+    transport_vehicle_no: txt(formData, "transport_vehicle_no") || null,
+    transport_driver_name: txt(formData, "transport_driver_name") || null,
+    transport_driver_phone: txt(formData, "transport_driver_phone") || null,
+    lr_no: txt(formData, "lr_no") || null,
+    transport_phone: txt(formData, "transport_phone") || null,
     custom_billed_at: now, custom_billed_by: profile.id,
   }).eq("id", challanId);
 

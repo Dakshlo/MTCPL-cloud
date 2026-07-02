@@ -58,7 +58,13 @@ function DroppedCard({ d, onBill, onConvert }: { d: DroppedChallan; onBill: () =
         📅 {new Date(`${d.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
         {d.customBilled ? <> · {d.items.length} item{d.items.length !== 1 ? "s" : ""} · <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{rupee(total)}</strong></> : null}
       </div>
+      {(d.transport.vehicle || d.transport.driver) && (
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>🚚 {[d.transport.vehicle, d.transport.driver].filter(Boolean).join(" · ")}</div>
+      )}
       <div style={{ marginTop: 2, display: "flex", gap: 7, flexWrap: "wrap" }}>
+        {d.sourceDispatchId && (
+          <Link href={`/dispatch/${d.sourceDispatchId}/print?draft=1`} target="_blank" rel="noopener noreferrer" style={btnSmall}>🖨 Draft challan</Link>
+        )}
         {d.customBilled ? (
           <>
             <Link href={`/invoicing/challan/${d.id}/custom/print`} target="_blank" rel="noopener noreferrer" style={btnSmall}>🖨 Bill</Link>
@@ -92,6 +98,8 @@ function BillForm({ d, onClose }: { d: DroppedChallan; onClose: () => void }) {
   const cell: React.CSSProperties = { padding: "5px 7px", border: "1px solid var(--border)" };
   const inp: React.CSSProperties = { width: "100%", border: "none", background: "transparent", color: "var(--text)", fontSize: 12.5, padding: "3px 4px" };
   const num: React.CSSProperties = { ...inp, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+  const fld: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 13 };
+  const tlbl = (s: string) => <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>{s}</span>;
 
   return (
     <div onMouseDown={onClose} style={overlay}>
@@ -142,6 +150,19 @@ function BillForm({ d, onClose }: { d: DroppedChallan; onClose: () => void }) {
           </table>
         </div>
         <button type="button" onClick={() => setItems((p) => [...p, blank()])} style={{ ...btnGhost, marginTop: 10 }}>＋ Add line</button>
+
+        {/* Transportation — prefilled from the dispatch/challan; editable. Printed on the bill. */}
+        <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)", marginTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>🚚 Transportation <span style={{ fontWeight: 600, textTransform: "none" }}>(from the dispatch — edit if needed)</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            <label className="stack">{tlbl("Transport company")}<input name="transport_company" defaultValue={d.transport.company} style={fld} /></label>
+            <label className="stack">{tlbl("Vehicle no.")}<input name="transport_vehicle_no" defaultValue={d.transport.vehicle} style={{ ...fld, fontFamily: "ui-monospace, monospace" }} /></label>
+            <label className="stack">{tlbl("Driver")}<input name="transport_driver_name" defaultValue={d.transport.driver} style={fld} /></label>
+            <label className="stack">{tlbl("Driver phone")}<input name="transport_driver_phone" defaultValue={d.transport.driverPhone} style={fld} /></label>
+            <label className="stack">{tlbl("LR no.")}<input name="lr_no" defaultValue={d.transport.lr} style={fld} /></label>
+            <label className="stack">{tlbl("Transport phone")}<input name="transport_phone" defaultValue={d.transport.phone} style={fld} /></label>
+          </div>
+        </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginTop: 14 }}>
           <div style={{ flex: "1 1 300px" }}>
