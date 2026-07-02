@@ -6,13 +6,21 @@
  * (Daksh).
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { sendChallanBackFromBulkAction } from "../actions";
 
 export function BulkSendBack({ id, code }: { id: string; code?: string }) {
   const [confirming, setConfirming] = useState(false);
   const [pending, start] = useTransition();
+  // The confirm dialog MUST render at the document root: the bulk cards use
+  // `.blk-card:hover { transform }`, and a CSS transform on an ancestor makes it
+  // the containing block for position:fixed children — so a nested modal snaps
+  // to the little card box and jitters as hover toggles (the "heavy glitch").
+  // Portalling to <body> escapes the transform so the overlay is truly full-screen.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   function doSend() {
     start(async () => {
@@ -24,7 +32,6 @@ export function BulkSendBack({ id, code }: { id: string; code?: string }) {
 
   return (
     <>
-      <FinanceLoadingOverlay show={pending} label="Sending back…" />
       <button
         type="button"
         onClick={() => setConfirming(true)}
@@ -33,11 +40,12 @@ export function BulkSendBack({ id, code }: { id: string; code?: string }) {
         ↩ Send back
       </button>
 
-      {confirming && (
+      {mounted && confirming && createPortal(
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
           onClick={() => { if (!pending) setConfirming(false); }}
         >
+          <FinanceLoadingOverlay show={pending} label="Sending back…" />
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(420px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 34, marginBottom: 6 }}>↩</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>Send back to Challans?</div>
@@ -51,7 +59,8 @@ export function BulkSendBack({ id, code }: { id: string; code?: string }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

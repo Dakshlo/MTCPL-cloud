@@ -148,7 +148,7 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
     <section className="page-card">
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <h1>Bulk challans</h1>
-        <Link href="/invoicing/bulk/new" style={BUTTON_STYLES.primary}>🧾 Create tax invoice</Link>
+        <Link href="/invoicing/bulk/new" style={BUTTON_STYLES.primary}>🧾 Create work order invoice</Link>
       </div>
 
       {sp.toast && (

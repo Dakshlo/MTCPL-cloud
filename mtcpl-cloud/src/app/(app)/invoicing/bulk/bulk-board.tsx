@@ -78,7 +78,7 @@ export function BulkBoard({ groups, companies }: { groups: BulkGroup[]; companie
       {/* Tabs */}
       <div style={{ display: "flex", gap: 9, marginBottom: 14, flexWrap: "wrap" }}>
         <button type="button" onClick={() => setTab("awaiting")} style={tabBtn(tab === "awaiting")}>🚚 Awaiting challan · {counts.awaiting}</button>
-        <button type="button" onClick={() => setTab("ready")} style={tabBtn(tab === "ready")}>✅ Challan ready · {counts.ready}</button>
+        <button type="button" onClick={() => setTab("ready")} style={tabBtn(tab === "ready")}>✅ Final challan · {counts.ready}</button>
       </div>
 
       {/* Search bar */}
@@ -90,7 +90,7 @@ export function BulkBoard({ groups, companies }: { groups: BulkGroup[]; companie
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          {searchActive ? <>Results <span style={{ color: "var(--text)" }}>· {shown}</span></> : <>{tab === "ready" ? "Ready" : "Awaiting"} <span style={{ color: "var(--text)" }}>· {tab === "ready" ? counts.ready : counts.awaiting}</span></>}
+          {searchActive ? <>Results <span style={{ color: "var(--text)" }}>· {shown}</span></> : <>{tab === "ready" ? "Final" : "Awaiting"} <span style={{ color: "var(--text)" }}>· {tab === "ready" ? counts.ready : counts.awaiting}</span></>}
         </div>
         {!searchActive && filtered.length > 0 && (
           <button type="button" onClick={() => { setAllExpanded((v) => !v); setExpanded({}); }} style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer" }}>
@@ -102,7 +102,7 @@ export function BulkBoard({ groups, companies }: { groups: BulkGroup[]; companie
       {filtered.length === 0 ? (
         <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "30px 22px", textAlign: "center", color: "var(--muted)" }}>
           {searchActive ? <>No challans match <strong>“{query}”</strong>.</>
-            : tab === "ready" ? <>No challans are ready yet. Fill transport on an <strong>Awaiting</strong> challan to make its full challan.</>
+            : tab === "ready" ? <>No final challans yet. Fill transport on an <strong>Awaiting</strong> challan to make its final challan.</>
             : <>Nothing awaiting. Send open challans here from the <Link href="/invoicing/challans" style={{ color: "var(--gold-dark)", fontWeight: 700 }}>Challans</Link> page.</>}
         </div>
       ) : (
@@ -142,7 +142,7 @@ export function BulkBoard({ groups, companies }: { groups: BulkGroup[]; companie
                             c.sourceDispatchId && <Link href={`/dispatch/${c.sourceDispatchId}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, padding: "8px 12px", border: "1px solid var(--gold-dark)", borderRadius: 8, background: "var(--gold)", color: "#fff", textDecoration: "none" }}>🖨 Download challan</Link>
                           ) : (
                             <>
-                              <button type="button" onClick={() => setGetChallan(c)} style={{ fontSize: 12, fontWeight: 800, padding: "8px 12px", border: "none", borderRadius: 8, background: "#0f172a", color: "#fff", cursor: "pointer" }}>🚚 Get challan</button>
+                              <button type="button" onClick={() => setGetChallan(c)} style={{ fontSize: 12, fontWeight: 800, padding: "8px 12px", border: "none", borderRadius: 8, background: "#0f172a", color: "#fff", cursor: "pointer" }}>🚚 Get final challan</button>
                               {c.sourceDispatchId && <Link href={`/dispatch/${c.sourceDispatchId}/print?draft=1`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--muted)", textDecoration: "none" }}>🖨 Draft</Link>}
                             </>
                           )}
@@ -183,7 +183,7 @@ function GetChallanModal({ card, companies, onClose }: { card: BulkCard; compani
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 16px", overflowY: "auto" }}>
       <form action={saveBulkTransportAction} onClick={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 20, boxShadow: "0 28px 70px rgba(0,0,0,0.4)" }}>
         <input type="hidden" name="id" value={card.id} />
-        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 2 }}>🚚 Get challan — {card.code}</div>
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 2 }}>🚚 Get final challan — {card.code}</div>
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>Fill transport, generate the driver&apos;s full challan, and put the truck on the road. Vehicle &amp; driver are prefilled from the dispatch.</div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

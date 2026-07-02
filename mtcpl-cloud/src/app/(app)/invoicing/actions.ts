@@ -1129,14 +1129,28 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
   const invoiceDate = txt(formData, "invoice_date") || null;
   const fy = financialYear(invoiceDate || new Date());
+  // Invoice number on the SHARED per-FY INV counter (same series as the single-
+  // challan review page). The user can set the trailing XX; blank = next auto.
+  // A manual number bumps the counter so the next auto number follows it.
   let invSeq: number | null = null;
-  try { const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` }); if (typeof seq === "number") invSeq = seq; } catch { /* mig not applied */ }
+  const manualInv = Math.floor(Number(txt(formData, "inv_seq")) || 0);
+  try {
+    if (manualInv > 0) {
+      invSeq = manualInv;
+      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
+      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
+      if (manualInv > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manualInv }, { onConflict: "fy" });
+    } else {
+      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+      if (typeof seq === "number") invSeq = seq;
+    }
+  } catch { /* mig not applied */ }
 
   const insert: Record<string, unknown> = {
     temple,
     inv_fy: invSeq != null ? fy : null,
     inv_seq: invSeq,
-    invoice_no_override: txt(formData, "invoice_no_override") || null,
+    invoice_no_override: null,
     gst_mode: gstMode,
     igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
     cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,

@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { challanCode } from "@/lib/doc-code";
+import { challanCode, financialYear } from "@/lib/doc-code";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
 import { BulkInvoiceForm, type TempleData } from "./bulk-invoice-form";
@@ -102,16 +102,26 @@ export default async function NewBulkInvoicePage() {
       };
     });
 
+  // Invoice number preview — the shared per-FY INV counter (same series the
+  // review page uses). Shown as a fixed "INV-26/27-" prefix + an editable XX.
+  const invFy = financialYear(new Date());
+  const invPrefix = `INV-${invFy}-`;
+  let autoNum = "01";
+  {
+    const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${invFy}`).maybeSingle();
+    autoNum = String((Number((ctr as { last_seq?: number } | null)?.last_seq) || 0) + 1).padStart(2, "0");
+  }
+
   return (
     <section className="page-card">
       <div className="page-header">
-        <h1>Create bulk tax invoice</h1>
-        <p className="muted">Bill several of a temple&apos;s bulk challans on one tax invoice. Pick the temple, tick the challans it covers, then type the line items.</p>
+        <h1>Work order invoice</h1>
+        <p className="muted">Bill several of a temple&apos;s bulk challans on one work order invoice. Pick the temple, tick the challans it covers, then type the line items.</p>
       </div>
       {temples.length === 0 ? (
         <div className="banner" style={{ marginTop: 14 }}>No bulk challans to invoice. Send open challans to Bulk from the Challans page first.</div>
       ) : (
-        <div style={{ marginTop: 14 }}><BulkInvoiceForm temples={temples} /></div>
+        <div style={{ marginTop: 14 }}><BulkInvoiceForm temples={temples} invPrefix={invPrefix} autoNum={autoNum} /></div>
       )}
       <p style={{ marginTop: 16, fontSize: 12 }}>
         <Link href="/invoicing/bulk" style={{ color: "var(--muted)", textDecoration: "none" }}>← Bulk challans</Link>

@@ -27,7 +27,7 @@ type Item = { particulars: string; hsn: string; unit: string; quantity: string; 
 const blankItem = (): Item => ({ particulars: "", hsn: "", unit: "", quantity: "", rate: "" });
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
 
-export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
+export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: TempleData[]; invPrefix: string; autoNum: string }) {
   const [temple, setTemple] = useState("");
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [items, setItems] = useState<Item[]>([blankItem(), blankItem()]);
@@ -35,7 +35,7 @@ export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
   const [igst, setIgst] = useState("18");
   const [cgst, setCgst] = useState("9");
   const [sgst, setSgst] = useState("9");
-  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invNum, setInvNum] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   const cur = temples.find((t) => t.temple === temple) ?? null;
@@ -78,7 +78,7 @@ export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
-      <input type="hidden" name="invoice_no_override" value={invoiceNo} />
+      <input type="hidden" name="inv_seq" value={invNum} />
 
       {/* 1 — Temple */}
       <Section step={1} title="Client (temple)" subtitle="Which temple is this invoice billed to?">
@@ -179,7 +179,15 @@ export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
                 <label className="stack" style={{ maxWidth: 120 }}><span>SGST %</span><input value={sgst} onChange={(e) => setSgst(e.target.value)} inputMode="decimal" /></label>
               </div>
             )}
-            <label className="stack" style={{ maxWidth: 240, marginTop: 12 }}><span>Invoice no. override <span className="muted" style={{ fontWeight: 600 }}>(optional)</span></span><input value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="auto INV-… on approval" /></label>
+            {/* Invoice no. — fixed INV-<FY>- prefix, edit only the number. */}
+            <div style={{ marginTop: 14 }}>
+              <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
+              <div style={{ display: "inline-flex", alignItems: "stretch", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, background: "var(--surface)", color: "var(--muted)", borderRight: "1.5px solid var(--border)" }}>{invPrefix}</span>
+                <input value={invNum} onChange={(e) => setInvNum(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder={autoNum} style={{ width: 90, textAlign: "left", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, padding: "8px 10px", border: "none", background: "transparent", color: "var(--text)" }} />
+              </div>
+              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{invPrefix}{autoNum}</strong>.</span>
+            </div>
           </Section>
         </div>
         <div style={{ flex: "0 0 300px" }}>
@@ -203,7 +211,7 @@ export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
           👁 Preview invoice
         </button>
         <button type="submit" disabled={!canSubmit} style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: canSubmit ? "#0f172a" : "var(--border)", border: "none", borderRadius: 11, cursor: canSubmit ? "pointer" : "default" }}>
-          🧾 Create tax invoice → owner approval
+          🧾 Create work order invoice → owner approval
         </button>
         {!canSubmit && <span style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and add at least one line item.</span>}
       </div>
@@ -220,7 +228,7 @@ export function BulkInvoiceForm({ temples }: { temples: TempleData[] }) {
           igst={Number(igst) || 0}
           cgst={Number(cgst) || 0}
           sgst={Number(sgst) || 0}
-          invoiceNo={invoiceNo}
+          invoiceNo={invNum ? `${invPrefix}${invNum.padStart(2, "0")}` : ""}
           invoiceDate={todayIST()}
           onClose={() => setShowPreview(false)}
         />
