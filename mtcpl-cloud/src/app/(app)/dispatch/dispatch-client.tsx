@@ -835,9 +835,11 @@ function TempleDispatchPeek({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [parking, setParking] = useState(false);
-  const [vehicleNo, setVehicleNo] = useState("");
-  const [driverName, setDriverName] = useState("");
-  const [driverPhone, setDriverPhone] = useState("");
+  // Mig 163 — weigh per slab (default) OR one whole-truck weight. Vehicle +
+  // driver are NOT captured here any more — they're taken later at Check &
+  // verify, once the actual truck is loaded (Daksh, Jul 2026).
+  const [weightMode, setWeightMode] = useState<"slab" | "truck">("slab");
+  const [truckKg, setTruckKg] = useState("");
   // Mig 130 — optional per-slab weight (tonnes). Keyed by slab id;
   // empty string = not entered (stored NULL).
   const [weights, setWeights] = useState<Record<string, string>>({});
@@ -940,6 +942,9 @@ function TempleDispatchPeek({
   }
   const totalKg = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
   const totalTonnes = totalKg / 1000;
+  // Whole-truck weight (mig 163) — entered in KG, stored/printed in tonnes.
+  const truckKgNum = Math.max(0, Number(truckKg) || 0);
+  const truckTonnes = truckKgNum / 1000;
 
   // Group selected slabs that are IDENTICAL (same label + description +
   // size) — they weigh the same, so the operator enters ONE weight per
@@ -963,19 +968,6 @@ function TempleDispatchPeek({
       return next;
     });
   }
-
-  // Recent unique trucks (newest first) for one-tap fill.
-  const recentTrucks = useMemo(() => {
-    const seen = new Set<string>();
-    const out: TruckTrip[] = [];
-    for (const t of truckHistory) {
-      if (seen.has(t.vehicle_no)) continue;
-      seen.add(t.vehicle_no);
-      out.push(t);
-      if (out.length >= 6) break;
-    }
-    return out;
-  }, [truckHistory]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -1111,12 +1103,12 @@ function TempleDispatchPeek({
                   padding: "13px 26px", fontSize: 15.5, fontWeight: 800, cursor: selCount === 0 ? "not-allowed" : "pointer",
                 }}
               >
-                Truck details → ({selCount} slab{selCount === 1 ? "" : "s"})
+                Weight &amp; send → ({selCount} slab{selCount === 1 ? "" : "s"})
               </button>
             </div>
           </>
         ) : (
-          /* ── Step 2: truck form ── */
+          /* ── Step 2: weight + notes (vehicle/driver come at Check & verify) ── */
           <form
             action={(fd) => {
               setSubmitting(true);
@@ -1130,6 +1122,8 @@ function TempleDispatchPeek({
             <input type="hidden" name="temple" value={group.temple} />
             <input type="hidden" name="slab_ids" value={JSON.stringify(selectedIds)} />
             <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />
+            <input type="hidden" name="weight_mode" value={weightMode} />
+            <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
 
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, WebkitOverflowScrolling: "touch" }}>
               {/* Mig 130 — site info that will print on the challan,
@@ -1158,62 +1152,10 @@ function TempleDispatchPeek({
                 )}
               </div>
 
-              {/* Recent trucks quick-fill */}
-              {recentTrucks.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
-                    🚛 Recent trucks — tap to fill
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {recentTrucks.map((t) => (
-                      <button
-                        key={t.vehicle_no}
-                        type="button"
-                        onClick={() => {
-                          setVehicleNo(t.vehicle_no);
-                          setDriverName(t.driver_name ?? "");
-                          setDriverPhone(t.driver_phone ?? "");
-                        }}
-                        style={{
-                          fontSize: 12.5, fontWeight: 700, padding: "8px 13px", borderRadius: 999,
-                          border: `1.5px solid ${vehicleNo === t.vehicle_no ? "var(--gold-dark)" : "var(--border)"}`,
-                          background: vehicleNo === t.vehicle_no ? "rgba(184,115,51,0.1)" : "var(--bg)",
-                          color: "var(--text)", cursor: "pointer",
-                        }}
-                        title={`Last trip: ${t.temple} · ${new Date(t.dispatched_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}`}
-                      >
-                        <span style={{ fontFamily: "ui-monospace, monospace" }}>{t.vehicle_no}</span>
-                        {t.driver_name ? <span className="muted"> · {t.driver_name}</span> : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <label className="stack">
-                <span style={{ fontSize: 13.5, fontWeight: 700 }}>Vehicle No. <span style={{ color: "#DC2626" }}>*</span></span>
-                <input
-                  name="vehicle_no"
-                  required
-                  value={vehicleNo}
-                  onChange={(e) => setVehicleNo(e.target.value.toUpperCase())}
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="RJ24 GA 1234"
-                  style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", fontSize: 15, padding: "11px 13px" }}
-                />
-              </label>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <label className="stack" style={{ flex: "1 1 200px" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 700 }}>Driver Name <span style={{ color: "#DC2626" }}>*</span></span>
-                  <input name="driver_name" required value={driverName} onChange={(e) => setDriverName(e.target.value)} style={{ fontSize: 15, padding: "11px 13px" }} />
-                </label>
-                <label className="stack" style={{ flex: "1 1 170px" }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 700 }}>Driver Phone</span>
-                  <input name="driver_phone" type="tel" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} style={{ fontSize: 15, padding: "11px 13px" }} />
-                </label>
+              {/* Vehicle no + driver are captured at Check & verify (once the
+                  truck is actually loaded) — not here. */}
+              <div style={{ background: "rgba(37,99,235,0.06)", border: "1px solid rgba(37,99,235,0.25)", borderRadius: 10, padding: "9px 13px", fontSize: 12, color: "var(--muted)" }}>
+                🚚 Vehicle no. &amp; driver are added later on the <strong>Check &amp; verify</strong> page, when the truck is loaded.
               </div>
 
               <label className="stack">
@@ -1225,18 +1167,53 @@ function TempleDispatchPeek({
                   group (same label + size). Optional; fills the challan's
                   Net Weight. */}
               <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 14px" }}>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                   <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    ⚖ Weight per slab <span style={{ fontWeight: 600, textTransform: "none" }}>(kg · optional)</span>
+                    ⚖ Weight <span style={{ fontWeight: 600, textTransform: "none" }}>(kg · optional)</span>
                   </span>
                   <span style={{ fontSize: 12.5, fontWeight: 700 }}>
                     {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
-                    {totalKg > 0 && <span style={{ color: "#15803d" }}> · {Math.round(totalKg).toLocaleString("en-IN")} kg ({totalTonnes.toFixed(3)} T)</span>}
+                    {weightMode === "truck"
+                      ? truckKgNum > 0 && <span style={{ color: "#0d9488" }}> · 🚚 {Math.round(truckKgNum).toLocaleString("en-IN")} kg ({truckTonnes.toFixed(3)} T)</span>
+                      : totalKg > 0 && <span style={{ color: "#15803d" }}> · {Math.round(totalKg).toLocaleString("en-IN")} kg ({totalTonnes.toFixed(3)} T)</span>}
                   </span>
                 </div>
-                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
-                  Enter the weight of ONE slab — same-size slabs auto-fill. Challan totals in tonnes.
+                {/* Per-slab (default) OR one whole-truck weight (mig 163). */}
+                <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+                  {([["slab", "Per slab"], ["truck", "Whole truck"]] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setWeightMode(m)}
+                      style={{
+                        padding: "6px 14px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", border: "none",
+                        background: weightMode === m ? (m === "truck" ? "#0d9488" : "#2563eb") : "var(--bg)",
+                        color: weightMode === m ? "#fff" : "var(--muted)",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
+                  {weightMode === "truck"
+                    ? "Enter ONE weight for the whole truck load. Challan totals in tonnes."
+                    : "Enter the weight of ONE slab — same-size slabs auto-fill. Challan totals in tonnes."}
+                </div>
+                {weightMode === "truck" ? (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700 }}>
+                    🚚 Truck load weight
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={truckKg}
+                      onChange={(e) => setTruckKg(e.target.value.replace(/[^\d]/g, ""))}
+                      placeholder="kg"
+                      style={{ width: 130, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 14, padding: "9px 11px" }}
+                    />
+                    <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{truckKgNum > 0 ? `= ${truckTonnes.toFixed(3)} T` : "kg"}</span>
+                  </label>
+                ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {weightGroups.map((g) => {
                     const each = Number((weights[g.ids[0]] ?? "").replace(/[^\d]/g, "")) || 0;
@@ -1277,6 +1254,7 @@ function TempleDispatchPeek({
                     );
                   })}
                 </div>
+                )}
               </div>
             </div>
 

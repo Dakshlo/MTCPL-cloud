@@ -124,14 +124,19 @@ export async function createDispatchAction(formData: FormData) {
   } catch {
     slabWeightsKg = {};
   }
+  // Mig 163 — whole-truck weight option. weight_mode 'truck' stores ONE load
+  // weight (tonnes) on the dispatch; 'slab' (default) uses per-slab weights.
+  const weightMode = String(formData.get("weight_mode") || "slab") === "truck" ? "truck" : "slab";
+  const truckTonnes = weightMode === "truck" ? Math.max(0, Number(formData.get("truck_weight")) || 0) : 0;
 
   // ── Validation
   if (!temple) fail("/dispatch", "Temple is required");
   if (!Array.isArray(slabIds) || slabIds.length === 0) {
     fail("/dispatch", "Pick at least one slab to dispatch");
   }
-  if (vehicleNo === null) fail("/dispatch", "Vehicle number is required");
-  if (driverName === null) fail("/dispatch", "Driver name is required");
+  // Vehicle no + driver are NO LONGER required at make-dispatch — they're
+  // captured at Check & verify once the truck is loaded (Daksh, Jul 2026).
+  // Any values still posted here (legacy clients) are stored if present.
 
   // Verify every selected slab is (a) status=completed and (b) actually
   // belongs to the specified temple. Defends against stale UI or hostile
@@ -205,6 +210,8 @@ export async function createDispatchAction(formData: FormData) {
         notes,
         dispatched_by: profile.id,
         load_number: candidate,
+        weight_mode: weightMode,
+        load_weight_tonnes: weightMode === "truck" && truckTonnes > 0 ? truckTonnes : null,
       })
       .select("id, challan_number, load_number")
       .single();
