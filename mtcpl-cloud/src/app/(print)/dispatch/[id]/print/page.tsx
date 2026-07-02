@@ -35,7 +35,10 @@ function CodeCell({ codes }: { codes: string[] }) {
 }
 
 export default async function DispatchChallanPrintPage({ params, searchParams }: { params: Params; searchParams: Search }) {
-  await requireAuth(["developer", "owner", "team_head", "senior_incharge", "carving_head", "cutting_operator", "dispatch"]);
+  // Accountants reach this challan print from the Bulk "Get challan" / "Download
+  // challan" links (invoicing flow), so they must be allowed too — otherwise
+  // requireAuth bounced them to home (Daksh, Jul 2026).
+  await requireAuth(["developer", "owner", "team_head", "senior_incharge", "carving_head", "cutting_operator", "dispatch", "accountant_star", "accountant"]);
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
