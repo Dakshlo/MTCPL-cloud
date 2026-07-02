@@ -40,16 +40,19 @@ export function ReviewForm({
   challanId,
   items,
   initGst,
-  initInvoiceNo,
-  autoCode,
+  invPrefix,
+  initNum,
+  autoNum,
   transportCompanies = [],
   initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" },
 }: {
   challanId: string;
   items: PriceItem[];
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
-  initInvoiceNo: string;
-  autoCode: string;
+  /** Fixed "INV-26/27-" prefix; the reviewer edits only the trailing number. */
+  invPrefix: string;
+  initNum: string;
+  autoNum: string;
   transportCompanies?: string[];
   initTransport?: { company: string; phone: string; lr: string; vehicle: string; driverName: string; driverPhone: string };
 }) {
@@ -75,7 +78,14 @@ export function ReviewForm({
     }
     return m;
   });
-  const [invoiceNo, setInvoiceNo] = useState(initInvoiceNo);
+  const [invNum, setInvNum] = useState(initNum);
+  // Custom transport-company combobox (our own dropdown, not the browser datalist).
+  const [company, setCompany] = useState(initTransport.company);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const companyMatches = useMemo(() => {
+    const q = company.trim().toLowerCase();
+    return (q ? transportCompanies.filter((n) => n.toLowerCase().includes(q)) : transportCompanies).slice(0, 50);
+  }, [company, transportCompanies]);
   const [mode, setMode] = useState<GstMode>(initGst.mode);
   const [igst, setIgst] = useState(String(initGst.igst));
   const [cgst, setCgst] = useState(String(initGst.cgst));
@@ -173,7 +183,7 @@ export function ReviewForm({
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
-      <input type="hidden" name="invoice_no_override" value={invoiceNo} />
+      <input type="hidden" name="inv_seq" value={invNum} />
 
       {/* Called inline (not <GroupSection/>) so editing a Rate doesn't remount. */}
       {groups.map((g) => GroupSection(g))}
@@ -187,11 +197,36 @@ export function ReviewForm({
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface)", marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 4 }}>🚚 Transportation</div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>Vehicle no. &amp; driver are taken from the dispatch automatically.</div>
-        <datalist id="transport-companies">
-          {transportCompanies.map((n) => <option key={n} value={n} />)}
-        </datalist>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-          <label style={tLabel}><span>Transport company</span><input name="transport_company" list="transport-companies" defaultValue={initTransport.company} placeholder="Pick or type new…" style={tInput} /></label>
+          <div style={tLabel}>
+            <span>Transport company</span>
+            <div style={{ position: "relative" }}>
+              <input
+                name="transport_company"
+                value={company}
+                onChange={(e) => { setCompany(e.target.value); setCompanyOpen(true); }}
+                onFocus={() => setCompanyOpen(true)}
+                onBlur={() => setTimeout(() => setCompanyOpen(false), 120)}
+                autoComplete="off"
+                placeholder="Pick or type new…"
+                style={{ ...tInput, width: "100%" }}
+              />
+              {companyOpen && companyMatches.length > 0 && (
+                <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.18)", maxHeight: 220, overflowY: "auto" }}>
+                  {companyMatches.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); setCompany(n); setCompanyOpen(false); }}
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", fontSize: 13, background: n === company ? "rgba(184,115,51,0.12)" : "transparent", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer", color: "var(--text)" }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <label style={tLabel}><span>LR no.</span><input name="lr_no" defaultValue={initTransport.lr} style={tInput} /></label>
         </div>
       </div>
@@ -233,19 +268,21 @@ export function ReviewForm({
               </label>
             </div>
           )}
-          {/* Manual invoice number override (transition off the old series). */}
+          {/* Invoice number — fixed INV-<FY>- prefix, edit only the number. */}
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-light)" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
-              <span style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>Invoice no. (optional)</span>
+            <span style={{ display: "block", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
+            <div style={{ display: "inline-flex", alignItems: "stretch", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", padding: "6px 10px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, background: "var(--surface)", color: "var(--muted)", borderRight: "1.5px solid var(--border)" }}>{invPrefix}</span>
               <input
                 type="text"
-                value={invoiceNo}
-                onChange={(e) => setInvoiceNo(e.target.value)}
-                placeholder={autoCode}
-                style={{ ...pctInput, width: "100%", textAlign: "left" }}
+                inputMode="numeric"
+                value={invNum}
+                onChange={(e) => setInvNum(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder={autoNum}
+                style={{ width: 90, textAlign: "left", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, padding: "6px 10px", border: "none", background: "transparent", color: "var(--text)" }}
               />
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{autoCode}</strong>.</span>
-            </label>
+            </div>
+            <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{invPrefix}{autoNum}</strong>. Editing the number continues the series after it.</span>
           </div>
         </div>
 
@@ -264,11 +301,8 @@ export function ReviewForm({
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button type="submit" name="go" value="print" style={{ fontSize: 14.5, padding: "12px 24px", fontWeight: 800, color: "#fff", background: "#0f172a", border: "none", borderRadius: 11, cursor: "pointer" }}>
-          💾 Save &amp; print tax invoice →
-        </button>
-        <button type="submit" name="go" value="save" style={{ fontSize: 13.5, padding: "12px 20px", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 11, cursor: "pointer" }}>
-          Save only
+        <button type="submit" name="go" value="save" style={{ fontSize: 14.5, padding: "12px 26px", fontWeight: 800, color: "#fff", background: "#0f172a", border: "none", borderRadius: 11, cursor: "pointer" }}>
+          📤 Send for approval to owner →
         </button>
       </div>
     </form>

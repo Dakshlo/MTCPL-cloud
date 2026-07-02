@@ -104,7 +104,9 @@ export async function saveChallanPricingAction(formData: FormData) {
       sgst_percent: gstMode === "cgst_sgst" ? sgst : null,
       priced_at: new Date().toISOString(),
       priced_by: profile.id,
-      invoice_no_override: txt(formData, "invoice_no_override") || null,
+      // Number now lives in inv_fy/inv_seq (edited as the XX on the review form);
+      // clear any legacy free-text override so the INV-<FY>-<seq> code wins.
+      invoice_no_override: null,
       // Pricing (re-)submits the challan for owner approval — clear any prior
       // rejection so it re-enters the Approval queue (Mig 167).
       owner_rejected_at: null,
@@ -133,14 +135,22 @@ export async function saveChallanPricingAction(formData: FormData) {
     }
   }
 
-  // Mig 172 — assign an INDEPENDENT invoice number (INV series) ONCE on first
-  // pricing, separate from the challan's CH number. Best-effort: if mig 172
+  // Invoice number (INV series, mig 172). The reviewer sets the trailing XX on
+  // the review form; blank = auto-continue the shared per-FY INV counter. A
+  // manual number is stored AND bumps the counter so the next auto number
+  // follows it (same rule as the challan CH editor). Best-effort: if mig 172
   // isn't applied the select errors and the code falls back to the challan no.
   try {
     const { data: inv } = await admin.from("challans").select("inv_seq, challan_date").eq("id", challanId).maybeSingle();
     const row = inv as { inv_seq?: number | null; challan_date?: string } | null;
-    if (row && row.inv_seq == null) {
-      const fy = financialYear(row.challan_date || new Date());
+    const fy = financialYear(row?.challan_date || new Date());
+    const manual = Math.floor(Number(txt(formData, "inv_seq")) || 0);
+    if (manual > 0) {
+      await admin.from("challans").update({ inv_fy: fy, inv_seq: manual }).eq("id", challanId);
+      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
+      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
+      if (manual > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manual }, { onConflict: "fy" });
+    } else if (row && row.inv_seq == null) {
       const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
       if (typeof seq === "number") await admin.from("challans").update({ inv_fy: fy, inv_seq: seq }).eq("id", challanId);
     }

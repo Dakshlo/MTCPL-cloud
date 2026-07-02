@@ -14,7 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
-import { invoiceCode } from "@/lib/invoice-code";
+import { financialYear } from "@/lib/doc-code";
 import { ReviewForm, type PriceItem } from "./review-form";
 
 type Params = Promise<{ id: string }>;
@@ -32,7 +32,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, inv_fy, inv_seq, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -61,6 +61,8 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     priced_at: string | null;
     temple: string | null;
     invoice_no_override: string | null;
+    inv_fy: string | null;
+    inv_seq: number | null;
     invoice_parties:
       | { name: string; gstin: string | null; address: string | null; phone: string | null }
       | Array<{ name: string; gstin: string | null; address: string | null; phone: string | null }>
@@ -186,6 +188,19 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     }
   }
 
+  // Invoice number (INV series, mig 172) — shown as a fixed "INV-26/27-" prefix
+  // plus an editable XX. Uses the challan's assigned inv_seq if any; otherwise
+  // previews the next number from the shared per-FY INV counter (Daksh Jul 2026).
+  const invFy = (c.inv_fy ?? "").trim() || financialYear(c.challan_date);
+  const invPrefix = `INV-${invFy}-`;
+  let nextSeq = c.inv_seq ?? 1;
+  if (c.inv_seq == null) {
+    const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${invFy}`).maybeSingle();
+    nextSeq = (Number((ctr as { last_seq?: number } | null)?.last_seq) || 0) + 1;
+  }
+  const initNum = c.inv_seq != null ? String(c.inv_seq) : "";
+  const autoNum = String(nextSeq).padStart(2, "0");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 40, maxWidth: 1280 }}>
       <div>
@@ -218,8 +233,9 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
         challanId={id}
         items={priceItems}
         initGst={initGst}
-        initInvoiceNo={c.invoice_no_override ?? ""}
-        autoCode={invoiceCode(c.challan_number, c.challan_date)}
+        invPrefix={invPrefix}
+        initNum={initNum}
+        autoNum={autoNum}
         transportCompanies={transportCompanies}
         initTransport={initTransport}
       />

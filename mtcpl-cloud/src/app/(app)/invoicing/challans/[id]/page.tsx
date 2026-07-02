@@ -107,7 +107,7 @@ export default async function ChallanDetailPage({ params }: { params: Params }) 
               </Link>
               {!c.temple && !c.source_dispatch_id && (
                 <Link href={`/invoicing/challans/${c.id}/convert`} style={BUTTON_STYLES.secondary}>
-                  Convert to invoice →
+                  Create purchase invoice →
                 </Link>
               )}
               <CancelChallanButton challanId={c.id} cancelAction={cancelChallanAction} />
