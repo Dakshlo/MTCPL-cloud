@@ -62,6 +62,12 @@ function groupByTemple<T extends { temple: string; slabCftTotal: number }>(rows:
     .map(([temple, rs]) => ({ temple, rows: rs, cft: rs.reduce((n, r) => n + r.slabCftTotal, 0) }));
 }
 
+/** The old demo temple can't be deleted from the data — hide it from the
+ *  Delivered board (Daksh, Jul 2026). */
+function isDemoTemple(name: string): boolean {
+  return /^\s*demo\b/i.test(name);
+}
+
 /** Temple section header for the grouped tabs — a clear sticky-ish bar
  *  so each temple's dispatches read as one block. */
 function TempleHeader({ temple, count, cft }: { temple: string; count: number; cft: number }) {
@@ -544,9 +550,9 @@ export function DispatchClient({
               padding: "10px 16px", background: "var(--bg)", border: "1.5px solid var(--border)",
               borderRadius: 10, color: "var(--text)", fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap",
             }}
-            title="Open the challan archive — every dispatch that's been finalised"
+            title="Open Old challans — every dispatch that's been finalised"
           >
-            📋 Challan archive →
+            📋 Old challans →
           </Link>
         </div>
       </div>
@@ -1725,9 +1731,14 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
 
   return (
     <>
-      {groupByTemple(rows).map((g) => (
+      {groupByTemple(rows).filter((g) => !isDemoTemple(g.temple)).map((g) => {
+      // Show only the 2 most recent delivered challans per temple; older ones
+      // live in Old challans (rows arrive newest-first from the server).
+      const shown = g.rows.slice(0, 2);
+      const older = g.rows.length - shown.length;
+      return (
       <CollapsibleTemple key={g.temple} temple={g.temple} count={g.rows.length} cft={g.cft}>
-      {g.rows.map((r) => {
+      {shown.map((r) => {
         const chalan = chalanLabel(r.challan_number, r.id, r.docFy, r.docSeq);
         const dispatchedAt = new Date(r.dispatched_at);
         const deliveredAt = new Date(r.delivered_at);
@@ -1751,7 +1762,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
                 </span>
               </div>
               <div style={{ marginTop: 4, fontSize: 11.5, color: "var(--muted)" }}>
-                {r.vehicle_no ? <>🚛 {r.vehicle_no} · </> : null}
+                {r.vehicle_no ? <>🚛 <strong style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text)", fontFamily: "ui-monospace, monospace", letterSpacing: "0.02em" }}>{r.vehicle_no}</strong> · </> : null}
                 Left {dispatchedAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
                 {" · "}Delivered {deliveredAt.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 {r.approvedAt ? <> · ⏱ transit {durationBetween(r.approvedAt, r.delivered_at)}</> : null}
@@ -1795,8 +1806,14 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
           </div>
         );
       })}
+      {older > 0 && (
+        <Link href="/challan" style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none", padding: "8px 10px", background: "var(--bg)", border: "1px dashed var(--border)", borderRadius: 8 }}>
+          ➕ {older} older challan{older !== 1 ? "s" : ""} — open Old challans →
+        </Link>
+      )}
       </CollapsibleTemple>
-      ))}
+      );
+      })}
 
       {legacy.length > 0 && (
         <details style={{ marginTop: 16 }}>

@@ -135,13 +135,7 @@ export function ChallanArchiveClient({
       <div className="record-head">
         <div>
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            📋 Challan Archive
-            <span
-              className="role-pill"
-              style={{ background: "var(--gold)", color: "#fff", fontWeight: 700, fontSize: 10 }}
-            >
-              DEV-ONLY
-            </span>
+            📋 Old Challans
           </h1>
           <p className="muted">
             Every dispatch challan ever issued. Filter by truck, temple, or stone; reprint the A4 challan from
