@@ -175,6 +175,14 @@ export function DueBillsClient({
   // its tick intact.
   const SELECTION_KEY = "mtcpl:due-bills:selected";
   const AMOUNT_OVERRIDES_KEY = "mtcpl:due-bills:amount-overrides";
+  // Guards the persist effect below from writing on the INITIAL mount, when
+  // `selected` is still the empty initial set (rehydration commits the saved
+  // set on the next render). Without this, mounting /accounts wrote "[]" over
+  // the sessionStorage the accountant had queued — and if the rehydrate's
+  // router.replace remounted the client, the remount read that emptied store
+  // and showed everything unticked. Daksh, Jul 2026 fix.
+  const persistReadyRef = useRef(false);
+  const amountReadyRef = useRef(false);
   // Rehydrate on mount (client-only — sessionStorage is unavailable
   // during SSR). Also push the rehydrated selection into the URL
   // (?selected=…) via router.replace so the server fires the
@@ -229,6 +237,14 @@ export function DueBillsClient({
   // directly, so spread to an array first.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Skip the first run (mount): `selected` is still the empty initial set —
+    // the rehydrate effect commits the saved selection on the NEXT render. See
+    // persistReadyRef note above. Every real change (tick / clear / rehydrate)
+    // after mount persists exactly as before.
+    if (!persistReadyRef.current) {
+      persistReadyRef.current = true;
+      return;
+    }
     try {
       sessionStorage.setItem(SELECTION_KEY, JSON.stringify([...selected]));
     } catch {
@@ -272,6 +288,12 @@ export function DueBillsClient({
   }, [selected]);
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Skip the mount run for the same reason as the selection persist above —
+    // don't overwrite rehydrated amount overrides with the empty initial value.
+    if (!amountReadyRef.current) {
+      amountReadyRef.current = true;
+      return;
+    }
     try {
       sessionStorage.setItem(AMOUNT_OVERRIDES_KEY, JSON.stringify(amountOverrides));
     } catch {
