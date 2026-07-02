@@ -49,6 +49,9 @@ export type DoneBlockSection = {
     section?: string | null;
     element?: string | null;
   }>;
+  /** Leftover "Reused" blocks restocked from this cut (Daksh Jul 2026). Rendered
+   *  as a small section under the slabs — ONLY when at least one is present. */
+  remainingBlocks?: Array<{ code: string; dims: string; location: string }>;
 };
 
 export type CuttingDonePdfInput = {
@@ -223,7 +226,7 @@ export async function generateCuttingDonePdf(
     // Estimate space: ~40px header + 14px per meta line + 16px per
     // slab row + 20px footer breathing room. Use a generous estimate.
     const slabRows = Math.max(1, block.slabs.length);
-    const estimatedHeight = 40 + 14 * 3 + 16 * slabRows + 20;
+    const estimatedHeight = 40 + 14 * 3 + 16 * slabRows + (block.remainingBlocks?.length ?? 0) * 16 + 24 + 20;
     ensureSpace(estimatedHeight);
 
     // Block title bar — block code + stone, accent rule
@@ -346,6 +349,21 @@ export async function generateCuttingDonePdf(
         page.drawLine({ start: { x: LEFT, y }, end: { x: RIGHT, y }, thickness: 0.4, color: COLOR_RULE });
         y -= 12;
       });
+    }
+
+    // Remaining block(s) — leftover pieces restocked from this cut. Only shown
+    // when present (Daksh Jul 2026). code · dims · location, one per line.
+    const remaining = block.remainingBlocks ?? [];
+    if (remaining.length > 0) {
+      ensureSpace(20 + remaining.length * 16 + 6);
+      drawText(`REMAINING BLOCK${remaining.length === 1 ? "" : "S"}`, { x: MARGIN_X + 4, y, size: 8.5, font: fontBold, color: COLOR_ACCENT });
+      y -= 15;
+      remaining.forEach((r) => {
+        drawText(r.code, { x: MARGIN_X + 8, y, size: 11, font: fontBold, color: COLOR_TEXT });
+        drawText(`${r.dims}   ·   ${r.location}`, { x: MARGIN_X + 120, y, size: 10, font: fontReg, color: COLOR_MUTED });
+        y -= 16;
+      });
+      y -= 4;
     }
 
     y -= 10;

@@ -1362,7 +1362,7 @@ export async function approveCutAction(
     const { sendCuttingApprovedWhatsApp } = await import("@/lib/wa-cutting-alert");
     await Promise.all([
       refreshPaths(),
-      sendCuttingApprovedWhatsApp(sessionBlockId, profile.id),
+      sendCuttingApprovedWhatsApp(sessionBlockId, profile.id, restockedIds),
     ]);
     return { ok: true };
   } catch (err) {

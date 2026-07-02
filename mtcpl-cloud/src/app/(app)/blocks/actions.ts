@@ -359,7 +359,7 @@ export async function manualCutBlockAction(formData: FormData) {
   // WhatsApp alert — same as a formal cutting approval, keyed on the
   // block + chosen operator (works for sandstone and marble). Never
   // throws; awaited so the send completes before the action returns.
-  await sendManualCutWhatsApp(blockId, operatorId, profile.id);
+  await sendManualCutWhatsApp(blockId, operatorId, profile.id, restockedIds);
 
   // 5. Revalidate
   revalidatePath("/blocks");

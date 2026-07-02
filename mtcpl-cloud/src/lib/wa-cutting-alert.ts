@@ -130,6 +130,26 @@ function fmtIstDateTime(iso: string | null): string {
   });
 }
 
+/** Leftover ("Reused") blocks restocked from a cut → code · dims · yard for the
+ *  Cutting-Done PDF's "Remaining block(s)" section. Empty when none. */
+async function fetchRemainingBlocks(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ids: string[],
+): Promise<Array<{ code: string; dims: string; location: string }>> {
+  if (!ids || ids.length === 0) return [];
+  const { data } = await admin.from("blocks").select("id, length_ft, width_ft, height_ft, yard").in("id", ids);
+  return ((data ?? []) as Array<Record<string, unknown>>)
+    .map((b) => {
+      const l = Number(b.length_ft) || 0, w = Number(b.width_ft) || 0, h = Number(b.height_ft) || 0;
+      return {
+        code: b.id as string,
+        dims: l && w && h ? `${l}×${w}×${h}″` : "-",
+        location: `Yard ${(b.yard as number | null) ?? "-"}`,
+      };
+    })
+    .sort((a, b) => a.code.localeCompare(b.code));
+}
+
 /**
  * Fire-and-forget: send the cutting-approved WhatsApp for one just-approved
  * cut_session_block. NEVER throws (callers are fire-and-forget). Silently
@@ -138,6 +158,7 @@ function fmtIstDateTime(iso: string | null): string {
 export async function sendCuttingApprovedWhatsApp(
   sessionBlockId: string,
   actorId: string,
+  remainingBlockIds: string[] = [],
 ): Promise<void> {
   try {
     const templateName = process.env.MSG91_WA_CUTTING_TEMPLATE;
@@ -214,6 +235,10 @@ export async function sendCuttingApprovedWhatsApp(
       ? `${tonnes.toFixed(3)} T`
       : blk?.l && blk?.w && blk?.h ? `${blk.l}×${blk.w}×${blk.h}″` : "-";
 
+    // Remaining ("Reused") blocks restocked from this cut — code · dims · yard.
+    // Only fetched when the approval passed the restocked ids; shown only if any.
+    const remainingBlocks = await fetchRemainingBlocks(admin, remainingBlockIds);
+
     // Build the PDF (single block) via the shared Cutting-Done generator.
     const { generateCuttingDonePdf } = await import("@/lib/cutting-done-pdf");
     const generatedAt = fmtIstDateTime(new Date().toISOString());
@@ -243,6 +268,7 @@ export async function sendCuttingApprovedWhatsApp(
           section: s.section,
           element: s.element,
         })),
+        remainingBlocks,
       }],
     });
 
@@ -321,6 +347,7 @@ export async function sendManualCutWhatsApp(
   blockId: string,
   operatorId: string | null,
   actorId: string,
+  remainingBlockIds: string[] = [],
 ): Promise<void> {
   try {
     const templateName = process.env.MSG91_WA_CUTTING_TEMPLATE;
@@ -386,6 +413,8 @@ export async function sendManualCutWhatsApp(
           ? `${Number(meta.length_ft)}×${Number(meta.width_ft)}×${Number(meta.height_ft)}″`
           : "-";
 
+    const remainingBlocks = await fetchRemainingBlocks(admin, remainingBlockIds);
+
     const { generateCuttingDonePdf } = await import("@/lib/cutting-done-pdf");
     const generatedAt = fmtIstDateTime(new Date().toISOString());
     const pdfBytes = await generateCuttingDonePdf({
@@ -414,6 +443,7 @@ export async function sendManualCutWhatsApp(
           section: s.section,
           element: s.element,
         })),
+        remainingBlocks,
       }],
     });
 
