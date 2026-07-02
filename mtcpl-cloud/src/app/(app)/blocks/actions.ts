@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { generateNextCode } from "./utils";
+import { fetchAllBlockIds } from "./block-ids";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { sendManualCutWhatsApp } from "@/lib/wa-cutting-alert";
@@ -31,13 +32,10 @@ export async function addBlockAction(formData: FormData) {
   const { profile } = await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "block_entry"]);
   const supabase = createAdminSupabaseClient();
 
-  // Explicit high limit so the next-code picker sees every block. Without
-  // it, Supabase caps .select() at 1000 rows by default — crossing that
-  // threshold would silently make the picker suggest IDs that are already
-  // taken and blow up with a pkey violation. 100k row cap is far beyond
-  // any realistic block inventory.
-  const { data: existingRows } = await supabase.from("blocks").select("id").limit(100000);
-  const existingIds = (existingRows ?? []).map(r => r.id);
+  // Paginated so the next-code picker sees EVERY block. Supabase caps a single
+  // .select() at 1000 rows and .limit(100000) does NOT override it — a truncated
+  // pool made the picker suggest already-taken codes (pkey collision → failure).
+  const existingIds = await fetchAllBlockIds(supabase);
   const requestedId = textValue(formData, "id");
 
   const truck_no = textValue(formData, "truck_no") || null;

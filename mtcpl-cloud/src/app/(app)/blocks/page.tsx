@@ -10,6 +10,7 @@ import { undoMarbleCutAction } from "./actions";
 import { PeekIframe } from "@/components/peek-iframe";
 import { PeekSection } from "@/components/peek-section";
 import { generateNextCode } from "./utils";
+import { fetchAllBlockIds } from "./block-ids";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
 
@@ -87,10 +88,10 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     { data: operatorRows },
   ] = await Promise.all([
     blocksQuery,
-    // Explicit high limit — same reason as in the slab page: Supabase's
-    // default .select() cap is 1000 rows, which once exceeded causes the
-    // Add Block form to suggest a block-code that's already in use.
-    admin.from("blocks").select("id").limit(100000),
+    // Paginated (fetchAllBlockIds) — .limit(100000) does NOT override Supabase's
+    // 1000-row response cap, so a truncated pool made the Add Block form suggest
+    // an already-taken code. Kept in {data:[{id}]} shape for the destructure.
+    fetchAllBlockIds(admin).then((ids) => ({ data: ids.map((id) => ({ id })) })),
     admin
       .from("blocks")
       .select("id, stone, yard, length_ft, width_ft, height_ft, tonnes, updated_at")

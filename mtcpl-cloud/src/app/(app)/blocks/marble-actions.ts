@@ -17,6 +17,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { isAllowedYard } from "@/lib/yards";
 import { generateNextCode } from "./utils";
+import { fetchAllBlockIds } from "./block-ids";
 
 export async function createMarbleTruckAction(formData: FormData) {
   const { profile } = await requireAuth([
@@ -98,8 +99,9 @@ export async function createMarbleTruckAction(formData: FormData) {
   // table crosses that, the next-code picker misreads MAX and starts
   // suggesting IDs that are already taken (same pkey-collision bug that
   // hit slab_requirements).
-  const { data: existingBlocks } = await supabase.from("blocks").select("id").limit(100000);
-  const existingIds = (existingBlocks ?? []).map((r) => r.id as string);
+  // Paginated — .limit(100000) does NOT override Supabase's 1000-row response
+  // cap, so a truncated pool suggested already-taken codes (see fetchAllBlockIds).
+  const existingIds = await fetchAllBlockIds(supabase);
   // Marble blocks share the same MT-B-XXX series as sandstone so the
   // owner sees one continuous ID sequence across the whole inventory.
   // The stone type itself (WhiteMarble / YellowMarble) already
