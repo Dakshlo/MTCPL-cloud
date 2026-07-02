@@ -6,6 +6,7 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { CollapsibleInvoiceTemple, type InvoiceRow } from "./invoices-collapsible";
 
 // Page through a query (the invoices register can exceed the 1000-row cap over a
 // financial year — never silently truncate).
@@ -148,22 +149,58 @@ export default async function InvoicingListPage() {
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
+  // Group temple invoices (legacy + priced + bulk) into collapsible temple cards.
+  const templeGroups = new Map<string, Row[]>();
+  for (const r of rows) { const k = r.customer || "—"; const a = templeGroups.get(k) ?? []; a.push(r); templeGroups.set(k, a); }
+  const templeList = [...templeGroups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  // Mig 176 — "Other" (non-temple) invoices = converted other_challans. Best-
+  // effort so a pre-migration deploy just shows an empty Other section.
+  type OtherRow = InvoiceRow & { customer: string };
+  let otherRows: OtherRow[] = [];
+  {
+    const { data, error } = await supabase.from("other_challans")
+      .select("id, challan_date, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
+      .not("converted_at", "is", null).is("cancelled_at", null)
+      .order("converted_at", { ascending: false });
+    if (!error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      otherRows = ((data ?? []) as any[]).map((o) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const amounts = ((o.other_challan_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
+        const t = computeInvoiceTotals(amounts, { mode: (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
+        const party = Array.isArray(o.invoice_parties) ? o.invoice_parties[0] : o.invoice_parties;
+        return { key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`, date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—" };
+      });
+    }
+  }
+
   return (
     <section className="page-card">
-      <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <h1>Invoicing</h1>
-        </div>
-        <Link href="/invoicing/invoices/new" style={{ textDecoration: "none", fontSize: 13, padding: "10px 18px", background: "var(--gold)", color: "#fff", border: "1px solid var(--gold-dark)", borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>
-          🧾 + New invoice
-        </Link>
+      <div className="page-header">
+        <h1>Invoicing</h1>
+        <p className="muted">Every issued tax invoice — temple sales grouped by temple, plus other (non-temple) sales.</p>
       </div>
 
-      <div style={{ marginTop: 18 }}>
-        {rows.length === 0 ? (
-          <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "32px 24px", textAlign: "center", color: "var(--muted)" }}>
-            No invoices yet. Price a challan to issue a tax invoice, or click <strong>+ New invoice</strong>.
+      {/* Temple invoices — collapsible temple cards, collapsed by default. */}
+      <div style={{ marginTop: 16 }}>
+        <div style={sectionHead}>🏛 Temple invoices <span style={countPill}>{rows.length}</span></div>
+        {templeList.length === 0 ? (
+          <Empty text="No temple invoices yet. Price a challan to issue one." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {templeList.map(([temple, list]) => (
+              <CollapsibleInvoiceTemple key={temple} temple={temple} rows={list.map((r) => ({ key: r.key, code: r.code, date: r.date, total: r.total, href: r.href, external: r.external }))} />
+            ))}
           </div>
+        )}
+      </div>
+
+      {/* Other (non-temple) invoices. */}
+      <div style={{ marginTop: 22 }}>
+        <div style={sectionHead}>🏷 Other invoices <span style={countPill}>{otherRows.length}</span></div>
+        {otherRows.length === 0 ? (
+          <Empty text="No other invoices yet. Create one in Other Sales." />
         ) : (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -171,32 +208,19 @@ export default async function InvoicingListPage() {
                 <tr style={{ background: "var(--bg)" }}>
                   <th style={th}>Invoice #</th>
                   <th style={th}>Date</th>
-                  <th style={th}>Customer (temple)</th>
+                  <th style={th}>Client</th>
                   <th style={{ ...th, textAlign: "right" }}>Total (₹)</th>
                   <th style={{ ...th, width: 100 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {otherRows.map((r) => (
                   <tr key={r.key} style={{ borderTop: "1px solid var(--border-light)" }}>
                     <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{r.code}</td>
-                    <td style={td}>
-                      {new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
-                    </td>
+                    <td style={td}>{new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</td>
                     <td style={td}>{r.customer}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                      {r.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td style={td}>
-                      <Link
-                        href={r.href}
-                        target={r.external ? "_blank" : undefined}
-                        rel={r.external ? "noopener noreferrer" : undefined}
-                        style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none" }}
-                      >
-                        {r.external ? "🖨 Invoice →" : "View →"}
-                      </Link>
-                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style={td}><Link href={r.href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none" }}>🖨 Invoice →</Link></td>
                   </tr>
                 ))}
               </tbody>
@@ -206,6 +230,12 @@ export default async function InvoicingListPage() {
       </div>
     </section>
   );
+}
+
+const sectionHead: React.CSSProperties = { fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 };
+const countPill: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" };
+function Empty({ text }: { text: string }) {
+  return <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13.5 }}>{text}</div>;
 }
 
 const th: React.CSSProperties = {

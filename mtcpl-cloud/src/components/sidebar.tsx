@@ -536,6 +536,14 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
+  // Mig 176 — non-temple goods: create a challan → convert to invoice.
+  {
+    href: "/invoicing/other",
+    label: "Other Sales",
+    icon: "🏷",
+    roles: ["developer", "owner", "accountant_star", "accountant"],
+    department: "invoicing",
+  },
   {
     href: "/invoicing/invoices",
     label: "Invoices",

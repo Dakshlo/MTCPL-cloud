@@ -337,6 +337,25 @@ export async function upsertInvoicePartyAction(
     notes: txt(formData, "notes") || null,
   };
 
+  // Mig 176 — billing extras + shipping block + per-client GST default. Written
+  // ONLY when the form actually sends the field, so a form that omits them (the
+  // original parties form) never wipes values set elsewhere.
+  const setIfPresent = (key: string, val: unknown) => { if (formData.has(key)) payload[key] = val; };
+  setIfPresent("city", txt(formData, "city") || null);
+  setIfPresent("state", txt(formData, "state") || null);
+  setIfPresent("state_code", txt(formData, "state_code") || null);
+  setIfPresent("ship_name", txt(formData, "ship_name") || null);
+  setIfPresent("ship_address", txt(formData, "ship_address") || null);
+  setIfPresent("ship_city", txt(formData, "ship_city") || null);
+  setIfPresent("ship_state", txt(formData, "ship_state") || null);
+  setIfPresent("ship_state_code", txt(formData, "ship_state_code") || null);
+  setIfPresent("ship_gstin", txt(formData, "ship_gstin") || null);
+  setIfPresent("ship_phone", txt(formData, "ship_phone") || null);
+  if (formData.has("gst_mode")) { const g = txt(formData, "gst_mode"); payload.gst_mode = g === "igst" || g === "cgst_sgst" ? g : null; }
+  setIfPresent("igst_percent", txt(formData, "igst_percent") ? Number(txt(formData, "igst_percent")) || null : null);
+  setIfPresent("cgst_percent", txt(formData, "cgst_percent") ? Number(txt(formData, "cgst_percent")) || null : null);
+  setIfPresent("sgst_percent", txt(formData, "sgst_percent") ? Number(txt(formData, "sgst_percent")) || null : null);
+
   const supabase = createAdminSupabaseClient();
 
   if (id) {
