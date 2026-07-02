@@ -22,7 +22,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, useTransition, type CSSProperties, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
 import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
@@ -75,6 +75,34 @@ function TempleHeader({ temple, count, cft }: { temple: string; count: number; c
     >
       <span style={{ fontSize: 15.5, fontWeight: 800 }}>🏛 {temple}</span>
       <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{count} dispatch{count === 1 ? "" : "es"} · {cft.toFixed(2)} CFT</span>
+    </div>
+  );
+}
+
+/** Collapsible temple section — same look as TempleHeader but click-to-toggle
+ *  and COLLAPSED by default, so the Invoice-in-process / On-the-road /
+ *  Delivered tabs open as a tidy list of temple cards you expand on demand
+ *  (Daksh, Jul 2026). */
+function CollapsibleTemple({ temple, count, cft, children }: { temple: string; count: number; cft: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          padding: "10px 14px", marginBottom: open ? 6 : 0, cursor: "pointer", textAlign: "left",
+          background: "var(--bg)", color: "var(--text)",
+          border: "1px solid var(--border)", borderLeft: "4px solid var(--gold-dark)", borderRadius: "0 10px 10px 0",
+        }}
+      >
+        <span style={{ fontSize: 12, display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform .12s", color: "var(--gold-dark)" }}>▶</span>
+        <span style={{ fontSize: 15.5, fontWeight: 800 }}>🏛 {temple}</span>
+        <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>{count} dispatch{count === 1 ? "" : "es"} · {cft.toFixed(2)} CFT</span>
+        <span className="muted" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700 }}>{open ? "tap to collapse" : "tap to open"}</span>
+      </button>
+      {open && children}
     </div>
   );
 }
@@ -1532,12 +1560,11 @@ function OutForDeliveryTab({ rows, canUndo }: { rows: OutForDeliveryRow[]; canUn
         जब slab site पर पहुँच जाए: <strong>Reached — mark delivered</strong> दबाएँ और दो photo लगाएँ (truck on site + signed challan).
       </div>
       {groupByTemple(rows).map((g) => (
-        <div key={g.temple} style={{ marginBottom: 8 }}>
-          <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+        <CollapsibleTemple key={g.temple} temple={g.temple} count={g.rows.length} cft={g.cft}>
           {g.rows.map((r) => (
             <DispatchRow key={r.id} row={r} canUndo={canUndo} onMarkDelivered={() => setDeliverRow(r)} />
           ))}
-        </div>
+        </CollapsibleTemple>
       ))}
       {deliverRow && (
         <DeliverModal
@@ -1699,8 +1726,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
   return (
     <>
       {groupByTemple(rows).map((g) => (
-      <div key={g.temple} style={{ marginBottom: 10 }}>
-      <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+      <CollapsibleTemple key={g.temple} temple={g.temple} count={g.rows.length} cft={g.cft}>
       {g.rows.map((r) => {
         const chalan = chalanLabel(r.challan_number, r.id, r.docFy, r.docSeq);
         const dispatchedAt = new Date(r.dispatched_at);
@@ -1769,7 +1795,7 @@ function DeliveredTab({ rows, legacy }: { rows: DeliveredRow[]; legacy: LegacyDi
           </div>
         );
       })}
-      </div>
+      </CollapsibleTemple>
       ))}
 
       {legacy.length > 0 && (
@@ -1831,8 +1857,7 @@ function InvoiceInProcessTab({ rows }: { rows: InvoiceInProcessRow[] }) {
         These trucks are <strong>verified</strong> but not released yet — the invoicing team is pricing each one and the owner must approve the invoice before it goes on the road.
       </div>
       {groupByTemple(rows).map((g) => (
-        <div key={g.temple} style={{ marginBottom: 8 }}>
-          <TempleHeader temple={g.temple} count={g.rows.length} cft={g.cft} />
+        <CollapsibleTemple key={g.temple} temple={g.temple} count={g.rows.length} cft={g.cft}>
           {g.rows.map((r) => {
             const chip = subStatusChip(r.subStatus);
             return (
@@ -1876,7 +1901,7 @@ function InvoiceInProcessTab({ rows }: { rows: InvoiceInProcessRow[] }) {
               </div>
             );
           })}
-        </div>
+        </CollapsibleTemple>
       ))}
     </>
   );
