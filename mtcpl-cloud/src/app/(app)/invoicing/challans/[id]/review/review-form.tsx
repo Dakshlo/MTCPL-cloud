@@ -9,7 +9,8 @@
  */
 
 import { useMemo, useState } from "react";
-import { saveChallanPricingAction } from "../../../actions";
+import { saveChallanPricingAction, returnDispatchToWaitingAction } from "../../../actions";
+import { ReturnToDispatchButton } from "../../../_ui/return-to-dispatch-button";
 import { dash } from "@/lib/dispatch-grouping";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 
@@ -300,10 +301,12 @@ export function ReviewForm({
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <button type="submit" name="go" value="save" style={{ fontSize: 14.5, padding: "12px 26px", fontWeight: 800, color: "#fff", background: "#0f172a", border: "none", borderRadius: 11, cursor: "pointer" }}>
           📤 Send for approval to owner →
         </button>
+        {/* Cancel = drop this challan and bounce the dispatch back to Waiting approval. */}
+        <ReturnToDispatchButton challanId={challanId} action={returnDispatchToWaitingAction} label="✕ Cancel — send back to dispatch" />
       </div>
     </form>
   );

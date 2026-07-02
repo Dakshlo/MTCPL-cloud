@@ -307,7 +307,7 @@ function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChal
         {open ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             <button type="button" onClick={onConvert} style={{ width: "100%", textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)", cursor: "pointer" }}>
-              🧾 Convert to invoice
+              🧾 Convert to purchase invoice
             </button>
             <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
