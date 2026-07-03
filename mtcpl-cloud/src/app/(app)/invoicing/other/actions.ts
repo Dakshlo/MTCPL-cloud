@@ -93,6 +93,7 @@ async function resolvePartyId(admin: ReturnType<typeof createAdminSupabaseClient
     address: billing?.address ?? null, city: billing?.city ?? null, state: billing?.state ?? null, state_code: billing?.state_code ?? null,
     phone: billing?.phone ?? null, email: billing?.email ?? null,
     ship_name: ship?.name ?? null, ship_address: ship?.address ?? null, ship_city: ship?.city ?? null, ship_state: ship?.state ?? null, ship_state_code: ship?.state_code ?? null, ship_gstin: ship?.gstin ?? null, ship_phone: ship?.phone ?? null,
+    gst_mode: billing?.gst.mode ?? null, igst_percent: billing?.gst.igst ?? null, cgst_percent: billing?.gst.cgst ?? null, sgst_percent: billing?.gst.sgst ?? null,
   } as never).select("id").single();
   if (error || !created) return raw;
   return (created as { id: string }).id;

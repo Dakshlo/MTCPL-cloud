@@ -26,6 +26,7 @@ import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAc
 import { OwnerRejectButton } from "../_ui/owner-reject-button";
 import { getProfilesMap } from "@/lib/profiles";
 import type { ChangeSource } from "@/lib/invoice-approvals";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
 // Page through a query — the approval queue can in theory exceed the 1000-row
 // PostgREST cap; never silently truncate (mirrors invoices/page.tsx).
@@ -71,6 +72,8 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   const isOwner = canApproveInvoice(profile);
 
   const supabase = createAdminSupabaseClient();
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(supabase);
 
   // PENDING approval = priced, not yet approved, not rejected, not cancelled,
   // not legacy-converted.
@@ -134,7 +137,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   // Temple-wise sections (alphabetical), newest priced first within each.
   const grouped = (() => {
     const m = new Map<string, PendingChallan[]>();
-    for (const c of pending) { const k = c.temple ?? "—"; const a = m.get(k) ?? []; a.push(c); m.set(k, a); }
+    for (const c of pending) { const k = displayNameFor(billNames, c.temple); const a = m.get(k) ?? []; a.push(c); m.set(k, a); }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   })();
 
@@ -187,14 +190,14 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
         .select("id, temple, inv_fy, inv_seq, invoice_no_override, custom_billed_at, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by")
         .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!error) for (const r of (data ?? []) as any[]) push(r.custom_billed_at ? "running" : "purchase", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, r.temple ?? "—");
+      if (!error) for (const r of (data ?? []) as any[]) push(r.custom_billed_at ? "running" : "purchase", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, displayNameFor(billNames, r.temple));
     }
     {
       const { data, error } = await supabase.from("bulk_invoices")
         .select("id, temple, inv_fy, inv_seq, invoice_no_override, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by")
         .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!error) for (const r of (data ?? []) as any[]) push("bulk", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, r.temple ?? "—");
+      if (!error) for (const r of (data ?? []) as any[]) push("bulk", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, displayNameFor(billNames, r.temple));
     }
     {
       const { data, error } = await supabase.from("other_challans")
@@ -293,7 +296,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
                   {bulkPending.map((b) => (
                     <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface, #fff)", border: `1px solid ${ACCOUNTS_TOKENS.border}`, borderRadius: 10 }}>
                       <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, color: ACCOUNTS_TOKENS.accent, minWidth: 120 }}>{bulkCodeOf(b)}</span>
-                      <span style={{ fontSize: 12, color: "var(--muted)" }}>🏛 {b.temple}</span>
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>🏛 {displayNameFor(billNames, b.temple)}</span>
                       <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>₹{(bulkTotal.get(b.id) ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       <Link href={`/invoicing/bulk/${b.id}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark, #92400e)", textDecoration: "none" }}>🖨 Review invoice →</Link>
                       <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

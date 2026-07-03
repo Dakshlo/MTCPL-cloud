@@ -19,6 +19,7 @@ import { HeroMenu } from "./_ui/hero-menu";
 import { type DashGroup, type DashCard, type DashStatus } from "./_ui/dashboard-board";
 import { DashboardTabs } from "./_ui/dashboard-tabs";
 import { gatherInvoiced } from "@/lib/invoicing-summary";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
 type ChallanRow = {
   id: string;
@@ -112,9 +113,11 @@ export default async function InvoicingDashboardPage() {
     }
   }
 
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(supabase);
   const templeOf = (c: ChallanRow): string => {
     const legacy = c.invoice_parties ? (Array.isArray(c.invoice_parties) ? c.invoice_parties[0]?.name ?? null : c.invoice_parties.name) : null;
-    return c.temple ?? legacy ?? "—";
+    return displayNameFor(billNames, c.temple ?? legacy);
   };
 
   const byTemple = new Map<string, DashCard[]>();

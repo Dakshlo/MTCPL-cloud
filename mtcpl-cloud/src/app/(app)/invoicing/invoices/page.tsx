@@ -8,6 +8,7 @@ import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { InvoicesView, type InvoiceRow } from "./invoices-collapsible";
 import { getProfilesMap } from "@/lib/profiles";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
 // Page through a query (the invoices register can exceed the 1000-row cap over a
 // financial year — never silently truncate).
@@ -166,6 +167,8 @@ export default async function InvoicingListPage() {
   // Who generated each invoice — resolve creator ids to names for the Recent card.
   const profNames = await getProfilesMap();
   const nameOf = (id: string | null | undefined) => (id ? profNames[id] ?? null : null);
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(supabase);
 
   // Mig 184 — invoices with a staged edit/cancel awaiting approval (best-effort;
   // empty until the migration is run) so the card can lock its actions.
@@ -200,7 +203,7 @@ export default async function InvoicingListPage() {
         const t = computeInvoiceTotals(amounts, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
         customRows.push({
           key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`,
-          date: r.challan_date, customer: r.temple ?? "—", total: t.grand,
+          date: r.challan_date, customer: displayNameFor(billNames, r.temple), total: t.grand,
           href: `/invoicing/challan/${r.id}/custom/print`, external: true,
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
           editHref: `/invoicing/running/${r.id}/invoice`, cancelKind: "running", cancelId: r.id,
@@ -221,7 +224,7 @@ export default async function InvoicingListPage() {
     })),
     ...priced.map((c) => ({
       key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
-      customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
+      customer: displayNameFor(billNames, c.temple), total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
       challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
       editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
@@ -231,7 +234,7 @@ export default async function InvoicingListPage() {
     })),
     ...bulkApproved.map((b) => ({
       key: `bulk:${b.id}`, code: (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`), date: b.invoice_date,
-      customer: b.temple ?? "—", total: bulkTotal.get(b.id) ?? 0,
+      customer: displayNameFor(billNames, b.temple), total: bulkTotal.get(b.id) ?? 0,
       href: `/invoicing/bulk/${b.id}/print`, external: true,
       challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
       challanCodes: bulkChallanCodes.get(b.id) ?? [],

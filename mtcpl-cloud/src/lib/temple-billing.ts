@@ -36,6 +36,8 @@ export type TempleBilling = {
   phone: string | null;
   vendor_code: string | null;
   work_order_no: string | null;
+  /** default GST for this client — pre-fills the invoice pricing forms */
+  gst: { mode: "igst" | "cgst_sgst" | null; igst: number | null; cgst: number | null; sgst: number | null };
   /** separate shipping address; null ⇒ same as billing */
   shipping: ShipAddr | null;
 };
@@ -43,7 +45,7 @@ export type TempleBilling = {
 const COLS =
   "name, bill_name, bill_gstin, bill_pan, bill_address, bill_city, bill_state, bill_state_code, bill_email, bill_phone, " +
   "ship_name, ship_address, ship_city, ship_state, ship_state_code, ship_gstin, ship_pan, ship_phone, ship_email, " +
-  "vendor_code, work_order_no, site_location";
+  "vendor_code, work_order_no, site_location, gst_mode, igst_percent, cgst_percent, sgst_percent";
 
 // Pre-mig-165 columns (mig 158) — used as a graceful fallback if the full
 // select errors because mig 165 hasn't been applied yet (else PostgREST fails
@@ -57,7 +59,8 @@ export async function fetchTempleBilling(
   if (!templeName) return null;
   const nameOnly: TempleBilling = {
     name: templeName, gstin: null, pan: null, address: null, city: null, state: null,
-    state_code: null, email: null, phone: null, vendor_code: null, work_order_no: null, shipping: null,
+    state_code: null, email: null, phone: null, vendor_code: null, work_order_no: null,
+    gst: { mode: null, igst: null, cgst: null, sgst: null }, shipping: null,
   };
   const { data, error } = await admin.from("temples").select(COLS).eq("name", templeName).maybeSingle();
   if (error) {
@@ -94,6 +97,12 @@ export async function fetchTempleBilling(
     phone: t.bill_phone,
     vendor_code: t.vendor_code,
     work_order_no: t.work_order_no,
+    gst: {
+      mode: t.gst_mode === "igst" || t.gst_mode === "cgst_sgst" ? t.gst_mode : null,
+      igst: t.igst_percent != null ? Number(t.igst_percent) : null,
+      cgst: t.cgst_percent != null ? Number(t.cgst_percent) : null,
+      sgst: t.sgst_percent != null ? Number(t.sgst_percent) : null,
+    },
     shipping: shippingSet ? ship : null,
   };
 }

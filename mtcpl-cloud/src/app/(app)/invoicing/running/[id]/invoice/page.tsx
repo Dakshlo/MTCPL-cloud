@@ -49,7 +49,13 @@ export default async function RunningInvoicePage({ params }: { params: Params })
   const ship = billing?.shipping ?? null;
 
   const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
-  const gstMode = (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode;
+  // GST — respect the bill's own saved GST; on first convert default from the
+  // temple's Client Billing & GST (Daksh).
+  const challanMode = (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode;
+  const tGst = billing?.gst ?? { mode: null, igst: null, cgst: null, sgst: null };
+  const initGst = challanMode
+    ? { mode: challanMode, igst: Number(c.igst_percent) || 18, cgst: Number(c.cgst_percent) || 9, sgst: Number(c.sgst_percent) || 9 }
+    : { mode: tGst.mode as GstMode, igst: tGst.igst ?? 18, cgst: tGst.cgst ?? 9, sgst: tGst.sgst ?? 9 };
 
   const invFy = (c.inv_fy ?? "").trim() || financialYear(c.challan_date);
   const invPrefix = `INV-${invFy}-`;
@@ -70,7 +76,7 @@ export default async function RunningInvoicePage({ params }: { params: Params })
         editMode={editMode}
         sourceDispatchId={c.source_dispatch_id}
         initSections={initSections}
-        initGst={{ mode: gstMode, igst: Number(c.igst_percent) || 18, cgst: Number(c.cgst_percent) || 9, sgst: Number(c.sgst_percent) || 9 }}
+        initGst={initGst}
         bill={bill}
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}
