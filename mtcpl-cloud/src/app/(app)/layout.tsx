@@ -745,7 +745,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               slabImportBadge,
               dispatchApprovalBadge,
               invoiceApprovalBadge,
-              ownerView: profile.role === "owner",
+              ownerView: ["owner", "developer"].includes(profile.role),
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
