@@ -242,6 +242,17 @@ export async function buildCutterCostReport(
 ): Promise<CutterCostReport> {
   const admin = createAdminSupabaseClient();
 
+  // Clip an IN-PROGRESS period to TODAY so operational + depreciation prorate to
+  // the days ELAPSED, matching the days-elapsed output (Daksh). Otherwise the
+  // current month divides a FULL-month expense by only the output-so-far,
+  // inflating cost/CFT. Past periods end before today → unchanged; the last day
+  // of the month/week/year still uses the full window.
+  {
+    const todayKey = formatDateKey(istTodayParts());
+    // eslint-disable-next-line no-param-reassign
+    if (period.endDate > todayKey) period = { ...period, endDate: todayKey };
+  }
+
   // Period bounds in IST. approved_at is TIMESTAMPTZ so we filter
   // on absolute ISO timestamps with the IST offset baked in.
   const startIst = new Date(`${period.startDate}T00:00:00+05:30`);

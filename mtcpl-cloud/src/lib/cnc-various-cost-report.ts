@@ -363,6 +363,17 @@ export async function buildCncVariousCostReport(
 ): Promise<CncVariousCostReport> {
   const admin = createAdminSupabaseClient();
 
+  // Clip an IN-PROGRESS period to TODAY so operational + depreciation prorate to
+  // the days ELAPSED, matching the days-elapsed output (Daksh). Otherwise the
+  // current month divides a FULL-month expense by only the output-so-far,
+  // inflating cost/unit. Past periods end before today → unchanged; the last day
+  // of the month/week/year still uses the full window.
+  {
+    const todayKey = formatDateKey(istTodayParts());
+    // eslint-disable-next-line no-param-reassign
+    if (period.endDate > todayKey) period = { ...period, endDate: todayKey };
+  }
+
   // Period bounds in IST. review_approved_at is TIMESTAMPTZ.
   const startIso = new Date(`${period.startDate}T00:00:00+05:30`).toISOString();
   const endParts = parseDateKey(period.endDate);
