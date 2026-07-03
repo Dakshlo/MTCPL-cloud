@@ -48,6 +48,36 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
     }
   }
 
+  // Also offer TEMPLE parties (Daksh) — sell other goods to a temple without
+  // re-entering all its details. A temple not already an invoice_parties client
+  // shows as a `temple:<name>` option; picking it resolves/creates its party on
+  // save. Best-effort so a pre-mig deploy just omits them.
+  {
+    const seen = new Set(clients.map((c) => c.name.trim().toLowerCase()));
+    const push = (name: string, rawName: string, t: Record<string, any>) => {
+      const nm = name.trim();
+      if (!nm || seen.has(nm.toLowerCase())) return;
+      seen.add(nm.toLowerCase());
+      clients.push({
+        id: `temple:${rawName}`, name: nm, category: "Temple",
+        gstin: t.bill_gstin ?? null, pan: t.bill_pan ?? null,
+        address: t.bill_address ?? null, city: t.bill_city ?? null, state: t.bill_state ?? null, state_code: t.bill_state_code ?? null,
+        phone: t.bill_phone ?? null, email: t.bill_email ?? null,
+        ship_name: t.ship_name ?? null, ship_address: t.ship_address ?? null, ship_city: t.ship_city ?? null, ship_state: t.ship_state ?? null, ship_state_code: t.ship_state_code ?? null, ship_gstin: t.ship_gstin ?? null, ship_phone: t.ship_phone ?? null,
+        gst_mode: null, igst_percent: null, cgst_percent: null, sgst_percent: null,
+      });
+    };
+    const full = await admin.from("temples")
+      .select("name, bill_name, bill_gstin, bill_pan, bill_address, bill_city, bill_state, bill_state_code, bill_phone, bill_email, ship_name, ship_address, ship_city, ship_state, ship_state_code, ship_gstin, ship_phone")
+      .order("name");
+    if (!full.error) {
+      for (const t of (full.data ?? []) as any[]) push((t.bill_name?.trim?.() || t.name || ""), t.name, t);
+    } else {
+      const basic = await admin.from("temples").select("name").order("name");
+      for (const t of (basic.data ?? []) as any[]) push(t.name ?? "", t.name, {});
+    }
+  }
+
   // This section's challans + items. Try with the section cols (mig 183); if the
   // schema lacks them, retry without so the page still works pre-183.
   const baseCols = "id, party_id, challan_date, doc_fy, doc_seq, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name, category)";

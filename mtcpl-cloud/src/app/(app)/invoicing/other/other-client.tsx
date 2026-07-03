@@ -36,6 +36,9 @@ type Section = { head: string; lines: Line[] };
 const blankLine = (): Line => ({ particulars: "", hsn: "", unit: "", quantity: "" });
 const blankSection = (): Section => ({ head: "", lines: [blankLine()] });
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+// Other Sales bills a wider range of goods than dispatch — allow weight/volume
+// units on top of the standard CFT / SFT / NOS (Daksh).
+const OTHER_UNITS: string[] = [...BULK_UNITS, "Tonnes", "Cubic meter"];
 
 function toSections(items: OtherItem[]): Section[] {
   if (!items.length) return [blankSection()];
@@ -145,7 +148,16 @@ export function OtherSalesClient({
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Client</span>
               <select value={party} onChange={(e) => setParty(e.target.value)} required style={FIELD}>
                 <option value="">Select a client…</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {clients.some((c) => !c.id.startsWith("temple:")) && (
+                  <optgroup label="Clients">
+                    {clients.filter((c) => !c.id.startsWith("temple:")).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                )}
+                {clients.some((c) => c.id.startsWith("temple:")) && (
+                  <optgroup label="Temples">
+                    {clients.filter((c) => c.id.startsWith("temple:")).map((c) => <option key={c.id} value={c.id}>🛕 {c.name}</option>)}
+                  </optgroup>
+                )}
               </select>
             </label>
             <button type="button" onClick={() => setClientModal(true)} style={btnGhost}>＋ New client</button>
@@ -190,7 +202,8 @@ export function OtherSalesClient({
                           <td style={cell}>
                             <select value={l.unit} onChange={(e) => setLine(si, li, "unit", e.target.value)} style={{ ...inp, cursor: "pointer" }}>
                               <option value="">Unit…</option>
-                              {BULK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                              {OTHER_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                              {l.unit && !OTHER_UNITS.includes(l.unit) && <option value={l.unit}>{l.unit}</option>}
                             </select>
                           </td>
                           <td style={cell}><input value={l.quantity} onChange={(e) => setLine(si, li, "quantity", e.target.value)} inputMode="decimal" style={num} /></td>

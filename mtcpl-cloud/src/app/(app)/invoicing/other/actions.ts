@@ -17,6 +17,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
+import { fetchTempleBilling } from "@/lib/temple-billing";
 
 function txt(fd: FormData, key: string): string {
   const v = fd.get(key);
@@ -75,6 +76,28 @@ function readGst(fd: FormData) {
   };
 }
 
+/** Resolve a client-dropdown value to an invoice_parties id. A `temple:<name>`
+ *  value (selling other goods to a temple) finds-or-creates a party from the
+ *  temple's billing, so its details never have to be re-entered. */
+async function resolvePartyId(admin: ReturnType<typeof createAdminSupabaseClient>, raw: string): Promise<string> {
+  if (!raw.startsWith("temple:")) return raw;
+  const templeName = raw.slice("temple:".length);
+  const billing = await fetchTempleBilling(admin, templeName);
+  const partyName = (billing?.name ?? templeName).trim() || templeName;
+  const { data: existing } = await admin.from("invoice_parties").select("id").eq("name", partyName).maybeSingle();
+  if (existing) return (existing as { id: string }).id;
+  const ship = billing?.shipping ?? null;
+  const { data: created, error } = await admin.from("invoice_parties").insert({
+    name: partyName, category: "Temple", is_active: true,
+    gstin: billing?.gstin ?? null, pan: billing?.pan ?? null,
+    address: billing?.address ?? null, city: billing?.city ?? null, state: billing?.state ?? null, state_code: billing?.state_code ?? null,
+    phone: billing?.phone ?? null, email: billing?.email ?? null,
+    ship_name: ship?.name ?? null, ship_address: ship?.address ?? null, ship_city: ship?.city ?? null, ship_state: ship?.state ?? null, ship_state_code: ship?.state_code ?? null, ship_gstin: ship?.gstin ?? null, ship_phone: ship?.phone ?? null,
+  } as never).select("id").single();
+  if (error || !created) return raw;
+  return (created as { id: string }).id;
+}
+
 async function writeItems(admin: ReturnType<typeof createAdminSupabaseClient>, challanId: string, items: ItemIn[]) {
   if (items.length === 0) return;
   const rows = items.map((it, i) => ({ other_challan_id: challanId, position: i, ...it }));
@@ -94,6 +117,7 @@ export async function createOtherChallanAction(formData: FormData) {
   if (!partyId) redirect("/invoicing/other?toast=Pick+a+client");
   const items = parseItems(formData);
   if (items.length === 0) redirect("/invoicing/other?toast=Add+at+least+one+line+item");
+  const resolvedPartyId = await resolvePartyId(admin, partyId);
 
   const challanDate = txt(formData, "challan_date") || null;
   const fy = financialYear(challanDate || new Date());
@@ -108,7 +132,7 @@ export async function createOtherChallanAction(formData: FormData) {
   const { data: row, error } = await admin
     .from("other_challans")
     .insert({
-      party_id: partyId,
+      party_id: resolvedPartyId,
       challan_date: challanDate ?? undefined,
       doc_fy: docSeq != null ? fy : null,
       doc_seq: docSeq,
@@ -144,11 +168,12 @@ export async function updateOtherChallanAction(formData: FormData) {
   const items = parseItems(formData);
   if (items.length === 0) redirect("/invoicing/other?toast=Add+at+least+one+line+item");
   const partyId = txt(formData, "party_id");
+  const resolvedPartyId = partyId ? await resolvePartyId(admin, partyId) : "";
 
   await admin
     .from("other_challans")
     .update({
-      ...(partyId ? { party_id: partyId } : {}),
+      ...(resolvedPartyId ? { party_id: resolvedPartyId } : {}),
       ...(txt(formData, "challan_date") ? { challan_date: txt(formData, "challan_date") } : {}),
       notes: txt(formData, "notes") || null,
     })

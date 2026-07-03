@@ -157,6 +157,31 @@ export default async function InvoicingDashboardPage() {
     a.push(card);
     byTemple.set(temple, a);
   }
+
+  // Other Sales challans + invoices also belong on the ALL board (Daksh) —
+  // grouped under the client/party name. Best-effort (pre-mig deploy shows none).
+  let otherCount = 0;
+  {
+    const { data, error } = await supabase.from("other_challans")
+      .select("id, doc_fy, doc_seq, challan_date, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name)")
+      .is("cancelled_at", null)
+      .order("challan_date", { ascending: false });
+    if (!error) for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+      const pj = r.invoice_parties as { name?: string } | { name?: string }[] | null;
+      const party = (Array.isArray(pj) ? pj[0]?.name : pj?.name) ?? "Other Sales";
+      const converted = !!r.converted_at;
+      const code = challanCode(r.doc_fy as string | null, r.doc_seq as number | null) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`;
+      const invCode = converted ? invoiceCodeFromDoc(r.inv_fy as string | null, r.inv_seq as number | null) : null;
+      const card: DashCard = {
+        id: `other:${String(r.id)}`, code, date: String(r.challan_date), status: converted ? "invoiced" : "open",
+        href: `/invoicing/other/${String(r.id)}/print`, invCode,
+        search: `${party} ${code} ${invCode ?? ""}`.toLowerCase(),
+      };
+      const a = byTemple.get(party) ?? []; a.push(card); byTemple.set(party, a);
+      otherCount++;
+    }
+  }
+
   const groups: DashGroup[] = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([temple, rows]) => ({ temple, rows }));
 
   // Invoiced analytics (temple purchase + work order + running + other sales).
@@ -187,7 +212,7 @@ export default async function InvoicingDashboardPage() {
       />
 
       <div style={{ marginTop: 18 }}>
-        <DashboardTabs groups={groups} total={challans.length} invoiced={invoiced} />
+        <DashboardTabs groups={groups} total={challans.length + otherCount} invoiced={invoiced} />
       </div>
     </section>
   );
