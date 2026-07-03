@@ -371,7 +371,7 @@ export async function buildCncVariousCostReport(
   {
     const todayKey = formatDateKey(istTodayParts());
     // eslint-disable-next-line no-param-reassign
-    if (period.endDate > todayKey) period = { ...period, endDate: todayKey };
+    if (period.endDate > todayKey && period.startDate <= todayKey) period = { ...period, endDate: todayKey };
   }
 
   // Period bounds in IST. review_approved_at is TIMESTAMPTZ.
