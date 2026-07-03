@@ -44,7 +44,7 @@ export default async function TempleClientsPage({ searchParams }: { searchParams
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
         {list.length === 0 && <div className="banner">No temples configured yet.</div>}
         {list.map((temple) => (
-          <TempleEditModal key={temple.id} temple={temple} returnTo="temples" />
+          <TempleEditModal key={temple.id} temple={temple} returnTo="temples" canEditStatus={["owner", "developer"].includes(profile.role)} />
         ))}
       </div>
 

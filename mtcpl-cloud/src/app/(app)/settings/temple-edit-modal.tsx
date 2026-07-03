@@ -28,7 +28,7 @@ function SaveOverlay() {
 }
 
 export function TempleEditModal({
-  temple, canDelete = false, returnTo, renameSlot = null,
+  temple, canDelete = false, returnTo, renameSlot = null, canEditStatus = true,
 }: {
   temple: Temple;
   canDelete?: boolean;
@@ -36,6 +36,9 @@ export function TempleEditModal({
   returnTo: "settings" | "temples";
   /** Owner/dev-only rename form (rendered server-side, passed in). */
   renameSlot?: ReactNode;
+  /** When false, the Active/Inactive Status is shown LOCKED so an accountant
+   *  can't accidentally deactivate a temple from the billing page (Daksh). */
+  canEditStatus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [gstMode, setGstMode] = useState<string>(temple.gst_mode ?? "none");
@@ -95,10 +98,19 @@ export function TempleEditModal({
                   </label>
                   <label className="stack" style={{ flex: "0 0 140px" }}>
                     <span>Status</span>
-                    <select name="is_active" defaultValue={String(temple.is_active)}>
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </select>
+                    {canEditStatus ? (
+                      <select name="is_active" defaultValue={String(temple.is_active)}>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                      </select>
+                    ) : (
+                      <>
+                        <input type="hidden" name="is_active" value={String(temple.is_active)} />
+                        <div title="Only the owner can change a temple's status (from Settings)" style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--muted)", fontSize: 13, display: "flex", alignItems: "center", gap: 6, cursor: "not-allowed" }}>
+                          🔒 {temple.is_active ? "Active" : "Inactive"}
+                        </div>
+                      </>
+                    )}
                   </label>
                 </div>
 
