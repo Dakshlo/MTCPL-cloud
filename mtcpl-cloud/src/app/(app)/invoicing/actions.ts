@@ -1743,7 +1743,10 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   revalidatePath("/invoicing/bulk");
   revalidatePath("/invoicing/approval");
   refreshInvoicingPaths();
-  redirect(`/invoicing/bulk/${bulkId}/print`);
+  // Daksh — the work order invoice now needs owner approval, so land on the
+  // Approval page (not the print) so it's clearly "pending approval" and the
+  // create form isn't re-shown on Back.
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Work order invoice sent for owner approval")}`);
 }
 
 // ── Bulk invoice owner approval (Mig 173) ────────────────────────────────
