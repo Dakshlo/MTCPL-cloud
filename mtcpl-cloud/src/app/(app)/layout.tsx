@@ -745,6 +745,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               slabImportBadge,
               dispatchApprovalBadge,
               invoiceApprovalBadge,
+              ownerView: profile.role === "owner",
             })} />
 
             {/* Mig 078 — Messenger pilot. canUseMessenger is locked
@@ -877,6 +878,9 @@ function buildTopbarTaskItems(counts: {
   /** Mig 167 — priced challans awaiting the OWNER's invoice approval.
    *  Owner / developer only; null otherwise. */
   invoiceApprovalBadge: number | null;
+  /** True only for the OWNER — floats the owner-only approvals into a
+   *  highlighted "Needs your approval" group at the top of the dropdown. */
+  ownerView: boolean;
 }): TopbarTask[] {
   const items: TopbarTask[] = [];
   // Mig 058 follow-on (Daksh) — per-user rejected-bills item.
@@ -1092,6 +1096,13 @@ function buildTopbarTaskItems(counts: {
       icon: "🗂",
       department: "production",
     });
+  }
+  // Owner-only approvals — flag them so the dropdown floats them into a
+  // "Needs your approval" group at the top (UI only; nothing about how these
+  // pages work changes — Daksh).
+  if (counts.ownerView) {
+    const OWNER = new Set(["slab-cancels", "owner-reviews", "work-order-approval", "rejected-bills", "pay-today", "debit-approval", "bank-decline-approval", "royalty-approval"]);
+    for (const it of items) if (OWNER.has(it.id)) it.ownerCritical = true;
   }
   return items;
 }

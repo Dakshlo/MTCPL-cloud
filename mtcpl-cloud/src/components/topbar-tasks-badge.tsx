@@ -57,6 +57,9 @@ export type TopbarTask = {
   /** Which department this queue belongs to. Used by the dropdown
    *  to group rows by department + colour-tag each section. */
   department: TopbarTaskDepartment;
+  /** Owner-only approval — floated into a highlighted "Needs your approval"
+   *  group at the very top of the dropdown so the owner spots his work fast. */
+  ownerCritical?: boolean;
 };
 
 // Department accent colours used by the dropdown headers + the
@@ -113,13 +116,17 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
   // Group items by department in render order: Production → Finance
   // → Inventory. Sections that have no items for this user (e.g.
   // an accountant doesn't get a Production row) are skipped.
+  // Owner-only approvals float into a highlighted group at the very top so the
+  // owner instantly sees the work only he can clear (UI only — Daksh).
+  const ownerItems = items.filter((it) => it.ownerCritical).sort((a, b) => b.count - a.count);
   const grouped: Array<{
-    dept: TopbarTaskDepartment;
+    dept: TopbarTaskDepartment | "owner";
     items: TopbarTask[];
   }> = [];
+  if (ownerItems.length > 0) grouped.push({ dept: "owner", items: ownerItems });
   const order: TopbarTaskDepartment[] = ["production", "finance", "inventory"];
   for (const dept of order) {
-    const deptItems = items.filter((it) => it.department === dept);
+    const deptItems = items.filter((it) => it.department === dept && !it.ownerCritical);
     if (deptItems.length > 0) grouped.push({ dept, items: deptItems });
   }
 
@@ -315,7 +322,8 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
 
             {/* Department-grouped sections */}
             {grouped.map((group, groupIdx) => {
-              const meta = DEPT_META[group.dept];
+              const isOwnerGroup = group.dept === "owner";
+              const meta = group.dept === "owner" ? { label: "⭐ Needs your approval", color: "#b8860b" } : DEPT_META[group.dept];
               const groupTotal = group.items.reduce((s, it) => s + it.count, 0);
               return (
                 <div
@@ -325,6 +333,7 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
                     flexDirection: "column",
                     gap: 2,
                     marginTop: groupIdx === 0 ? 0 : 6,
+                    ...(isOwnerGroup ? { background: "rgba(184,134,11,0.08)", border: "1px solid rgba(184,134,11,0.28)", borderRadius: 10, padding: "2px 2px 6px" } : null),
                   }}
                 >
                   {/* Department header */}
