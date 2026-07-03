@@ -11,6 +11,7 @@ import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { RouteTracker } from "@/components/route-tracker";
 import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
+import { TopbarDiaryBadge, type DiaryBadgeItem } from "@/components/topbar-diary-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
@@ -459,6 +460,32 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     return (count ?? 0) + bulk + changes;
   }
 
+  // Mig 185 — Work Diary pill (every user): open register entries you created
+  // or are included in, most urgent first. Best-effort: pre-migration → null
+  // hides the pill entirely.
+  async function fetchDiaryBadge(): Promise<{ count: number; items: DiaryBadgeItem[] } | null> {
+    const byId = new Map<string, { id: string; activity: string; due_date: string }>();
+    const { data: mine, error } = await supabase
+      .from("work_diary_entries")
+      .select("id, activity, due_date")
+      .eq("created_by", profile.id)
+      .is("closed_at", null);
+    if (error) return null; // mig 185 not applied
+    for (const r of (mine ?? []) as Array<{ id: string; activity: string; due_date: string }>) byId.set(r.id, r);
+    const { data: parts } = await supabase.from("work_diary_participants").select("entry_id").eq("profile_id", profile.id);
+    const pIds = ((parts ?? []) as Array<{ entry_id: string }>).map((r) => r.entry_id).filter((id) => !byId.has(id));
+    for (let i = 0; i < pIds.length; i += 300) {
+      const { data } = await supabase.from("work_diary_entries").select("id, activity, due_date").in("id", pIds.slice(i, i + 300)).is("closed_at", null);
+      for (const r of (data ?? []) as Array<{ id: string; activity: string; due_date: string }>) byId.set(r.id, r);
+    }
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const all = [...byId.values()].sort((a, b) => a.due_date.localeCompare(b.due_date));
+    return {
+      count: all.length,
+      items: all.slice(0, 8).map((e) => ({ id: e.id, activity: e.activity, due: e.due_date, overdue: e.due_date < today })),
+    };
+  }
+
   const [
     approvalsBadge,
     billsAuditBadge,
@@ -477,6 +504,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     dispatchApprovalBadge,
     invoiceApprovalBadge,
     templeCancelAlert,
+    diaryBadge,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -495,6 +523,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchDispatchApprovalBadge(),
     fetchInvoiceApprovalBadge(),
     fetchTempleCancelAlert(),
+    fetchDiaryBadge(),
   ]);
 
   // Tablet keyboard quick-chips — every active temple's code, so the chips
@@ -728,6 +757,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                     (Rajesh / Parth)    → Cutting Audit only
                   accountant with can_approve_bills → adds Pay Today
                 Roles with zero items get nothing rendered. */}
+            {/* Mig 185 — Work Diary (the "kaam ka register") for every user. */}
+            {diaryBadge && <TopbarDiaryBadge count={diaryBadge.count} items={diaryBadge.items} />}
             <TopbarTasksBadge items={buildTopbarTaskItems({
               approvalsBadge,
               billsAuditBadge,
