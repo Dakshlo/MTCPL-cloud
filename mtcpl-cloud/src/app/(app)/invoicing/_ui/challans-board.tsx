@@ -25,6 +25,8 @@ export type BoardChallan = {
   id: string;
   code: string;
   date: string;
+  /** Source dispatch — powers the "View challan" (delivery-challan print) link. */
+  sourceDispatchId: string | null;
   notes: string | null;
   cancelled_at: string | null;
   converted_invoice_id: string | null;
@@ -174,7 +176,7 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
             background: dragging ? "rgba(139,92,246,0.12)" : undefined,
           }}
         >
-          🎯 Dropped
+          🏃 Running bills
           {droppedCount > 0 && (
             <span style={{ fontSize: 11, fontWeight: 800, color: "#5b21b6", background: "rgba(139,92,246,0.16)", borderRadius: 999, padding: "1px 8px" }}>{droppedCount}</span>
           )}
@@ -291,7 +293,7 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
             }}
           >
             <div style={{ fontSize: 26, lineHeight: 1 }}>🎯</div>
-            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 5 }}>{isOverDrop ? "Release → Drop" : "Drop here → Custom bill"}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 5 }}>{isOverDrop ? "Release → Running bill" : "Drop here → Running bill"}</div>
             <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginTop: 2 }}>re-bill as one whole piece &amp; deliver</div>
           </div>
         </div>
@@ -305,17 +307,17 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
         >
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(440px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 34, marginBottom: 6 }}>{pendingDrop.target === "drop" ? "🎯" : "📦"}</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>{pendingDrop.target === "drop" ? "Drop this challan?" : "Send to Bulk challans?"}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>{pendingDrop.target === "drop" ? "Make this a running bill?" : "Send to Bulk challans?"}</div>
             <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, margin: "0 0 18px" }}>
               <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{pendingDrop.code}</strong>{" "}
               {pendingDrop.target === "drop"
-                ? <>moves to the <strong>Dropped</strong> section below, where you re-bill it as ONE whole-piece bill in the client&apos;s format. Creating that bill delivers the production dispatch (no on-road leg) — the <strong>challan number stays the same</strong>.</>
+                ? <>moves to the <strong>Running bills</strong> page, where you re-bill it as ONE whole-piece bill in the client&apos;s format. Creating that bill delivers the production dispatch (no on-road leg) — the <strong>challan number stays the same</strong>.</>
                 : <>will leave this page and wait on the <strong>Bulk challans</strong> page, where it can be billed together with the temple&apos;s other challans on one tax invoice. You can send it back anytime.</>}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" disabled={sending} onClick={() => setPendingDrop(null)} style={{ ...BUTTON_STYLES.ghost, opacity: sending ? 0.5 : 1 }}>Cancel</button>
               <button type="button" disabled={sending} onClick={confirmSend} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: pendingDrop.target === "drop" ? "#6d28d9" : "#b45309", cursor: sending ? "default" : "pointer", opacity: sending ? 0.7 : 1 }}>
-                {sending ? (pendingDrop.target === "drop" ? "Dropping…" : "Sending…") : (pendingDrop.target === "drop" ? "🎯 Drop the challan" : "📦 Send to bulk")}
+                {sending ? (pendingDrop.target === "drop" ? "Dropping…" : "Sending…") : (pendingDrop.target === "drop" ? "🏃 Make running bill" : "📦 Send to bulk")}
               </button>
             </div>
           </div>
@@ -373,9 +375,19 @@ function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChal
       <div style={{ marginTop: "auto", paddingTop: 4 }}>
         {open ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            <button type="button" onClick={onConvert} style={{ width: "100%", textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)", cursor: "pointer" }}>
-              🧾 Convert to purchase invoice
-            </button>
+            <div style={{ display: "flex", gap: 7 }}>
+              <button type="button" onClick={onConvert} style={{ flex: 1, textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)", cursor: "pointer" }}>
+                🧾 Convert to purchase invoice
+              </button>
+              <Link
+                href={c.sourceDispatchId ? `/dispatch/${c.sourceDispatchId}/print` : `/invoicing/challans/${c.id}`}
+                target={c.sourceDispatchId ? "_blank" : undefined}
+                rel={c.sourceDispatchId ? "noopener noreferrer" : undefined}
+                style={{ flexShrink: 0, textAlign: "center", fontSize: 12.5, fontWeight: 700, padding: "9px 12px", borderRadius: 9, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", textDecoration: "none" }}
+              >
+                👁 View challan
+              </Link>
+            </div>
             <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
               <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
             </span>

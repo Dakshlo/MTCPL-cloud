@@ -18,7 +18,7 @@ import { type DroppedChallan } from "../_ui/challans-board";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ toast?: string }>;
+type SearchParams = Promise<{ toast?: string; edit?: string }>;
 
 export default async function DroppedChallansPage({ searchParams }: { searchParams: SearchParams }) {
   const { profile } = await requireAuth();
@@ -35,8 +35,24 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
       .is("cancelled_at", null)
       .is("inv_seq", null) // invoiced ones live on the Invoices page
       .order("dropped_at", { ascending: false });
+    // ?edit=<id> (Invoices page ✎ Edit) — an INVOICED running bill isn't in the
+    // normal list (inv_seq filter); fetch it explicitly so its form can open.
+    let editRow: any = null;
+    if (sp.edit) {
+      const { data: er } = await supabase
+        .from("challans")
+        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, custom_billed_at, gst_mode, igst_percent, cgst_percent, sgst_percent, source_dispatch_id, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone, invoice_parties(name), challan_custom_items(position, particulars, hsn, unit, quantity, rate, amount)")
+        .eq("id", sp.edit)
+        .not("dropped_at", "is", null)
+        .is("cancelled_at", null)
+        .maybeSingle();
+      editRow = er ?? null;
+    }
     if (!error) {
-      const rows = (data ?? []) as any[];
+      const rows = [
+        ...(editRow && !((data ?? []) as any[]).some((r: any) => r.id === editRow.id) ? [editRow] : []),
+        ...((data ?? []) as any[]),
+      ];
       // Vehicle/driver fall back to the source dispatch when the challan's own
       // mig-169 transport columns are empty.
       const dispIds = [...new Set(rows.map((r) => r.source_dispatch_id).filter(Boolean))] as string[];
@@ -74,8 +90,8 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
     <section className="page-card">
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1>🎯 Dropped challans</h1>
-          <p className="muted">Challans dropped for a custom whole-piece bill. Create the bill (keeps the CH number &amp; delivers the dispatch) or un-drop back to Challans.</p>
+          <h1>🏃 Running bills</h1>
+          <p className="muted">Challans dropped here become RUNNING BILLS — re-billed as one whole piece. Create the bill (keeps the CH number &amp; delivers the dispatch) or un-drop back to Challans.</p>
         </div>
         <Link href="/invoicing/challans" style={{ textDecoration: "none", fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", whiteSpace: "nowrap" }}>← Challans</Link>
       </div>
@@ -87,7 +103,7 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
       )}
 
       <div style={{ marginTop: 14 }}>
-        <DroppedSection dropped={dropped} showHeader={false} />
+        <DroppedSection dropped={dropped} showHeader={false} initialEditId={sp.edit} />
       </div>
     </section>
   );

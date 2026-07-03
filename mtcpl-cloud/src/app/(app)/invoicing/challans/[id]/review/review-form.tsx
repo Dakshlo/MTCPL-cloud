@@ -44,16 +44,25 @@ export function ReviewForm({
   invPrefix,
   initNum,
   autoNum,
+  freedNumbers = [],
+  editMode = false,
+  bill = null,
   transportCompanies = [],
   initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" },
 }: {
   challanId: string;
   items: PriceItem[];
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
-  /** Fixed "INV-26/27-" prefix; the reviewer edits only the trailing number. */
+  /** Fixed "INV-26/27-" prefix. The number is LOCKED (auto-assigned). */
   invPrefix: string;
   initNum: string;
   autoNum: string;
+  /** Mig 178 — freed (gap) numbers from cancelled invoices, indication only. */
+  freedNumbers?: number[];
+  /** Jul 2026 — editing a FINAL (approved) invoice: number + approval kept. */
+  editMode?: boolean;
+  /** Bill-To block for the invoice preview. */
+  bill?: { name: string; address: string | null; gstin: string | null } | null;
   transportCompanies?: string[];
   initTransport?: { company: string; phone: string; lr: string; vehicle: string; driverName: string; driverPhone: string };
 }) {
@@ -79,7 +88,6 @@ export function ReviewForm({
     }
     return m;
   });
-  const [invNum, setInvNum] = useState(initNum);
   // Custom transport-company combobox (our own dropdown, not the browser datalist).
   const [company, setCompany] = useState(initTransport.company);
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -88,6 +96,7 @@ export function ReviewForm({
     return (q ? transportCompanies.filter((n) => n.toLowerCase().includes(q)) : transportCompanies).slice(0, 50);
   }, [company, transportCompanies]);
   const [mode, setMode] = useState<GstMode>(initGst.mode);
+  const [showPreview, setShowPreview] = useState(false);
   const [igst, setIgst] = useState(String(initGst.igst));
   const [cgst, setCgst] = useState(String(initGst.cgst));
   const [sgst, setSgst] = useState(String(initGst.sgst));
@@ -179,12 +188,12 @@ export function ReviewForm({
   return (
     <form action={saveChallanPricingAction}>
       <input type="hidden" name="challan_id" value={challanId} />
+      <input type="hidden" name="edit_mode" value={editMode ? "1" : ""} />
       <input type="hidden" name="rates" value={ratesJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
-      <input type="hidden" name="inv_seq" value={invNum} />
 
       {/* Called inline (not <GroupSection/>) so editing a Rate doesn't remount. */}
       {groups.map((g) => GroupSection(g))}
@@ -269,21 +278,21 @@ export function ReviewForm({
               </label>
             </div>
           )}
-          {/* Invoice number — fixed INV-<FY>- prefix, edit only the number. */}
+          {/* Invoice number — LOCKED (auto-assigned, never hand-edited). */}
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-light)" }}>
             <span style={{ display: "block", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
-            <div style={{ display: "inline-flex", alignItems: "stretch", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", padding: "6px 10px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, background: "var(--surface)", color: "var(--muted)", borderRight: "1.5px solid var(--border)" }}>{invPrefix}</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={invNum}
-                onChange={(e) => setInvNum(e.target.value.replace(/[^0-9]/g, ""))}
-                placeholder={autoNum}
-                style={{ width: 90, textAlign: "left", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, padding: "6px 10px", border: "none", background: "transparent", color: "var(--text)" }}
-              />
-            </div>
-            <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{invPrefix}{autoNum}</strong>. Editing the number continues the series after it.</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", padding: "7px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>
+              {invPrefix}{initNum ? initNum.padStart(2, "0") : autoNum}
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 8px", fontFamily: "inherit" }}>🔒 {initNum ? "ASSIGNED" : "AUTO"}</span>
+            </span>
+            <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>
+              {initNum ? "Number already assigned — it never changes." : "Assigned automatically on send — numbers can't be edited."}
+            </span>
+            {freedNumbers.length > 0 && (
+              <span style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#92400e", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
+                ℹ Free number{freedNumbers.length !== 1 ? "s" : ""} (from cancelled invoices): <strong style={{ fontFamily: "ui-monospace, monospace" }}>{freedNumbers.join(", ")}</strong> — the series still continues at {invPrefix}{autoNum}.
+              </span>
+            )}
           </div>
         </div>
 
@@ -303,12 +312,100 @@ export function ReviewForm({
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <button type="submit" name="go" value="save" style={{ fontSize: 14.5, padding: "12px 26px", fontWeight: 800, color: "#fff", background: "#0f172a", border: "none", borderRadius: 11, cursor: "pointer" }}>
-          📤 Send for approval to owner →
+          {editMode ? "💾 Save invoice changes →" : "📤 Send for approval to owner →"}
+        </button>
+        {/* Preview how the finished tax invoice will look (NOT VALID watermark). */}
+        <button type="button" onClick={() => setShowPreview(true)} style={{ fontSize: 13.5, padding: "12px 20px", fontWeight: 800, color: "#0f2540", background: "var(--surface, #fff)", border: "1.5px solid #0f2540", borderRadius: 11, cursor: "pointer" }}>
+          👁 Preview invoice
         </button>
         {/* Cancel = drop this challan and bounce the dispatch back to Waiting approval. */}
-        <ReturnToDispatchButton challanId={challanId} action={returnDispatchToWaitingAction} label="✕ Cancel — send back to dispatch" />
+        {!editMode && <ReturnToDispatchButton challanId={challanId} action={returnDispatchToWaitingAction} label="✕ Cancel — send back to dispatch" />}
       </div>
+
+      {showPreview && (
+        <InvoicePreview
+          bill={bill}
+          invoiceNo={`${invPrefix}${initNum ? initNum.padStart(2, "0") : autoNum}`}
+          groups={groups.map((g) => ({ key: g.key, stone: g.stone, unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0 }))}
+          totals={totals}
+          mode={mode}
+          igst={Number(igst) || 0}
+          cgst={Number(cgst) || 0}
+          sgst={Number(sgst) || 0}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
     </form>
+  );
+}
+
+/** Invoice preview (NOT VALID watermark) — how the tax invoice will read with
+ *  the current rates + GST, before sending for approval (Daksh Jul 2026). */
+function InvoicePreview({ bill, invoiceNo, groups, totals, mode, igst, cgst, sgst, onClose }: {
+  bill: { name: string; address: string | null; gstin: string | null } | null;
+  invoiceNo: string;
+  groups: Array<{ key: string; stone: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number }>;
+  totals: { subtotal: number; igstAmt: number; cgstAmt: number; sgstAmt: number; grand: number };
+  mode: GstMode; igst: number; cgst: number; sgst: number;
+  onClose: () => void;
+}) {
+  const pcell: React.CSSProperties = { padding: "5px 8px", border: "1px solid #e2e7ee", fontWeight: 700, color: "#1a1a1a", fontSize: 11.5 };
+  const ptot: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 20, padding: "5px 12px", fontSize: 12 };
+  return (
+    <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
+      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(780px, 100%)", background: "#fff", color: "#1a1a1a", borderRadius: 12, padding: "18px 20px", boxShadow: "0 24px 60px rgba(0,0,0,0.35)", position: "relative", maxHeight: "92vh", overflowY: "auto" }}>
+        <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 5, pointerEvents: "none", overflow: "hidden", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", alignContent: "space-evenly", justifyItems: "center", padding: "30px 0" }}>
+          {Array.from({ length: 18 }).map((_, i) => <span key={i} style={{ transform: "rotate(-30deg)", whiteSpace: "nowrap", font: "800 15px/1 Arial, sans-serif", color: "#d40000", opacity: 0.16 }}>NOT VALID INVOICE</span>)}
+        </div>
+        <div style={{ position: "relative", zIndex: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, borderBottom: "2px solid #1e3a5f", paddingBottom: 8, marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#0f2540" }}>MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+              <div style={{ fontSize: 10.5, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.1em", color: "#fff", background: "#0f2540", borderRadius: 6, padding: "3px 12px", display: "inline-block" }}>PREVIEW</div>
+              <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", marginTop: 4 }}>{invoiceNo}</div>
+            </div>
+          </div>
+          {bill && (
+            <div style={{ border: "1px solid #ccc", borderRadius: 6, padding: "7px 9px", background: "#f7fafc", marginBottom: 10, maxWidth: 420 }}>
+              <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", color: "#888" }}>Bill To</div>
+              <div style={{ fontSize: 13.5, fontWeight: 800 }}>{bill.name}</div>
+              {bill.address && <div style={{ fontSize: 11.5, color: "#333" }}>{bill.address}</div>}
+              {bill.gstin && <div style={{ fontSize: 10.5, color: "#555", fontFamily: "ui-monospace, monospace" }}>GSTIN: {bill.gstin}</div>}
+            </div>
+          )}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ background: "#eef2f7" }}>
+              <th style={pcell}>Stone</th><th style={pcell}>Unit</th><th style={{ ...pcell, textAlign: "right" }}>Qty</th><th style={{ ...pcell, textAlign: "right" }}>Measure</th><th style={{ ...pcell, textAlign: "right" }}>Rate</th><th style={{ ...pcell, textAlign: "right" }}>Amount</th>
+            </tr></thead>
+            <tbody>
+              {groups.map((gr) => (
+                <tr key={gr.key}>
+                  <td style={pcell}>{gr.stone}</td><td style={pcell}>{gr.unit.toUpperCase()}</td>
+                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{gr.qty}</td>
+                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(gr.meas)}</td>
+                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(gr.rate)}</td>
+                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{rupee(gr.rate * gr.meas)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+            <div style={{ minWidth: 250, border: "1px solid #d3dae3", borderRadius: 8, overflow: "hidden" }}>
+              <div style={ptot}><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
+              {mode === "igst" && <div style={ptot}><span>IGST @ {igst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.igstAmt)}</span></div>}
+              {mode === "cgst_sgst" && <><div style={ptot}><span>CGST @ {cgst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.cgstAmt)}</span></div><div style={ptot}><span>SGST @ {sgst}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.sgstAmt)}</span></div></>}
+              <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+            <button type="button" onClick={onClose} style={{ fontSize: 13.5, padding: "10px 20px", fontWeight: 800, color: "#fff", background: "#0f172a", border: "none", borderRadius: 10, cursor: "pointer" }}>Close preview</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

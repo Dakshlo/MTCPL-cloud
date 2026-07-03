@@ -15,6 +15,8 @@ import { useMemo, useState } from "react";
 export type ChallanRow = {
   id: string;
   challan_number: number | null;
+  doc_fy: string | null;
+  doc_seq: number | null;
   temple: string;
   vehicle_no: string | null;
   driver_name: string | null;
@@ -35,9 +37,12 @@ export type ChallanRow = {
 type SortKey = "challan" | "temple" | "stone" | "dispatched_at";
 type SortDir = "asc" | "desc";
 
-function chalanLabel(n: number | null, id: string): string {
-  if (n != null) return `CHLN-${String(n).padStart(4, "0")}`;
-  return `DISP-${id.slice(0, 8).toUpperCase()}`;
+// Jul 2026 — prefer the UNIFIED code (CH-26/27-N, mig 168); the legacy
+// CHLN-#### only for pre-168 rows.
+function chalanLabel(r: { challan_number: number | null; doc_fy: string | null; doc_seq: number | null; id: string }): string {
+  if (r.doc_fy && r.doc_seq != null) return `CH-${r.doc_fy}-${String(r.doc_seq).padStart(2, "0")}`;
+  if (r.challan_number != null) return `CHLN-${String(r.challan_number).padStart(4, "0")}`;
+  return `DISP-${r.id.slice(0, 8).toUpperCase()}`;
 }
 
 function fmtDate(iso: string | null): string {
@@ -75,7 +80,7 @@ export function ChallanArchiveClient({
 
     if (q) {
       list = list.filter((r) => {
-        const ch = chalanLabel(r.challan_number, r.id).toLowerCase();
+        const ch = chalanLabel(r).toLowerCase();
         return (
           ch.includes(q) ||
           r.temple.toLowerCase().includes(q) ||
@@ -286,7 +291,7 @@ export function ChallanArchiveClient({
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
-                    {chalanLabel(r.challan_number, r.id)}
+                    {chalanLabel(r)}
                   </td>
                   <td style={tdStyle}>{r.temple}</td>
                   <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace" }}>

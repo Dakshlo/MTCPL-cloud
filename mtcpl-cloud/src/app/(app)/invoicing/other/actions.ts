@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
+import { freeInvoiceNumber } from "@/lib/invoice-numbers";
 
 function txt(fd: FormData, key: string): string {
   const v = fd.get(key);
@@ -125,7 +126,10 @@ export async function updateOtherChallanAction(formData: FormData) {
   const { data: g } = await admin.from("other_challans").select("converted_at, cancelled_at").eq("id", id).maybeSingle();
   const guard = g as { converted_at: string | null; cancelled_at: string | null } | null;
   if (!guard) redirect("/invoicing/other?toast=Challan+not+found");
-  if (guard.converted_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Already an invoice — cannot edit")}`);
+  // Jul 2026 — "Edit invoice": a converted (invoiced) other-sales bill may be
+  // re-edited; the INV number never changes.
+  const editMode = txt(formData, "edit_mode") === "1" && !!guard.converted_at;
+  if (guard.converted_at && !editMode) redirect(`/invoicing/other?toast=${encodeURIComponent("Already an invoice — open it in Edit mode")}`);
   if (guard.cancelled_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Challan is cancelled")}`);
 
   const items = parseItems(formData);
@@ -165,18 +169,11 @@ export async function convertOtherChallanAction(formData: FormData) {
   if (row.converted_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Already converted")}`);
 
   const fy = financialYear(row.challan_date || new Date());
+  // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.
   let invSeq: number | null = null;
-  const manual = Math.floor(Number(txt(formData, "inv_seq")) || 0);
   try {
-    if (manual > 0) {
-      invSeq = manual;
-      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
-      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
-      if (manual > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manual }, { onConflict: "fy" });
-    } else {
-      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
-      if (typeof seq === "number") invSeq = seq;
-    }
+    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+    if (typeof seq === "number") invSeq = seq;
   } catch { /* counter unavailable */ }
 
   await admin
@@ -187,6 +184,27 @@ export async function convertOtherChallanAction(formData: FormData) {
   await logAudit(profile.id, "other_challan_converted", "other_challan", id, { fy, invSeq });
   refresh(id);
   redirect(`/invoicing/other?toast=${encodeURIComponent(`Invoice created — INV-${fy}-${String(invSeq ?? 0).padStart(2, "0")}`)}`);
+}
+
+/** Cancel an OTHER-SALES invoice: free its number; the challan reverts to its
+ *  unconverted state on the Other Sales page (mig 178). */
+export async function cancelOtherInvoiceAction(formData: FormData) {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "other_challan_id");
+  if (!id) redirect("/invoicing/invoices");
+
+  const { data: c } = await admin.from("other_challans").select("inv_fy, inv_seq, converted_at, cancelled_at").eq("id", id).maybeSingle();
+  const ch = c as { inv_fy: string | null; inv_seq: number | null; converted_at: string | null; cancelled_at: string | null } | null;
+  if (!ch || !ch.converted_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if (ch!.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is cancelled")}`);
+
+  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
+  await admin.from("other_challans").update({ inv_fy: null, inv_seq: null, converted_at: null, converted_by: null }).eq("id", id);
+
+  await logAudit(profile.id, "other_invoice_cancelled", "other_challan", id, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  refresh(id);
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, challan back on Other Sales`)}`);
 }
 
 /** Cancel an unconverted challan. */

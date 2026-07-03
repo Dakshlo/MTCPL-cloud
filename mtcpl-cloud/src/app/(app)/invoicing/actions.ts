@@ -26,6 +26,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
+import { freeInvoiceNumber } from "@/lib/invoice-numbers";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -63,12 +64,16 @@ export async function saveChallanPricingAction(formData: FormData) {
   const { data: guard } = await admin
     .from("challans").select("converted_invoice_id, cancelled_at, priced_at, owner_approved_at, owner_rejected_at").eq("id", challanId).maybeSingle();
   const g = guard as { converted_invoice_id: string | null; cancelled_at: string | null; priced_at: string | null; owner_approved_at: string | null; owner_rejected_at: string | null } | null;
+  // Jul 2026 — "Edit invoice": an already-approved (final) invoice may be
+  // re-edited (rates / GST / transport) as long as the INV number never changes.
+  // Approval stays intact; the pending-with-owner state stays locked.
+  const editMode = txt(formData, "edit_mode") === "1" && !!g?.owner_approved_at;
   if (g?.converted_invoice_id) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Already converted to an invoice — cannot re-price")}`);
   if (g?.cancelled_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Challan is cancelled — cannot price")}`);
-  if (g?.owner_approved_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Owner already approved this invoice — cannot re-price")}`);
+  if (g?.owner_approved_at && !editMode) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Owner already approved this invoice — open it in Edit mode from the Invoices page")}`);
   // Mig 167 — once sent to the owner (priced, not yet rejected), the accountant
   // can't re-price; they wait for the owner to reject (then re-price or cancel).
-  if (g?.priced_at && !g?.owner_rejected_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Sent to owner for approval — wait for a rejection before re-pricing")}`);
+  if (!g?.owner_approved_at && g?.priced_at && !g?.owner_rejected_at) redirect(`/invoicing/challans/${challanId}?toast=${encodeURIComponent("Sent to owner for approval — wait for a rejection before re-pricing")}`);
 
   let rates: Record<string, number | string> = {};
   try {
@@ -135,22 +140,16 @@ export async function saveChallanPricingAction(formData: FormData) {
     }
   }
 
-  // Invoice number (INV series, mig 172). The reviewer sets the trailing XX on
-  // the review form; blank = auto-continue the shared per-FY INV counter. A
-  // manual number is stored AND bumps the counter so the next auto number
-  // follows it (same rule as the challan CH editor). Best-effort: if mig 172
-  // isn't applied the select errors and the code falls back to the challan no.
+  // Invoice number (INV series, mig 172) — LOCKED (Daksh Jul 2026): assigned
+  // ONCE from the shared per-FY counter on first pricing, never edited by hand.
+  // Cancelling an invoice later frees the number (freeInvoiceNumber). Best-
+  // effort: if mig 172 isn't applied the select errors and the code falls back
+  // to the challan-derived number.
   try {
     const { data: inv } = await admin.from("challans").select("inv_seq, challan_date").eq("id", challanId).maybeSingle();
     const row = inv as { inv_seq?: number | null; challan_date?: string } | null;
-    const fy = financialYear(row?.challan_date || new Date());
-    const manual = Math.floor(Number(txt(formData, "inv_seq")) || 0);
-    if (manual > 0) {
-      await admin.from("challans").update({ inv_fy: fy, inv_seq: manual }).eq("id", challanId);
-      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
-      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
-      if (manual > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manual }, { onConflict: "fy" });
-    } else if (row && row.inv_seq == null) {
+    if (row && row.inv_seq == null) {
+      const fy = financialYear(row.challan_date || new Date());
       const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
       if (typeof seq === "number") await admin.from("challans").update({ inv_fy: fy, inv_seq: seq }).eq("id", challanId);
     }
@@ -158,9 +157,12 @@ export async function saveChallanPricingAction(formData: FormData) {
     /* mig 172 not applied — invoice code falls back to the challan-derived number */
   }
 
-  await logAudit(profile.id, "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });
+  await logAudit(profile.id, editMode ? "invoice_edited" : "challan_priced", "challan", challanId, { gstMode, igst, cgst, sgst });
   refreshInvoicingPaths({ challanId });
   revalidatePath("/invoicing/approval");
+  if (editMode) {
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
+  }
   const goPrint = txt(formData, "go") === "print";
   redirect(
     goPrint
@@ -380,7 +382,10 @@ export async function createCustomBillAction(formData: FormData) {
   if (!ch) redirect("/invoicing/challans?toast=Challan+not+found");
   if (ch!.cancelled_at) redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan is cancelled")}`);
   if (!ch!.dropped_at) redirect(`/invoicing/challans?toast=${encodeURIComponent("Drop the challan first")}`);
-  if (ch!.custom_billed_at) redirect(`/invoicing/challans?toast=${encodeURIComponent("Already custom-billed")}`);
+  // Jul 2026 — "Edit invoice": a billed (even invoiced) running bill may be
+  // re-edited; the INV number never changes and the dispatch is not re-delivered.
+  const editMode = txt(formData, "edit_mode") === "1" && !!ch!.custom_billed_at;
+  if (ch!.custom_billed_at && !editMode) redirect(`/invoicing/challans?toast=${encodeURIComponent("Already custom-billed — open it in Edit mode")}`);
 
   const items = parseCustomItems(formData);
   if (items.length === 0) redirect(`/invoicing/challans?toast=${encodeURIComponent("Add at least one line item")}`);
@@ -408,16 +413,19 @@ export async function createCustomBillAction(formData: FormData) {
 
   // Release the production dispatch straight to Delivered (skip On-the-road):
   // the delivered lane is gated only on delivered_at, so on_road_at stays null.
-  if (ch!.source_dispatch_id) {
+  // (Edit mode never re-delivers — the .is(delivered_at, null) guard holds.)
+  if (ch!.source_dispatch_id && !editMode) {
     await admin.from("dispatches")
       .update({ delivered_at: now, delivered_by: profile.id, delivery_note: "Custom whole-piece bill (dropped) — no physical on-road leg." })
       .eq("id", ch!.source_dispatch_id)
       .is("delivered_at", null);
   }
 
-  void logAudit(profile.id, "challan_custom_billed", "challan", challanId, {});
+  void logAudit(profile.id, editMode ? "running_bill_edited" : "challan_custom_billed", "challan", challanId, {});
   refreshInvoicingPaths({ challanId });
   revalidatePath("/dispatch");
+  revalidatePath("/invoicing/dropped");
+  if (editMode) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Custom bill created — dispatch marked Delivered")}`);
 }
 
@@ -437,24 +445,77 @@ export async function convertCustomBillToInvoiceAction(formData: FormData) {
   if (ch!.inv_seq != null) redirect(`/invoicing/challans?toast=${encodeURIComponent("Already invoiced")}`);
 
   const fy = financialYear(ch!.challan_date || new Date());
+  // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.
   let invSeq: number | null = null;
-  const manual = Math.floor(Number(txt(formData, "inv_seq")) || 0);
   try {
-    if (manual > 0) {
-      invSeq = manual;
-      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
-      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
-      if (manual > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manual }, { onConflict: "fy" });
-    } else {
-      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
-      if (typeof seq === "number") invSeq = seq;
-    }
+    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+    if (typeof seq === "number") invSeq = seq;
   } catch { /* mig 172 not applied */ }
   await admin.from("challans").update({ inv_fy: invSeq != null ? fy : null, inv_seq: invSeq }).eq("id", challanId);
 
   void logAudit(profile.id, "challan_custom_invoiced", "challan", challanId, { fy, invSeq });
   refreshInvoicingPaths({ challanId });
   redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice created — INV-${fy}-${String(invSeq ?? 0).padStart(2, "0")}`)}`);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Mig 178 — invoice-number freeing. Numbers are LOCKED (auto-assigned only);
+// cancelling an invoice frees its number: head-of-series cancellations roll the
+// counter back (so the next invoice reuses the number, collapsing through any
+// freed tail), mid-series ones are recorded in freed_invoice_numbers and shown
+// as an indication on Review & price.
+// ════════════════════════════════════════════════════════════════
+
+/** Cancel a PRICED-CHALLAN invoice: free its number, wipe pricing/approval —
+ *  the challan returns to the Challans page (open) for a fresh cycle. */
+export async function cancelPricedInvoiceAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/invoices");
+
+  const { data: c } = await admin.from("challans")
+    .select("inv_fy, inv_seq, priced_at, cancelled_at, converted_invoice_id")
+    .eq("id", challanId).maybeSingle();
+  const ch = c as { inv_fy: string | null; inv_seq: number | null; priced_at: string | null; cancelled_at: string | null; converted_invoice_id: string | null } | null;
+  if (!ch) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if (ch!.cancelled_at || ch!.converted_invoice_id) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is no longer an invoice")}`);
+
+  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
+  await admin.from("challans").update({
+    inv_fy: null, inv_seq: null, invoice_no_override: null,
+    priced_at: null, priced_by: null,
+    owner_approved_at: null, owner_approved_by: null,
+    owner_rejected_at: null, owner_reject_reason: null,
+  }).eq("id", challanId);
+
+  void logAudit(profile.id, "invoice_cancelled", "challan", challanId, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, challan back on Challans`)}`);
+}
+
+/** Cancel a RUNNING-BILL invoice: free the number; the custom bill stays and
+ *  the challan returns to the Running bills page (re-invoiceable). */
+export async function cancelRunningInvoiceAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/invoices");
+
+  const { data: c } = await admin.from("challans")
+    .select("inv_fy, inv_seq, custom_billed_at, cancelled_at").eq("id", challanId).maybeSingle();
+  const ch = c as { inv_fy: string | null; inv_seq: number | null; custom_billed_at: string | null; cancelled_at: string | null } | null;
+  if (!ch || !ch.custom_billed_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if (ch!.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is cancelled")}`);
+
+  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
+  await admin.from("challans").update({ inv_fy: null, inv_seq: null }).eq("id", challanId);
+
+  void logAudit(profile.id, "running_invoice_cancelled", "challan", challanId, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/dropped");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, bill back on Running bills`)}`);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1300,21 +1361,12 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
   const invoiceDate = txt(formData, "invoice_date") || null;
   const fy = financialYear(invoiceDate || new Date());
-  // Invoice number on the SHARED per-FY INV counter (same series as the single-
-  // challan review page). The user can set the trailing XX; blank = next auto.
-  // A manual number bumps the counter so the next auto number follows it.
+  // Invoice number on the SHARED per-FY INV counter — LOCKED (auto only, Daksh
+  // Jul 2026). Cancelling later frees the number via freeInvoiceNumber.
   let invSeq: number | null = null;
-  const manualInv = Math.floor(Number(txt(formData, "inv_seq")) || 0);
   try {
-    if (manualInv > 0) {
-      invSeq = manualInv;
-      const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `INV:${fy}`).maybeSingle();
-      const last = Number((ctr as { last_seq?: number } | null)?.last_seq) || 0;
-      if (manualInv > last) await admin.from("doc_counters").upsert({ fy: `INV:${fy}`, last_seq: manualInv }, { onConflict: "fy" });
-    } else {
-      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
-      if (typeof seq === "number") invSeq = seq;
-    }
+    const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+    if (typeof seq === "number") invSeq = seq;
   } catch { /* mig not applied */ }
 
   const insert: Record<string, unknown> = {
@@ -1390,17 +1442,69 @@ export async function ownerRejectBulkAction(formData: FormData): Promise<void> {
   redirect(`/invoicing/approval?toast=${encodeURIComponent("Bulk invoice rejected — challans returned to the pool")}`);
 }
 
-/** Cancel a bulk invoice and RETURN its challans to the bulk pool. */
+/** Cancel a bulk (work-order) invoice: free its INV number and RETURN its
+ *  challans to the bulk pool. */
 export async function cancelBulkInvoiceAction(formData: FormData): Promise<void> {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "id");
   if (!id) redirect("/invoicing/bulk");
+  // Mig 178 — free the invoice number before retiring the row.
+  {
+    const { data: b } = await admin.from("bulk_invoices").select("inv_fy, inv_seq, cancelled_at").eq("id", id).maybeSingle();
+    const row = b as { inv_fy: string | null; inv_seq: number | null; cancelled_at: string | null } | null;
+    if (row && !row.cancelled_at) await freeInvoiceNumber(admin, row.inv_fy, row.inv_seq, profile.id);
+  }
   await admin.from("bulk_invoice_challans").delete().eq("bulk_invoice_id", id);
-  await admin.from("bulk_invoices").update({ cancelled_at: new Date().toISOString() }).eq("id", id);
+  await admin.from("bulk_invoices").update({ cancelled_at: new Date().toISOString(), inv_fy: null, inv_seq: null }).eq("id", id);
   void logAudit(profile.id, "bulk_invoice_cancelled", "bulk_invoice", id, {});
   revalidatePath("/invoicing/bulk");
   revalidatePath("/invoicing/approval");
-  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Bulk invoice cancelled — challans returned to the pool")}`);
+  revalidatePath("/invoicing/invoices");
+  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Bulk invoice cancelled — number freed, challans returned to the pool")}`);
+}
+
+/** Edit a bulk (work-order) invoice — line items / GST / notes. The INV number
+ *  never changes (Daksh Jul 2026). */
+export async function updateBulkInvoiceAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/invoices");
+
+  const { data: b } = await admin.from("bulk_invoices").select("cancelled_at").eq("id", id).maybeSingle();
+  if (!b) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if ((b as { cancelled_at: string | null }).cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is cancelled")}`);
+
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string }> = [];
+  try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
+  items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
+  if (items.length === 0) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Add at least one line item")}`);
+
+  const gm = txt(formData, "gst_mode");
+  const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  await admin.from("bulk_invoices").update({
+    gst_mode: gstMode,
+    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
+    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
+    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    notes: txt(formData, "notes") || null,
+  }).eq("id", id);
+  await admin.from("bulk_invoice_items").delete().eq("bulk_invoice_id", id);
+  await admin.from("bulk_invoice_items").insert(items.map((it, i) => ({
+    bulk_invoice_id: id, position: i,
+    particulars: (it.particulars ?? "").toString() || null,
+    hsn: (it.hsn ?? "").toString() || null,
+    unit: (it.unit ?? "").toString() || null,
+    quantity: Number(it.quantity) || null,
+    rate: Number(it.rate) || null,
+    amount: Number(it.amount) || (Number(it.quantity) || 0) * (Number(it.rate) || 0) || null,
+  })));
+
+  void logAudit(profile.id, "bulk_invoice_edited", "bulk_invoice", id, {});
+  revalidatePath("/invoicing/invoices");
+  revalidatePath("/invoicing/bulk");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
 }

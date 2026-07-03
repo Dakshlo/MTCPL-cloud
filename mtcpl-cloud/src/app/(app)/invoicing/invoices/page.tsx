@@ -6,7 +6,7 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
-import { CollapsibleInvoiceTemple, type InvoiceRow } from "./invoices-collapsible";
+import { CollapsibleInvoiceTemple, InvoiceActions, type InvoiceRow } from "./invoices-collapsible";
 
 // Page through a query (the invoices register can exceed the 1000-row cap over a
 // financial year — never silently truncate).
@@ -27,6 +27,7 @@ async function pageAll<T>(
 
 type PricedChallan = {
   id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string;
+  source_dispatch_id: string | null;
   invoice_no_override: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
@@ -53,7 +54,7 @@ export default async function InvoicingListPage() {
     pageAll<PricedChallan>((from, to) =>
       supabase
         .from("challans")
-        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, source_dispatch_id, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
         .not("priced_at", "is", null)
         // Mig 167 — only OWNER-APPROVED priced challans are final invoices.
         // A priced-but-pending (or rejected) challan stays in the Approval
@@ -133,11 +134,11 @@ export default async function InvoicingListPage() {
 
   // Mig 177 — invoiced custom (dropped) bills: temple challans re-billed as a
   // whole piece then invoiced. Best-effort so a pre-migration deploy skips them.
-  type Row = { key: string; code: string; date: string; customer: string; total: number; href: string; external: boolean };
+  type Row = InvoiceRow & { customer: string };
   const customRows: Row[] = [];
   {
     const { data, error } = await supabase.from("challans")
-      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
+      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
       .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
       .order("challan_date", { ascending: false });
     if (!error) {
@@ -146,7 +147,13 @@ export default async function InvoicingListPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const amounts = ((r.challan_custom_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
         const t = computeInvoiceTotals(amounts, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
-        customRows.push({ key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`, date: r.challan_date, customer: r.temple ?? "—", total: t.grand, href: `/invoicing/challan/${r.id}/custom/print`, external: true });
+        customRows.push({
+          key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`,
+          date: r.challan_date, customer: r.temple ?? "—", total: t.grand,
+          href: `/invoicing/challan/${r.id}/custom/print`, external: true,
+          challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
+          editHref: `/invoicing/dropped?edit=${r.id}`, cancelKind: "running", cancelId: r.id,
+        });
       }
     }
   }
@@ -161,11 +168,14 @@ export default async function InvoicingListPage() {
       key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
       customer: c.temple ?? "—", total: totalByChallan.get(c.id) ?? 0,
       href: `/invoicing/challan/${c.id}/print`, external: true,
+      challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
+      editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
     })),
     ...bulkApproved.map((b) => ({
       key: `bulk:${b.id}`, code: (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`), date: b.invoice_date,
       customer: b.temple ?? "—", total: bulkTotal.get(b.id) ?? 0,
       href: `/invoicing/bulk/${b.id}/print`, external: true,
+      challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
@@ -190,7 +200,11 @@ export default async function InvoicingListPage() {
         const amounts = ((o.other_challan_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
         const t = computeInvoiceTotals(amounts, { mode: (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
         const party = Array.isArray(o.invoice_parties) ? o.invoice_parties[0] : o.invoice_parties;
-        return { key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`, date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—" };
+        return {
+          key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,
+          date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
+          editHref: `/invoicing/other?edit=${o.id}`, cancelKind: "other" as const, cancelId: o.id,
+        };
       });
     }
   }
@@ -210,7 +224,7 @@ export default async function InvoicingListPage() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {templeList.map(([temple, list]) => (
-              <CollapsibleInvoiceTemple key={temple} temple={temple} rows={list.map((r) => ({ key: r.key, code: r.code, date: r.date, total: r.total, href: r.href, external: r.external }))} />
+              <CollapsibleInvoiceTemple key={temple} temple={temple} rows={list} />
             ))}
           </div>
         )}
@@ -240,7 +254,7 @@ export default async function InvoicingListPage() {
                     <td style={td}>{new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</td>
                     <td style={td}>{r.customer}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td style={td}><Link href={r.href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none" }}>🖨 Invoice →</Link></td>
+                    <td style={{ ...td, textAlign: "right" }}><InvoiceActions r={r} /></td>
                   </tr>
                 ))}
               </tbody>

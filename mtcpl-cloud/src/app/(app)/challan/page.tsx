@@ -30,6 +30,8 @@ export default async function ChallanPage() {
   type DispatchRow = {
     id: string;
     challan_number: number | null;
+    doc_fy: string | null;
+    doc_seq: number | null;
     temple: string;
     vehicle_no: string | null;
     driver_name: string | null;
@@ -53,7 +55,7 @@ export default async function ChallanPage() {
       const { data } = await admin
         .from("dispatches")
         .select(
-          "id, challan_number, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, delivered_at, receiver_name, delivery_note, notes, dispatched_by, delivered_by, approved_by, approved_at",
+          "id, challan_number, doc_fy, doc_seq, temple, vehicle_no, driver_name, driver_phone, dispatched_at, expected_delivery_date, delivered_at, receiver_name, delivery_note, notes, dispatched_by, delivered_by, approved_by, approved_at",
         )
         .not("approved_at", "is", null)
         .order("challan_number", { ascending: false })
@@ -135,6 +137,8 @@ export default async function ChallanPage() {
     return {
       id: d.id,
       challan_number: d.challan_number,
+      doc_fy: d.doc_fy,
+      doc_seq: d.doc_seq,
       temple: d.temple,
       vehicle_no: d.vehicle_no,
       driver_name: d.driver_name,

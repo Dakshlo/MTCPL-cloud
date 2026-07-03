@@ -113,6 +113,7 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
           invAuto={invAuto}
           preselectId={sp.client}
           openNew={sp.new === "1"}
+          editInvoiceId={sp.edit}
           needsMigration={needsMigration}
         />
       </div>

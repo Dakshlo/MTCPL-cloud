@@ -35,7 +35,6 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
   const [igst, setIgst] = useState("18");
   const [cgst, setCgst] = useState("9");
   const [sgst, setSgst] = useState("9");
-  const [invNum, setInvNum] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   const cur = temples.find((t) => t.temple === temple) ?? null;
@@ -78,7 +77,6 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
-      <input type="hidden" name="inv_seq" value={invNum} />
 
       {/* 1 — Temple */}
       <Section step={1} title="Client (temple)" subtitle="Which temple is this invoice billed to?">
@@ -179,14 +177,14 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
                 <label className="stack" style={{ maxWidth: 120 }}><span>SGST %</span><input value={sgst} onChange={(e) => setSgst(e.target.value)} inputMode="decimal" /></label>
               </div>
             )}
-            {/* Invoice no. — fixed INV-<FY>- prefix, edit only the number. */}
+            {/* Invoice no. — LOCKED (auto-assigned from the shared series). */}
             <div style={{ marginTop: 14 }}>
               <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
-              <div style={{ display: "inline-flex", alignItems: "stretch", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, background: "var(--surface)", color: "var(--muted)", borderRight: "1.5px solid var(--border)" }}>{invPrefix}</span>
-                <input value={invNum} onChange={(e) => setInvNum(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder={autoNum} style={{ width: 90, textAlign: "left", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, padding: "8px 10px", border: "none", background: "transparent", color: "var(--text)" }} />
-              </div>
-              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>Leave blank to auto-number as <strong style={{ fontFamily: "ui-monospace, monospace" }}>{invPrefix}{autoNum}</strong>.</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", padding: "7px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>
+                {invPrefix}{autoNum}
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 8px", fontFamily: "inherit" }}>🔒 AUTO</span>
+              </span>
+              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 5 }}>Assigned automatically — numbers can't be edited.</span>
             </div>
           </Section>
         </div>
@@ -228,7 +226,7 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
           igst={Number(igst) || 0}
           cgst={Number(cgst) || 0}
           sgst={Number(sgst) || 0}
-          invoiceNo={invNum ? `${invPrefix}${invNum.padStart(2, "0")}` : ""}
+          invoiceNo={`${invPrefix}${autoNum}`}
           invoiceDate={todayIST()}
           onClose={() => setShowPreview(false)}
         />

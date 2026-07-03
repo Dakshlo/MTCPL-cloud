@@ -128,6 +128,7 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
         id: c.id,
         code,
         date: c.challan_date,
+        sourceDispatchId: c.source_dispatch_id,
         notes: c.notes,
         cancelled_at: c.cancelled_at,
         converted_invoice_id: c.converted_invoice_id,

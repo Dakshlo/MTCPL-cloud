@@ -50,6 +50,7 @@ type PendingChallan = {
   challan_date: string;
   temple: string | null;
   priced_at: string;
+  source_dispatch_id: string | null;
   invoice_no_override: string | null;
   gst_mode: string | null;
   igst_percent: number | null;
@@ -75,7 +76,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
     supabase
       .from("challans")
       .select(
-        "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent",
+        "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, source_dispatch_id, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent",
       )
       .not("priced_at", "is", null)
       .is("owner_approved_at", null)
@@ -264,13 +265,24 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
                       <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>
                         ₹{(totalByChallan.get(c.id) ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
+                      {c.source_dispatch_id && (
+                        <Link
+                          href={`/dispatch/${c.source_dispatch_id}/print`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", textDecoration: "none" }}
+                        >
+                          👁 View challan →
+                        </Link>
+                      )}
                       <Link
                         href={`/invoicing/challan/${c.id}/print`}
                         target="_blank"
                         rel="noopener noreferrer"
+                        title="Watermarked NOT VALID until approved"
                         style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark, #92400e)", textDecoration: "none" }}
                       >
-                        🖨 Review invoice →
+                        🧾 View invoice →
                       </Link>
                       <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         {isOwner ? (

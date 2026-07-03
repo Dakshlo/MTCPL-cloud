@@ -33,15 +33,19 @@ const blankItem = (): Item => ({ particulars: "", hsn: "", unit: "", quantity: "
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
 export function OtherSalesClient({
-  clients, challans, chPrefix, chAuto, invPrefix, invAuto, preselectId, openNew, needsMigration,
+  clients, challans, chPrefix, chAuto, invPrefix, invAuto, preselectId, openNew, editInvoiceId, needsMigration,
 }: {
   clients: Party[]; challans: OtherChallan[];
   chPrefix: string; chAuto: string; invPrefix: string; invAuto: string;
-  preselectId?: string; openNew?: boolean; needsMigration?: boolean;
+  preselectId?: string; openNew?: boolean;
+  /** ?edit=<id> (Invoices page ✎ Edit) — open the form for a CONVERTED bill. */
+  editInvoiceId?: string; needsMigration?: boolean;
 }) {
   const router = useRouter();
   const [formOpen, setFormOpen] = useState(!!openNew);
   const [editId, setEditId] = useState<string | null>(null);
+  // TRUE when the row being edited is already a final invoice (number locked).
+  const [editingConverted, setEditingConverted] = useState(false);
   const [party, setParty] = useState(preselectId ?? "");
   const [date, setDate] = useState(todayIST());
   const [items, setItems] = useState<Item[]>([blankItem()]);
@@ -63,10 +67,18 @@ export function OtherSalesClient({
     if (found) { setParty(found.id); setPendingClient(null); setFormOpen(true); }
   }, [clients, pendingClient]);
 
+  // Invoices-page ✎ Edit → auto-open the form for that converted bill.
+  useEffect(() => {
+    if (!editInvoiceId) return;
+    const ch = challans.find((c) => c.id === editInvoiceId);
+    if (ch) startEdit(ch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editInvoiceId]);
+
   const cur = clients.find((c) => c.id === party) ?? null;
 
   function resetForm() {
-    setEditId(null); setParty(""); setDate(todayIST()); setItems([blankItem(), blankItem()]);
+    setEditId(null); setEditingConverted(false); setParty(""); setDate(todayIST()); setItems([blankItem()]);
     setMode(null); setIgst("18"); setCgst("9"); setSgst("9"); setNotes("");
   }
   function pickParty(id: string) {
@@ -82,7 +94,7 @@ export function OtherSalesClient({
   }
   function startNew() { resetForm(); if (preselectId) setParty(preselectId); setFormOpen(true); }
   function startEdit(ch: OtherChallan) {
-    setEditId(ch.id); setParty(ch.partyId); setDate(ch.date);
+    setEditId(ch.id); setEditingConverted(ch.converted); setParty(ch.partyId); setDate(ch.date);
     setItems(ch.items.length ? ch.items.map((it) => ({ particulars: it.particulars, hsn: it.hsn, unit: it.unit, quantity: it.quantity ? String(it.quantity) : "", rate: it.rate ? String(it.rate) : "" })) : [blankItem()]);
     setMode(ch.gstMode); setIgst(String(ch.igst || 18)); setCgst(String(ch.cgst || 9)); setSgst(String(ch.sgst || 9)); setNotes(ch.notes ?? "");
     setFormOpen(true);
@@ -125,6 +137,7 @@ export function OtherSalesClient({
       {formOpen && (
         <form action={editId ? updateOtherChallanAction : createOtherChallanAction} style={CARD}>
           {editId && <input type="hidden" name="other_challan_id" value={editId} />}
+          <input type="hidden" name="edit_mode" value={editingConverted ? "1" : ""} />
           <input type="hidden" name="items" value={itemsJson} />
           <input type="hidden" name="gst_mode" value={mode ?? ""} />
           <input type="hidden" name="igst_percent" value={igst} />
@@ -135,7 +148,7 @@ export function OtherSalesClient({
           <input type="hidden" name="party_id" value={party} />
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>{editId ? "Edit challan" : "New challan"} <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>· {editId ? "" : `${chPrefix}${chAuto}`}</span></h2>
+            <h2 style={{ margin: 0, fontSize: 16 }}>{editId ? (editingConverted ? "Edit invoice" : "Edit challan") : "New challan"} <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>· {editId ? "" : `${chPrefix}${chAuto}`}</span>{editingConverted && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: "#6d28d9", background: "rgba(124,58,237,0.1)", borderRadius: 999, padding: "2px 8px" }}>NUMBER LOCKED</span>}</h2>
             <button type="button" onClick={() => { setFormOpen(false); resetForm(); }} style={btnGhost}>Close</button>
           </div>
 
@@ -226,7 +239,7 @@ export function OtherSalesClient({
           <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" onClick={() => setPreview(true)} disabled={!party} style={{ ...btnGhost, opacity: party ? 1 : 0.5, cursor: party ? "pointer" : "default" }}>👁 Preview</button>
             <button type="submit" disabled={!canSubmit} style={{ ...btnPrimary, background: canSubmit ? "#0f172a" : "var(--border)", cursor: canSubmit ? "pointer" : "default" }}>
-              {editId ? "💾 Save changes" : "🧾 Create challan"}
+              {editId ? (editingConverted ? "💾 Save invoice changes (number unchanged)" : "💾 Save changes") : "🧾 Create challan"}
             </button>
             {!canSubmit && <span style={{ fontSize: 12, color: "var(--muted)" }}>Pick a client and add at least one line item.</span>}
           </div>
@@ -250,7 +263,7 @@ export function OtherSalesClient({
         <div>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", margin: "10px 0 8px" }}>Invoiced · {done.length}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
-            {done.map((ch) => <ChallanCard key={ch.id} ch={ch} />)}
+            {done.map((ch) => <ChallanCard key={ch.id} ch={ch} onEdit={() => startEdit(ch)} />)}
           </div>
         </div>
       )}
@@ -288,7 +301,7 @@ function ChallanCard({ ch, onEdit, onConvert }: { ch: OtherChallan; onEdit?: () 
       <div style={{ fontSize: 11.5, color: "var(--muted)" }}>📅 {new Date(`${ch.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })} · {ch.items.length} item{ch.items.length !== 1 ? "s" : ""} · <strong style={{ color: "var(--text)", fontFamily: "ui-monospace, monospace" }}>{rupee(total)}</strong></div>
       <div style={{ marginTop: 2, display: "flex", gap: 7, flexWrap: "wrap" }}>
         <Link href={`/invoicing/other/${ch.id}/print`} target="_blank" rel="noopener noreferrer" style={btnLink}>🖨 {ch.converted ? "Invoice" : "Challan"}</Link>
-        {!ch.converted && onEdit && <button type="button" onClick={onEdit} style={btnSmall}>✎ Edit</button>}
+        {onEdit && <button type="button" onClick={onEdit} style={btnSmall}>✎ Edit</button>}
         {!ch.converted && onConvert && <button type="button" onClick={onConvert} style={{ ...btnSmall, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)" }}>🧾 Convert to invoice</button>}
         {!ch.converted && (
           <form action={cancelOtherChallanAction} onSubmit={(e) => { if (!confirm("Cancel this challan?")) e.preventDefault(); }}>
@@ -302,19 +315,16 @@ function ChallanCard({ ch, onEdit, onConvert }: { ch: OtherChallan; onEdit?: () 
 }
 
 function ConvertModal({ ch, invPrefix, invAuto, onClose }: { ch: OtherChallan; invPrefix: string; invAuto: string; onClose: () => void }) {
-  const [num, setNum] = useState("");
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20 }}>
       <form action={convertOtherChallanAction} onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(440px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: 20, boxShadow: "0 24px 60px rgba(0,0,0,0.3)" }}>
         <input type="hidden" name="other_challan_id" value={ch.id} />
-        <input type="hidden" name="inv_seq" value={num} />
         <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 4 }}>🧾 Convert {ch.code} to invoice</div>
-        <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 14px" }}>Assigns an invoice number on the shared series. Leave blank for the next auto number.</p>
-        <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
-        <div style={{ display: "inline-flex", alignItems: "stretch", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, background: "var(--surface)", color: "var(--muted)", borderRight: "1.5px solid var(--border)" }}>{invPrefix}</span>
-          <input value={num} onChange={(e) => setNum(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder={invAuto} style={{ width: 90, textAlign: "left", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, padding: "8px 10px", border: "none", background: "transparent", color: "var(--text)" }} />
-        </div>
+        <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 14px" }}>The invoice number is assigned automatically from the shared series — it can't be edited (cancel the invoice later to free it).</p>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", padding: "7px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>
+          {invPrefix}{invAuto}
+          <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 8px", fontFamily: "inherit" }}>🔒 AUTO</span>
+        </span>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
           <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
           <button type="submit" style={{ ...btnPrimary, background: "#0f172a" }}>🧾 Convert to invoice</button>

@@ -20,7 +20,7 @@ import { challanCode } from "@/lib/doc-code";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string; draft?: string }>;
+type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string; draft?: string; embed?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -42,8 +42,11 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
-  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam, draft: draftParam } = await searchParams;
+  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam, draft: draftParam, embed: embedParam } = await searchParams;
   const isDraft = draftParam === "1";
+  // embed=1 — rendered inside an iframe (Review & price split view): hide the
+  // dark screen bar so only the challan sheet shows.
+  const isEmbed = embedParam === "1";
   const admin = createAdminSupabaseClient();
 
   const { data: dispatch, error } = await admin
@@ -375,10 +378,10 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
         @media screen { body { padding: 0; } }
       `}</style>
 
-      <div className="screen-bar">
+      {!isEmbed && <div className="screen-bar">
         <span className="screen-bar-title">Dispatch Challan — {shortId} · {dispatch.temple} · A4 landscape</span>
         <PrintBtn />
-      </div>
+      </div>}
 
       <div className="print-wrap">
         {isDraft && (

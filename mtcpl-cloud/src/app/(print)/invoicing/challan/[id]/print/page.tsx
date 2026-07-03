@@ -15,7 +15,7 @@ import { fetchTempleBilling } from "@/lib/temple-billing";
 import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
-import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
 
@@ -225,9 +225,14 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   const invCode = (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invFy, invSeq) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date));
   // Source challan no. (the priced challan IS this invoice) — shown under the
   // date so the floor links the bill to its delivery challan at a glance.
-  const challanLabel = c.challan_number != null && String(c.challan_number).trim() !== ""
-    ? `CHLN-${String(c.challan_number).padStart(4, "0")}`
-    : null;
+  // Jul 2026 fix: use the UNIFIED code (CH-26/27-N, mig 168) — the legacy
+  // CHLN-#### only as a fallback for pre-168 rows (the printed "CHLN-CH-2026-24"
+  // was this label built from the old challan_number).
+  const challanLabel =
+    challanCode(c.doc_fy, c.doc_seq) ??
+    (c.challan_number != null && String(c.challan_number).trim() !== ""
+      ? `CHLN-${String(c.challan_number).padStart(4, "0")}`
+      : null);
 
   // Stone per item — derived from its slab codes (challan_items has no stone
   // column). One lookup for all codes; a group is single-stone so its first

@@ -14,7 +14,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
-import { financialYear } from "@/lib/doc-code";
+import { financialYear, challanCode } from "@/lib/doc-code";
+import { fetchFreedInvoiceNumbers } from "@/lib/invoice-numbers";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { ReviewForm, type PriceItem } from "./review-form";
 
 type Params = Promise<{ id: string }>;
@@ -32,7 +34,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     admin
       .from("challans")
       .select(
-        "id, challan_number, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, invoice_no_override, inv_fy, inv_seq, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, doc_fy, doc_seq, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, inv_fy, inv_seq, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -49,6 +51,8 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
   const c = challan as {
     id: string;
     challan_number: string;
+    doc_fy: string | null;
+    doc_seq: number | null;
     challan_date: string;
     notes: string | null;
     cancelled_at: string | null;
@@ -59,6 +63,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     cgst_percent: number | null;
     sgst_percent: number | null;
     priced_at: string | null;
+    owner_approved_at: string | null;
     temple: string | null;
     invoice_no_override: string | null;
     inv_fy: string | null;
@@ -200,45 +205,80 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
   }
   const initNum = c.inv_seq != null ? String(c.inv_seq) : "";
   const autoNum = String(nextSeq).padStart(2, "0");
+  // Mig 178 — freed (gap) numbers from cancelled invoices, indication only.
+  const freedNumbers = await fetchFreedInvoiceNumbers(admin, invFy);
+  // Jul 2026 — "Edit invoice" mode (from the Invoices page): re-edit a FINAL
+  // approved invoice; the INV number + approval stay untouched.
+  const editMode = sp.edit === "1" && !!c.owner_approved_at;
+  // The proper unified challan code (CH-<fy>-n) — legacy CHLN only as fallback.
+  const chCode = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 40, maxWidth: 1280 }}>
-      <div>
-        <Link href={`/invoicing/challans/${id}`} style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>
-          ← Challan {c.challan_number}
-        </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
-          <h1 style={{ margin: 0, fontSize: 22 }}>Review &amp; price</h1>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#0f172a", fontSize: 15 }}>{c.challan_number}</span>
-          <span style={{ fontSize: 14, color: "var(--muted)" }}>· {billing?.name ?? c.temple ?? "—"} · {c.challan_date}</span>
-          {c.priced_at && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.1)", borderRadius: 999, padding: "2px 10px" }}>PRICED</span>}
+    <>
+      {/* Full-screen feel — sidebar collapsed by default (toggle to bring it back). */}
+      <CockpitSidebarToggle defaultCollapsed={true} />
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", paddingBottom: 40 }}>
+        {/* LEFT — the pricing form. */}
+        <div style={{ flex: "1 1 620px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ marginTop: 44 }}>
+            <Link href={`/invoicing/challans/${id}`} style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}>
+              ← Challan {chCode}
+            </Link>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
+              <h1 style={{ margin: 0, fontSize: 22 }}>{editMode ? "Edit invoice" : "Review & price"}</h1>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#0f172a", fontSize: 15 }}>{chCode}</span>
+              <span style={{ fontSize: 14, color: "var(--muted)" }}>· {billing?.name ?? c.temple ?? "—"} · {c.challan_date}</span>
+              {editMode
+                ? <span style={{ fontSize: 11, fontWeight: 700, color: "#6d28d9", background: "rgba(124,58,237,0.1)", borderRadius: 999, padding: "2px 10px" }}>EDITING FINAL INVOICE — number locked</span>
+                : c.priced_at && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.1)", borderRadius: 999, padding: "2px 10px" }}>PRICED</span>}
+            </div>
+            {billing && (billing.gstin || billing.pan || billing.address || billing.phone) && (
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                {billing.gstin ? <>GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.gstin}</strong> · </> : null}
+                {billing.pan ? <>PAN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.pan}</strong> · </> : null}
+                {billing.address ? <>{billing.address} · </> : null}
+                {billing.phone ? <>☎ {billing.phone}</> : null}
+              </div>
+            )}
+          </div>
+
+          {toast && (
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
+              {toast}
+            </div>
+          )}
+
+          <ReviewForm
+            challanId={id}
+            items={priceItems}
+            initGst={initGst}
+            invPrefix={invPrefix}
+            initNum={initNum}
+            autoNum={autoNum}
+            freedNumbers={freedNumbers}
+            editMode={editMode}
+            bill={{ name: billing?.name ?? c.temple ?? "—", address: billing?.address ?? null, gstin: billing?.gstin ?? null }}
+            transportCompanies={transportCompanies}
+            initTransport={initTransport}
+          />
         </div>
-        {billing && (billing.gstin || billing.pan || billing.address || billing.phone) && (
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            {billing.gstin ? <>GSTIN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.gstin}</strong> · </> : null}
-            {billing.pan ? <>PAN <strong style={{ fontFamily: "ui-monospace, monospace" }}>{billing.pan}</strong> · </> : null}
-            {billing.address ? <>{billing.address} · </> : null}
-            {billing.phone ? <>☎ {billing.phone}</> : null}
+
+        {/* RIGHT — the generated challan, pinned, so the reviewer verifies while
+            pricing (Daksh Jul 2026). Only dispatch-sourced challans have one. */}
+        {c.source_dispatch_id && (
+          <div style={{ flex: "1 1 560px", minWidth: 380, position: "sticky", top: 10, display: "flex", flexDirection: "column", height: "calc(100vh - 20px)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)" }}>
+            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>📋 Generated challan — verify while you price</span>
+              <Link href={`/dispatch/${c.source_dispatch_id}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none", whiteSpace: "nowrap" }}>Open full ↗</Link>
+            </div>
+            <iframe
+              src={`/dispatch/${c.source_dispatch_id}/print?embed=1`}
+              title="Generated challan"
+              style={{ flex: 1, width: "100%", border: "none", background: "#f0f0f0" }}
+            />
           </div>
         )}
       </div>
-
-      {toast && (
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,101,52,0.08)", border: "1px solid rgba(22,101,52,0.3)", borderRadius: 8, padding: "8px 12px" }}>
-          {toast}
-        </div>
-      )}
-
-      <ReviewForm
-        challanId={id}
-        items={priceItems}
-        initGst={initGst}
-        invPrefix={invPrefix}
-        initNum={initNum}
-        autoNum={autoNum}
-        transportCompanies={transportCompanies}
-        initTransport={initTransport}
-      />
-    </div>
+    </>
   );
 }
