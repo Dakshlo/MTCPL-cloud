@@ -1354,9 +1354,10 @@ export async function saveBulkTransportAction(formData: FormData): Promise<void>
   if (trErr) redirect(`/invoicing/bulk?toast=${encodeURIComponent("Could not save — try again")}`);
   if (transportCompany) await admin.from("transport_companies").upsert({ name: transportCompany }, { onConflict: "name" });
 
-  // Mark it a full challan (mig 175 — best-effort so a pre-migration deploy still
-  // saves the transport, it just won't move to Tab-2 until the migration runs).
-  await admin.from("challans").update({ full_challan_at: new Date().toISOString(), full_challan_by: profile.id }).eq("id", id);
+  // Mark it a full challan AND flag it into the bulk pool NOW (Daksh Jul 2026 —
+  // the drag no longer flags on drop; the challan stays on the Challans page
+  // until this Convert). Best-effort so a pre-migration deploy still saves.
+  await admin.from("challans").update({ full_challan_at: new Date().toISOString(), full_challan_by: profile.id, sent_to_bulk_at: new Date().toISOString() }).eq("id", id);
 
   // Release the truck On-the-road WITH THE CHALLAN (only if not already out).
   const { data: ch } = await admin.from("challans").select("source_dispatch_id").eq("id", id).maybeSingle();

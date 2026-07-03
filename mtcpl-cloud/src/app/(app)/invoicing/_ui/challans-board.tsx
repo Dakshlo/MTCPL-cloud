@@ -123,14 +123,21 @@ export function ChallansBoard({ groups, total, droppedCount, canArchive = false 
 
   function confirmSend() {
     if (!pendingDrop) return;
+    const { id, target } = pendingDrop;
     setSending(true);
-    if (pendingDrop.target === "drop") {
-      if (dropIdRef.current) dropIdRef.current.value = pendingDrop.id;
-      dropFormRef.current?.requestSubmit();
-    } else {
-      if (idRef.current) idRef.current.value = pendingDrop.id;
-      formRef.current?.requestSubmit();
+    if (target === "bulk") {
+      // Stay-on-Challans (Daksh Jul 2026): the challan is NOT flagged sent-to-bulk
+      // on drop — we just OPEN the full-screen work-order-challan setup. The
+      // "Convert to work order challan" button there sets the flag, so backing out
+      // leaves the challan right here on the board.
+      setPendingDrop(null);
+      startNav(() => router.push(`/invoicing/bulk/prepare/${id}`));
+      return;
     }
+    // Running bill — current flow (dropped_at set now; two-step running-challan
+    // rework is the next build).
+    if (dropIdRef.current) dropIdRef.current.value = id;
+    dropFormRef.current?.requestSubmit();
   }
 
   return (
@@ -256,10 +263,11 @@ export function ChallansBoard({ groups, total, droppedCount, canArchive = false 
         </div>
       )}
 
-      {/* Floating drop zone — appears while dragging, fixed to the viewport so it's
-          reachable from any scroll position (Daksh). */}
+      {/* Floating drop zones — appear while dragging, pinned to the viewport.
+          Anchored to the CONTENT area (right of the sidebar via --content-left) so
+          the first zone isn't hidden behind the menu; z-index above the sidebar. */}
       {dragging && (
-        <div style={{ position: "fixed", left: "50%", bottom: 30, transform: "translateX(-50%)", zIndex: 80, display: "flex", gap: 14, width: "min(1000px, 96vw)", justifyContent: "center", flexWrap: "wrap" }}>
+        <div style={{ position: "fixed", left: "var(--content-left, 0px)", right: 0, bottom: 30, zIndex: 200, display: "flex", gap: 14, padding: "0 16px", justifyContent: "center", flexWrap: "wrap" }}>
           {/* Convert → purchase invoice (Review & price) */}
           <div
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOverConvert(true); }}

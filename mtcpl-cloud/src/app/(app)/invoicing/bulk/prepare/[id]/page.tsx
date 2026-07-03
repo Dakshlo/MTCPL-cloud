@@ -30,13 +30,15 @@ export default async function PrepareWorkOrderChallanPage({ params }: { params: 
 
   const { data: chRow } = await admin
     .from("challans")
-    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, sent_to_bulk_at, full_challan_at, priced_at, converted_invoice_id, cancelled_at, source_dispatch_id, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, sent_to_bulk_at, full_challan_at, priced_at, converted_invoice_id, cancelled_at, dropped_at, source_dispatch_id, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
     .eq("id", id)
     .maybeSingle();
   const c = chRow as any;
   if (!c) notFound();
-  if (c.cancelled_at || c.priced_at || c.converted_invoice_id) redirect(`/invoicing/bulk?toast=${encodeURIComponent("This challan can't be prepared for bulk")}`);
-  if (!c.sent_to_bulk_at) redirect(`/invoicing/challans?toast=${encodeURIComponent("Send the challan to Bulk first")}`);
+  // Stay-on-Challans (Jul 2026) — the challan is NOT flagged sent_to_bulk on drop;
+  // it's flagged only when "Convert to work order challan" runs. So an open (not
+  // priced/converted/cancelled/dropped) challan is valid to prepare here.
+  if (c.cancelled_at || c.priced_at || c.converted_invoice_id || c.dropped_at) redirect(`/invoicing/bulk?toast=${encodeURIComponent("This challan can't be prepared for bulk")}`);
 
   // Vehicle/driver fall back to the source dispatch when the challan's own
   // mig-169 transport columns are empty.
