@@ -139,7 +139,7 @@ export type DailyReport = {
     sandstone: { recoveredPct: number; originalCft: number; slabCft: number; lineages: number };
     marble: { cftPerTonne: number; tonnes: number; slabCft: number; lineages: number };
   } | null;
-  blocksByStone: Array<{ stone: string; count: number; cft: number }>;
+  blocksByStone: Array<{ stone: string; count: number; cft: number; vendors: Array<{ vendor: string; count: number; cft: number }> }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
   dispatchByTemple: Array<{ temple: string; slabs: number; cft: number; tonnes: number }>;
@@ -216,18 +216,22 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
   {
     const { data } = await admin
       .from("blocks")
-      .select("stone, length_ft, width_ft, height_ft, created_at")
+      .select("stone, length_ft, width_ft, height_ft, created_at, vendor_name")
       .gte("created_at", startUTC)
       .lte("created_at", endUTC);
-    const byStone = new Map<string, { count: number; cft: number }>();
-    for (const b of (data ?? []) as Array<{ stone: string | null; length_ft: number; width_ft: number; height_ft: number }>) {
+    const byStone = new Map<string, { count: number; cft: number; vendors: Map<string, { count: number; cft: number }> }>();
+    for (const b of (data ?? []) as Array<{ stone: string | null; length_ft: number; width_ft: number; height_ft: number; vendor_name: string | null }>) {
       const c = cft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
       totals.blocks.count += 1; totals.blocks.cft += c;
       const k = stoneLabel(b.stone);
-      const g = byStone.get(k) ?? { count: 0, cft: 0 };
-      g.count += 1; g.cft += c; byStone.set(k, g);
+      const g = byStone.get(k) ?? { count: 0, cft: 0, vendors: new Map<string, { count: number; cft: number }>() };
+      g.count += 1; g.cft += c;
+      const vn = (b.vendor_name ?? "").trim() || "—";
+      const vg = g.vendors.get(vn) ?? { count: 0, cft: 0 };
+      vg.count += 1; vg.cft += c; g.vendors.set(vn, vg);
+      byStone.set(k, g);
     }
-    if (detail) det.blocksByStone = [...byStone.entries()].map(([stone, v]) => ({ stone, ...v })).sort((a, b) => b.cft - a.cft);
+    if (detail) det.blocksByStone = [...byStone.entries()].map(([stone, v]) => ({ stone, count: v.count, cft: v.cft, vendors: [...v.vendors.entries()].map(([vendor, vv]) => ({ vendor, ...vv })).sort((a, b) => b.cft - a.cft) })).sort((a, b) => b.cft - a.cft);
   }
 
   // 2. CUTTING done today — blocks that became 'done' today; their cut slabs by stone.
@@ -872,7 +876,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.t(`${rec.marble.slabCft.toFixed(0)} CFT from ${rec.marble.tonnes.toFixed(1)} T · ${rec.marble.lineages} blocks`, mx, y - 90, 8, font, white);
       y -= rh + 14;
     }
-    section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.map((rw) => ({ n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` })));
+    section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.flatMap((rw) => [
+      { n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` },
+      ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `   ↳ ${vd.vendor}`, v: `${vd.count} · ${vd.cft.toFixed(0)} CFT` })),
+    ]));
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
     section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
     section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} slabs · ${rw.cft.toFixed(1)} CFT` })));
