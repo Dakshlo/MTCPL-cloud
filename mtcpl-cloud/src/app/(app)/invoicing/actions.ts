@@ -400,6 +400,27 @@ export async function archiveChallanAction(formData: FormData): Promise<void> {
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan archived — removed without an invoice; slabs untouched")}`);
 }
 
+/** Un-archive a challan (mig 181) — clears the archive flag on the challan AND
+ *  its dispatch, bringing both back (Challans board + dispatch lanes). The exact
+ *  reverse of archiveChallanAction; slabs were never touched. Developer only. */
+export async function unarchiveChallanAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["developer"]);
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/challans");
+  const { data: c } = await admin.from("challans").select("source_dispatch_id, archived_at").eq("id", id).maybeSingle();
+  const ch = c as { source_dispatch_id: string | null; archived_at: string | null } | null;
+  if (!ch) redirect("/invoicing/challans?toast=Challan+not+found");
+  await admin.from("challans").update({ archived_at: null, archived_by: null }).eq("id", id);
+  if (ch!.source_dispatch_id) {
+    await admin.from("dispatches").update({ archived_at: null, archived_by: null }).eq("id", ch!.source_dispatch_id);
+  }
+  void logAudit(profile.id, "challan_unarchived", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/dispatch");
+  redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan un-archived — back on the Challans page")}`);
+}
+
 // ════════════════════════════════════════════════════════════════
 // Mig 182 — Running bill, two-step. (1) createRunningChallanAction builds the
 // RUNNING CHALLAN (item tables + heads, NO rate) from the drop and delivers the

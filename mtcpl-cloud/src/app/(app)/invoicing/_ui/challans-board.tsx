@@ -19,7 +19,7 @@ import { challanStatus, type ChallanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "./challan-status-pill";
 import { ReturnToDispatchButton } from "./return-to-dispatch-button";
 import { ArchiveChallanButton } from "./archive-challan-button";
-import { sendChallanToBulkAction, returnDispatchToWaitingAction, dropChallanAction } from "../actions";
+import { sendChallanToBulkAction, returnDispatchToWaitingAction, dropChallanAction, unarchiveChallanAction } from "../actions";
 import type { GstMode } from "@/lib/challan-pricing";
 
 export type BoardChallan = {
@@ -65,7 +65,7 @@ function templeHue(name: string): number {
   return h;
 }
 
-export function ChallansBoard({ groups, total, droppedCount, canArchive = false }: { groups: BoardGroup[]; total: number; droppedCount: number; canArchive?: boolean }) {
+export function ChallansBoard({ groups, total, droppedCount, canArchive = false, archived = [] }: { groups: BoardGroup[]; total: number; droppedCount: number; canArchive?: boolean; archived?: Array<{ id: string; code: string; temple: string; date: string }> }) {
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [isOver, setIsOver] = useState(false);
@@ -255,6 +255,9 @@ export function ChallansBoard({ groups, total, droppedCount, canArchive = false 
         </div>
       )}
 
+      {/* Developer-only: archived (test/cleanup) challans, with un-archive. */}
+      {canArchive && archived.length > 0 && <ArchivedSection archived={archived} />}
+
       {/* Floating drop zones — appear while dragging, pinned to the viewport.
           Anchored to the CONTENT area (right of the sidebar via --content-left) so
           the first zone isn't hidden behind the menu; z-index above the sidebar. */}
@@ -429,6 +432,37 @@ function Card({ c, dragging, onDragStart, onDragEnd, canArchive }: { c: BoardCha
           <span style={{ color: "var(--muted)", fontSize: 12 }}>—</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Developer-only "Archived" section — collapsible list of archived (test/cleanup)
+ *  challans, each with an Un-archive button that brings it back to the board. */
+function ArchivedSection({ archived }: { archived: Array<{ id: string; code: string; temple: string; date: string }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ marginTop: 18, border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface, #fff)" }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "var(--bg)", border: "none", cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
+        <span style={{ fontSize: 12, transform: open ? "rotate(90deg)" : "none", transition: "transform .12s", color: "var(--muted)" }}>▶</span>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>🗑 Archived challans</span>
+        <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>{archived.length}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>developer only</span>
+      </button>
+      {open && (
+        <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          {archived.map((a) => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "9px 12px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)" }}>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13 }}>{a.code}</span>
+              <span style={{ fontSize: 12.5, color: "var(--muted)" }}>🏛 {a.temple}</span>
+              {a.date && <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{new Date(`${a.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</span>}
+              <form action={unarchiveChallanAction} style={{ marginLeft: "auto" }}>
+                <input type="hidden" name="id" value={a.id} />
+                <button type="submit" style={{ fontSize: 12, fontWeight: 800, padding: "7px 13px", borderRadius: 8, border: "1px solid var(--gold-dark)", background: "var(--gold)", color: "#fff", cursor: "pointer" }}>↩ Un-archive</button>
+              </form>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -97,9 +97,21 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
   }
   // Mig 181 — archived (test/cleanup) challans leave the board too. Best-effort.
   const archivedIds = new Set<string>();
+  // Developers can see + un-archive archived (test/cleanup) challans (mig 181).
+  const archivedList: Array<{ id: string; code: string; temple: string; date: string }> = [];
   {
-    const { data, error } = await supabase.from("challans").select("id").not("archived_at", "is", null);
-    if (!error) for (const r of (data ?? []) as Array<{ id: string }>) archivedIds.add(r.id);
+    const dev = profile.role === "developer";
+    const { data, error } = await supabase
+      .from("challans")
+      .select("id, challan_number, doc_fy, doc_seq, temple, challan_date")
+      .not("archived_at", "is", null)
+      .order("archived_at", { ascending: false });
+    if (!error) {
+      for (const r of (data ?? []) as Array<{ id: string; challan_number?: string | null; doc_fy?: string | null; doc_seq?: number | null; temple?: string | null; challan_date?: string | null }>) {
+        archivedIds.add(r.id);
+        if (dev) archivedList.push({ id: r.id, code: challanCode(r.doc_fy ?? null, r.doc_seq ?? null) ?? r.challan_number ?? "—", temple: r.temple ?? "—", date: r.challan_date ?? "" });
+      }
+    }
   }
   const visible = challans.filter((c) => !bulkIds.has(c.id) && !droppedIds.has(c.id) && !archivedIds.has(c.id));
 
@@ -162,7 +174,7 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
       )}
 
       <div style={{ marginTop: 14 }}>
-        <ChallansBoard groups={groups} total={visible.length} droppedCount={droppedCount} canArchive={profile.role === "developer"} />
+        <ChallansBoard groups={groups} total={visible.length} droppedCount={droppedCount} canArchive={profile.role === "developer"} archived={archivedList} />
       </div>
     </section>
   );
