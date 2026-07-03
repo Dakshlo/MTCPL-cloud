@@ -14,7 +14,7 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { allowedDepartmentsForRole } from "@/lib/departments";
 import { AccountsHero } from "../accounts/_ui/components";
 import { challanStatus } from "@/lib/challan-status";
-import { challanCode } from "@/lib/doc-code";
+import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { HeroMenu } from "./_ui/hero-menu";
 import { type DashGroup, type DashCard, type DashStatus } from "./_ui/dashboard-board";
 import { DashboardTabs } from "./_ui/dashboard-tabs";
@@ -33,6 +33,8 @@ type ChallanRow = {
   owner_approved_at: string | null;
   owner_rejected_at: string | null;
   source_dispatch_id: string | null;
+  inv_fy: string | null;
+  inv_seq: number | null;
   invoice_parties: { name: string } | { name: string }[] | null;
 };
 
@@ -51,7 +53,7 @@ export default async function InvoicingDashboardPage() {
   for (let off = 0; off < 100_000; off += 1000) {
     const { data, error } = await supabase
       .from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, source_dispatch_id, invoice_parties(name)")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, source_dispatch_id, inv_fy, inv_seq, invoice_parties(name)")
       // Archived (test/cleanup) challans are hidden here — they only surface in the
       // developer-only Archived section on the Challans page (mig 181).
       .is("archived_at", null)
@@ -69,10 +71,27 @@ export default async function InvoicingDashboardPage() {
     const { data, error } = await supabase.from("challans").select("id").not("sent_to_bulk_at", "is", null);
     if (!error) for (const r of (data ?? []) as Array<{ id: string }>) inBulk.add(r.id);
   }
-  const onBulkInvoice = new Set<string>();
+  const bulkByChallan = new Map<string, string>(); // challan_id → bulk_invoice_id
   {
-    const { data, error } = await supabase.from("bulk_invoice_challans").select("challan_id");
-    if (!error) for (const r of (data ?? []) as Array<{ challan_id: string }>) onBulkInvoice.add(r.challan_id);
+    const { data, error } = await supabase.from("bulk_invoice_challans").select("challan_id, bulk_invoice_id");
+    if (!error) for (const r of (data ?? []) as Array<{ challan_id: string; bulk_invoice_id: string }>) bulkByChallan.set(r.challan_id, r.bulk_invoice_id);
+  }
+  const onBulkInvoice = new Set<string>(bulkByChallan.keys());
+  // INV code per bulk-invoiced challan (from its bulk invoice's number) so the
+  // ALL board can show the invoice number + it's searchable.
+  const bulkInvCodeByChallan = new Map<string, string>();
+  {
+    const bids = [...new Set(bulkByChallan.values())];
+    const codeByBulk = new Map<string, string>();
+    for (let i = 0; i < bids.length; i += 300) {
+      const chunk = bids.slice(i, i + 300); if (!chunk.length) break;
+      const { data } = await supabase.from("bulk_invoices").select("id, inv_fy, inv_seq, invoice_no_override").in("id", chunk);
+      for (const b of (data ?? []) as Array<{ id: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null }>) {
+        const code = (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || "");
+        if (code) codeByBulk.set(b.id, code);
+      }
+    }
+    for (const [ch, bid] of bulkByChallan) { const c = codeByBulk.get(bid); if (c) bulkInvCodeByChallan.set(ch, c); }
   }
 
   // Slab codes / labels per challan → search blob.
@@ -113,13 +132,20 @@ export default async function InvoicingDashboardPage() {
 
     const temple = templeOf(c);
     const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
+    // Invoiced challans also carry their invoice number (direct = inv_fy/seq;
+    // bulk = the bulk invoice's number) — shown on the card + searchable.
+    const invCode =
+      status === "invoiced" ? invoiceCodeFromDoc(c.inv_fy, c.inv_seq)
+      : status === "bulk_invoiced" ? (bulkInvCodeByChallan.get(c.id) ?? null)
+      : null;
     const card: DashCard = {
       id: c.id,
       code,
       date: c.challan_date,
       status,
       href,
-      search: `${temple} ${code} ${c.challan_number} ${codesByChallan.get(c.id) ?? ""}`.toLowerCase(),
+      invCode,
+      search: `${temple} ${code} ${c.challan_number} ${invCode ?? ""} ${codesByChallan.get(c.id) ?? ""}`.toLowerCase(),
     };
     const a = byTemple.get(temple) ?? [];
     a.push(card);

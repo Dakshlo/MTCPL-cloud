@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 
 export type DashStatus = "open" | "pending_approval" | "rejected" | "invoiced" | "cancelled" | "in_bulk" | "bulk_invoiced";
-export type DashCard = { id: string; code: string; date: string; status: DashStatus; href: string; search: string };
+export type DashCard = { id: string; code: string; date: string; status: DashStatus; href: string; search: string; invCode?: string | null };
 export type DashGroup = { temple: string; rows: DashCard[] };
 
 const META: Record<DashStatus, { label: string; bg: string; fg: string; dot: string }> = {
@@ -69,7 +69,7 @@ export function DashboardBoard({ groups, total }: { groups: DashGroup[]; total: 
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search temple, challan no., or slab code…"
+          placeholder="Search temple, challan / invoice no., or slab code…"
           style={{ width: "100%", padding: "11px 38px 11px 38px", borderRadius: 11, border: "1px solid var(--border)", background: "var(--surface, #fff)", color: "var(--text)", fontSize: 14 }}
         />
         {query && (
@@ -115,7 +115,10 @@ export function DashboardBoard({ groups, total }: { groups: DashGroup[]; total: 
                       return (
                         <Link key={c.id} href={c.href} className="dsh-card" style={{ border: "1px solid var(--border)", borderLeft: `4px solid ${m.dot}`, borderRadius: 12, background: "var(--surface, #fff)", padding: "12px 13px 13px", display: "flex", flexDirection: "column", gap: 8, textDecoration: "none", color: "var(--text)", animation: "dshLift 0.18s ease" }}>
                           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15, letterSpacing: "-0.01em" }}>{c.code}</span>
+                            <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15, letterSpacing: "-0.01em" }}>{c.code}</span>
+                              {c.invCode && <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 11, color: "#065f46" }}>🧾 {c.invCode}</span>}
+                            </span>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px 3px 8px", borderRadius: 999, background: m.bg, color: m.fg, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
                               <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.dot }} />
                               {m.label}
