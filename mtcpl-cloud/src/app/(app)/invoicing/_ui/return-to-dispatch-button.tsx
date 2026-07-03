@@ -49,8 +49,11 @@ export function ReturnToDispatchButton({
       const r = await action(fd);
       if (!r.ok) { setError(r.error); return; }
       setOpen(false);
-      router.push(`/invoicing/challans?toast=${encodeURIComponent("Returned to dispatch — back in Waiting approval")}`);
-      router.refresh();
+      // NOTE: no router.refresh() — the challan row is DELETED, so refreshing the
+      // current (review) route re-runs its notFound() → a flash of "page not
+      // found". The action already revalidated the paths, so the push lands on a
+      // fresh Challans list. Use replace so Back doesn't return to the dead page.
+      router.replace(`/invoicing/challans?toast=${encodeURIComponent("Returned to dispatch — back in Waiting approval")}`);
     });
   }
 

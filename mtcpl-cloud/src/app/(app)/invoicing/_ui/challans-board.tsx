@@ -65,11 +65,12 @@ function templeHue(name: string): number {
   return h;
 }
 
-export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGroup[]; total: number; droppedCount: number }) {
+export function ChallansBoard({ groups, total, droppedCount, canArchive = false }: { groups: BoardGroup[]; total: number; droppedCount: number; canArchive?: boolean }) {
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [isOver, setIsOver] = useState(false);
   const [isOverDrop, setIsOverDrop] = useState(false);
+  const [isOverConvert, setIsOverConvert] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [allExpanded, setAllExpanded] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<{ id: string; code: string; target: "bulk" | "drop" } | null>(null);
@@ -102,14 +103,18 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
   const toggle = (t: string) => setExpanded((p) => ({ ...p, [t]: !(p[t] ?? allExpanded) }));
 
   function beginDrag(id: string) { setDragId(id); }
-  function endDrag() { setDragId(null); setIsOver(false); setIsOverDrop(false); }
+  function endDrag() { setDragId(null); setIsOver(false); setIsOverDrop(false); setIsOverConvert(false); }
 
-  function onDrop(target: "bulk" | "drop") {
+  function onDrop(target: "bulk" | "drop" | "convert") {
     setIsOver(false);
     setIsOverDrop(false);
+    setIsOverConvert(false);
     const id = dragId;
     setDragId(null);
     if (!id) return;
+    // Convert → purchase invoice = same as clicking the old button: straight to
+    // Review & price (non-destructive, no confirm needed).
+    if (target === "convert") { goConvert(id); return; }
     for (const g of groups) {
       const hit = g.rows.find((r) => r.id === id);
       if (hit) { setPendingDrop({ id: hit.id, code: hit.code, target }); return; }
@@ -241,7 +246,7 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
                 {open && (
                   <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(262px, 1fr))", gap: 12 }}>
                     {g.rows.map((c) => (
-                      <Card key={c.id} c={c} dragging={dragId === c.id} onDragStart={() => beginDrag(c.id)} onDragEnd={endDrag} onConvert={() => goConvert(c.id)} />
+                      <Card key={c.id} c={c} dragging={dragId === c.id} onDragStart={() => beginDrag(c.id)} onDragEnd={endDrag} canArchive={canArchive} />
                     ))}
                   </div>
                 )}
@@ -254,7 +259,28 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
       {/* Floating drop zone — appears while dragging, fixed to the viewport so it's
           reachable from any scroll position (Daksh). */}
       {dragging && (
-        <div style={{ position: "fixed", left: "50%", bottom: 30, transform: "translateX(-50%)", zIndex: 80, display: "flex", gap: 14, width: "min(760px, 94vw)", justifyContent: "center", flexWrap: "wrap" }}>
+        <div style={{ position: "fixed", left: "50%", bottom: 30, transform: "translateX(-50%)", zIndex: 80, display: "flex", gap: 14, width: "min(1000px, 96vw)", justifyContent: "center", flexWrap: "wrap" }}>
+          {/* Convert → purchase invoice (Review & price) */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOverConvert(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setIsOverConvert(true); }}
+            onDragLeave={() => setIsOverConvert(false)}
+            onDrop={(e) => { e.preventDefault(); onDrop("convert"); }}
+            style={{
+              flex: "1 1 280px", textAlign: "center", cursor: "copy", padding: "18px 20px", borderRadius: 16,
+              transform: `scale(${isOverConvert ? 1.05 : 1})`,
+              border: `2.5px dashed ${isOverConvert ? "#0f766e" : "#14b8a6"}`,
+              background: isOverConvert ? "#0f766e" : "rgba(240,253,250,0.97)",
+              color: isOverConvert ? "#fff" : "#0f766e",
+              boxShadow: "0 18px 50px rgba(15,23,42,0.28)",
+              animation: isOverConvert ? "none" : "chlFloat 1.1s ease-in-out infinite",
+              transition: "transform .12s ease, background .12s ease, color .12s ease", backdropFilter: "blur(2px)",
+            }}
+          >
+            <div style={{ fontSize: 26, lineHeight: 1 }}>🧾</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 5 }}>{isOverConvert ? "Release → Purchase invoice" : "Drop here → Purchase invoice"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginTop: 2 }}>price it now &amp; send for approval</div>
+          </div>
           {/* Send to Bulk */}
           <div
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setIsOver(true); }}
@@ -329,7 +355,7 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
   );
 }
 
-function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChallan; dragging: boolean; onDragStart: () => void; onDragEnd: () => void; onConvert: () => void }) {
+function Card({ c, dragging, onDragStart, onDragEnd, canArchive }: { c: BoardChallan; dragging: boolean; onDragStart: () => void; onDragEnd: () => void; canArchive: boolean }) {
   const st = challanStatus(c);
   const open = st === "open";
   const accent = ACCENT[st];
@@ -376,25 +402,21 @@ function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChal
       <div style={{ marginTop: "auto", paddingTop: 4 }}>
         {open ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            <div style={{ display: "flex", gap: 7 }}>
-              <button type="button" onClick={onConvert} style={{ flex: 1, textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "#fff", background: "var(--gold)", border: "1px solid var(--gold-dark)", cursor: "pointer" }}>
-                🧾 Convert to purchase invoice
-              </button>
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
               <Link
                 href={c.sourceDispatchId ? `/dispatch/${c.sourceDispatchId}/print` : `/invoicing/challans/${c.id}`}
                 target={c.sourceDispatchId ? "_blank" : undefined}
                 rel={c.sourceDispatchId ? "noopener noreferrer" : undefined}
-                style={{ flexShrink: 0, textAlign: "center", fontSize: 12.5, fontWeight: 700, padding: "9px 12px", borderRadius: 9, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", textDecoration: "none" }}
+                style={{ flex: 1, textAlign: "center", fontSize: 12.5, fontWeight: 800, padding: "9px 12px", borderRadius: 9, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", textDecoration: "none" }}
               >
                 👁 View challan
               </Link>
+              <ReturnToDispatchButton challanId={c.id} action={returnDispatchToWaitingAction} label="↩ Send back to dispatch" />
+              {canArchive && <ArchiveChallanButton id={c.id} code={c.code} />}
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
-              </span>
-              <ArchiveChallanButton id={c.id} code={c.code} />
-            </div>
+            <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag onto 🧾 Purchase invoice · 📦 Bulk · 🏃 Running bill
+            </span>
           </div>
         ) : st === "rejected" ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>

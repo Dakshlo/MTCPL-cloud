@@ -162,7 +162,7 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
       )}
 
       <div style={{ marginTop: 14 }}>
-        <ChallansBoard groups={groups} total={visible.length} droppedCount={droppedCount} />
+        <ChallansBoard groups={groups} total={visible.length} droppedCount={droppedCount} canArchive={profile.role === "developer"} />
       </div>
     </section>
   );
