@@ -16,7 +16,9 @@ import { AccountsHero } from "../accounts/_ui/components";
 import { challanStatus } from "@/lib/challan-status";
 import { challanCode } from "@/lib/doc-code";
 import { HeroMenu } from "./_ui/hero-menu";
-import { DashboardBoard, type DashGroup, type DashCard, type DashStatus } from "./_ui/dashboard-board";
+import { type DashGroup, type DashCard, type DashStatus } from "./_ui/dashboard-board";
+import { DashboardTabs } from "./_ui/dashboard-tabs";
+import { gatherInvoiced } from "@/lib/invoicing-summary";
 
 type ChallanRow = {
   id: string;
@@ -50,6 +52,9 @@ export default async function InvoicingDashboardPage() {
     const { data, error } = await supabase
       .from("challans")
       .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, source_dispatch_id, invoice_parties(name)")
+      // Archived (test/cleanup) challans are hidden here — they only surface in the
+      // developer-only Archived section on the Challans page (mig 181).
+      .is("archived_at", null)
       .order("challan_date", { ascending: false })
       .range(off, off + 999);
     if (error) throw new Error(error.message);
@@ -122,6 +127,9 @@ export default async function InvoicingDashboardPage() {
   }
   const groups: DashGroup[] = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([temple, rows]) => ({ temple, rows }));
 
+  // Invoiced analytics (temple purchase + work order + running + other sales).
+  const invoiced = await gatherInvoiced(supabase);
+
   return (
     <section className="page-card">
       <AccountsHero
@@ -147,7 +155,7 @@ export default async function InvoicingDashboardPage() {
       />
 
       <div style={{ marginTop: 18 }}>
-        <DashboardBoard groups={groups} total={challans.length} />
+        <DashboardTabs groups={groups} total={challans.length} invoiced={invoiced} />
       </div>
     </section>
   );
