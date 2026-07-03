@@ -13,7 +13,7 @@ import { useState, type ReactNode, type ChangeEvent } from "react";
 import { useFormStatus } from "react-dom";
 import { updateTempleAction, deleteTempleAction } from "./actions";
 import { BILLING_FIELDS, SHIPPING_FIELDS, SHARED_FIELDS } from "@/lib/temple-billing-fields";
-import { codeForState, parseGstin } from "@/lib/gst-states";
+import { codeForState } from "@/lib/gst-states";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -44,23 +44,17 @@ export function TempleEditModal({
   const [open, setOpen] = useState(false);
   const [gstMode, setGstMode] = useState<string>(temple.gst_mode ?? "none");
 
-  // Auto-fill (offline): State → GST state code; GSTIN → state code + state +
-  // PAN (a GSTIN encodes all three). Everything stays editable. The full legal
-  // name / address from a GSTIN would need a paid GST-lookup API (not wired).
+  // Auto-fill (offline): State name → GST State code only (editable). The
+  // GSTIN-based auto-fill was removed — it filled the wrong State in some cases
+  // (a client's billing State can differ from its GSTIN's registered State).
   function autoFillFrom(e: ChangeEvent<HTMLInputElement>, key: string) {
     const form = e.currentTarget.form;
     if (!form) return;
     const prefix = key.startsWith("ship_") ? "ship" : "bill";
-    const put = (name: string, val: string) => {
-      const el = form.elements.namedItem(name);
-      if (el instanceof HTMLInputElement && val) el.value = val;
-    };
-    if (key.endsWith("_gstin")) {
-      const p = parseGstin(e.currentTarget.value);
-      if (p) { put(`${prefix}_state_code`, p.stateCode); if (p.state) put(`${prefix}_state`, p.state); put(`${prefix}_pan`, p.pan); }
-    } else if (key.endsWith("_state")) {
+    if (key.endsWith("_state")) {
       const code = codeForState(e.currentTarget.value);
-      if (code) put(`${prefix}_state_code`, code);
+      const el = form.elements.namedItem(`${prefix}_state_code`);
+      if (code && el instanceof HTMLInputElement) el.value = code;
     }
   }
 
@@ -105,7 +99,7 @@ export function TempleEditModal({
             <div style={{ padding: "14px 18px", maxHeight: "78vh", overflowY: "auto" }}>
               {renameSlot}
 
-              <form action={updateTempleAction}>
+              <form action={updateTempleAction} autoComplete="off">
                 <SaveOverlay />
                 <input type="hidden" name="id" value={temple.id} />
                 <input type="hidden" name="temple_name" value={temple.name} />
@@ -114,11 +108,11 @@ export function TempleEditModal({
                 <div className="settings-form-row">
                   <label className="stack" style={{ flex: 1 }}>
                     <span>Installation By</span>
-                    <input name="installer_name" defaultValue={temple.installer_name ?? ""} />
+                    <input name="installer_name" autoComplete="off" defaultValue={temple.installer_name ?? ""} />
                   </label>
                   <label className="stack" style={{ flex: "0 0 170px" }}>
                     <span>Installation Mobile No.</span>
-                    <input name="installer_phone" type="tel" defaultValue={temple.installer_phone ?? ""} />
+                    <input name="installer_phone" type="tel" autoComplete="off" defaultValue={temple.installer_phone ?? ""} />
                   </label>
                   <label className="stack" style={{ flex: "0 0 140px" }}>
                     <span>Status</span>
@@ -142,13 +136,13 @@ export function TempleEditModal({
                   <fieldset style={fieldset}>
                     <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>🧾 Billing To</legend>
                     {BILLING_FIELDS.map((f) => (
-                      <label key={f.key} className="stack"><span>{f.label}</span><input name={f.key} defaultValue={temple[f.key] ?? ""} onChange={f.key.endsWith("_state") || f.key.endsWith("_gstin") ? (e) => autoFillFrom(e, f.key) : undefined} /></label>
+                      <label key={f.key} className="stack"><span>{f.label}</span><input name={f.key} defaultValue={temple[f.key] ?? ""} autoComplete="off" onChange={f.key.endsWith("_state") ? (e) => autoFillFrom(e, f.key) : undefined} /></label>
                     ))}
                   </fieldset>
                   <fieldset style={fieldset}>
                     <legend style={{ fontSize: 12.5, fontWeight: 800, padding: "0 6px" }}>📦 Shipping To <span className="muted" style={{ fontWeight: 600 }}>· blank = same as billing</span></legend>
                     {SHIPPING_FIELDS.map((f) => (
-                      <label key={f.key} className="stack"><span>{f.label}</span><input name={f.key} defaultValue={temple[f.key] ?? ""} onChange={f.key.endsWith("_state") || f.key.endsWith("_gstin") ? (e) => autoFillFrom(e, f.key) : undefined} /></label>
+                      <label key={f.key} className="stack"><span>{f.label}</span><input name={f.key} defaultValue={temple[f.key] ?? ""} autoComplete="off" onChange={f.key.endsWith("_state") ? (e) => autoFillFrom(e, f.key) : undefined} /></label>
                     ))}
                   </fieldset>
                 </div>
