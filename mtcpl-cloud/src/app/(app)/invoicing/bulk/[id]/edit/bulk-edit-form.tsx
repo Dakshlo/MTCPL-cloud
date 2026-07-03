@@ -11,12 +11,14 @@ import { BULK_UNITS } from "@/lib/bulk-items";
 type Line = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
 type Section = { head: string; lines: Line[] };
 
-export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes }: {
+export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes, challans, linkedIds }: {
   id: string;
   invoiceCode: string;
   initSections: Array<{ head: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
   initNotes: string;
+  challans: Array<{ id: string; code: string; date: string }>;
+  linkedIds: string[];
 }) {
   const [sections, setSections] = useState<Section[]>(() =>
     initSections.map((s) => ({ head: s.head, lines: s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: l.quantity ? String(l.quantity) : "", rate: l.rate ? String(l.rate) : "" })) })),
@@ -26,6 +28,8 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
   const [cgst, setCgst] = useState(String(initGst.cgst || 9));
   const [sgst, setSgst] = useState(String(initGst.sgst || 9));
   const [notes, setNotes] = useState(initNotes);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(linkedIds));
+  const toggleChallan = (cid: string) => setSelected((p) => { const n = new Set(p); if (n.has(cid)) n.delete(cid); else n.add(cid); return n; });
 
   const amountOf = (l: Line) => (Number(l.quantity) || 0) * (Number(l.rate) || 0);
   const setLine = (si: number, li: number, k: keyof Line, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, [k]: v } : l)) } : s)));
@@ -60,11 +64,33 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
       <input type="hidden" name="cgst_percent" value={cgst} />
       <input type="hidden" name="sgst_percent" value={sgst} />
       <input type="hidden" name="notes" value={notes} />
+      <input type="hidden" name="challan_ids" value={JSON.stringify([...selected])} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15 }}>{invoiceCode}</span>
         <span style={{ fontSize: 10, fontWeight: 800, color: "#6d28d9", background: "rgba(124,58,237,0.1)", borderRadius: 999, padding: "2px 8px" }}>🔒 NUMBER LOCKED</span>
       </div>
+
+      {challans.length > 0 && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", marginBottom: 14, background: "var(--bg)" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>📋 Delivery challans on this invoice <span style={{ fontWeight: 600, textTransform: "none" }}>· tick to include, untick to return it to the Bulk pool</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
+            {challans.map((c) => {
+              const on = selected.has(c.id);
+              return (
+                <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "rgba(180,83,9,0.06)" : "var(--surface)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggleChallan(c.id)} />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 12.5 }}>{c.code}</span>
+                    <span style={{ display: "block", fontSize: 10.5, color: "var(--muted)" }}>{new Date(`${c.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>{selected.size} selected · the change takes effect when the edit is approved.</div>
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {sections.map((s, si) => (

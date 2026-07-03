@@ -9,7 +9,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import type { GstMode } from "@/lib/challan-pricing";
 import { groupBulkItems } from "@/lib/bulk-items";
 import { BulkEditForm } from "./bulk-edit-form";
@@ -42,6 +42,28 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
   const invoiceCode = (b.invoice_no_override?.trim?.() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${id.slice(0, 6).toUpperCase()}`);
   const gstMode = (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode;
 
+  // Mig 184 slice 3 — challans this invoice can (de)select. Pool = sent-to-bulk
+  // challans for this temple not on ANOTHER invoice; plus this invoice's own.
+  const { data: allLinks } = await admin.from("bulk_invoice_challans").select("bulk_invoice_id, challan_id");
+  const links = (allLinks ?? []) as Array<{ bulk_invoice_id: string; challan_id: string }>;
+  const linkedIds = links.filter((l) => l.bulk_invoice_id === id).map((l) => l.challan_id);
+  const otherLinked = new Set(links.filter((l) => l.bulk_invoice_id !== id).map((l) => l.challan_id));
+  const pick = new Map<string, { id: string; code: string; date: string }>();
+  if (b.temple) {
+    const { data } = await admin.from("challans")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date")
+      .eq("temple", b.temple).not("sent_to_bulk_at", "is", null).is("cancelled_at", null).is("converted_invoice_id", null);
+    for (const r of (data ?? []) as any[]) {
+      if (otherLinked.has(r.id)) continue;
+      pick.set(r.id, { id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number ?? "—", date: r.challan_date });
+    }
+  }
+  if (linkedIds.length) {
+    const { data } = await admin.from("challans").select("id, challan_number, doc_fy, doc_seq, challan_date").in("id", linkedIds);
+    for (const r of (data ?? []) as any[]) pick.set(r.id, { id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number ?? "—", date: r.challan_date });
+  }
+  const pickable = [...pick.values()].sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0));
+
   return (
     <section className="page-card">
       <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -58,6 +80,8 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
           initSections={initSections}
           initGst={{ mode: gstMode, igst: Number(b.igst_percent) || 18, cgst: Number(b.cgst_percent) || 9, sgst: Number(b.sgst_percent) || 9 }}
           initNotes={b.notes ?? ""}
+          challans={pickable}
+          linkedIds={linkedIds}
         />
       </div>
     </section>
