@@ -5,7 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
-import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { InvoicesView, type InvoiceRow } from "./invoices-collapsible";
 import { getProfilesMap } from "@/lib/profiles";
 
@@ -134,6 +134,35 @@ export default async function InvoicingListPage() {
     }
   }
 
+  // Linked delivery-challan codes per BULK invoice (bulk_invoice_challans →
+  // challans) — a work-order invoice bundles several, shown as a dropdown on the
+  // card. Best-effort so a pre-mig deploy just shows none.
+  const bulkChallanCodes = new Map<string, string[]>();
+  if (bulkApproved.length) {
+    const bids = bulkApproved.map((b) => b.id);
+    const links: Array<{ bulk_invoice_id: string; challan_id: string }> = [];
+    for (let i = 0; i < bids.length; i += 300) {
+      const chunk = bids.slice(i, i + 300); if (!chunk.length) break;
+      const { data } = await supabase.from("bulk_invoice_challans").select("bulk_invoice_id, challan_id").in("bulk_invoice_id", chunk);
+      for (const r of (data ?? []) as Array<{ bulk_invoice_id: string; challan_id: string }>) links.push(r);
+    }
+    const codeById = new Map<string, string>();
+    const chIds = [...new Set(links.map((l) => l.challan_id))];
+    for (let i = 0; i < chIds.length; i += 300) {
+      const chunk = chIds.slice(i, i + 300); if (!chunk.length) break;
+      const { data } = await supabase.from("challans").select("id, doc_fy, doc_seq, challan_number").in("id", chunk);
+      for (const r of (data ?? []) as Array<{ id: string; doc_fy: string | null; doc_seq: number | null; challan_number: string | null }>) {
+        codeById.set(r.id, challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number ?? "—");
+      }
+    }
+    for (const l of links) {
+      const arr = bulkChallanCodes.get(l.bulk_invoice_id) ?? [];
+      const code = codeById.get(l.challan_id); if (code) arr.push(code);
+      bulkChallanCodes.set(l.bulk_invoice_id, arr);
+    }
+    for (const [k, v] of bulkChallanCodes) bulkChallanCodes.set(k, v.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+  }
+
   // Who generated each invoice — resolve creator ids to names for the Recent card.
   const profNames = await getProfilesMap();
   const nameOf = (id: string | null | undefined) => (id ? profNames[id] ?? null : null);
@@ -159,6 +188,7 @@ export default async function InvoicingListPage() {
           href: `/invoicing/challan/${r.id}/custom/print`, external: true,
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
           editHref: `/invoicing/running/${r.id}/invoice`, cancelKind: "running", cancelId: r.id,
+          challanCodes: challanCode(r.doc_fy, r.doc_seq) ? [challanCode(r.doc_fy, r.doc_seq)!] : [],
           sourceType: "running", createdBy: nameOf(r.custom_billed_by),
         });
       }
@@ -178,6 +208,7 @@ export default async function InvoicingListPage() {
       href: `/invoicing/challan/${c.id}/print`, external: true,
       challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
       editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
+      challanCodes: [challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number],
       sourceType: "purchase" as const, createdBy: nameOf(c.priced_by),
     })),
     ...bulkApproved.map((b) => ({
@@ -185,6 +216,7 @@ export default async function InvoicingListPage() {
       customer: b.temple ?? "—", total: bulkTotal.get(b.id) ?? 0,
       href: `/invoicing/bulk/${b.id}/print`, external: true,
       challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
+      challanCodes: bulkChallanCodes.get(b.id) ?? [],
       sourceType: "work_order" as const, createdBy: nameOf(b.created_by),
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -200,7 +232,7 @@ export default async function InvoicingListPage() {
   let otherRows: OtherRow[] = [];
   {
     const { data, error } = await supabase.from("other_challans")
-      .select("id, challan_date, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
+      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
       .not("converted_at", "is", null).is("cancelled_at", null)
       .order("converted_at", { ascending: false });
     if (!error) {
@@ -214,6 +246,7 @@ export default async function InvoicingListPage() {
           key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,
           date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
           editHref: `/invoicing/other/${o.id}/invoice`, cancelKind: "other" as const, cancelId: o.id,
+          challanCodes: challanCode(o.doc_fy, o.doc_seq) ? [challanCode(o.doc_fy, o.doc_seq)!] : [],
           sourceType: "other" as const, createdBy: nameOf(o.converted_by),
         };
       });

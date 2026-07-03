@@ -33,6 +33,9 @@ export type InvoiceRow = {
   sourceType?: "purchase" | "work_order" | "running" | "other" | "legacy";
   /** Who generated the invoice (resolved name). */
   createdBy?: string | null;
+  /** Source delivery-challan code(s) this invoice bills — work-order invoices
+   *  link several (shown as a dropdown). */
+  challanCodes?: string[];
 };
 
 const SOURCE_META: Record<NonNullable<InvoiceRow["sourceType"]>, { label: string; color: string; bg: string }> = {
@@ -45,6 +48,25 @@ const SOURCE_META: Record<NonNullable<InvoiceRow["sourceType"]>, { label: string
 
 function money(n: number) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Source challan reference — one code as a chip, several as a click-to-open
+ *  dropdown (work-order invoices bundle multiple delivery challans). */
+function ChallanRef({ codes }: { codes?: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (!codes || codes.length === 0) return null;
+  const chip: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: "var(--muted)", fontFamily: "ui-monospace, monospace", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: "1px 7px", whiteSpace: "nowrap" };
+  if (codes.length === 1) return <span style={chip}>📋 {codes[0]}</span>;
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} style={{ ...chip, cursor: "pointer" }}>📋 {codes.length} challans {open ? "▴" : "▾"}</button>
+      {open && (
+        <span onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 50, background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.18)", padding: "6px 4px", minWidth: 130, maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
+          {codes.map((c) => <span key={c} style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--text)", padding: "3px 10px", whiteSpace: "nowrap" }}>{c}</span>)}
+        </span>
+      )}
+    </span>
+  );
 }
 
 const CANCEL_META = {
@@ -136,7 +158,10 @@ export function CollapsibleInvoiceTemple({ temple, rows }: { temple: string; row
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} style={{ borderTop: "1px solid var(--border)" }}>
-                <td style={{ padding: "9px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{r.code}</td>
+                <td style={{ padding: "9px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+                  {r.code}
+                  {r.challanCodes && r.challanCodes.length > 0 && <div style={{ marginTop: 4 }}><ChallanRef codes={r.challanCodes} /></div>}
+                </td>
                 <td style={{ padding: "9px 14px", color: "var(--muted)" }}>
                   {new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 </td>
@@ -170,6 +195,7 @@ function InvoiceCard({ r }: { r: InvoiceRow }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10.5, fontWeight: 800, color: src.color, background: src.bg, borderRadius: 999, padding: "2px 9px" }}>{src.label}</span>
           {r.createdBy && <span style={{ fontSize: 11, color: "var(--muted)" }}>by {r.createdBy}</span>}
+          <ChallanRef codes={r.challanCodes} />
         </div>
       </div>
       <div style={{ flex: "0 0 auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, minWidth: 110, textAlign: "right" }}>₹ {money(r.total)}</div>
