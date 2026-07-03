@@ -1,25 +1,25 @@
 "use client";
 
-/** Edit a bulk (work-order) invoice — line items / GST / notes. The INV number
- *  is LOCKED (Daksh Jul 2026). Posts updateBulkInvoiceAction. */
+/** Edit a work order (bulk) invoice — tables/heads / line items / GST / notes.
+ *  The INV number is LOCKED (Daksh Jul 2026). Posts updateBulkInvoiceAction. */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { updateBulkInvoiceAction } from "../../../actions";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { BULK_UNITS } from "@/lib/bulk-items";
 
-type Item = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
+type Line = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
+type Section = { head: string; lines: Line[] };
 
-export function BulkEditForm({ id, invoiceCode, initItems, initGst, initNotes }: {
+export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes }: {
   id: string;
   invoiceCode: string;
-  initItems: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }>;
+  initSections: Array<{ head: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
   initNotes: string;
 }) {
-  const [items, setItems] = useState<Item[]>(() =>
-    initItems.length
-      ? initItems.map((it) => ({ particulars: it.particulars, hsn: it.hsn, unit: it.unit, quantity: it.quantity ? String(it.quantity) : "", rate: it.rate ? String(it.rate) : "" }))
-      : [{ particulars: "", hsn: "", unit: "", quantity: "", rate: "" }],
+  const [sections, setSections] = useState<Section[]>(() =>
+    initSections.map((s) => ({ head: s.head, lines: s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: l.quantity ? String(l.quantity) : "", rate: l.rate ? String(l.rate) : "" })) })),
   );
   const [mode, setMode] = useState<GstMode>(initGst.mode);
   const [igst, setIgst] = useState(String(initGst.igst || 18));
@@ -27,11 +27,25 @@ export function BulkEditForm({ id, invoiceCode, initItems, initGst, initNotes }:
   const [sgst, setSgst] = useState(String(initGst.sgst || 9));
   const [notes, setNotes] = useState(initNotes);
 
-  const amountOf = (it: Item) => (Number(it.quantity) || 0) * (Number(it.rate) || 0);
-  const totals = computeInvoiceTotals(items.map(amountOf), { mode, igst: Number(igst) || 0, cgst: Number(cgst) || 0, sgst: Number(sgst) || 0 });
-  const itemsJson = JSON.stringify(items.map((it) => ({ particulars: it.particulars, hsn: it.hsn, unit: it.unit, quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: amountOf(it) })));
-  const hasItems = items.some((it) => it.particulars.trim() || amountOf(it) > 0);
-  const setItem = (i: number, k: keyof Item, v: string) => setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
+  const amountOf = (l: Line) => (Number(l.quantity) || 0) * (Number(l.rate) || 0);
+  const setLine = (si: number, li: number, k: keyof Line, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, [k]: v } : l)) } : s)));
+  const setHead = (si: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, head: v } : s)));
+  const addLine = (si: number) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: [...s.lines, { particulars: "", hsn: "", unit: "", quantity: "", rate: "" }] } : s)));
+  const removeLine = (si: number, li: number) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.filter((_, j) => j !== li) } : s)));
+  const addTable = () => setSections((p) => [...p, { head: "", lines: [{ particulars: "", hsn: "", unit: "", quantity: "", rate: "" }] }]);
+  const removeTable = (si: number) => setSections((p) => (p.length <= 1 ? p : p.filter((_, i) => i !== si)));
+
+  const serialItems = useMemo(
+    () => sections.flatMap((s, si) =>
+      s.lines
+        .filter((l) => l.particulars.trim() || Number(l.quantity) || Number(l.rate))
+        .map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, amount: amountOf(l), section_index: si, section_head: s.head.trim() || null })),
+    ),
+    [sections],
+  );
+  const totals = computeInvoiceTotals(serialItems.map((i) => i.amount), { mode, igst: Number(igst) || 0, cgst: Number(cgst) || 0, sgst: Number(sgst) || 0 });
+  const itemsJson = JSON.stringify(serialItems);
+  const hasItems = serialItems.length > 0;
 
   const cell: React.CSSProperties = { padding: "5px 7px", border: "1px solid var(--border)" };
   const inp: React.CSSProperties = { width: "100%", border: "none", background: "transparent", color: "var(--text)", fontSize: 12.5, padding: "3px 4px" };
@@ -52,41 +66,61 @@ export function BulkEditForm({ id, invoiceCode, initItems, initGst, initNotes }:
         <span style={{ fontSize: 10, fontWeight: 800, color: "#6d28d9", background: "rgba(124,58,237,0.1)", borderRadius: 999, padding: "2px 8px" }}>🔒 NUMBER LOCKED</span>
       </div>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 680 }}>
-          <thead>
-            <tr style={{ background: "var(--bg)" }}>
-              <th style={{ ...cell, width: 26 }}>#</th>
-              <th style={{ ...cell, textAlign: "left" }}>Item / Particulars</th>
-              <th style={{ ...cell, width: 100 }}>HSN</th>
-              <th style={{ ...cell, width: 74 }}>Unit</th>
-              <th style={{ ...cell, width: 84 }}>Qty</th>
-              <th style={{ ...cell, width: 100 }}>Rate</th>
-              <th style={{ ...cell, width: 110, textAlign: "right" }}>Amount</th>
-              <th style={{ ...cell, width: 30 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td style={{ ...cell, textAlign: "center", color: "var(--muted)" }}>{i + 1}</td>
-                <td style={cell}><input value={it.particulars} onChange={(e) => setItem(i, "particulars", e.target.value)} style={inp} /></td>
-                <td style={cell}><input value={it.hsn} onChange={(e) => setItem(i, "hsn", e.target.value)} style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></td>
-                <td style={cell}><input value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)} style={inp} /></td>
-                <td style={cell}><input value={it.quantity} onChange={(e) => setItem(i, "quantity", e.target.value)} inputMode="decimal" style={num} /></td>
-                <td style={cell}><input value={it.rate} onChange={(e) => setItem(i, "rate", e.target.value)} inputMode="decimal" style={num} /></td>
-                <td style={{ ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{rupee(amountOf(it))}</td>
-                <td style={{ ...cell, textAlign: "center" }}>
-                  <button type="button" onClick={() => setItems((p) => p.filter((_, j) => j !== i))} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800 }}>✕</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {sections.map((s, si) => (
+          <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 15 }}>🪨</span>
+              <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. PinkStone)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px" }} />
+              {sections.length > 1 && <button type="button" onClick={() => removeTable(si)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800, fontSize: 12 }}>✕ Table</button>}
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+                <thead>
+                  <tr style={{ background: "var(--surface)" }}>
+                    <th style={{ ...cell, width: 24 }}>#</th>
+                    <th style={{ ...cell, textAlign: "left" }}>Item / Particulars</th>
+                    <th style={{ ...cell, width: 90 }}>HSN</th>
+                    <th style={{ ...cell, width: 92 }}>Unit</th>
+                    <th style={{ ...cell, width: 78 }}>Qty</th>
+                    <th style={{ ...cell, width: 92 }}>Rate</th>
+                    <th style={{ ...cell, width: 104, textAlign: "right" }}>Amount</th>
+                    <th style={{ ...cell, width: 30 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.lines.map((l, li) => (
+                    <tr key={li}>
+                      <td style={{ ...cell, textAlign: "center", color: "var(--muted)" }}>{li + 1}</td>
+                      <td style={cell}><input value={l.particulars} onChange={(e) => setLine(si, li, "particulars", e.target.value)} style={inp} /></td>
+                      <td style={cell}><input value={l.hsn} onChange={(e) => setLine(si, li, "hsn", e.target.value)} style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></td>
+                      <td style={cell}>
+                        <select value={l.unit} onChange={(e) => setLine(si, li, "unit", e.target.value)} style={{ ...inp, cursor: "pointer" }}>
+                          <option value="">Unit…</option>
+                          {BULK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                          {l.unit && !BULK_UNITS.includes(l.unit as (typeof BULK_UNITS)[number]) && <option value={l.unit}>{l.unit}</option>}
+                        </select>
+                      </td>
+                      <td style={cell}><input value={l.quantity} onChange={(e) => setLine(si, li, "quantity", e.target.value)} inputMode="decimal" style={num} /></td>
+                      <td style={cell}><input value={l.rate} onChange={(e) => setLine(si, li, "rate", e.target.value)} inputMode="decimal" style={num} /></td>
+                      <td style={{ ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{rupee(amountOf(l))}</td>
+                      <td style={{ ...cell, textAlign: "center" }}>
+                        {s.lines.length > 1 && <button type="button" onClick={() => removeLine(si, li)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800 }}>✕</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "8px 10px" }}>
+              <button type="button" onClick={() => addLine(si)} style={{ fontSize: 12, fontWeight: 700, padding: "7px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>＋ Add line</button>
+            </div>
+          </div>
+        ))}
       </div>
-      <button type="button" onClick={() => setItems((p) => [...p, { particulars: "", hsn: "", unit: "", quantity: "", rate: "" }])} style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", marginTop: 10 }}>＋ Add line</button>
+      <button type="button" onClick={addTable} style={{ marginTop: 12, fontSize: 12.5, fontWeight: 800, padding: "9px 15px", borderRadius: 9, border: "1.5px dashed var(--gold-dark)", background: "rgba(180,83,9,0.06)", color: "var(--gold-dark)", cursor: "pointer" }}>＋ Add table (new head)</button>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginTop: 14 }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginTop: 16 }}>
         <div style={{ flex: "1 1 300px" }}>
           <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>GST</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>

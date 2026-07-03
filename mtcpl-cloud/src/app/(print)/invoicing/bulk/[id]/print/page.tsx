@@ -15,6 +15,7 @@ import { fetchTempleBilling } from "@/lib/temple-billing";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
+import { groupBulkItems } from "@/lib/bulk-items";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
@@ -59,6 +60,9 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
   const { data: itemRows } = await admin.from("bulk_invoice_items").select("*").eq("bulk_invoice_id", id).order("position");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items = (itemRows ?? []) as any[];
+  // Grouped into tables by section (mig 179); single-table invoices → one group.
+  const sections = groupBulkItems(items);
+  const multiSection = sections.length > 1 || sections.some((s) => (s.head ?? "").trim());
 
   // Covered challans (referenced, not copied).
   const { data: links } = await admin.from("bulk_invoice_challans").select("challan_id").eq("bulk_invoice_id", id);
@@ -122,6 +126,8 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
         table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t th.q { background: #c7ddf6; } .t td.q { background: #e6f0fb; }
         .t th.a { background: #ffe6a8; } .t td.a { background: #fff7e0; }
+        .sec-head { margin-top: 10px; background: #0f2540; color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 0.03em; padding: 5px 10px; border-radius: 5px 5px 0 0; }
+        .sec-head + table.t { margin-top: 0; }
         .totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; }
         .terms { flex: 1 1 auto; max-width: 58%; }
         .terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
@@ -193,38 +199,40 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No line items.</p>
         ) : (
           <>
-            <table className="t">
-              <thead>
-                <tr>
-                  <th style={{ width: 22 }}>#</th>
-                  <th>Item / Particulars</th>
-                  <th style={{ width: 80 }}>HSN</th>
-                  <th style={{ width: 56 }}>Unit</th>
-                  <th className="r q" style={{ width: 56 }}>Qty</th>
-                  <th className="r q" style={{ width: 80 }}>Rate</th>
-                  <th className="r a" style={{ width: 96 }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, i) => {
-                  const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
-                  return (
-                    <tr key={it.id ?? i}>
-                      <td>{i + 1}</td>
-                      <td>{dash(it.particulars)}</td>
-                      <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
-                      <td>{dash(it.unit)}</td>
-                      <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
-                      <td className="r q">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>
-                      <td className="r a">{rupee(amt)}</td>
+            {sections.map((sec, gi) => (
+              <div key={sec.index}>
+                {multiSection && <div className="sec-head">🪨 {dash(sec.head) === "-" ? `Table ${gi + 1}` : sec.head}</div>}
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 22 }}>#</th>
+                      <th>Item / Particulars</th>
+                      <th style={{ width: 80 }}>HSN</th>
+                      <th style={{ width: 56 }}>Unit</th>
+                      <th className="r q" style={{ width: 56 }}>Qty</th>
+                      <th className="r q" style={{ width: 80 }}>Rate</th>
+                      <th className="r a" style={{ width: 96 }}>Amount</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr><td colSpan={6} className="r" style={{ textAlign: "right" }}>Subtotal</td><td className="r">{rupee(totals.subtotal)}</td></tr>
-              </tfoot>
-            </table>
+                  </thead>
+                  <tbody>
+                    {sec.rows.map((it, i) => {
+                      const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
+                      return (
+                        <tr key={it.id ?? `${gi}-${i}`}>
+                          <td>{i + 1}</td>
+                          <td>{dash(it.particulars)}</td>
+                          <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
+                          <td>{dash(it.unit)}</td>
+                          <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
+                          <td className="r q">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>
+                          <td className="r a">{rupee(amt)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
 
             <div className="totbox">
               <div className="terms">

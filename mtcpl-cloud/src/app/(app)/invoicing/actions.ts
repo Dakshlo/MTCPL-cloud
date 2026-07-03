@@ -1277,9 +1277,11 @@ export async function sendChallanToBulkAction(formData: FormData): Promise<void>
   refreshInvoicingPaths({ challanId: id });
   revalidatePath("/invoicing/bulk");
   revalidatePath("/invoicing/challans");
-  // Daksh — stay on the Challans page (the card just leaves the list); don't yank
-  // the user over to the Bulk page.
-  redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan moved to Bulk")}`);
+  // Daksh Jul 2026 — go straight to the full-page "prepare work order challan"
+  // step (challan on the left, transport on the right). Filling transport there
+  // turns it into the FINAL work order challan; the Bulk page no longer has an
+  // awaiting/final split.
+  redirect(`/invoicing/bulk/prepare/${id}`);
 }
 
 /** Send a bulk challan back to the Challans page. */
@@ -1351,11 +1353,12 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   if (!temple) redirect("/invoicing/bulk/new?toast=Pick+a+temple");
 
   let challanIds: string[] = [];
-  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string }> = [];
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null }> = [];
   try { challanIds = JSON.parse(txt(formData, "challan_ids") || "[]") as string[]; } catch { challanIds = []; }
   try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
   items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
   if (items.length === 0) redirect("/invoicing/bulk/new?toast=Add+at+least+one+line+item");
+  if (challanIds.length === 0) redirect("/invoicing/bulk/new?toast=Select+at+least+one+challan");
 
   const gm = txt(formData, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
@@ -1389,6 +1392,8 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   const itemRows = items.map((it, i) => ({
     bulk_invoice_id: bulkId,
     position: i,
+    section_index: Number(it.section_index) || 0,
+    section_head: (it.section_head ?? "").toString().trim() || null,
     particulars: (it.particulars ?? "").toString() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
@@ -1396,7 +1401,13 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     rate: Number(it.rate) || null,
     amount: it.amount != null && it.amount !== "" ? Number(it.amount) : ((Number(it.quantity) || 0) * (Number(it.rate) || 0)),
   }));
-  await admin.from("bulk_invoice_items").insert(itemRows);
+  // Best-effort insert with section cols; fall back if mig 179 isn't applied.
+  {
+    const { error: insErr } = await admin.from("bulk_invoice_items").insert(itemRows);
+    if (insErr) {
+      await admin.from("bulk_invoice_items").insert(itemRows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+    }
+  }
   if (challanIds.length) {
     await admin.from("bulk_invoice_challans").insert(challanIds.map((cid) => ({ bulk_invoice_id: bulkId, challan_id: cid })));
   }
@@ -1478,7 +1489,7 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
   if (!b) redirect("/invoicing/invoices?toast=Invoice+not+found");
   if ((b as { cancelled_at: string | null }).cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is cancelled")}`);
 
-  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string }> = [];
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null }> = [];
   try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
   items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
   if (items.length === 0) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Add at least one line item")}`);
@@ -1493,15 +1504,21 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
     notes: txt(formData, "notes") || null,
   }).eq("id", id);
   await admin.from("bulk_invoice_items").delete().eq("bulk_invoice_id", id);
-  await admin.from("bulk_invoice_items").insert(items.map((it, i) => ({
+  const editRows = items.map((it, i) => ({
     bulk_invoice_id: id, position: i,
+    section_index: Number(it.section_index) || 0,
+    section_head: (it.section_head ?? "").toString().trim() || null,
     particulars: (it.particulars ?? "").toString() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
     quantity: Number(it.quantity) || null,
     rate: Number(it.rate) || null,
     amount: Number(it.amount) || (Number(it.quantity) || 0) * (Number(it.rate) || 0) || null,
-  })));
+  }));
+  {
+    const { error: insErr } = await admin.from("bulk_invoice_items").insert(editRows);
+    if (insErr) await admin.from("bulk_invoice_items").insert(editRows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+  }
 
   void logAudit(profile.id, "bulk_invoice_edited", "bulk_invoice", id, {});
   revalidatePath("/invoicing/invoices");

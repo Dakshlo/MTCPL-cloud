@@ -10,12 +10,13 @@
 
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { amountInWordsIN } from "@/lib/amount-words";
+import { groupBulkItems } from "@/lib/bulk-items";
 
 export type PreviewParty = {
   name: string | null; address: string | null; city: string | null; state: string | null;
   state_code: string | null; gstin: string | null; pan: string | null; phone: string | null; email: string | null;
 };
-export type PreviewItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number };
+export type PreviewItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number; section_index?: number; section_head?: string | null };
 
 const dash = (s: string | null | undefined) => (s && String(s).trim() ? String(s) : "-");
 const fmt = (n: number, dp = 2) => n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -64,6 +65,8 @@ export function BulkInvoicePreview({
   const totalTax = mode === "igst" ? totals.igstAmt : mode === "cgst_sgst" ? totals.cgstAmt + totals.sgstAmt : 0;
   const gstLabel = mode === "igst" ? `IGST @ ${igst || 0}%` : mode === "cgst_sgst" ? `CGST + SGST @ ${cgst || 0}% + ${sgst || 0}%` : "—";
   const code = invoiceNo.trim() || "INV — assigned on approval";
+  const groups = groupBulkItems(items);
+  const multiSection = groups.length > 1 || groups.some((g) => (g.head ?? "").trim());
 
   return (
     <div
@@ -101,6 +104,8 @@ export function BulkInvoicePreview({
         /* Excel-style colour: Qty + Rate = blue, Amount = amber (Daksh). */
         .bip-t th.bip-q { background: #c7ddf6; } .bip-t td.bip-q { background: #e6f0fb; }
         .bip-t th.bip-a { background: #ffe6a8; } .bip-t td.bip-a { background: #fff7e0; }
+        .bip-sec { margin-top: 10px; background: #0f2540; color: #fff; font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 5px 5px 0 0; position: relative; z-index: 6; }
+        .bip-sec + table.bip-t { margin-top: 0; }
         .bip-totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; position: relative; z-index: 6; }
         .bip-terms { flex: 1 1 auto; max-width: 58%; }
         .bip-terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
@@ -156,35 +161,37 @@ export function BulkInvoicePreview({
           <p style={{ color: "#888", fontSize: 11, marginTop: 12, position: "relative", zIndex: 6 }}>No line items yet.</p>
         ) : (
           <>
-            <table className="bip-t">
-              <thead>
-                <tr>
-                  <th style={{ width: 22 }}>#</th>
-                  <th>Item / Particulars</th>
-                  <th style={{ width: 80 }}>HSN</th>
-                  <th style={{ width: 56 }}>Unit</th>
-                  <th className="r bip-q" style={{ width: 56 }}>Qty</th>
-                  <th className="r bip-q" style={{ width: 80 }}>Rate</th>
-                  <th className="r bip-a" style={{ width: 96 }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, i) => (
-                  <tr key={i}>
-                    <td>{i + 1}</td>
-                    <td>{dash(it.particulars)}</td>
-                    <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
-                    <td>{dash(it.unit)}</td>
-                    <td className="r bip-q">{it.quantity ? fmt(it.quantity) : "-"}</td>
-                    <td className="r bip-q">{it.rate ? fmt(it.rate) : "-"}</td>
-                    <td className="r bip-a">{rupee(it.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr><td colSpan={6} className="r" style={{ textAlign: "right" }}>Subtotal</td><td className="r">{rupee(totals.subtotal)}</td></tr>
-              </tfoot>
-            </table>
+            {groups.map((g, gi) => (
+              <div key={g.index}>
+                {multiSection && <div className="bip-sec">🪨 {dash(g.head) === "-" ? `Table ${gi + 1}` : g.head}</div>}
+                <table className="bip-t">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 22 }}>#</th>
+                      <th>Item / Particulars</th>
+                      <th style={{ width: 80 }}>HSN</th>
+                      <th style={{ width: 56 }}>Unit</th>
+                      <th className="r bip-q" style={{ width: 56 }}>Qty</th>
+                      <th className="r bip-q" style={{ width: 80 }}>Rate</th>
+                      <th className="r bip-a" style={{ width: 96 }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((it, i) => (
+                      <tr key={`${gi}-${i}`}>
+                        <td>{i + 1}</td>
+                        <td>{dash(it.particulars)}</td>
+                        <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
+                        <td>{dash(it.unit)}</td>
+                        <td className="r bip-q">{it.quantity ? fmt(it.quantity) : "-"}</td>
+                        <td className="r bip-q">{it.rate ? fmt(it.rate) : "-"}</td>
+                        <td className="r bip-a">{rupee(it.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
 
             <div className="bip-totbox">
               <div className="bip-terms">

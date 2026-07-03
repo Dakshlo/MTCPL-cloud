@@ -1,0 +1,98 @@
+/**
+ * Prepare work order challan (Daksh, Jul 2026). Reached right after a challan is
+ * dragged onto Bulk (sendChallanToBulkAction redirects here). Full-screen split:
+ *   LEFT  — the delivery challan that came from dispatch (iframe, verify it),
+ *   RIGHT — transport / LR / vehicle / driver form.
+ * "Convert to work order challan" (saveBulkTransportAction) fills transport, marks
+ * it the FINAL work order challan, and releases the dispatch on the road — so the
+ * Bulk page no longer needs an awaiting/final split. The work order challan IS the
+ * dispatch challan (same CH number).
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { canUseInvoicing } from "@/lib/invoicing-permissions";
+import { challanCode } from "@/lib/doc-code";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
+import { PrepareForm } from "./prepare-form";
+
+export const dynamic = "force-dynamic";
+
+type Params = Promise<{ id: string }>;
+
+export default async function PrepareWorkOrderChallanPage({ params }: { params: Params }) {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/");
+  const { id } = await params;
+  const admin = createAdminSupabaseClient();
+
+  const { data: chRow } = await admin
+    .from("challans")
+    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, sent_to_bulk_at, full_challan_at, priced_at, converted_invoice_id, cancelled_at, source_dispatch_id, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone")
+    .eq("id", id)
+    .maybeSingle();
+  const c = chRow as any;
+  if (!c) notFound();
+  if (c.cancelled_at || c.priced_at || c.converted_invoice_id) redirect(`/invoicing/bulk?toast=${encodeURIComponent("This challan can't be prepared for bulk")}`);
+  if (!c.sent_to_bulk_at) redirect(`/invoicing/challans?toast=${encodeURIComponent("Send the challan to Bulk first")}`);
+
+  // Vehicle/driver fall back to the source dispatch when the challan's own
+  // mig-169 transport columns are empty.
+  let disp: { vehicle_no: string | null; driver_name: string | null; driver_phone: string | null } | null = null;
+  if (c.source_dispatch_id) {
+    const { data } = await admin.from("dispatches").select("vehicle_no, driver_name, driver_phone").eq("id", c.source_dispatch_id).maybeSingle();
+    disp = (data as any) ?? null;
+  }
+
+  let companies: string[] = [];
+  {
+    const { data } = await admin.from("transport_companies").select("name").order("name");
+    companies = ((data ?? []) as Array<{ name: string }>).map((r) => r.name);
+  }
+
+  const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
+  const transport = {
+    company: (c.transport_company ?? "").trim(),
+    phone: (c.transport_phone ?? "").trim(),
+    lr: (c.lr_no ?? "").trim(),
+    vehicle: ((c.transport_vehicle_no ?? "") || (disp?.vehicle_no ?? "")).trim(),
+    driver: ((c.transport_driver_name ?? "") || (disp?.driver_name ?? "")).trim(),
+    driverPhone: ((c.transport_driver_phone ?? "") || (disp?.driver_phone ?? "")).trim(),
+  };
+
+  return (
+    <>
+      <CockpitSidebarToggle defaultCollapsed={true} />
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", paddingBottom: 40 }}>
+        {/* LEFT — the challan that came from dispatch. */}
+        {c.source_dispatch_id ? (
+          <div style={{ flex: "1 1 560px", minWidth: 380, position: "sticky", top: 10, display: "flex", flexDirection: "column", height: "calc(100vh - 20px)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)", marginTop: 44 }}>
+            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>📋 Challan from dispatch — {code}</span>
+              <Link href={`/dispatch/${c.source_dispatch_id}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none", whiteSpace: "nowrap" }}>Open full ↗</Link>
+            </div>
+            <iframe src={`/dispatch/${c.source_dispatch_id}/print?embed=1`} title="Dispatch challan" style={{ flex: 1, width: "100%", border: "none", background: "#f0f0f0" }} />
+          </div>
+        ) : (
+          <div style={{ flex: "1 1 400px", minWidth: 340, marginTop: 44 }} className="banner">This challan has no linked dispatch — nothing to show on the left.</div>
+        )}
+
+        {/* RIGHT — transport form. */}
+        <div style={{ flex: "1 1 460px", minWidth: 340, marginTop: 44 }}>
+          <PrepareForm
+            id={c.id}
+            code={code}
+            temple={c.temple ?? "—"}
+            alreadyReady={!!c.full_challan_at}
+            sourceDispatchId={c.source_dispatch_id}
+            transport={transport}
+            companies={companies}
+          />
+        </div>
+      </div>
+    </>
+  );
+}

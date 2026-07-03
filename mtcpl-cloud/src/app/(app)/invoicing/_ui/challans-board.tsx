@@ -312,7 +312,7 @@ export function ChallansBoard({ groups, total, droppedCount }: { groups: BoardGr
               <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{pendingDrop.code}</strong>{" "}
               {pendingDrop.target === "drop"
                 ? <>moves to the <strong>Running bills</strong> page, where you re-bill it as ONE whole-piece bill in the client&apos;s format. Creating that bill delivers the production dispatch (no on-road leg) — the <strong>challan number stays the same</strong>.</>
-                : <>will leave this page and wait on the <strong>Bulk challans</strong> page, where it can be billed together with the temple&apos;s other challans on one tax invoice. You can send it back anytime.</>}
+                : <>opens the <strong>work order challan</strong> setup — you fill transport (the <strong>challan number stays the same</strong>), convert it, and it lands ready on the <strong>Bulk challans</strong> page to be billed on a work order invoice.</>}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" disabled={sending} onClick={() => setPendingDrop(null)} style={{ ...BUTTON_STYLES.ghost, opacity: sending ? 0.5 : 1 }}>Cancel</button>

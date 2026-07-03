@@ -97,13 +97,6 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
     }
   }
 
-  // Transport company master for the Get-challan datalist.
-  let companies: string[] = [];
-  {
-    const { data } = await admin.from("transport_companies").select("name").order("name");
-    companies = ((data ?? []) as Array<{ name: string }>).map((r) => r.name);
-  }
-
   const byTemple = new Map<string, BulkCard[]>();
   for (const c of pool) {
     const temple = c.temple ?? "—";
@@ -174,7 +167,7 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
       )}
 
       <div style={{ marginTop: 14 }}>
-        <BulkBoard groups={groups} companies={companies} />
+        <BulkBoard groups={groups} />
       </div>
 
       <p style={{ marginTop: 16, fontSize: 12 }}>

@@ -13,6 +13,7 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { challanCode, financialYear } from "@/lib/doc-code";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import type { GstMode } from "@/lib/challan-pricing";
+import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { BulkInvoiceForm, type TempleData } from "./bulk-invoice-form";
 
 export const dynamic = "force-dynamic";
@@ -24,13 +25,13 @@ export default async function NewBulkInvoicePage() {
 
   const { data: rows } = await admin
     .from("challans")
-    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple")
+    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, source_dispatch_id")
     .not("sent_to_bulk_at", "is", null)
     .is("priced_at", null)
     .is("converted_invoice_id", null)
     .is("cancelled_at", null)
     .order("challan_date", { ascending: false });
-  const all = (rows ?? []) as Array<{ id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null }>;
+  const all = (rows ?? []) as Array<{ id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; source_dispatch_id: string | null }>;
 
   const invoiced = new Set<string>();
   {
@@ -94,7 +95,7 @@ export default async function NewBulkInvoicePage() {
       return {
         temple,
         gst: gstByTemple.get(temple) ?? { mode: null, igst: 18, cgst: 9, sgst: 9 },
-        challans: list.map((c) => ({ id: c.id, code: challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number, date: c.challan_date })),
+        challans: list.map((c) => ({ id: c.id, code: challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number, date: c.challan_date, dispatchId: c.source_dispatch_id })),
         bill,
         ship: bg?.shipping ?? null,
         vendorCode: bg?.vendor_code ?? null,
@@ -114,18 +115,19 @@ export default async function NewBulkInvoicePage() {
 
   return (
     <section className="page-card">
-      <div className="page-header">
-        <h1>Work order invoice</h1>
-        <p className="muted">Bill several of a temple&apos;s bulk challans on one work order invoice. Pick the temple, tick the challans it covers, then type the line items.</p>
+      <CockpitSidebarToggle defaultCollapsed={true} />
+      <div className="page-header" style={{ marginTop: 40, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1>Work order invoice</h1>
+          <p className="muted">Tick the temple&apos;s work order challans (they show on the left to verify), then build the billed tables.</p>
+        </div>
+        <Link href="/invoicing/bulk" style={{ textDecoration: "none", fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", whiteSpace: "nowrap" }}>← Bulk challans</Link>
       </div>
       {temples.length === 0 ? (
-        <div className="banner" style={{ marginTop: 14 }}>No bulk challans to invoice. Send open challans to Bulk from the Challans page first.</div>
+        <div className="banner" style={{ marginTop: 14 }}>No work order challans to invoice. Drag challans onto Bulk from the Challans page and finish their setup first.</div>
       ) : (
         <div style={{ marginTop: 14 }}><BulkInvoiceForm temples={temples} invPrefix={invPrefix} autoNum={autoNum} /></div>
       )}
-      <p style={{ marginTop: 16, fontSize: 12 }}>
-        <Link href="/invoicing/bulk" style={{ color: "var(--muted)", textDecoration: "none" }}>← Bulk challans</Link>
-      </p>
     </section>
   );
 }

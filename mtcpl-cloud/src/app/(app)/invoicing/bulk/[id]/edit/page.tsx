@@ -11,6 +11,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
 import type { GstMode } from "@/lib/challan-pricing";
+import { groupBulkItems } from "@/lib/bulk-items";
 import { BulkEditForm } from "./bulk-edit-form";
 
 type Params = Promise<{ id: string }>;
@@ -27,10 +28,16 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
   if (b.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is cancelled")}`);
 
   const { data: itemRows } = await admin.from("bulk_invoice_items").select("*").eq("bulk_invoice_id", id).order("position");
-  const items = ((itemRows ?? []) as any[]).map((it) => ({
-    particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "",
-    quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0,
+  // Rebuild the tables (mig 179): group by section → each becomes an editable
+  // table with its head. Pre-mig rows fold into one headless table.
+  const initSections = groupBulkItems((itemRows ?? []) as any[]).map((g) => ({
+    head: g.head ?? "",
+    lines: g.rows.map((it: any) => ({
+      particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "",
+      quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0,
+    })),
   }));
+  if (initSections.length === 0) initSections.push({ head: "", lines: [{ particulars: "", hsn: "", unit: "", quantity: 0, rate: 0 }] });
 
   const invoiceCode = (b.invoice_no_override?.trim?.() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${id.slice(0, 6).toUpperCase()}`);
   const gstMode = (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode;
@@ -48,7 +55,7 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
         <BulkEditForm
           id={id}
           invoiceCode={invoiceCode}
-          initItems={items}
+          initSections={initSections}
           initGst={{ mode: gstMode, igst: Number(b.igst_percent) || 18, cgst: Number(b.cgst_percent) || 9, sgst: Number(b.sgst_percent) || 9 }}
           initNotes={b.notes ?? ""}
         />
