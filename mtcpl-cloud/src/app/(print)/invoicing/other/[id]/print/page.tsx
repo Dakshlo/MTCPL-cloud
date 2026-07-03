@@ -1,8 +1,12 @@
 /**
- * "Other Sales" print (mig 176) — A4 portrait, SAME look as the tax invoice
- * (header, Bill To / Ship To, line items, totals + tax summary + amount in
- * words, signatures, terms). Prints as a CHALLAN (OC-<fy>-n) until converted,
- * then as a TAX INVOICE (INV-<fy>-n). Bill/Ship come from the client party.
+ * "Other Sales" print (mig 176 + 183). A4 portrait.
+ *   • Before conversion → CHALLAN (CH-<fy>-n): sectioned item tables (table
+ *     heads), columns Particulars / HSN / Unit / Qty only — NO rate, like a
+ *     delivery challan.
+ *   • After conversion → TAX INVOICE (INV-<fy>-n): the same tables gain Rate +
+ *     Amount, plus totals, tax summary, amount-in-words and (on top) a reference
+ *     to the source challan number.
+ * Bill/Ship come from the client party.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -11,6 +15,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
+import { groupBulkItems } from "@/lib/bulk-items";
 import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
@@ -51,6 +56,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
   const o = oc as any;
   const { data: itemRows } = await admin.from("other_challan_items").select("*").eq("other_challan_id", id).order("position");
   const items = (itemRows ?? []) as any[];
+  const groups = groupBulkItems(items).map((g) => ({ head: (g.head ?? "").trim(), rows: g.rows as any[] }));
   const { data: pty } = await admin.from("invoice_parties").select("*").eq("id", o.party_id).maybeSingle();
   const p = pty as any;
 
@@ -63,9 +69,10 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
 
   const converted = !!o.converted_at;
   const docTitle = converted ? "TAX INVOICE" : "CHALLAN";
+  const chCode = challanCode(o.doc_fy, o.doc_seq) ?? `CH-${id.slice(0, 6).toUpperCase()}`;
   const docNum = converted
     ? (invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${id.slice(0, 6).toUpperCase()}`)
-    : (challanCode(o.doc_fy, o.doc_seq) ?? `CH-${id.slice(0, 6).toUpperCase()}`);
+    : chCode;
 
   const gstMode = (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode;
   const amounts = items.map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
@@ -93,6 +100,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
         .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; }
         .meta { text-align: right; margin-top: 3px; font-size: 10.5px; font-weight: 800; color: #1a1a1a; line-height: 1.5; }
         .meta-date { font-size: 12.5px; font-weight: 800; color: #0f2540; }
+        .meta-ref { font-size: 10px; font-weight: 700; color: #555; font-family: ui-monospace, monospace; }
         .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 4px; }
         .party { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; background: #f7fafc; }
         .party-k { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
@@ -100,13 +108,15 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
         .party-line { font-size: 11.5px; color: #333; margin-top: 1.5px; }
         .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
-        table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
+        .sec { margin-top: 8px; }
+        .sec-head { font-size: 10.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; border-radius: 3px; padding: 4px 9px; }
+        table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; }
         table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; border: 1px solid #d3dae3; }
         table.t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
         .t .r { text-align: right; white-space: nowrap; font-family: ui-monospace, monospace; }
-        table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
         .t th.q { background: #c7ddf6; } .t td.q { background: #e6f0fb; }
         .t th.a { background: #ffe6a8; } .t td.a { background: #fff7e0; }
+        .subtotal-row { display: flex; justify-content: flex-end; gap: 18px; font-size: 11px; font-weight: 800; padding: 6px 6px 0; }
         .totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; }
         .terms { flex: 1 1 auto; max-width: 58%; }
         .terms-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #0f2540; margin-bottom: 3px; }
@@ -131,7 +141,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
           .wrap { max-width: none; padding: 0 2mm; margin: 0; }
           table.t thead { display: table-header-group; }
           table.t tr { page-break-inside: avoid; }
-          .signoff, .totbox, .taxsum { page-break-inside: avoid; }
+          .sec, .signoff, .totbox, .taxsum { page-break-inside: avoid; }
           @page { size: A4 portrait; margin: 9mm; }
         }
         @media screen { body { padding: 0; } }
@@ -156,6 +166,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
             <div className="num">{docNum}</div>
             <div className="meta">
               <div className="meta-date">{new Date(`${o.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+              {converted && <div className="meta-ref">Against Challan: {chCode}</div>}
             </div>
           </div>
         </div>
@@ -169,62 +180,71 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No line items.</p>
         ) : (
           <>
-            <table className="t">
-              <thead>
-                <tr>
-                  <th style={{ width: 22 }}>#</th>
-                  <th>Item / Particulars</th>
-                  <th style={{ width: 80 }}>HSN</th>
-                  <th style={{ width: 56 }}>Unit</th>
-                  <th className="r q" style={{ width: 56 }}>Qty</th>
-                  <th className="r q" style={{ width: 80 }}>Rate</th>
-                  <th className="r a" style={{ width: 96 }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it, i) => {
-                  const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
-                  return (
-                    <tr key={it.id ?? i}>
-                      <td>{i + 1}</td>
-                      <td>{dash(it.particulars)}</td>
-                      <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
-                      <td>{dash(it.unit)}</td>
-                      <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
-                      <td className="r q">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>
-                      <td className="r a">{rupee(amt)}</td>
+            {groups.map((g, gi) => (
+              <div className="sec" key={gi}>
+                {(groups.length > 1 || g.head) && <div className="sec-head">{g.head || `Table ${gi + 1}`}</div>}
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 22 }}>#</th>
+                      <th>Item / Particulars</th>
+                      <th style={{ width: 80 }}>HSN</th>
+                      <th style={{ width: 56 }}>Unit</th>
+                      <th className="r q" style={{ width: 56 }}>Qty</th>
+                      {converted && <th className="r q" style={{ width: 80 }}>Rate</th>}
+                      {converted && <th className="r a" style={{ width: 96 }}>Amount</th>}
                     </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr><td colSpan={6} className="r" style={{ textAlign: "right" }}>Subtotal</td><td className="r">{rupee(totals.subtotal)}</td></tr>
-              </tfoot>
-            </table>
-
-            <div className="totbox">
-              <div className="terms">
-                <div className="terms-title">Terms &amp; Conditions</div>
-                <ol className="terms-list">
-                  <li>Goods once sold will not be taken back.</li>
-                  <li>Interest will be charged @ 24% p.a. from the date of bill.</li>
-                  <li>All disputes are subject to PINDWARA jurisdiction only.</li>
-                  <li>We are not responsible for any shortage or damage after the goods leaves our godown.</li>
-                </ol>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((it, i) => {
+                      const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
+                      return (
+                        <tr key={it.id ?? i}>
+                          <td>{i + 1}</td>
+                          <td>{dash(it.particulars)}</td>
+                          <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
+                          <td>{dash(it.unit)}</td>
+                          <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
+                          {converted && <td className="r q">{it.rate != null ? fmt(Number(it.rate)) : "-"}</td>}
+                          {converted && <td className="r a">{rupee(amt)}</td>}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <div className="totals">
-                <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
-                {gstMode === "igst" && <div className="row alt"><span>IGST @ {Number(o.igst_percent) || 0}%</span><span className="mono">{rupee(totals.igstAmt)}</span></div>}
-                {gstMode === "cgst_sgst" && (<><div className="row alt"><span>CGST @ {Number(o.cgst_percent) || 0}%</span><span className="mono">{rupee(totals.cgstAmt)}</span></div><div className="row alt"><span>SGST @ {Number(o.sgst_percent) || 0}%</span><span className="mono">{rupee(totals.sgstAmt)}</span></div></>)}
-                <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
-              </div>
-            </div>
+            ))}
 
-            <table className="taxsum">
-              <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>{docTitle === "TAX INVOICE" ? "Invoice" : "Challan"} Total</th></tr></thead>
-              <tbody><tr><td className="mono">{rupee(totals.subtotal)}</td><td>{gstLabel}</td><td className="mono">{rupee(totalTax)}</td><td className="mono">{rupee(totals.grand)}</td></tr></tbody>
-            </table>
-            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+            {converted ? (
+              <>
+                <div className="subtotal-row"><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
+                <div className="totbox">
+                  <div className="terms">
+                    <div className="terms-title">Terms &amp; Conditions</div>
+                    <ol className="terms-list">
+                      <li>Goods once sold will not be taken back.</li>
+                      <li>Interest will be charged @ 24% p.a. from the date of bill.</li>
+                      <li>All disputes are subject to PINDWARA jurisdiction only.</li>
+                      <li>We are not responsible for any shortage or damage after the goods leaves our godown.</li>
+                    </ol>
+                  </div>
+                  <div className="totals">
+                    <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
+                    {gstMode === "igst" && <div className="row alt"><span>IGST @ {Number(o.igst_percent) || 0}%</span><span className="mono">{rupee(totals.igstAmt)}</span></div>}
+                    {gstMode === "cgst_sgst" && (<><div className="row alt"><span>CGST @ {Number(o.cgst_percent) || 0}%</span><span className="mono">{rupee(totals.cgstAmt)}</span></div><div className="row alt"><span>SGST @ {Number(o.sgst_percent) || 0}%</span><span className="mono">{rupee(totals.sgstAmt)}</span></div></>)}
+                    <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                  </div>
+                </div>
+
+                <table className="taxsum">
+                  <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
+                  <tbody><tr><td className="mono">{rupee(totals.subtotal)}</td><td>{gstLabel}</td><td className="mono">{rupee(totalTax)}</td><td className="mono">{rupee(totals.grand)}</td></tr></tbody>
+                </table>
+                <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+              </>
+            ) : (
+              <p style={{ fontSize: 9.5, color: "#888", marginTop: 8, fontStyle: "italic" }}>Delivery challan — rate &amp; tax are added when this is converted to a tax invoice.</p>
+            )}
           </>
         )}
 

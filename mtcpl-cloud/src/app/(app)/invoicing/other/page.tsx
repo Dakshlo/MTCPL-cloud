@@ -1,8 +1,8 @@
 /**
- * "Other Sales" (mig 176) — non-temple challans → invoices. Loads the client
- * list (invoice_parties) + this section's challans and hands them to the client
- * component. Best-effort so a pre-migration deploy shows a "run mig 176" banner
- * instead of 500ing.
+ * "Other Sales" (mig 176 + 183) — non-temple challans → invoices (two-step).
+ * Loads the client list (invoice_parties) + this section's challans (with their
+ * sectioned items) and hands them to the client component. Best-effort so a pre-
+ * migration deploy shows a "run mig 176/183" banner instead of 500ing.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,44 +48,47 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
     }
   }
 
-  // This section's challans + items.
+  // This section's challans + items. Try with the section cols (mig 183); if the
+  // schema lacks them, retry without so the page still works pre-183.
+  const baseCols = "id, party_id, challan_date, doc_fy, doc_seq, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name, category)";
   let challans: OtherChallan[] = [];
   {
-    const { data, error } = await admin
+    let rows: any[] | null = null;
+    const withSec = await admin
       .from("other_challans")
-      .select("id, party_id, challan_date, doc_fy, doc_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name, category), other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)")
+      .select(`${baseCols}, other_challan_items(position, particulars, hsn, unit, quantity, rate, amount, section_index, section_head)`)
       .is("cancelled_at", null)
       .order("created_at", { ascending: false });
-    if (error) {
-      needsMigration = true;
+    if (withSec.error) {
+      const plain = await admin
+        .from("other_challans")
+        .select(`${baseCols}, other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)`)
+        .is("cancelled_at", null)
+        .order("created_at", { ascending: false });
+      if (plain.error) needsMigration = true; else rows = plain.data as any[];
     } else {
-      challans = ((data ?? []) as any[]).map((r) => {
-        const code = challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`;
-        const invoiceCode = r.inv_fy && r.inv_seq != null ? `INV-${r.inv_fy}-${pad(r.inv_seq)}` : null;
-        const gm = r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null;
-        const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties;
-        const items = ((r.other_challan_items ?? []) as any[])
-          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-          .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0 }));
-        return {
-          id: r.id, code, date: r.challan_date, partyId: r.party_id, partyName: p?.name ?? "—", category: p?.category ?? null,
-          gstMode: gm, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0,
-          notes: r.notes ?? null, items, converted: !!r.converted_at, invoiceCode,
-        };
-      });
+      rows = withSec.data as any[];
     }
+    challans = ((rows ?? []) as any[]).map((r) => {
+      const code = challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`;
+      const invoiceCode = r.inv_fy && r.inv_seq != null ? `INV-${r.inv_fy}-${pad(r.inv_seq)}` : null;
+      const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties;
+      const items = ((r.other_challan_items ?? []) as any[])
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0, sectionIndex: Number(it.section_index) || 0, sectionHead: it.section_head ?? null }));
+      const total = items.reduce((a, it) => a + (it.amount || 0), 0);
+      return {
+        id: r.id, code, date: r.challan_date, partyId: r.party_id, partyName: p?.name ?? "—", category: p?.category ?? null,
+        notes: r.notes ?? null, items, converted: !!r.converted_at, invoiceCode, total,
+      };
+    });
   }
 
-  // Preview numbers for the forms.
+  // Preview CH number for the create form (shared counter, same as dispatch).
   const fy = financialYear(new Date());
   const chPrefix = `CH-${fy}-`;
-  const invPrefix = `INV-${fy}-`;
-  const nextOf = async (key: string) => {
-    const { data } = await admin.from("doc_counters").select("last_seq").eq("fy", key).maybeSingle();
-    return String((Number((data as any)?.last_seq) || 0) + 1).padStart(2, "0");
-  };
-  const chAuto = await nextOf(`${fy}`);       // shared CH counter (same as dispatch)
-  const invAuto = await nextOf(`INV:${fy}`);
+  const { data: ctr } = await admin.from("doc_counters").select("last_seq").eq("fy", `${fy}`).maybeSingle();
+  const chAuto = String((Number((ctr as any)?.last_seq) || 0) + 1).padStart(2, "0");
 
   return (
     <section className="page-card">
@@ -109,11 +112,8 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
           challans={challans}
           chPrefix={chPrefix}
           chAuto={chAuto}
-          invPrefix={invPrefix}
-          invAuto={invAuto}
           preselectId={sp.client}
           openNew={sp.new === "1"}
-          editInvoiceId={sp.edit}
           needsMigration={needsMigration}
         />
       </div>

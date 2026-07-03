@@ -213,7 +213,7 @@ export default async function InvoicingListPage() {
         return {
           key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,
           date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
-          editHref: `/invoicing/other?edit=${o.id}`, cancelKind: "other" as const, cancelId: o.id,
+          editHref: `/invoicing/other/${o.id}/invoice`, cancelKind: "other" as const, cancelId: o.id,
           sourceType: "other" as const, createdBy: nameOf(o.converted_by),
         };
       });

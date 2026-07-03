@@ -1,10 +1,13 @@
 "use server";
 
 /**
- * "Other Sales" server actions (mig 176) — non-temple challans that convert to
- * invoices. A row in `other_challans` is the challan; converting stamps an INV
- * number from the SHARED per-FY INV counter (doc_counters / next_doc_seq), so
- * every invoice (temple + bulk + other) stays on one continuous series.
+ * "Other Sales" server actions (mig 176 + 183) — non-temple challans that
+ * convert to invoices, now a TWO-STEP flow like running bills (Daksh, Jul 2026):
+ *   1. Create a CHALLAN — sectioned line items (table heads), NO rate/GST.
+ *      Numbered CH-<fy>-n from the SHARED per-FY challan counter.
+ *   2. Convert to an INVOICE on a full-screen page — add a rate per line + GST;
+ *      the locked INV-<fy>-n is drawn from the SHARED INV counter so every
+ *      invoice (temple + bulk + other) stays on one continuous series.
  */
 
 import { redirect } from "next/navigation";
@@ -25,13 +28,17 @@ function refresh(id?: string) {
   revalidatePath("/invoicing/other");
   revalidatePath("/invoicing/invoices");
   revalidatePath("/invoicing");
-  if (id) revalidatePath(`/invoicing/other/${id}/print`);
+  if (id) {
+    revalidatePath(`/invoicing/other/${id}/print`);
+    revalidatePath(`/invoicing/other/${id}/invoice`);
+  }
 }
 
 type ItemIn = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
 
 /** Parse the JSON line-item array; drop wholly-empty rows; recompute amount.
- *  Carries the table/head grouping (mig 183). */
+ *  Carries the table/head grouping (mig 183). `rate` is absent on the challan
+ *  step (kept null) and present on convert. */
 function parseItems(fd: FormData): ItemIn[] {
   let raw: unknown = [];
   try { raw = JSON.parse(txt(fd, "items") || "[]"); } catch { raw = []; }
@@ -40,16 +47,17 @@ function parseItems(fd: FormData): ItemIn[] {
     const it = r as Record<string, unknown>;
     const particulars = String(it?.particulars ?? "").trim();
     const qty = Number(it?.quantity) || 0;
-    const rate = Number(it?.rate) || 0;
-    const amount = Math.round((Number(it?.amount) || qty * rate) * 100) / 100;
-    if (!particulars && !amount && !qty) continue; // skip blank line
+    const hasRate = it?.rate != null && String(it.rate).trim() !== "";
+    const rate = hasRate ? Number(it?.rate) || 0 : null;
+    const amount = rate != null ? Math.round(qty * rate * 100) / 100 : null;
+    if (!particulars && !qty && !amount) continue; // skip blank line
     out.push({
       particulars: particulars || null,
       hsn: String(it?.hsn ?? "").trim() || null,
       unit: String(it?.unit ?? "").trim() || null,
       quantity: qty || null,
-      rate: rate || null,
-      amount: amount || null,
+      rate,
+      amount,
       section_index: Number(it?.section_index) || 0,
       section_head: String(it?.section_head ?? "").trim() || null,
     });
@@ -76,7 +84,8 @@ async function writeItems(admin: ReturnType<typeof createAdminSupabaseClient>, c
   if (error) await admin.from("other_challan_items").insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
 }
 
-/** Create a new "other" challan (CH-<fy>-<n>, shared series) with line items. */
+/** STEP 1 — create a new "other" CHALLAN (CH-<fy>-<n>, shared series) with
+ *  sectioned line items and NO rate/GST. */
 export async function createOtherChallanAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
@@ -104,7 +113,6 @@ export async function createOtherChallanAction(formData: FormData) {
       challan_date: challanDate ?? undefined,
       doc_fy: docSeq != null ? fy : null,
       doc_seq: docSeq,
-      ...readGst(formData),
       notes: txt(formData, "notes") || null,
       created_by: profile.id,
     })
@@ -116,10 +124,10 @@ export async function createOtherChallanAction(formData: FormData) {
 
   await logAudit(profile.id, "other_challan_created", "other_challan", id, { fy, docSeq });
   refresh(id);
-  redirect(`/invoicing/other?toast=${encodeURIComponent(`Challan created — CH-${fy}-${String(docSeq ?? 0).padStart(2, "0")}`)}`);
+  redirect(`/invoicing/other?toast=${encodeURIComponent(`Challan created — CH-${fy}-${String(docSeq ?? 0).padStart(2, "0")} · now convert it to an invoice`)}`);
 }
 
-/** Edit an unconverted challan (replaces its line items). */
+/** Edit an UNCONVERTED challan (replaces its sectioned line items, still no rate). */
 export async function updateOtherChallanAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
@@ -130,10 +138,8 @@ export async function updateOtherChallanAction(formData: FormData) {
   const { data: g } = await admin.from("other_challans").select("converted_at, cancelled_at").eq("id", id).maybeSingle();
   const guard = g as { converted_at: string | null; cancelled_at: string | null } | null;
   if (!guard) redirect("/invoicing/other?toast=Challan+not+found");
-  // Jul 2026 — "Edit invoice": a converted (invoiced) other-sales bill may be
-  // re-edited; the INV number never changes.
-  const editMode = txt(formData, "edit_mode") === "1" && !!guard.converted_at;
-  if (guard.converted_at && !editMode) redirect(`/invoicing/other?toast=${encodeURIComponent("Already an invoice — open it in Edit mode")}`);
+  // A converted (invoiced) bill is edited on the full-screen convert page.
+  if (guard.converted_at) redirect(`/invoicing/other/${id}/invoice?edit=1`);
   if (guard.cancelled_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Challan is cancelled")}`);
 
   const items = parseItems(formData);
@@ -145,7 +151,6 @@ export async function updateOtherChallanAction(formData: FormData) {
     .update({
       ...(partyId ? { party_id: partyId } : {}),
       ...(txt(formData, "challan_date") ? { challan_date: txt(formData, "challan_date") } : {}),
-      ...readGst(formData),
       notes: txt(formData, "notes") || null,
     })
     .eq("id", id);
@@ -157,8 +162,9 @@ export async function updateOtherChallanAction(formData: FormData) {
   redirect(`/invoicing/other?toast=${encodeURIComponent("Challan updated")}`);
 }
 
-/** Convert a challan to an invoice — assign INV-<fy>-<n> on the shared counter.
- *  A manual XX bumps the counter so the next auto number continues after it. */
+/** STEP 2 — convert a challan to an INVOICE (rate per line + GST). Prices the
+ *  items, sets GST, and assigns INV-<fy>-<n> from the shared counter (locked).
+ *  Re-editing a converted bill (edit_mode) keeps the same INV number. */
 export async function convertOtherChallanAction(formData: FormData) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
@@ -170,7 +176,22 @@ export async function convertOtherChallanAction(formData: FormData) {
   const row = c as { converted_at: string | null; cancelled_at: string | null; challan_date: string | null } | null;
   if (!row) redirect("/invoicing/other?toast=Challan+not+found");
   if (row.cancelled_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Challan is cancelled")}`);
-  if (row.converted_at) redirect(`/invoicing/other?toast=${encodeURIComponent("Already converted")}`);
+  const editMode = txt(formData, "edit_mode") === "1" && !!row.converted_at;
+  if (row.converted_at && !editMode) redirect(`/invoicing/other?toast=${encodeURIComponent("Already an invoice")}`);
+
+  const items = parseItems(formData);
+  if (items.length === 0) redirect(`/invoicing/other/${id}/invoice?toast=Add+at+least+one+line+item`);
+
+  // Re-price the existing items + set GST on the parent.
+  await admin.from("other_challan_items").delete().eq("other_challan_id", id);
+  await writeItems(admin, id, items);
+  await admin.from("other_challans").update({ ...readGst(formData) }).eq("id", id);
+
+  if (editMode) {
+    await logAudit(profile.id, "other_invoice_edited", "other_challan", id, {});
+    refresh(id);
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
+  }
 
   const fy = financialYear(row.challan_date || new Date());
   // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.
