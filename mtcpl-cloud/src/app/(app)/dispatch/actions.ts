@@ -28,6 +28,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { createInvoicingChallanFromDispatch } from "@/lib/dispatch-invoicing-bridge";
+import { freeChallanNumber } from "@/lib/invoice-numbers";
 import { financialYear } from "@/lib/doc-code";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -906,7 +907,7 @@ export async function cancelDispatchAction(formData: FormData) {
 
   const { data: dispatch } = await admin
     .from("dispatches")
-    .select("id, temple, challan_number, approved_at, delivered_at")
+    .select("id, temple, challan_number, doc_fy, doc_seq, approved_at, delivered_at")
     .eq("id", dispatchId)
     .maybeSingle();
   if (!dispatch) fail("/dispatch", "Dispatch not found");
@@ -916,6 +917,11 @@ export async function cancelDispatchAction(formData: FormData) {
   if (dispatch.delivered_at) {
     fail("/dispatch", "Cannot cancel a delivered dispatch");
   }
+
+  // Mig 180 — cancelling FULLY frees the CH number (held through re-verify until
+  // now): head-of-series rolls the counter back so the next challan reuses it,
+  // otherwise it's recorded as a free gap. Only now, not on a return-to-dispatch.
+  await freeChallanNumber(admin, (dispatch as { doc_fy?: string | null }).doc_fy ?? null, (dispatch as { doc_seq?: number | null }).doc_seq ?? null, profile.id);
 
   // Fetch slab ids so we can flip their statuses back.
   const { data: logs } = await admin

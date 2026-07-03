@@ -10,7 +10,6 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -66,33 +65,15 @@ export default async function PrepareWorkOrderChallanPage({ params }: { params: 
   return (
     <>
       <CockpitSidebarToggle defaultCollapsed={true} />
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", paddingBottom: 40 }}>
-        {/* LEFT — the challan that came from dispatch. */}
-        {c.source_dispatch_id ? (
-          <div style={{ flex: "1 1 560px", minWidth: 380, position: "sticky", top: 10, display: "flex", flexDirection: "column", height: "calc(100vh - 20px)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)", marginTop: 44 }}>
-            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>📋 Challan from dispatch — {code}</span>
-              <Link href={`/dispatch/${c.source_dispatch_id}/print`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, fontWeight: 700, color: "var(--gold-dark)", textDecoration: "none", whiteSpace: "nowrap" }}>Open full ↗</Link>
-            </div>
-            <iframe src={`/dispatch/${c.source_dispatch_id}/print?embed=1`} title="Dispatch challan" style={{ flex: 1, width: "100%", border: "none", background: "#f0f0f0" }} />
-          </div>
-        ) : (
-          <div style={{ flex: "1 1 400px", minWidth: 340, marginTop: 44 }} className="banner">This challan has no linked dispatch — nothing to show on the left.</div>
-        )}
-
-        {/* RIGHT — transport form. */}
-        <div style={{ flex: "1 1 460px", minWidth: 340, marginTop: 44 }}>
-          <PrepareForm
-            id={c.id}
-            code={code}
-            temple={c.temple ?? "—"}
-            alreadyReady={!!c.full_challan_at}
-            sourceDispatchId={c.source_dispatch_id}
-            transport={transport}
-            companies={companies}
-          />
-        </div>
-      </div>
+      <PrepareForm
+        id={c.id}
+        code={code}
+        temple={c.temple ?? "—"}
+        alreadyReady={!!c.full_challan_at}
+        sourceDispatchId={c.source_dispatch_id}
+        transport={transport}
+        companies={companies}
+      />
     </>
   );
 }

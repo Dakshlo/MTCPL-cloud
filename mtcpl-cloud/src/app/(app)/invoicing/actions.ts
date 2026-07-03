@@ -93,7 +93,12 @@ export async function saveChallanPricingAction(formData: FormData) {
     .from("challan_items")
     .select("id, quantity, measure_qty")
     .eq("challan_id", challanId);
-  for (const it of (items ?? []) as Array<{ id: string; quantity: number | null; measure_qty: number | null }>) {
+  // Rate is MANDATORY (Daksh Jul 2026) — every line must carry a rate > 0.
+  const rows = (items ?? []) as Array<{ id: string; quantity: number | null; measure_qty: number | null }>;
+  if (rows.length > 0 && rows.some((it) => !((Number(rates[it.id]) || 0) > 0))) {
+    redirect(`/invoicing/challans/${challanId}/review?toast=${encodeURIComponent("Enter a rate for every stone before sending.")}`);
+  }
+  for (const it of rows) {
     const rate = Number(rates[it.id]) || 0;
     const qty = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
     const amount = Math.round(rate * qty * 100) / 100;

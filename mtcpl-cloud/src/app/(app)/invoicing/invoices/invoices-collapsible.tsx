@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { cancelPricedInvoiceAction, cancelRunningInvoiceAction, cancelBulkInvoiceAction } from "../actions";
 import { cancelOtherInvoiceAction } from "../other/actions";
@@ -41,7 +42,9 @@ const CANCEL_META = {
 
 /** Row-level action strip — shared by the temple cards and the Other table. */
 export function InvoiceActions({ r }: { r: InvoiceRow }) {
+  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
+  const [editConfirm, setEditConfirm] = useState(false);
   const [pending, setPending] = useState(false);
   const meta = r.cancelKind ? CANCEL_META[r.cancelKind] : null;
   return (
@@ -52,7 +55,21 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
       <Link href={r.href} target={r.external ? "_blank" : undefined} rel={r.external ? "noopener noreferrer" : undefined} style={{ ...lnk, color: "var(--gold-dark)" }}>
         {r.external ? "🧾 Invoice" : "View →"}
       </Link>
-      {r.editHref && <Link href={r.editHref} style={lnk}>✎ Edit</Link>}
+      {r.editHref && <button type="button" onClick={() => setEditConfirm(true)} style={{ ...lnk, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✎ Edit</button>}
+      {editConfirm && r.editHref && (
+        <span onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20 }}>
+          <FinanceLoadingOverlay show={pending} label="Opening editor…" />
+          <div style={{ width: "min(420px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 24px 60px rgba(0,0,0,0.3)", textAlign: "left" }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>✎</div>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>Edit invoice {r.code}?</div>
+            <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, margin: "0 0 16px" }}>You can change everything <strong>except the invoice number</strong>, which stays <strong>{r.code}</strong>. The invoice remains approved.</p>
+            <span style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" disabled={pending} onClick={() => setEditConfirm(false)} style={{ fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>Cancel</button>
+              <button type="button" disabled={pending} onClick={() => { setPending(true); router.push(r.editHref!); }} style={{ fontSize: 13, fontWeight: 800, padding: "9px 17px", borderRadius: 10, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer", opacity: pending ? 0.7 : 1 }}>✎ Edit invoice</button>
+            </span>
+          </div>
+        </span>
+      )}
       {meta && r.cancelId && (
         <>
           <button type="button" onClick={() => setConfirming(true)} style={{ ...lnk, color: "#b91c1c", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✕ Cancel</button>

@@ -20,7 +20,7 @@ import { challanCode } from "@/lib/doc-code";
 import { PrintBtn } from "./print-btn";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string; draft?: string; embed?: string }>;
+type Search = Promise<{ units?: string; weights?: string; descs?: string; weight_mode?: string; truck_weight?: string; draft?: string; embed?: string; tc?: string; tph?: string; lr?: string; veh?: string; drv?: string; drvph?: string }>;
 
 function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -42,7 +42,7 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
   const { id } = await params;
   // Preview from the Check page passes the current (unsaved) cft/sft toggles +
   // edited weights so the grouped challan matches the screen before verifying.
-  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam, draft: draftParam, embed: embedParam } = await searchParams;
+  const { units: unitsParam, weights: weightsParam, descs: descsParam, weight_mode: weightModeParam, truck_weight: truckWeightParam, draft: draftParam, embed: embedParam, tc: tcParam, tph: tphParam, lr: lrParam, veh: vehParam, drv: drvParam, drvph: drvphParam } = await searchParams;
   const isDraft = draftParam === "1";
   // embed=1 — rendered inside an iframe (Review & price split view): hide the
   // dark screen bar so only the challan sheet shows.
@@ -74,6 +74,20 @@ export default async function DispatchChallanPrintPage({ params, searchParams }:
       const t = trRow as Record<string, string | null>;
       transport = { company: t.transport_company, phone: t.transport_phone, lr: t.lr_no, vehicle: t.transport_vehicle_no, driver: t.transport_driver_name, driverPhone: t.transport_driver_phone };
     }
+  }
+  // Live-preview overrides (Daksh Jul 2026) — the "Prepare work order challan"
+  // page passes the un-saved transport fields as query params so the embedded
+  // challan updates as you type. Any present param overrides the stored value.
+  if (tcParam != null || lrParam != null || vehParam != null || drvParam != null || drvphParam != null || tphParam != null) {
+    const base = transport ?? { company: null, phone: null, lr: null, vehicle: null, driver: null, driverPhone: null };
+    transport = {
+      company: tcParam != null ? tcParam : base.company,
+      phone: tphParam != null ? tphParam : base.phone,
+      lr: lrParam != null ? lrParam : base.lr,
+      vehicle: vehParam != null ? vehParam : base.vehicle,
+      driver: drvParam != null ? drvParam : base.driver,
+      driverPhone: drvphParam != null ? drvphParam : base.driverPhone,
+    };
   }
 
   // Mig 163 — weight mode + whole-truck weight. Best-effort (separate select) so

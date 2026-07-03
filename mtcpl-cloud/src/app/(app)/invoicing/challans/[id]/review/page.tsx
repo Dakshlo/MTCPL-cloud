@@ -191,6 +191,17 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
         vehicle: t.transport_vehicle_no ?? "", driverName: t.transport_driver_name ?? "", driverPhone: t.transport_driver_phone ?? "",
       };
     }
+    // Vehicle/driver default to the source dispatch (they're captured at verify);
+    // the reviewer can override here if there's a mistake (Daksh Jul 2026).
+    if (c.source_dispatch_id && (!initTransport.vehicle || !initTransport.driverName)) {
+      const { data: d } = await admin.from("dispatches").select("vehicle_no, driver_name, driver_phone").eq("id", c.source_dispatch_id).maybeSingle();
+      const dd = d as { vehicle_no: string | null; driver_name: string | null; driver_phone: string | null } | null;
+      if (dd) {
+        if (!initTransport.vehicle) initTransport.vehicle = dd.vehicle_no ?? "";
+        if (!initTransport.driverName) initTransport.driverName = dd.driver_name ?? "";
+        if (!initTransport.driverPhone) initTransport.driverPhone = dd.driver_phone ?? "";
+      }
+    }
   }
 
   // Invoice number (INV series, mig 172) — shown as a fixed "INV-26/27-" prefix
@@ -258,6 +269,8 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             freedNumbers={freedNumbers}
             editMode={editMode}
             bill={{ name: billing?.name ?? c.temple ?? "—", address: billing?.address ?? null, gstin: billing?.gstin ?? null }}
+            ship={billing && "shipping" in billing && billing.shipping ? { name: billing.shipping.name ?? "", address: billing.shipping.address ?? null } : null}
+            challanCode={chCode}
             transportCompanies={transportCompanies}
             initTransport={initTransport}
           />
