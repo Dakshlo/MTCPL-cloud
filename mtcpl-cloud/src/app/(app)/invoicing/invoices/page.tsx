@@ -6,7 +6,8 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
-import { CollapsibleInvoiceTemple, InvoiceActions, type InvoiceRow } from "./invoices-collapsible";
+import { InvoicesView, type InvoiceRow } from "./invoices-collapsible";
+import { getProfilesMap } from "@/lib/profiles";
 
 // Page through a query (the invoices register can exceed the 1000-row cap over a
 // financial year — never silently truncate).
@@ -28,6 +29,7 @@ async function pageAll<T>(
 type PricedChallan = {
   id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string;
   source_dispatch_id: string | null;
+  priced_by: string | null;
   invoice_no_override: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
@@ -54,7 +56,7 @@ export default async function InvoicingListPage() {
     pageAll<PricedChallan>((from, to) =>
       supabase
         .from("challans")
-        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, source_dispatch_id, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+        .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, priced_by, source_dispatch_id, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
         .not("priced_at", "is", null)
         // Mig 167 — only OWNER-APPROVED priced challans are final invoices.
         // A priced-but-pending (or rejected) challan stays in the Approval
@@ -104,11 +106,11 @@ export default async function InvoicingListPage() {
   }
 
   // Mig 173 — approved BULK invoices (best-effort).
-  type BulkRow = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+  type BulkRow = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; created_by: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
   let bulkApproved: BulkRow[] = [];
   {
     const { data, error } = await supabase.from("bulk_invoices")
-      .select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, created_by, gst_mode, igst_percent, cgst_percent, sgst_percent")
       .not("owner_approved_at", "is", null).is("cancelled_at", null)
       .order("invoice_date", { ascending: false });
     if (!error) bulkApproved = (data ?? []) as BulkRow[];
@@ -132,13 +134,17 @@ export default async function InvoicingListPage() {
     }
   }
 
+  // Who generated each invoice — resolve creator ids to names for the Recent card.
+  const profNames = await getProfilesMap();
+  const nameOf = (id: string | null | undefined) => (id ? profNames[id] ?? null : null);
+
   // Mig 177 — invoiced custom (dropped) bills: temple challans re-billed as a
   // whole piece then invoiced. Best-effort so a pre-migration deploy skips them.
   type Row = InvoiceRow & { customer: string };
   const customRows: Row[] = [];
   {
     const { data, error } = await supabase.from("challans")
-      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
+      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
       .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
       .order("challan_date", { ascending: false });
     if (!error) {
@@ -153,6 +159,7 @@ export default async function InvoicingListPage() {
           href: `/invoicing/challan/${r.id}/custom/print`, external: true,
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
           editHref: `/invoicing/dropped?edit=${r.id}`, cancelKind: "running", cancelId: r.id,
+          sourceType: "running", createdBy: nameOf(r.custom_billed_by),
         });
       }
     }
@@ -163,6 +170,7 @@ export default async function InvoicingListPage() {
     ...legacy.map((r) => ({
       key: `inv:${r.id}`, code: r.invoice_number, date: r.invoice_date, customer: r.customer_name,
       total: Number(r.total) || 0, href: `/invoicing/invoices/${r.id}`, external: false,
+      sourceType: "legacy" as const,
     })),
     ...priced.map((c) => ({
       key: `ch:${c.id}`, code: (c.invoice_no_override?.trim() || invoiceCodeFromDoc(invByChallan.get(c.id)?.fy ?? null, invByChallan.get(c.id)?.seq ?? null) || invoiceCodeFromDoc(c.doc_fy, c.doc_seq) || invoiceCode(c.challan_number, c.challan_date)), date: c.challan_date,
@@ -170,12 +178,14 @@ export default async function InvoicingListPage() {
       href: `/invoicing/challan/${c.id}/print`, external: true,
       challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
       editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
+      sourceType: "purchase" as const, createdBy: nameOf(c.priced_by),
     })),
     ...bulkApproved.map((b) => ({
       key: `bulk:${b.id}`, code: (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`), date: b.invoice_date,
       customer: b.temple ?? "—", total: bulkTotal.get(b.id) ?? 0,
       href: `/invoicing/bulk/${b.id}/print`, external: true,
       challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
+      sourceType: "work_order" as const, createdBy: nameOf(b.created_by),
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
@@ -190,7 +200,7 @@ export default async function InvoicingListPage() {
   let otherRows: OtherRow[] = [];
   {
     const { data, error } = await supabase.from("other_challans")
-      .select("id, challan_date, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
+      .select("id, challan_date, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
       .not("converted_at", "is", null).is("cancelled_at", null)
       .order("converted_at", { ascending: false });
     if (!error) {
@@ -204,85 +214,22 @@ export default async function InvoicingListPage() {
           key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,
           date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
           editHref: `/invoicing/other?edit=${o.id}`, cancelKind: "other" as const, cancelId: o.id,
+          sourceType: "other" as const, createdBy: nameOf(o.converted_by),
         };
       });
     }
   }
 
+  // Recent view = every invoice (temple + other) newest first.
+  const recent = [...rows, ...otherRows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
   return (
     <section className="page-card">
       <div className="page-header">
         <h1>Invoicing</h1>
-        <p className="muted">Every issued tax invoice — temple sales grouped by temple, plus other (non-temple) sales.</p>
+        <p className="muted">Every issued tax invoice — newest first, or grouped by temple. <span style={{ fontWeight: 700 }}>{recent.length}</span> total.</p>
       </div>
-
-      {/* Temple invoices — collapsible temple cards, collapsed by default. */}
-      <div style={{ marginTop: 16 }}>
-        <div style={sectionHead}>🏛 Temple invoices <span style={countPill}>{rows.length}</span></div>
-        {templeList.length === 0 ? (
-          <Empty text="No temple invoices yet. Price a challan to issue one." />
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {templeList.map(([temple, list]) => (
-              <CollapsibleInvoiceTemple key={temple} temple={temple} rows={list} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Other (non-temple) invoices. */}
-      <div style={{ marginTop: 22 }}>
-        <div style={sectionHead}>🏷 Other invoices <span style={countPill}>{otherRows.length}</span></div>
-        {otherRows.length === 0 ? (
-          <Empty text="No other invoices yet. Create one in Other Sales." />
-        ) : (
-          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "var(--bg)" }}>
-                  <th style={th}>Invoice #</th>
-                  <th style={th}>Date</th>
-                  <th style={th}>Client</th>
-                  <th style={{ ...th, textAlign: "right" }}>Total (₹)</th>
-                  <th style={{ ...th, width: 100 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {otherRows.map((r) => (
-                  <tr key={r.key} style={{ borderTop: "1px solid var(--border-light)" }}>
-                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{r.code}</td>
-                    <td style={td}>{new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</td>
-                    <td style={td}>{r.customer}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{r.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td style={{ ...td, textAlign: "right" }}><InvoiceActions r={r} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <InvoicesView recent={recent} templeList={templeList} otherRows={otherRows} />
     </section>
   );
 }
-
-const sectionHead: React.CSSProperties = { fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 };
-const countPill: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" };
-function Empty({ text }: { text: string }) {
-  return <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13.5 }}>{text}</div>;
-}
-
-const th: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 12px",
-  fontSize: 11,
-  fontWeight: 700,
-  color: "var(--muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const td: React.CSSProperties = {
-  padding: "10px 12px",
-  verticalAlign: "middle",
-};

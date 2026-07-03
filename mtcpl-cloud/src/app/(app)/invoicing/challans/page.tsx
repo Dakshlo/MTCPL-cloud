@@ -95,7 +95,13 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
       }
     }
   }
-  const visible = challans.filter((c) => !bulkIds.has(c.id) && !droppedIds.has(c.id));
+  // Mig 181 — archived (test/cleanup) challans leave the board too. Best-effort.
+  const archivedIds = new Set<string>();
+  {
+    const { data, error } = await supabase.from("challans").select("id").not("archived_at", "is", null);
+    if (!error) for (const r of (data ?? []) as Array<{ id: string }>) archivedIds.add(r.id);
+  }
+  const visible = challans.filter((c) => !bulkIds.has(c.id) && !droppedIds.has(c.id) && !archivedIds.has(c.id));
 
   // Slab codes / labels per challan → folded into the search blob so the search
   // bar matches by slab code too (challan_items.codes is comma-separated text).

@@ -27,6 +27,20 @@ export type InvoiceRow = {
   cancelKind?: "priced" | "running" | "bulk" | "other" | null;
   /** Id posted to the cancel action. */
   cancelId?: string;
+  /** Temple / client this invoice bills — shown on the Recent card. */
+  customer?: string;
+  /** How the bill was made — drives the coloured source badge. */
+  sourceType?: "purchase" | "work_order" | "running" | "other" | "legacy";
+  /** Who generated the invoice (resolved name). */
+  createdBy?: string | null;
+};
+
+const SOURCE_META: Record<NonNullable<InvoiceRow["sourceType"]>, { label: string; color: string; bg: string }> = {
+  purchase: { label: "Purchase bill", color: "#0f766e", bg: "rgba(15,118,110,0.12)" },
+  work_order: { label: "Work order", color: "#6d28d9", bg: "rgba(124,58,237,0.12)" },
+  running: { label: "Running bill", color: "#b45309", bg: "rgba(180,83,9,0.14)" },
+  other: { label: "Other sale", color: "#0369a1", bg: "rgba(3,105,161,0.12)" },
+  legacy: { label: "Invoice", color: "#64748b", bg: "rgba(100,116,139,0.12)" },
 };
 
 function money(n: number) {
@@ -140,3 +154,78 @@ export function CollapsibleInvoiceTemple({ temple, rows }: { temple: string; row
 }
 
 const lnk: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text)", textDecoration: "none" };
+
+/** One invoice card in the Recent view — code, temple, source badge, who made
+ *  it, total + actions. */
+function InvoiceCard({ r }: { r: InvoiceRow }) {
+  const src = SOURCE_META[r.sourceType ?? "legacy"];
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", padding: "12px 14px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div style={{ minWidth: 150, flex: "0 0 auto" }}>
+        <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14.5 }}>{r.code}</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+      </div>
+      <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>{r.customer || "—"}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, color: src.color, background: src.bg, borderRadius: 999, padding: "2px 9px" }}>{src.label}</span>
+          {r.createdBy && <span style={{ fontSize: 11, color: "var(--muted)" }}>by {r.createdBy}</span>}
+        </div>
+      </div>
+      <div style={{ flex: "0 0 auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, minWidth: 110, textAlign: "right" }}>₹ {money(r.total)}</div>
+      <div style={{ flex: "0 0 auto" }}><InvoiceActions r={r} /></div>
+    </div>
+  );
+}
+
+/** Invoices page body — a Recent/Temple-wise toggle (default Recent). Recent is
+ *  one flat list newest-first; Temple-wise keeps the collapsible temple cards +
+ *  the Other-sales table. Daksh, Jul 2026. */
+export function InvoicesView({ recent, templeList, otherRows }: {
+  recent: InvoiceRow[];
+  templeList: Array<[string, InvoiceRow[]]>;
+  otherRows: InvoiceRow[];
+}) {
+  const [view, setView] = useState<"recent" | "temple">("recent");
+  const seg = (active: boolean): React.CSSProperties => ({
+    fontSize: 13, fontWeight: 800, padding: "8px 16px", borderRadius: 9, cursor: "pointer", border: "none",
+    background: active ? "var(--gold)" : "transparent", color: active ? "#fff" : "var(--muted)",
+  });
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)", marginBottom: 16 }}>
+        <button type="button" onClick={() => setView("recent")} style={seg(view === "recent")}>🕑 Recent</button>
+        <button type="button" onClick={() => setView("temple")} style={seg(view === "temple")}>🏛 Temple-wise</button>
+      </div>
+
+      {view === "recent" ? (
+        recent.length === 0 ? (
+          <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "30px 22px", textAlign: "center", color: "var(--muted)" }}>No invoices yet.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+            {recent.map((r) => <InvoiceCard key={r.key} r={r} />)}
+          </div>
+        )
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 10 }}>🏛 Temple invoices</div>
+          {templeList.length === 0 ? (
+            <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "22px", textAlign: "center", color: "var(--muted)" }}>No temple invoices yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {templeList.map(([temple, rows]) => <CollapsibleInvoiceTemple key={temple} temple={temple} rows={rows} />)}
+            </div>
+          )}
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", margin: "22px 0 10px" }}>🏷 Other invoices</div>
+          {otherRows.length === 0 ? (
+            <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "22px", textAlign: "center", color: "var(--muted)" }}>No other invoices yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {otherRows.map((r) => <InvoiceCard key={r.key} r={r} />)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

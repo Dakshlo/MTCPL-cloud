@@ -373,6 +373,33 @@ export async function undropChallanAction(formData: FormData) {
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Back on the board")}`);
 }
 
+/** Archive a challan (test/cleanup, mig 181) — retire it WITHOUT invoicing it or
+ *  returning its slabs. The challan leaves the Invoicing board and its dispatch
+ *  leaves every dispatch lane; the slabs stay dispatched (they've already left
+ *  the plant), no INV number is consumed. Owner / developer / account-star. */
+export async function archiveChallanAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/challans");
+  const { data: c } = await admin.from("challans")
+    .select("source_dispatch_id, priced_at, converted_invoice_id, dropped_at").eq("id", id).maybeSingle();
+  const ch = c as { source_dispatch_id: string | null; priced_at: string | null; converted_invoice_id: string | null; dropped_at: string | null } | null;
+  if (!ch) redirect("/invoicing/challans?toast=Challan+not+found");
+  if (ch!.converted_invoice_id || ch!.priced_at) {
+    redirect(`/invoicing/challans?toast=${encodeURIComponent("It's in an invoice — cancel the invoice first, then archive")}`);
+  }
+  const now = new Date().toISOString();
+  await admin.from("challans").update({ archived_at: now, archived_by: profile.id, sent_to_bulk_at: null, dropped_at: null }).eq("id", id);
+  if (ch!.source_dispatch_id) {
+    await admin.from("dispatches").update({ archived_at: now, archived_by: profile.id }).eq("id", ch!.source_dispatch_id);
+  }
+  void logAudit(profile.id, "challan_archived", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/dispatch");
+  redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan archived — removed without an invoice; slabs untouched")}`);
+}
+
 /** Create the custom whole-piece bill for a dropped challan — free line items,
  *  SAME CH number — and release the production dispatch straight to Delivered. */
 export async function createCustomBillAction(formData: FormData) {

@@ -167,6 +167,19 @@ export default async function DispatchPage({
 
   const profilesMap = await getProfilesMap();
 
+  // Test/cleanup (mig 181) — archived dispatches are hidden from EVERY lane so a
+  // retired test challan's truck doesn't linger on the board. Best-effort: a
+  // pre-migration deploy just shows them (the column select never 500s the page).
+  const archivedDispIds = new Set<string>();
+  {
+    const { data, error } = await admin.from("dispatches").select("id").not("archived_at", "is", null);
+    if (!error) for (const r of (data ?? []) as Array<{ id: string }>) archivedDispIds.add(r.id);
+  }
+  const notArchived = <T extends { id: string }>(arr: T[] | null) => (arr ?? []).filter((d) => !archivedDispIds.has(d.id));
+  const provisionalRows = notArchived(provisionalDispatches);
+  const openRows = notArchived(openDispatches);
+  const closedRows = notArchived(closedDispatches);
+
   // Build stone category map for marble/sandstone separation
   const stoneCategoryMap: Record<string, StoneCategory> = {};
   for (const s of stoneTypeRows ?? []) {
@@ -361,7 +374,7 @@ export default async function DispatchPage({
 
   const readySlabs: ReadySlab[] = readyRows.map(shapeReadySlab);
 
-  const provisional: ProvisionalRow[] = (provisionalDispatches ?? []).map((d) => {
+  const provisional: ProvisionalRow[] = provisionalRows.map((d) => {
     const { count, cft } = cftForDispatch(d.id);
     return {
       id: d.id,
@@ -387,7 +400,7 @@ export default async function DispatchPage({
   // Mig 167 — split the approved-not-delivered set: Invoice in process
   // (on_road_at IS NULL — verified, invoicing pricing + owner approval) vs
   // On the road (on_road_at IS NOT NULL — owner approved, truck released).
-  const approvedDispatches = openDispatches ?? [];
+  const approvedDispatches = openRows;
   const invoiceInProcessDispatches = approvedDispatches.filter(
     (d) => (d as { on_road_at?: string | null }).on_road_at == null,
   );
@@ -509,7 +522,7 @@ export default async function DispatchPage({
   const proofUrl = (p: string | null | undefined) =>
     p ? admin.storage.from("dispatch_delivery_proofs").getPublicUrl(p).data.publicUrl : null;
 
-  const delivered: DeliveredRow[] = (closedDispatches ?? []).map((d) => {
+  const delivered: DeliveredRow[] = closedRows.map((d) => {
     const { count, cft } = cftForDispatch(d.id);
     return {
       id: d.id,
@@ -540,9 +553,9 @@ export default async function DispatchPage({
   // 🚚 Truck history peek (Provisional tab) and the recent-truck
   // quick-fill chips on the new-dispatch form.
   const truckHistory: TruckTrip[] = [
-    ...(provisionalDispatches ?? []).map((d) => ({ d, status: "provisional" as const, when: d.dispatched_at })),
-    ...(openDispatches ?? []).map((d) => ({ d, status: "on_road" as const, when: d.dispatched_at })),
-    ...(closedDispatches ?? []).map((d) => ({ d, status: "delivered" as const, when: d.dispatched_at })),
+    ...provisionalRows.map((d) => ({ d, status: "provisional" as const, when: d.dispatched_at })),
+    ...openRows.map((d) => ({ d, status: "on_road" as const, when: d.dispatched_at })),
+    ...closedRows.map((d) => ({ d, status: "delivered" as const, when: d.dispatched_at })),
   ]
     .filter((x) => x.d.vehicle_no)
     .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
@@ -569,7 +582,7 @@ export default async function DispatchPage({
     }));
 
   // Per-provisional slab details for the EditSlabsModal.
-  const provisionalSlabIds = (provisionalDispatches ?? [])
+  const provisionalSlabIds = provisionalRows
     .flatMap((d) => logsByDispatch.get(d.id) ?? []);
   const provisionalSlabDetails = new Map<string, ReadySlab>();
   if (provisionalSlabIds.length > 0) {
@@ -583,7 +596,7 @@ export default async function DispatchPage({
   }
 
   const provisionalSlabsByDispatch: Record<string, ReadySlab[]> = {};
-  for (const d of provisionalDispatches ?? []) {
+  for (const d of provisionalRows) {
     const ids = logsByDispatch.get(d.id) ?? [];
     provisionalSlabsByDispatch[d.id] = ids
       .map((id) => provisionalSlabDetails.get(id))

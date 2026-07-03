@@ -201,7 +201,7 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
           <>
             {sections.map((sec, gi) => (
               <div key={sec.index}>
-                {multiSection && <div className="sec-head">🪨 {dash(sec.head) === "-" ? `Table ${gi + 1}` : sec.head}</div>}
+                {multiSection && <div className="sec-head">{dash(sec.head) === "-" ? `Table ${gi + 1}` : sec.head}</div>}
                 <table className="t">
                   <thead>
                     <tr>

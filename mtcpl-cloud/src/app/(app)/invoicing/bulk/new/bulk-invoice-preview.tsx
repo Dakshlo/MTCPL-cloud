@@ -163,7 +163,7 @@ export function BulkInvoicePreview({
           <>
             {groups.map((g, gi) => (
               <div key={g.index}>
-                {multiSection && <div className="bip-sec">🪨 {dash(g.head) === "-" ? `Table ${gi + 1}` : g.head}</div>}
+                {multiSection && <div className="bip-sec">{dash(g.head) === "-" ? `Table ${gi + 1}` : g.head}</div>}
                 <table className="bip-t">
                   <thead>
                     <tr>

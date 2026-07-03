@@ -18,6 +18,7 @@ import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { challanStatus, type ChallanStatus } from "@/lib/challan-status";
 import { ChallanStatusPill } from "./challan-status-pill";
 import { ReturnToDispatchButton } from "./return-to-dispatch-button";
+import { ArchiveChallanButton } from "./archive-challan-button";
 import { sendChallanToBulkAction, returnDispatchToWaitingAction, dropChallanAction } from "../actions";
 import type { GstMode } from "@/lib/challan-pricing";
 
@@ -388,9 +389,12 @@ function Card({ c, dragging, onDragStart, onDragEnd, onConvert }: { c: BoardChal
                 👁 View challan
               </Link>
             </div>
-            <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
-            </span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ fontSize: 10.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ fontSize: 13, cursor: "grab" }}>⠿</span> drag this card onto 📦 Bulk
+              </span>
+              <ArchiveChallanButton id={c.id} code={c.code} />
+            </div>
           </div>
         ) : st === "rejected" ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
