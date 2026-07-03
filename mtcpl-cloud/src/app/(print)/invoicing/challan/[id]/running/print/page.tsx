@@ -1,7 +1,8 @@
 /**
- * Running challan print (Daksh, mig 182). A4 portrait — the running CHALLAN (no
- * rate/amount), item tables grouped by head, transport strip, Bill/Ship To. It's
- * the goods document before the running bill is invoiced (rate added later).
+ * Running challan print (mig 182). Identical to the normal DELIVERY CHALLAN — same
+ * letterhead, beige address/transport boxes, slab-table styling, signature row —
+ * only the item rows are the running-challan line items (particulars / HSN / unit
+ * / qty), with the per-slab L·W·H·weight columns removed. No rate/amount.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28,7 +29,7 @@ function Party({ label, name, p, fallback }: { label: string; name: string | nul
         <>
           {p.address && <div className="party-line">{p.address}</div>}
           {loc && <div className="party-line">{loc}</div>}
-          {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)} · PAN: {dash(p.pan)}</div>}
+          {(p.gstin || p.pan) && <div className="party-meta">GSTIN: {dash(p.gstin)}{p.pan ? ` · PAN: ${p.pan}` : ""}</div>}
         </>
       ) : (
         <div className="party-line muted">{fallback ?? "-"}</div>
@@ -55,6 +56,7 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
   const sections = groupBulkItems((itemRows ?? []) as any[]);
   const multi = sections.length > 1 || sections.some((s) => (s.head ?? "").trim());
   const totalQty = ((itemRows ?? []) as any[]).reduce((a, it) => a + (Number(it.quantity) || 0), 0);
+  const totalItems = ((itemRows ?? []) as any[]).length;
 
   const billing = await fetchTempleBilling(admin, c.temple);
   const billParty: PartyShape | null = billing
@@ -64,6 +66,7 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
   const billName = billParty?.name ?? c.temple ?? "—";
   const shipName = (shipParty?.name ?? "").trim() || billName;
   const docNum = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
+  const contact = (name: string | null, phone: string | null) => [name, phone].filter(Boolean).join(" · ") || "-";
 
   return (
     <>
@@ -71,42 +74,53 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; background: #f0f0f0; }
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; position: relative; }
+        .print-wrap { max-width: 1180px; margin: 0 auto; background: #fff; padding: 14px 18px 18px; position: relative; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .doc-title { text-align: center; margin: 0 0 7px; }
-        .doc-title span { display: inline-block; font-size: 17px; font-weight: 800; letter-spacing: 0.16em; color: #fff; background: #5b21b6; border-radius: 6px; padding: 4px 24px; }
-        .head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; border-bottom: 2.5px double #5b21b6; padding-bottom: 6px; }
-        .head > div:last-child { justify-self: end; }
-        .brand-logo { height: 68px; width: auto; }
+        .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; text-transform: uppercase; }
+        .head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 8px; }
+        .brand-logo { height: 68px; width: auto; display: block; }
         .company-block { text-align: center; min-width: 0; }
-        .cn { font-size: 16px; font-weight: 800; color: #0f2540; white-space: nowrap; }
-        .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
-        .num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; }
-        .meta-date { font-size: 12.5px; font-weight: 800; color: #0f2540; text-align: right; margin-top: 3px; }
-        .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0 4px; }
-        .party { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; background: #f7fafc; }
-        .party-k { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #888; margin-bottom: 2px; }
-        .party-name { font-size: 14.5px; font-weight: 800; color: #1a1a1a; }
-        .party-line { font-size: 11.5px; color: #333; margin-top: 1.5px; }
-        .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
+        .head > div:last-child { justify-self: end; }
+        .company-name { font-size: 16.5px; font-weight: 800; color: #0f2540; letter-spacing: 0.02em; }
+        .company-line { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
+        .doc-num { font-size: 17px; font-weight: 800; font-family: ui-monospace, monospace; text-align: right; margin-top: 2px; white-space: nowrap; color: #1a1a1a; }
+        .doc-date { text-align: right; margin-top: 3px; font-size: 13.5px; font-weight: 800; color: #1a1a1a; white-space: nowrap; }
+        .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0 4px; align-items: start; }
+        .party { border: 1px solid #d8d2c4; border-radius: 6px; padding: 7px 10px; background: #faf7f0; }
+        .party-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #8a6a45; margin-bottom: 2px; }
+        .party-name { font-size: 12.5px; font-weight: 800; color: #1a1a1a; }
+        .party-line { font-size: 10px; color: #333; margin-top: 1px; line-height: 1.35; }
+        .party-meta { font-size: 9px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
-        .sec-head { margin-top: 10px; background: #5b21b6; color: #fff; font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 5px 5px 0 0; }
-        table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
-        .sec-head + table.t { margin-top: 0; }
-        table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; border: 1px solid #d3dae3; }
-        table.t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
-        .t .r { text-align: right; white-space: nowrap; font-family: ui-monospace, monospace; }
-        .totline { margin-top: 8px; font-size: 11px; font-weight: 800; color: #0f2540; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px; padding: 6px 12px; }
-        .signoff { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 26px; }
+        .transport { border: 1px solid #d8d2c4; border-radius: 6px; background: #faf7f0; padding: 6px 10px; margin: 4px 0; }
+        .transport-k { font-size: 8px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #8a6a45; margin-bottom: 3px; }
+        .transport-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.4fr; gap: 12px; }
+        .transport-grid > div { display: flex; flex-direction: column; min-width: 0; }
+        .transport-grid .tk { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #8a6a45; }
+        .transport-grid .tv { font-size: 11px; font-weight: 700; color: #1a1a1a; }
+        .transport-grid .tv.mono { font-family: ui-monospace, monospace; }
+        .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
+        table.slab-table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
+        table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
+        table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; font-weight: 700; color: #1a1a1a; }
+        table.slab-table tfoot td { font-weight: 800; background: #faf7f0; border: 1px solid #d8d2c4; }
+        .slab-table .r { text-align: right; white-space: nowrap; }
+        .slab-table .mono { font-family: ui-monospace, monospace; }
+        .slab-table th.cqty { background: #f6e5c4; }
+        .slab-table td.cqty { background: #fdf6ea; }
+        .totals { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; font-weight: 800; margin-top: 8px; padding: 6px 10px; border: 1px solid #d8d2c4; border-radius: 6px; background: #faf7f0; }
+        .signoff { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 22px; }
         .sign { border-top: 1.5px solid #888; padding-top: 5px; font-size: 9px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         .sign .sub { font-size: 10px; color: #444; margin-top: 2px; text-transform: none; letter-spacing: 0; font-weight: 600; }
         @media print {
           body { background: #fff; }
           .screen-bar { display: none !important; }
-          .wrap { max-width: none; padding: 0 2mm; margin: 0; }
-          table.t thead { display: table-header-group; }
-          table.t tr { page-break-inside: avoid; }
+          .print-wrap { max-width: none; padding: 0 2mm; margin: 0; }
+          table.slab-table thead { display: table-header-group; }
+          table.slab-table tr { page-break-inside: avoid; }
+          .signoff { page-break-inside: avoid; }
           @page { size: A4 portrait; margin: 9mm; }
         }
         @media screen { body { padding: 0; } }
@@ -117,30 +131,36 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
         <PrintBtn />
       </div>
 
-      <div className="wrap">
-        <div className="doc-title"><span>RUNNING CHALLAN</span></div>
+      <div className="print-wrap">
+        <div className="doc-title"><span>Running Challan</span></div>
         <div className="head">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
           <div className="company-block">
-            <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-            <div className="cl">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
-            <div className="cl">GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965 · temple@mtcpl.co</div>
+            <div className="company-name">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+            <div className="company-line">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="company-line">GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965 · temple@mtcpl.co</div>
           </div>
           <div>
-            <div className="num">{docNum}</div>
-            <div className="meta-date">{new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
+            <div className="doc-num">{docNum}</div>
+            <div className="doc-date">{new Date(`${c.challan_date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
           </div>
         </div>
 
         <div className="parties">
-          <Party label="Bill To" name={billName} p={billParty} />
-          <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
+          <Party label="Billing To" name={billName} p={billParty} />
+          <Party label="Shipping To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
 
         {(c.transport_company || c.transport_vehicle_no || c.transport_driver_name || c.lr_no) && (
-          <div style={{ fontSize: 10.5, color: "#5b21b6", margin: "8px 0 4px", fontWeight: 700, background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 6, padding: "6px 10px" }}>
-            🚚 Transport: {[c.transport_company, c.lr_no ? `LR ${c.lr_no}` : "", c.transport_vehicle_no, c.transport_driver_name, c.transport_driver_phone].filter(Boolean).join("  ·  ")}
+          <div className="transport">
+            <div className="transport-k">🚚 Transportation</div>
+            <div className="transport-grid">
+              <div><span className="tk">Company</span><span className="tv">{dash(c.transport_company)}{c.transport_phone ? ` · ${c.transport_phone}` : ""}</span></div>
+              <div><span className="tk">LR no.</span><span className="tv mono">{dash(c.lr_no)}</span></div>
+              <div><span className="tk">Vehicle no.</span><span className="tv mono">{dash(c.transport_vehicle_no)}</span></div>
+              <div><span className="tk">Driver</span><span className="tv">{contact(c.transport_driver_name ? String(c.transport_driver_name).toUpperCase() : null, c.transport_driver_phone)}</span></div>
+            </div>
           </div>
         )}
 
@@ -150,31 +170,35 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
           <>
             {sections.map((sec, gi) => (
               <div key={sec.index}>
-                {multi && <div className="sec-head">{dash(sec.head) === "-" ? `Table ${gi + 1}` : sec.head}</div>}
-                <table className="t">
-                  <thead><tr><th style={{ width: 22 }}>#</th><th>Item / Particulars</th><th style={{ width: 90 }}>HSN</th><th style={{ width: 70 }}>Unit</th><th className="r" style={{ width: 70 }}>Qty</th></tr></thead>
+                {multi && <div className="stone-title">{dash(sec.head) === "-" ? `Table ${gi + 1}` : sec.head}</div>}
+                <table className="slab-table">
+                  <thead><tr><th style={{ width: 26 }}>#</th><th>Item / Particulars</th><th style={{ width: 90 }}>HSN</th><th style={{ width: 70 }}>Unit</th><th className="r cqty" style={{ width: 70 }}>Qty</th></tr></thead>
                   <tbody>
                     {sec.rows.map((it, i) => (
                       <tr key={(it as any).id ?? `${gi}-${i}`}>
                         <td>{i + 1}</td>
                         <td>{dash(it.particulars)}</td>
-                        <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
+                        <td className="mono">{dash(it.hsn)}</td>
                         <td>{dash(it.unit)}</td>
-                        <td className="r">{it.quantity != null ? Number(it.quantity) : "-"}</td>
+                        <td className="r mono cqty">{it.quantity != null ? Number(it.quantity) : "-"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ))}
-            <div className="totline">Σ Total quantity: {totalQty}</div>
+            <div className="totals">
+              <span>Σ {totalItems} item{totalItems !== 1 ? "s" : ""}</span>
+              <span>TOTAL QTY: {totalQty}</span>
+            </div>
           </>
         )}
 
         <div className="signoff">
           <div className="sign">MTCPL Representative<div className="sub">&nbsp;</div></div>
+          <div className="sign">Account Signature<div className="sub">VIRENDRA PAL</div></div>
           <div className="sign">Driver Signature<div className="sub">{dash(c.transport_driver_name)}</div></div>
-          <div className="sign" style={{ textAlign: "right" }}>Client Signature<div className="sub">{dash(billName)}</div></div>
+          <div className="sign" style={{ textAlign: "right" }}>Client Signature<div className="sub">{billName}</div></div>
         </div>
       </div>
     </>

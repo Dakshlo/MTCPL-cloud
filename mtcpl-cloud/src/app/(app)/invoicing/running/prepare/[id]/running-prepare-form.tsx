@@ -180,7 +180,7 @@ export function RunningPrepareForm({ id, code, temple, editMode, sourceDispatchI
 /** Client-side preview of the full running challan (NOT VALID watermark). */
 function RunningChallanPreview({ code, temple, sections, transport, onClose }: { code: string; temple: string; sections: Section[]; transport: Transport; onClose: () => void }) {
   const pcell: React.CSSProperties = { padding: "4px 7px", border: "1px solid #e2e7ee", fontWeight: 700, color: "#1a1a1a", fontSize: 11 };
-  const ph: React.CSSProperties = { ...pcell, background: "#eef2f7", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", color: "#444" };
+  const ph: React.CSSProperties = { ...pcell, background: "#f3efe7", fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", color: "#444", border: "1px solid #d8d2c4" };
   const filled = sections.map((s) => ({ head: s.head, lines: s.lines.filter((l) => l.particulars.trim() || Number(l.quantity)) })).filter((s) => s.lines.length);
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", display: "grid", placeItems: "start center", padding: 16, overflowY: "auto" }}>
@@ -189,8 +189,8 @@ function RunningChallanPreview({ code, temple, sections, transport, onClose }: {
           {Array.from({ length: 24 }).map((_, i) => <span key={i} style={{ transform: "rotate(-30deg)", whiteSpace: "nowrap", font: "800 15px/1 Arial, sans-serif", color: "#d40000", opacity: 0.16 }}>NOT VALID CHALLAN</span>)}
         </div>
         <div style={{ position: "relative", zIndex: 10 }}>
-          <div style={{ textAlign: "center", marginBottom: 7 }}><span style={{ display: "inline-block", fontSize: 14, fontWeight: 800, letterSpacing: "0.16em", color: "#fff", background: "#5b21b6", borderRadius: 6, padding: "4px 20px" }}>RUNNING CHALLAN</span></div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, borderBottom: "2.5px double #5b21b6", paddingBottom: 6, marginBottom: 8 }}>
+          <div style={{ textAlign: "center", marginBottom: 7 }}><span style={{ display: "inline-block", fontSize: 14, fontWeight: 800, letterSpacing: "0.16em", color: "#fff", background: "#0f2540", borderRadius: 6, padding: "4px 20px", textTransform: "uppercase" }}>Running Challan</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, borderBottom: "2.5px double #1e3a5f", paddingBottom: 6, marginBottom: 8 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#0f2540" }}>MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
               <div style={{ fontSize: 10, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965 · temple@mtcpl.co</div>
@@ -201,13 +201,13 @@ function RunningChallanPreview({ code, temple, sections, transport, onClose }: {
             </div>
           </div>
           {(transport.company || transport.vehicle || transport.driver || transport.lr) && (
-            <div style={{ fontSize: 10.5, color: "#0f2540", fontWeight: 700, background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
+            <div style={{ fontSize: 10.5, color: "#1a1a1a", fontWeight: 700, background: "#faf7f0", border: "1px solid #d8d2c4", borderRadius: 6, padding: "6px 10px", marginBottom: 8 }}>
               🚚 {[transport.company, transport.lr ? `LR ${transport.lr}` : "", transport.vehicle, transport.driver].filter(Boolean).join("  ·  ")}
             </div>
           )}
           {filled.length === 0 ? <p style={{ color: "#888", fontSize: 11 }}>No line items yet.</p> : filled.map((s, gi) => (
             <div key={gi} style={{ marginBottom: 8 }}>
-              {(filled.length > 1 || s.head.trim()) && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#fff", background: "#5b21b6", borderRadius: "5px 5px 0 0", padding: "4px 9px" }}>{s.head.trim() || `Table ${gi + 1}`}</div>}
+              {(filled.length > 1 || s.head.trim()) && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#5b2e0a", background: "#f3efe7", borderLeft: "3px solid #7c4a1e", borderRadius: 3, padding: "4px 9px" }}>{s.head.trim() || `Table ${gi + 1}`}</div>}
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr><th style={ph}>#</th><th style={{ ...ph, textAlign: "left" }}>Item / Particulars</th><th style={ph}>HSN</th><th style={ph}>Unit</th><th style={{ ...ph, textAlign: "right" }}>Qty</th></tr></thead>
                 <tbody>
