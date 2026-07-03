@@ -551,6 +551,15 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star", "accountant"],
     department: "invoicing",
   },
+  // Daksh Jul 2026 — Approval promoted to a menu entry (was a dashboard button);
+  // shows a count of invoices awaiting owner approval.
+  {
+    href: "/invoicing/approval",
+    label: "Approval",
+    icon: "🟡",
+    roles: ["developer", "owner", "accountant_star", "accountant"],
+    department: "invoicing",
+  },
   // Daksh: the invoicing menu is lean for EVERYONE (incl. owner/developer) —
   // Approval, Client billing & GST, Work Order Doc and Install contract are all
   // dashboard buttons, not menu entries.
@@ -643,10 +652,14 @@ export function Sidebar({
   activeDepartment,
   canAssignCarving = false,
   cancelledSlabAlert = false,
+  approvalCount = 0,
 }: {
   role: AppRole;
   displayName?: string;
   themePreference?: "light" | "dark" | null;
+  /** Daksh (Jul 2026) — number of invoices awaiting owner approval; shows as a
+   *  badge on the Invoicing → Approval nav item. */
+  approvalCount?: number;
   /** Daksh (Jun 2026) — TRUE when ≥1 cancelled slab is awaiting a
    *  replace / no-replace decision. Blinks the Temple View nav item so
    *  the decision can't be missed. */
@@ -1134,6 +1147,8 @@ export function Sidebar({
           const active = isActive(item.href);
           // Daksh — blink Temple View while a cancelled slab needs a decision.
           const alertBlink = item.href === "/temples" && cancelledSlabAlert;
+          // Count of invoices waiting on owner approval.
+          const showApproval = item.href === "/invoicing/approval" && approvalCount > 0;
 
           return (
             <Link
@@ -1143,6 +1158,9 @@ export function Sidebar({
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
+              {showApproval && (
+                <span title={`${approvalCount} invoice${approvalCount === 1 ? "" : "s"} awaiting owner approval`} style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: "#fff", background: "#dc2626", borderRadius: 999, minWidth: 18, height: 18, padding: "0 6px", display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{approvalCount}</span>
+              )}
               {alertBlink && <span className="nav-alert-dot" title="A cancelled slab needs a decision">🚫</span>}
               {active && <span className="nav-active-dot" />}
             </Link>

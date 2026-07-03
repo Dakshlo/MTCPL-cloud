@@ -437,7 +437,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .is("cancelled_at", null)
       .is("converted_invoice_id", null);
     if (iErr) return null;
-    return count ?? 0;
+    // Bulk (work-order) invoices also queue for approval — count them too so the
+    // badge matches the Approval page. Best-effort (pre-mig deploys just skip).
+    let bulk = 0;
+    {
+      const { count: b, error: bErr } = await supabase
+        .from("bulk_invoices")
+        .select("*", { count: "exact", head: true })
+        .is("owner_approved_at", null)
+        .is("owner_rejected_at", null)
+        .is("cancelled_at", null);
+      if (!bErr) bulk = b ?? 0;
+    }
+    return (count ?? 0) + bulk;
   }
 
   const [
@@ -565,6 +577,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         activeDepartment={effectiveDepartment(profile.role, profile.active_department ?? null)}
         canAssignCarving={profile.can_assign_carving === true}
         cancelledSlabAlert={templeCancelAlert}
+        approvalCount={invoiceApprovalBadge ?? 0}
       />
 
       <main className="main-shell">
