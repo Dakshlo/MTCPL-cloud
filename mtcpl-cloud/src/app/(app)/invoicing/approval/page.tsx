@@ -22,8 +22,10 @@ import {
   BUTTON_STYLES,
   EmptyState,
 } from "../../accounts/_ui/components";
-import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAction, ownerRejectBulkAction } from "../actions";
+import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAction, ownerRejectBulkAction, approveInvoiceEditAction, rejectInvoiceEditAction, approveInvoiceCancelAction, rejectInvoiceCancelAction } from "../actions";
 import { OwnerRejectButton } from "../_ui/owner-reject-button";
+import { getProfilesMap } from "@/lib/profiles";
+import type { ChangeSource } from "@/lib/invoice-approvals";
 
 // Page through a query — the approval queue can in theory exceed the 1000-row
 // PostgREST cap; never silently truncate (mirrors invoices/page.tsx).
@@ -167,6 +169,42 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   }
   const bulkCodeOf = (b: BulkPending) => (b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${b.id.slice(0, 6).toUpperCase()}`);
 
+  // Mig 184 — invoice CHANGE REQUESTS (edit / cancel) awaiting approval, across
+  // every source. Best-effort: pre-migration the pending_* columns are absent →
+  // the query errors and the section is simply empty.
+  type ChangeReq = { source: ChangeSource; id: string; code: string; party: string; kind: "edit" | "cancel"; by: string | null };
+  const changeReqs: ChangeReq[] = [];
+  {
+    const profs = await getProfilesMap();
+    const nm = (id: string | null | undefined) => (id ? profs[id] ?? null : null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const push = (source: ChangeSource, r: any, code: string, party: string) => {
+      if (r.pending_edit_at) changeReqs.push({ source, id: r.id, code, party, kind: "edit", by: nm(r.pending_edit_by) });
+      if (r.pending_cancel_at) changeReqs.push({ source, id: r.id, code, party, kind: "cancel", by: nm(r.pending_cancel_by) });
+    };
+    {
+      const { data, error } = await supabase.from("challans")
+        .select("id, temple, inv_fy, inv_seq, invoice_no_override, custom_billed_at, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by")
+        .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!error) for (const r of (data ?? []) as any[]) push(r.custom_billed_at ? "running" : "purchase", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, r.temple ?? "—");
+    }
+    {
+      const { data, error } = await supabase.from("bulk_invoices")
+        .select("id, temple, inv_fy, inv_seq, invoice_no_override, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by")
+        .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!error) for (const r of (data ?? []) as any[]) push("bulk", r, r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, r.temple ?? "—");
+    }
+    {
+      const { data, error } = await supabase.from("other_challans")
+        .select("id, inv_fy, inv_seq, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by, invoice_parties(name)")
+        .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!error) for (const r of (data ?? []) as any[]) { const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties; push("other", r, invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, p?.name ?? "—"); }
+    }
+  }
+
   return (
     <section className="page-card">
       <AccountsHero
@@ -196,7 +234,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
       )}
 
       <div style={{ marginTop: 18 }}>
-        {pending.length === 0 && bulkPending.length === 0 ? (
+        {pending.length === 0 && bulkPending.length === 0 && changeReqs.length === 0 ? (
           <EmptyState
             icon="✅"
             title="Nothing waiting for approval."
@@ -204,6 +242,47 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
           />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {changeReqs.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  ✏️ Invoice change requests
+                  <span style={{ color: "var(--muted)", fontWeight: 600, fontSize: 12 }}>· {changeReqs.length} waiting</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {changeReqs.map((r) => {
+                    const cancel = r.kind === "cancel";
+                    const viewHref = r.source === "bulk" ? `/invoicing/bulk/${r.id}/print` : r.source === "other" ? `/invoicing/other/${r.id}/print` : r.source === "running" ? `/invoicing/challan/${r.id}/custom/print` : `/invoicing/challan/${r.id}/print`;
+                    return (
+                      <div key={`${r.source}:${r.id}:${r.kind}`} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface, #fff)", border: `1px solid ${cancel ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${cancel ? "#dc2626" : "#d97706"}`, borderRadius: 10 }}>
+                        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, color: ACCOUNTS_TOKENS.accent, minWidth: 120 }}>{r.code}</span>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, color: cancel ? "#b91c1c" : "#b45309", background: cancel ? "rgba(220,38,38,0.1)" : "rgba(217,119,6,0.12)", borderRadius: 999, padding: "2px 9px" }}>{cancel ? "✕ CANCEL requested" : "✎ EDIT requested"}</span>
+                        <span style={{ fontSize: 12, color: "var(--muted)" }}>🏛 {r.party}</span>
+                        {r.by && <span style={{ fontSize: 11, color: "var(--muted)" }}>by {r.by}</span>}
+                        <Link href={viewHref} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark, #92400e)", textDecoration: "none" }}>🧾 View current →</Link>
+                        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          {isOwner ? (
+                            <>
+                              <form action={cancel ? approveInvoiceCancelAction : approveInvoiceEditAction}>
+                                <input type="hidden" name="source" value={r.source} />
+                                <input type="hidden" name="id" value={r.id} />
+                                <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: "#16a34a", color: "#fff", border: "1px solid #15803d", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✅ Approve {cancel ? "cancel" : "edit"}</button>
+                              </form>
+                              <form action={cancel ? rejectInvoiceCancelAction : rejectInvoiceEditAction}>
+                                <input type="hidden" name="source" value={r.source} />
+                                <input type="hidden" name="id" value={r.id} />
+                                <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: "var(--bg)", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✕ Reject</button>
+                              </form>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#92400e", background: "#fef3c7", borderRadius: 999, padding: "4px 10px" }}>Awaiting approval</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {bulkPending.length > 0 && (
               <div>
                 <div style={{ fontWeight: 800, fontSize: 13, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>

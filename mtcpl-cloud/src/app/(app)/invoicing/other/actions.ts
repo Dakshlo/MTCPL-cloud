@@ -17,7 +17,6 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
-import { freeInvoiceNumber } from "@/lib/invoice-numbers";
 
 function txt(fd: FormData, key: string): string {
   const v = fd.get(key);
@@ -181,17 +180,22 @@ export async function convertOtherChallanAction(formData: FormData) {
 
   const items = parseItems(formData);
   if (items.length === 0) redirect(`/invoicing/other/${id}/invoice?toast=Add+at+least+one+line+item`);
+  const gst = readGst(formData);
 
-  // Re-price the existing items + set GST on the parent.
+  // Mig 184 — editing an EXISTING other-sales invoice is approval-gated: stage
+  // the change; owner / accountant★ apply it from the Approval page.
+  if (editMode) {
+    const payload = { kind: "other" as const, items, gst };
+    await admin.from("other_challans").update({ pending_edit_payload: payload, pending_edit_at: new Date().toISOString(), pending_edit_by: profile.id } as never).eq("id", id);
+    await logAudit(profile.id, "invoice_edit_requested", "other_challan", id, {});
+    refresh(id);
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Edit sent for approval — the invoice is unchanged until approved")}`);
+  }
+
+  // First conversion — re-price the existing items + set GST on the parent.
   await admin.from("other_challan_items").delete().eq("other_challan_id", id);
   await writeItems(admin, id, items);
-  await admin.from("other_challans").update({ ...readGst(formData) }).eq("id", id);
-
-  if (editMode) {
-    await logAudit(profile.id, "other_invoice_edited", "other_challan", id, {});
-    refresh(id);
-    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
-  }
+  await admin.from("other_challans").update({ ...gst }).eq("id", id);
 
   const fy = financialYear(row.challan_date || new Date());
   // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.
@@ -224,12 +228,11 @@ export async function cancelOtherInvoiceAction(formData: FormData) {
   if (!ch || !ch.converted_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
   if (ch!.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is cancelled")}`);
 
-  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
-  await admin.from("other_challans").update({ inv_fy: null, inv_seq: null, converted_at: null, converted_by: null }).eq("id", id);
-
-  await logAudit(profile.id, "other_invoice_cancelled", "other_challan", id, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  // Mig 184 — approval-gated cancel: stage the request.
+  await admin.from("other_challans").update({ pending_cancel_at: new Date().toISOString(), pending_cancel_by: profile.id } as never).eq("id", id);
+  await logAudit(profile.id, "invoice_cancel_requested", "other_challan", id, {});
   refresh(id);
-  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, challan back on Other Sales`)}`);
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Cancel request sent for approval")}`);
 }
 
 /** Cancel an unconverted challan. */

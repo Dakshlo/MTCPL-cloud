@@ -27,6 +27,7 @@ import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
 import { freeInvoiceNumber } from "@/lib/invoice-numbers";
+import { applyInvoiceEdit, applyInvoiceCancel, pendingTableOf, type ChangeSource, type EditPayload } from "@/lib/invoice-approvals";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -98,6 +99,30 @@ export async function saveChallanPricingAction(formData: FormData) {
   if (rows.length > 0 && rows.some((it) => !((Number(rates[it.id]) || 0) > 0))) {
     redirect(`/invoicing/challans/${challanId}/review?toast=${encodeURIComponent("Enter a rate for every stone before sending.")}`);
   }
+
+  // Mig 184 — editing an EXISTING (approved) invoice is approval-gated: stage the
+  // change and stop; owner / accountant★ apply it from the Approval page.
+  if (editMode) {
+    const payload = {
+      kind: "purchase" as const,
+      rates,
+      gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? igst : null, cgst_percent: gstMode === "cgst_sgst" ? cgst : null, sgst_percent: gstMode === "cgst_sgst" ? sgst : null },
+      transport: {
+        company: txt(formData, "transport_company") || null,
+        phone: txt(formData, "transport_phone") || null,
+        lr: txt(formData, "lr_no") || null,
+        vehicle: txt(formData, "transport_vehicle_no") || null,
+        driver: txt(formData, "transport_driver_name") || null,
+        driverPhone: txt(formData, "transport_driver_phone") || null,
+      },
+    };
+    await admin.from("challans").update({ pending_edit_payload: payload, pending_edit_at: new Date().toISOString(), pending_edit_by: profile.id } as never).eq("id", challanId);
+    await logAudit(profile.id, "invoice_edit_requested", "challan", challanId, {});
+    refreshInvoicingPaths({ challanId });
+    revalidatePath("/invoicing/approval");
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Edit sent for approval — the invoice is unchanged until approved")}`);
+  }
+
   for (const it of rows) {
     const rate = Number(rates[it.id]) || 0;
     const qty = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
@@ -532,6 +557,16 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
   const now = new Date().toISOString();
 
+  // Mig 184 — editing an EXISTING running invoice is approval-gated: stage + stop.
+  if (editMode) {
+    const payload = { kind: "running" as const, items, gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null, cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null, sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null } };
+    await admin.from("challans").update({ pending_edit_payload: payload, pending_edit_at: now, pending_edit_by: profile.id } as never).eq("id", challanId);
+    void logAudit(profile.id, "invoice_edit_requested", "challan", challanId, {});
+    refreshInvoicingPaths({ challanId });
+    revalidatePath("/invoicing/approval");
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Edit sent for approval — the invoice is unchanged until approved")}`);
+  }
+
   await admin.from("challan_custom_items").delete().eq("challan_id", challanId);
   await insertCustomItems(admin, challanId, items);
   await admin.from("challans").update({
@@ -691,18 +726,13 @@ export async function cancelPricedInvoiceAction(formData: FormData): Promise<voi
   if (!ch) redirect("/invoicing/invoices?toast=Invoice+not+found");
   if (ch!.cancelled_at || ch!.converted_invoice_id) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is no longer an invoice")}`);
 
-  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
-  await admin.from("challans").update({
-    inv_fy: null, inv_seq: null, invoice_no_override: null,
-    priced_at: null, priced_by: null,
-    owner_approved_at: null, owner_approved_by: null,
-    owner_rejected_at: null, owner_reject_reason: null,
-  }).eq("id", challanId);
-
-  void logAudit(profile.id, "invoice_cancelled", "challan", challanId, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  // Mig 184 — cancelling is approval-gated: file a request; owner / accountant★
+  // approve it (frees the number + returns the challan) or reject it.
+  await admin.from("challans").update({ pending_cancel_at: new Date().toISOString(), pending_cancel_by: profile.id } as never).eq("id", challanId);
+  void logAudit(profile.id, "invoice_cancel_requested", "challan", challanId, {});
   refreshInvoicingPaths({ challanId });
   revalidatePath("/invoicing/approval");
-  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, challan back on Challans`)}`);
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Cancel request sent for approval")}`);
 }
 
 /** Cancel a RUNNING-BILL invoice: free the number; the custom bill stays and
@@ -719,13 +749,95 @@ export async function cancelRunningInvoiceAction(formData: FormData): Promise<vo
   if (!ch || !ch.custom_billed_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
   if (ch!.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Challan is cancelled")}`);
 
-  await freeInvoiceNumber(admin, ch!.inv_fy, ch!.inv_seq, profile.id);
-  await admin.from("challans").update({ inv_fy: null, inv_seq: null }).eq("id", challanId);
-
-  void logAudit(profile.id, "running_invoice_cancelled", "challan", challanId, { freed: ch!.inv_seq, fy: ch!.inv_fy });
+  // Mig 184 — approval-gated cancel: stage the request.
+  await admin.from("challans").update({ pending_cancel_at: new Date().toISOString(), pending_cancel_by: profile.id } as never).eq("id", challanId);
+  void logAudit(profile.id, "running_invoice_cancel_requested", "challan", challanId, {});
   refreshInvoicingPaths({ challanId });
-  revalidatePath("/invoicing/dropped");
-  redirect(`/invoicing/invoices?toast=${encodeURIComponent(`Invoice cancelled — number ${ch!.inv_seq ?? ""} freed, bill back on Running bills`)}`);
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Cancel request sent for approval")}`);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Mig 184 — invoice change requests. Editing / cancelling an EXISTING invoice
+// stages a request; owner / accountant★ approve or reject it on the Approval
+// page. Approve-edit applies the staged payload; approve-cancel frees the
+// number + retires the invoice; reject leaves the invoice exactly as it was.
+// ════════════════════════════════════════════════════════════════
+
+function readChange(fd: FormData): { source: ChangeSource; id: string } | null {
+  const s = txt(fd, "source");
+  const id = txt(fd, "id");
+  if (!id || !(s === "purchase" || s === "running" || s === "bulk" || s === "other")) return null;
+  return { source: s, id };
+}
+
+/** Approve a staged EDIT → apply the payload to the live invoice. */
+export async function approveInvoiceEditAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (admin.from(table) as any).select("pending_edit_payload").eq("id", c!.id).maybeSingle();
+  const payload = (data?.pending_edit_payload ?? null) as EditPayload | null;
+  if (payload) await applyInvoiceEdit(admin, c!.source, c!.id, payload);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({ pending_edit_at: null, pending_edit_by: null, pending_edit_payload: null }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_edit_approved", table, c!.id, {});
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  revalidatePath("/invoicing");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Edit approved & applied")}`);
+}
+
+/** Reject a staged EDIT → discard it; the invoice stays as it was. */
+export async function rejectInvoiceEditAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({ pending_edit_at: null, pending_edit_by: null, pending_edit_payload: null }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_edit_rejected", table, c!.id, {});
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Edit rejected — invoice unchanged")}`);
+}
+
+/** Approve a CANCEL request → cancel the invoice (free number, retire). */
+export async function approveInvoiceCancelAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  await applyInvoiceCancel(admin, c!.source, c!.id, profile.id);
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({ pending_cancel_at: null, pending_cancel_by: null, pending_edit_at: null, pending_edit_by: null, pending_edit_payload: null }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_cancel_approved", table, c!.id, {});
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  revalidatePath("/invoicing/bulk");
+  revalidatePath("/invoicing/challans");
+  revalidatePath("/invoicing/other");
+  revalidatePath("/invoicing");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Invoice cancelled — number freed")}`);
+}
+
+/** Reject a CANCEL request → keep the invoice. */
+export async function rejectInvoiceCancelAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({ pending_cancel_at: null, pending_cancel_by: null }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_cancel_rejected", table, c!.id, {});
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Cancel rejected — invoice kept")}`);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1676,19 +1788,13 @@ export async function cancelBulkInvoiceAction(formData: FormData): Promise<void>
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "id");
   if (!id) redirect("/invoicing/bulk");
-  // Mig 178 — free the invoice number before retiring the row.
-  {
-    const { data: b } = await admin.from("bulk_invoices").select("inv_fy, inv_seq, cancelled_at").eq("id", id).maybeSingle();
-    const row = b as { inv_fy: string | null; inv_seq: number | null; cancelled_at: string | null } | null;
-    if (row && !row.cancelled_at) await freeInvoiceNumber(admin, row.inv_fy, row.inv_seq, profile.id);
-  }
-  await admin.from("bulk_invoice_challans").delete().eq("bulk_invoice_id", id);
-  await admin.from("bulk_invoices").update({ cancelled_at: new Date().toISOString(), inv_fy: null, inv_seq: null }).eq("id", id);
-  void logAudit(profile.id, "bulk_invoice_cancelled", "bulk_invoice", id, {});
-  revalidatePath("/invoicing/bulk");
-  revalidatePath("/invoicing/approval");
+  // Mig 184 — approval-gated cancel: stage the request; approval frees the
+  // number + returns the challans to the pool.
+  await admin.from("bulk_invoices").update({ pending_cancel_at: new Date().toISOString(), pending_cancel_by: profile.id } as never).eq("id", id);
+  void logAudit(profile.id, "invoice_cancel_requested", "bulk_invoice", id, {});
   revalidatePath("/invoicing/invoices");
-  redirect(`/invoicing/bulk?toast=${encodeURIComponent("Bulk invoice cancelled — number freed, challans returned to the pool")}`);
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Cancel request sent for approval")}`);
 }
 
 /** Edit a bulk (work-order) invoice — line items / GST / notes. The INV number
@@ -1711,32 +1817,39 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
 
   const gm = txt(formData, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
-  await admin.from("bulk_invoices").update({
-    gst_mode: gstMode,
-    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
-    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
-    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
-    notes: txt(formData, "notes") || null,
-  }).eq("id", id);
-  await admin.from("bulk_invoice_items").delete().eq("bulk_invoice_id", id);
-  const editRows = items.map((it, i) => ({
-    bulk_invoice_id: id, position: i,
-    section_index: Number(it.section_index) || 0,
-    section_head: (it.section_head ?? "").toString().trim() || null,
+
+  // Mig 184 — editing a work-order invoice is approval-gated: stage + stop. The
+  // edit form may RE-SELECT the linked challans; if it sends no set, keep the
+  // current links unchanged (reconciled on approval).
+  let challanIds: string[];
+  const rawIds = txt(formData, "challan_ids");
+  if (rawIds) {
+    try { challanIds = (JSON.parse(rawIds) as string[]).filter(Boolean); } catch { challanIds = []; }
+  } else {
+    const { data: cur } = await admin.from("bulk_invoice_challans").select("challan_id").eq("bulk_invoice_id", id);
+    challanIds = ((cur ?? []) as Array<{ challan_id: string }>).map((r) => r.challan_id);
+  }
+  const stagedItems = items.map((it) => ({
     particulars: (it.particulars ?? "").toString() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
     quantity: Number(it.quantity) || null,
     rate: Number(it.rate) || null,
     amount: Number(it.amount) || (Number(it.quantity) || 0) * (Number(it.rate) || 0) || null,
+    section_index: Number(it.section_index) || 0,
+    section_head: (it.section_head ?? "").toString().trim() || null,
   }));
-  {
-    const { error: insErr } = await admin.from("bulk_invoice_items").insert(editRows);
-    if (insErr) await admin.from("bulk_invoice_items").insert(editRows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
-  }
+  const payload = {
+    kind: "bulk" as const,
+    items: stagedItems,
+    gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null, cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null, sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null },
+    notes: txt(formData, "notes") || null,
+    challanIds,
+  };
+  await admin.from("bulk_invoices").update({ pending_edit_payload: payload, pending_edit_at: new Date().toISOString(), pending_edit_by: profile.id } as never).eq("id", id);
 
-  void logAudit(profile.id, "bulk_invoice_edited", "bulk_invoice", id, {});
+  void logAudit(profile.id, "invoice_edit_requested", "bulk_invoice", id, {});
   revalidatePath("/invoicing/invoices");
-  revalidatePath("/invoicing/bulk");
-  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice updated — number unchanged")}`);
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Edit sent for approval — the invoice is unchanged until approved")}`);
 }

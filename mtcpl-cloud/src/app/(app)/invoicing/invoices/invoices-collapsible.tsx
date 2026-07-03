@@ -36,6 +36,10 @@ export type InvoiceRow = {
   /** Source delivery-challan code(s) this invoice bills — work-order invoices
    *  link several (shown as a dropdown). */
   challanCodes?: string[];
+  /** A change is staged for approval (mig 184) — edit/cancel are locked until
+   *  the owner / accountant★ approves or rejects it. */
+  pendingEdit?: boolean;
+  pendingCancel?: boolean;
 };
 
 const SOURCE_META: Record<NonNullable<InvoiceRow["sourceType"]>, { label: string; color: string; bg: string }> = {
@@ -83,6 +87,7 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
   const [editConfirm, setEditConfirm] = useState(false);
   const [pending, setPending] = useState(false);
   const meta = r.cancelKind ? CANCEL_META[r.cancelKind] : null;
+  const hasPending = r.pendingEdit || r.pendingCancel;
   return (
     <span style={{ display: "inline-flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
       {r.challanHref && (
@@ -91,7 +96,8 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
       <Link href={r.href} target={r.external ? "_blank" : undefined} rel={r.external ? "noopener noreferrer" : undefined} style={{ ...lnk, color: "var(--gold-dark)" }}>
         {r.external ? "🧾 Invoice" : "View →"}
       </Link>
-      {r.editHref && <button type="button" onClick={() => setEditConfirm(true)} style={{ ...lnk, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✎ Edit</button>}
+      {hasPending && <span title="A change is waiting on the Approval page" style={{ fontSize: 10.5, fontWeight: 800, color: "#b45309", background: "rgba(217,119,6,0.12)", borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}>⏳ {r.pendingCancel ? "Cancel in approval" : "Edit in approval"}</span>}
+      {!hasPending && r.editHref && <button type="button" onClick={() => setEditConfirm(true)} style={{ ...lnk, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✎ Edit</button>}
       {editConfirm && r.editHref && (
         <span onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20 }}>
           <FinanceLoadingOverlay show={pending} label="Opening editor…" />
@@ -106,7 +112,7 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
           </div>
         </span>
       )}
-      {meta && r.cancelId && (
+      {!hasPending && meta && r.cancelId && (
         <>
           <button type="button" onClick={() => setConfirming(true)} style={{ ...lnk, color: "#b91c1c", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✕ Cancel</button>
           {confirming && (

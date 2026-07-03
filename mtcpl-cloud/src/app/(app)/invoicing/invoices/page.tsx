@@ -167,6 +167,22 @@ export default async function InvoicingListPage() {
   const profNames = await getProfilesMap();
   const nameOf = (id: string | null | undefined) => (id ? profNames[id] ?? null : null);
 
+  // Mig 184 — invoices with a staged edit/cancel awaiting approval (best-effort;
+  // empty until the migration is run) so the card can lock its actions.
+  const pendingEditIds = new Set<string>();
+  const pendingCancelIds = new Set<string>();
+  {
+    const collect = async (table: "challans" | "bulk_invoices" | "other_challans") => {
+      const { data, error } = await supabase.from(table).select("id, pending_edit_at, pending_cancel_at").or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
+      if (error) return;
+      for (const r of (data ?? []) as Array<{ id: string; pending_edit_at: string | null; pending_cancel_at: string | null }>) {
+        if (r.pending_edit_at) pendingEditIds.add(r.id);
+        if (r.pending_cancel_at) pendingCancelIds.add(r.id);
+      }
+    };
+    await collect("challans"); await collect("bulk_invoices"); await collect("other_challans");
+  }
+
   // Mig 177 — invoiced custom (dropped) bills: temple challans re-billed as a
   // whole piece then invoiced. Best-effort so a pre-migration deploy skips them.
   type Row = InvoiceRow & { customer: string };
@@ -189,6 +205,7 @@ export default async function InvoicingListPage() {
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
           editHref: `/invoicing/running/${r.id}/invoice`, cancelKind: "running", cancelId: r.id,
           challanCodes: challanCode(r.doc_fy, r.doc_seq) ? [challanCode(r.doc_fy, r.doc_seq)!] : [],
+          pendingEdit: pendingEditIds.has(r.id), pendingCancel: pendingCancelIds.has(r.id),
           sourceType: "running", createdBy: nameOf(r.custom_billed_by),
         });
       }
@@ -209,6 +226,7 @@ export default async function InvoicingListPage() {
       challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
       editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
       challanCodes: [challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number],
+      pendingEdit: pendingEditIds.has(c.id), pendingCancel: pendingCancelIds.has(c.id),
       sourceType: "purchase" as const, createdBy: nameOf(c.priced_by),
     })),
     ...bulkApproved.map((b) => ({
@@ -217,6 +235,7 @@ export default async function InvoicingListPage() {
       href: `/invoicing/bulk/${b.id}/print`, external: true,
       challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
       challanCodes: bulkChallanCodes.get(b.id) ?? [],
+      pendingEdit: pendingEditIds.has(b.id), pendingCancel: pendingCancelIds.has(b.id),
       sourceType: "work_order" as const, createdBy: nameOf(b.created_by),
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -247,6 +266,7 @@ export default async function InvoicingListPage() {
           date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
           editHref: `/invoicing/other/${o.id}/invoice`, cancelKind: "other" as const, cancelId: o.id,
           challanCodes: challanCode(o.doc_fy, o.doc_seq) ? [challanCode(o.doc_fy, o.doc_seq)!] : [],
+          pendingEdit: pendingEditIds.has(o.id), pendingCancel: pendingCancelIds.has(o.id),
           sourceType: "other" as const, createdBy: nameOf(o.converted_by),
         };
       });

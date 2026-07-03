@@ -449,7 +449,14 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         .is("cancelled_at", null);
       if (!bErr) bulk = b ?? 0;
     }
-    return (count ?? 0) + bulk;
+    // Mig 184 — invoice change requests (edit/cancel) also queue for approval.
+    // Best-effort so a pre-migration deploy simply skips them.
+    let changes = 0;
+    for (const t of ["challans", "bulk_invoices", "other_challans"] as const) {
+      const { count: c, error } = await supabase.from(t).select("*", { count: "exact", head: true }).or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
+      if (!error) changes += c ?? 0;
+    }
+    return (count ?? 0) + bulk + changes;
   }
 
   const [
