@@ -281,11 +281,12 @@ export async function returnDispatchToWaitingAction(formData: FormData): Promise
 
   const { data: c } = await admin
     .from("challans")
-    .select("id, owner_approved_at, cancelled_at, source_dispatch_id, temple, challan_number")
+    .select("id, owner_approved_at, cancelled_at, source_dispatch_id, temple, challan_number, inv_fy, inv_seq")
     .eq("id", challanId)
     .maybeSingle();
   const ch = c as {
     owner_approved_at: string | null; cancelled_at: string | null; source_dispatch_id: string | null; temple: string | null; challan_number: string | null;
+    inv_fy: string | null; inv_seq: number | null;
   } | null;
   if (!ch) return { ok: false, error: "Challan not found." };
   if (ch.owner_approved_at) return { ok: false, error: "Owner already approved this invoice — cannot cancel here." };
@@ -302,7 +303,13 @@ export async function returnDispatchToWaitingAction(formData: FormData): Promise
       .is("delivered_at", null);
   }
 
-  await logAudit(profile.id, "challan_returned_to_dispatch", "challan", challanId, { temple: ch.temple, reason: stamp });
+  // If this challan had already been priced it holds a LOCKED invoice number
+  // (mig 178). Deleting the row would otherwise strand that number — the counter
+  // would stay advanced with no invoice keeping it (the INV:26/27 → 90 leak).
+  // Free it first so a head cancellation rolls the counter back for reuse.
+  await freeInvoiceNumber(admin, ch.inv_fy, ch.inv_seq, profile.id);
+
+  await logAudit(profile.id, "challan_returned_to_dispatch", "challan", challanId, { temple: ch.temple, reason: stamp, freedInvoice: ch.inv_seq });
   // Remove the challan (items cascade) so a re-verify recreates a fresh one.
   await admin.from("challans").delete().eq("id", challanId);
 
@@ -1067,12 +1074,13 @@ export async function cancelChallanAction(formData: FormData): Promise<ActionRes
   const admin = createAdminSupabaseClient();
   const { data: ch } = await admin
     .from("challans")
-    .select("id, challan_number, invoice_party_id, source_dispatch_id, cancelled_at, converted_invoice_id, owner_approved_at")
+    .select("id, challan_number, invoice_party_id, source_dispatch_id, cancelled_at, converted_invoice_id, owner_approved_at, inv_fy, inv_seq")
     .eq("id", id)
     .maybeSingle();
   const c = ch as {
     id: string; challan_number: string | null; invoice_party_id: string | null; source_dispatch_id: string | null;
     cancelled_at: string | null; converted_invoice_id: string | null; owner_approved_at: string | null;
+    inv_fy: string | null; inv_seq: number | null;
   } | null;
   if (!c) return { ok: false, error: "Challan not found." };
   if (c.cancelled_at) return { ok: false, error: "Challan is already cancelled." };
@@ -1094,7 +1102,10 @@ export async function cancelChallanAction(formData: FormData): Promise<ActionRes
       .update({ approved_at: null, approved_by: null, on_road_at: null, returned_at: new Date().toISOString(), return_reason: stamp })
       .eq("id", c.source_dispatch_id)
       .is("delivered_at", null);
-    void logAudit(profile.id, "challan_cancelled", "challan", id, { challan_number: c.challan_number, reason: stamp });
+    // Free a locked invoice number before the row is deleted (a priced-but-not-
+    // yet-approved challan holds one — otherwise the INV counter leaks ahead).
+    await freeInvoiceNumber(admin, c.inv_fy, c.inv_seq, profile.id);
+    void logAudit(profile.id, "challan_cancelled", "challan", id, { challan_number: c.challan_number, reason: stamp, freedInvoice: c.inv_seq });
     await admin.from("challans").delete().eq("id", id);
     refreshInvoicingPaths({ challanId: id });
     revalidatePath("/dispatch");
