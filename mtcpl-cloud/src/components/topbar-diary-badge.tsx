@@ -73,9 +73,8 @@ export function TopbarDiaryBadge({ count, items }: { count: number; items: Diary
               </Link>
             ))
           )}
-          <div style={{ display: "flex", gap: 6, padding: "8px 6px 4px", borderTop: "1px solid rgba(15,23,42,0.08)", marginTop: 4 }}>
-            <Link href="/diary" onClick={() => setOpen(false)} style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 800, padding: "8px 10px", borderRadius: 9, textDecoration: "none", color: "var(--text)", background: "rgba(15,23,42,0.06)" }}>Open Work Diary →</Link>
-            <Link href="/diary?new=1" onClick={() => setOpen(false)} style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 800, padding: "8px 10px", borderRadius: 9, textDecoration: "none", color: "#fff", background: "var(--gold-dark)" }}>＋ New entry</Link>
+          <div style={{ padding: "8px 6px 4px", borderTop: "1px solid rgba(15,23,42,0.08)", marginTop: 4 }}>
+            <Link href="/diary" onClick={() => setOpen(false)} style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800, padding: "8px 10px", borderRadius: 9, textDecoration: "none", color: "var(--text)", background: "rgba(15,23,42,0.06)" }}>Open Work Diary →</Link>
           </div>
         </div>
       )}
