@@ -58,7 +58,10 @@ export function TempleEditModal({
         onClick={() => setOpen(true)}
         style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", cursor: "pointer", color: "var(--text)", fontSize: 15, fontWeight: 800 }}
       >
-        🛕 {temple.name}
+        🛕 {returnTo === "temples" ? ((temple.bill_name ?? "").trim() || temple.name) : temple.name}
+        {returnTo === "temples" && (temple.bill_name ?? "").trim() && (temple.bill_name ?? "").trim() !== temple.name && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>· {temple.name}</span>
+        )}
         <code className="code-badge" style={{ fontWeight: 700 }}>{temple.code_prefix}</code>
         {!temple.is_active && <span className="role-pill badge-discarded" style={{ fontSize: 10 }}>Inactive</span>}
         <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>{gstSummary}</span>

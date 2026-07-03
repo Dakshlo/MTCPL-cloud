@@ -14,6 +14,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { AccountsHero } from "../../accounts/_ui/components";
 import { challanCode } from "@/lib/doc-code";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 import { ChallansBoard, type BoardGroup, type BoardChallan } from "../_ui/challans-board";
 
 type SearchParams = Promise<{ toast?: string }>;
@@ -62,11 +63,13 @@ export default async function ChallansListPage({ searchParams }: { searchParams:
   }>;
 
   type ChallanRow = (typeof challans)[number];
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(supabase);
   const clientNameOf = (c: ChallanRow): string => {
     const legacy = c.invoice_parties
       ? Array.isArray(c.invoice_parties) ? c.invoice_parties[0]?.name ?? null : c.invoice_parties.name
       : null;
-    return c.temple ?? legacy ?? "—";
+    return displayNameFor(billNames, c.temple ?? legacy);
   };
 
   // Mig 173 — challans "sent to bulk" leave the Challans page. Best-effort filter.

@@ -13,6 +13,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { challanCode } from "@/lib/doc-code";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 import { DroppedSection } from "../_ui/dropped-section";
 import { type DroppedChallan } from "../_ui/challans-board";
 
@@ -25,6 +26,8 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
   if (!canUseInvoicing(profile)) redirect("/");
   const sp = await searchParams;
   const supabase = createAdminSupabaseClient();
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(supabase);
 
   const dropped: DroppedChallan[] = [];
   {
@@ -69,7 +72,7 @@ export default async function DroppedChallansPage({ searchParams }: { searchPara
           .map((it) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0, amount: Number(it.amount) || 0 }));
         const disp = r.source_dispatch_id ? dispById.get(r.source_dispatch_id) : null;
         dropped.push({
-          id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number, temple: r.temple ?? p?.name ?? "—",
+          id: r.id, code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number, temple: displayNameFor(billNames, r.temple ?? p?.name),
           date: r.challan_date, customBilled: !!r.custom_billed_at, gstMode: gm,
           igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0, items,
           sourceDispatchId: r.source_dispatch_id ?? null,

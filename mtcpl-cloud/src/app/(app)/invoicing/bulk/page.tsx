@@ -12,6 +12,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 import { BUTTON_STYLES } from "../../accounts/_ui/components";
 import { BulkBoard, type BulkGroup, type BulkCard } from "./bulk-board";
 import { BulkCancel } from "./bulk-cancel";
@@ -97,9 +98,11 @@ export default async function BulkChallansPage({ searchParams }: { searchParams:
     }
   }
 
+  // Accountants know a temple by its BILLING name — use it as the client name.
+  const billNames = await fetchTempleBillNames(admin);
   const byTemple = new Map<string, BulkCard[]>();
   for (const c of pool) {
-    const temple = c.temple ?? "—";
+    const temple = displayNameFor(billNames, c.temple);
     const code = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
     const full = fullByChallan.get(c.id);
     const disp = c.source_dispatch_id ? dispById.get(c.source_dispatch_id) : undefined;
