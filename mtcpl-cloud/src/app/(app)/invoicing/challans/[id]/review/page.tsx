@@ -146,6 +146,18 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     const { data: hv, error } = await admin.from("temples").select("hsn_use_vendor").eq("name", c.temple).maybeSingle();
     if (!error && hv) hsnUseVendor = !!(hv as { hsn_use_vendor?: boolean }).hsn_use_vendor;
   }
+  // HSN per stone (Daksh) — pre-fill the review's mandatory HSN field with the
+  // stone's saved HSN (the vendor HSN when this temple bills with it).
+  const initHsn: Record<string, string> = {};
+  {
+    const stones = [...new Set(priceItems.map((it) => it.stone).filter(Boolean))];
+    if (stones.length) {
+      const { data } = await admin.from("stone_types").select("name, hsn_code, hsn_vendor_code").in("name", stones);
+      for (const r of (data ?? []) as Array<{ name: string; hsn_code: string | null; hsn_vendor_code: string | null }>) {
+        initHsn[r.name] = ((hsnUseVendor ? r.hsn_vendor_code : r.hsn_code) ?? "").trim();
+      }
+    }
+  }
   const priced = !!c.priced_at;
   const challanHasGst = c.gst_mode === "igst" || c.gst_mode === "cgst_sgst";
   const templeHasGst = templeGst.mode === "igst" || templeGst.mode === "cgst_sgst";
@@ -273,6 +285,8 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             challanCode={chCode}
             transportCompanies={transportCompanies}
             initTransport={initTransport}
+            initHsn={initHsn}
+            hsnUseVendor={hsnUseVendor}
           />
         </div>
 

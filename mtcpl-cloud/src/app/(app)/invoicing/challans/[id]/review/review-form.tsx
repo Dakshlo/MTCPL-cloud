@@ -52,6 +52,8 @@ export function ReviewForm({
   challanCode = "",
   transportCompanies = [],
   initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" },
+  initHsn = {},
+  hsnUseVendor = false,
 }: {
   challanId: string;
   items: PriceItem[];
@@ -70,6 +72,9 @@ export function ReviewForm({
   challanCode?: string;
   transportCompanies?: string[];
   initTransport?: { company: string; phone: string; lr: string; vehicle: string; driverName: string; driverPhone: string };
+  /** Per-stone HSN pre-fill — mandatory to fill before sending (Daksh). */
+  initHsn?: Record<string, string>;
+  hsnUseVendor?: boolean;
 }) {
   // One rate per stone+unit group (key = `${stone}|${unit}`).
   const groups = useMemo(() => {
@@ -93,6 +98,10 @@ export function ReviewForm({
     }
     return m;
   });
+  // HSN per stone (Daksh) — one code per stone table, MANDATORY, pre-filled from
+  // the stone master (edits save back to it on submit).
+  const [hsn, setHsn] = useState<Record<string, string>>(() => ({ ...initHsn }));
+  void hsnUseVendor;
   // Custom transport-company combobox (our own dropdown, not the browser datalist).
   const [company, setCompany] = useState(initTransport.company);
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -126,6 +135,10 @@ export function ReviewForm({
     return JSON.stringify(m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rates, items]);
+  // HSN is MANDATORY per stone table (Daksh).
+  const allHsn = groups.length > 0 && groups.every((g) => (hsn[g.stone] ?? "").trim().length > 0);
+  const hsnsJson = useMemo(() => JSON.stringify(hsn), [hsn]);
+  const canSubmit = allRated && allHsn;
 
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
@@ -159,6 +172,17 @@ export function ReviewForm({
             {g.stone} · {g.unit.toUpperCase()} <span style={{ fontWeight: 600, color: "var(--muted)" }}>· {g.items.length} row{g.items.length !== 1 ? "s" : ""} · {fmt(meas)} {g.unit}</span>
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
+              HSN code
+              <input
+                type="text"
+                value={hsn[g.stone] ?? ""}
+                onChange={(e) => setHsn((p) => ({ ...p, [g.stone]: e.target.value.replace(/[^0-9A-Za-z]/g, "") }))}
+                placeholder="required"
+                title="HSN code for this stone — prints on the tax invoice"
+                style={{ width: 110, textAlign: "center", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "6px 9px", borderRadius: 8, border: `1.5px solid ${(hsn[g.stone] ?? "").trim() ? "var(--border)" : "#dc2626"}`, background: "var(--bg)", color: "var(--text)" }}
+              />
+            </label>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
               Rate ₹/{g.unit}
               <input
@@ -204,6 +228,7 @@ export function ReviewForm({
       <input type="hidden" name="challan_id" value={challanId} />
       <input type="hidden" name="edit_mode" value={editMode ? "1" : ""} />
       <input type="hidden" name="rates" value={ratesJson} />
+      <input type="hidden" name="hsns" value={hsnsJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
@@ -328,7 +353,7 @@ export function ReviewForm({
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <button type="submit" name="go" value="save" disabled={!allRated} title={allRated ? undefined : "Enter a rate for every stone table first"} style={{ fontSize: 14.5, padding: "12px 26px", fontWeight: 800, color: "#fff", background: allRated ? "#0f172a" : "var(--border)", border: "none", borderRadius: 11, cursor: allRated ? "pointer" : "not-allowed" }}>
+        <button type="submit" name="go" value="save" disabled={!canSubmit} title={canSubmit ? undefined : "Enter a rate + HSN for every stone table first"} style={{ fontSize: 14.5, padding: "12px 26px", fontWeight: 800, color: "#fff", background: canSubmit ? "#0f172a" : "var(--border)", border: "none", borderRadius: 11, cursor: canSubmit ? "pointer" : "not-allowed" }}>
           {editMode ? "💾 Save invoice changes →" : "📤 Send for approval to owner →"}
         </button>
         {/* Preview how the finished tax invoice will look (NOT VALID watermark). */}
@@ -337,7 +362,7 @@ export function ReviewForm({
         </button>
         {/* Cancel = drop this challan and bounce the dispatch back to Waiting approval. */}
         {!editMode && <ReturnToDispatchButton challanId={challanId} action={returnDispatchToWaitingAction} label="✕ Cancel — send back to dispatch" />}
-        {!allRated && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>⚠ Rate is required for every stone table.</span>}
+        {!canSubmit && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>⚠ Rate + HSN are required for every stone table.</span>}
       </div>
 
       {showPreview && (

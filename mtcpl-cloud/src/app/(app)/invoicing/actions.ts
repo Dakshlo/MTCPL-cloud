@@ -88,6 +88,29 @@ export async function saveChallanPricingAction(formData: FormData) {
   const cgst = Number(txt(formData, "cgst_percent")) || 0;
   const sgst = Number(txt(formData, "sgst_percent")) || 0;
 
+  // HSN per stone (Daksh) — the review page makes the HSN mandatory per stone
+  // table and saves it back onto the stone master so the tax invoice prints it
+  // (the vendor-HSN column when this temple bills with it). Master data → saved
+  // directly, not gated by the rate/GST edit-approval flow.
+  try {
+    const hsns = JSON.parse(txt(formData, "hsns") || "{}") as Record<string, string>;
+    const stones = Object.keys(hsns);
+    if (stones.length) {
+      const { data: cRow } = await admin.from("challans").select("temple").eq("id", challanId).maybeSingle();
+      const temple = (cRow as { temple?: string | null } | null)?.temple ?? null;
+      let useVendor = false;
+      if (temple) {
+        const { data: tv } = await admin.from("temples").select("hsn_use_vendor").eq("name", temple).maybeSingle();
+        useVendor = !!(tv as { hsn_use_vendor?: boolean } | null)?.hsn_use_vendor;
+      }
+      for (const s of stones) {
+        const code = (hsns[s] ?? "").trim();
+        if (!code) continue;
+        await admin.from("stone_types").update(useVendor ? { hsn_vendor_code: code } : { hsn_code: code }).eq("name", s);
+      }
+    }
+  } catch { /* never block pricing on an HSN-write error */ }
+
   // Amount = rate × billable measure (cft/sft qty) — falls back to the line
   // quantity for legacy challans that have no measure snapshot.
   const { data: items } = await admin
