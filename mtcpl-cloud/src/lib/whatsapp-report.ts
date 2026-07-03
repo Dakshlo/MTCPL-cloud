@@ -142,7 +142,7 @@ export type DailyReport = {
   blocksByStone: Array<{ stone: string; count: number; cft: number }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
-  dispatchByTemple: Array<{ temple: string; slabs: number; tonnes: number }>;
+  dispatchByTemple: Array<{ temple: string; slabs: number; cft: number; tonnes: number }>;
   payments: { total: number; byVendor: Array<{ vendor: string; amount: number }> };
   /** Month-to-date CNC costing snapshot (elapsed days only). null if the
    *  report couldn't be built — never blocks the daily report. */
@@ -299,15 +299,15 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
       const templeOf = new Map(dispatches.map((d) => [d.id, d.temple]));
       const logRows = (logs ?? []) as Array<{ dispatch_id: string | null; slab_requirement_id: string | null; weight_tonnes: number | null }>;
       const dims = await cftBySlab(admin, logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[]);
-      const byTemple = new Map<string, { slabs: number; tonnes: number }>();
+      const byTemple = new Map<string, { slabs: number; cft: number; tonnes: number }>();
       for (const l of logRows) {
         if (!l.dispatch_id || !l.slab_requirement_id) continue;
         const temple = templeOf.get(l.dispatch_id) || "-";
         const c = dims.get(l.slab_requirement_id) ?? 0;
         const tn = Number(l.weight_tonnes) || 0;
         totals.dispatch.slabs += 1; totals.dispatch.cft += c; totals.dispatch.tonnes += tn;
-        const g = byTemple.get(temple) ?? { slabs: 0, tonnes: 0 };
-        g.slabs += 1; g.tonnes += tn; byTemple.set(temple, g);
+        const g = byTemple.get(temple) ?? { slabs: 0, cft: 0, tonnes: 0 };
+        g.slabs += 1; g.cft += c; g.tonnes += tn; byTemple.set(temple, g);
       }
       if (detail) det.dispatchByTemple = [...byTemple.entries()].map(([temple, v]) => ({ temple, ...v })).sort((a, b) => b.slabs - a.slabs);
     }
@@ -875,7 +875,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.map((rw) => ({ n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` })));
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
     section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
-    section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} · ${rw.tonnes.toFixed(1)} T` })));
+    section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} slabs · ${rw.cft.toFixed(1)} CFT` })));
     footer(P, 3, PAGES);
   }
 
