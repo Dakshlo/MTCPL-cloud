@@ -400,6 +400,156 @@ export async function archiveChallanAction(formData: FormData): Promise<void> {
   redirect(`/invoicing/challans?toast=${encodeURIComponent("Challan archived — removed without an invoice; slabs untouched")}`);
 }
 
+// ════════════════════════════════════════════════════════════════
+// Mig 182 — Running bill, two-step. (1) createRunningChallanAction builds the
+// RUNNING CHALLAN (item tables + heads, NO rate) from the drop and delivers the
+// dispatch; (2) convertRunningToInvoiceAction adds rate + GST + the INV number.
+// sendRunningBackAction undoes it all back to the Challans page.
+// ════════════════════════════════════════════════════════════════
+
+type RunItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
+function parseRunningItems(fd: FormData, withRate: boolean): RunItem[] {
+  let raw: unknown = [];
+  try { raw = JSON.parse(txt(fd, "items") || "[]"); } catch { raw = []; }
+  const out: RunItem[] = [];
+  for (const r of Array.isArray(raw) ? raw : []) {
+    const it = r as Record<string, unknown>;
+    const particulars = String(it?.particulars ?? "").trim();
+    const qty = Number(it?.quantity) || 0;
+    if (!particulars && !qty) continue;
+    const rate = withRate ? (Number(it?.rate) || 0) : 0;
+    const amount = withRate ? (Math.round((Number(it?.amount) || qty * rate) * 100) / 100) : 0;
+    out.push({
+      particulars: particulars || null,
+      hsn: String(it?.hsn ?? "").trim() || null,
+      unit: String(it?.unit ?? "").trim() || null,
+      quantity: qty || null,
+      rate: withRate ? (rate || null) : null,
+      amount: withRate ? (amount || null) : null,
+      section_index: Number(it?.section_index) || 0,
+      section_head: String(it?.section_head ?? "").trim() || null,
+    });
+  }
+  return out;
+}
+
+/** Insert challan_custom_items with section cols, falling back if mig 182 isn't
+ *  applied (so a pre-migration deploy still works, just without heads). */
+async function insertCustomItems(admin: ReturnType<typeof createAdminSupabaseClient>, challanId: string, items: RunItem[]) {
+  const rows = items.map((it, i) => ({ challan_id: challanId, position: i, ...it }));
+  const { error } = await admin.from("challan_custom_items").insert(rows);
+  if (error) await admin.from("challan_custom_items").insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+}
+
+const RUN_TRANSPORT = (fd: FormData) => ({
+  transport_company: txt(fd, "transport_company") || null,
+  transport_vehicle_no: txt(fd, "transport_vehicle_no") || null,
+  transport_driver_name: txt(fd, "transport_driver_name") || null,
+  transport_driver_phone: txt(fd, "transport_driver_phone") || null,
+  lr_no: txt(fd, "lr_no") || null,
+  transport_phone: txt(fd, "transport_phone") || null,
+});
+
+export async function createRunningChallanAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/challans");
+
+  const { data: c } = await admin.from("challans").select("running_challan_at, priced_at, converted_invoice_id, cancelled_at, source_dispatch_id").eq("id", challanId).maybeSingle();
+  const ch = c as { running_challan_at: string | null; priced_at: string | null; converted_invoice_id: string | null; cancelled_at: string | null; source_dispatch_id: string | null } | null;
+  if (!ch) redirect("/invoicing/challans?toast=Challan+not+found");
+  if (ch!.cancelled_at || ch!.priced_at || ch!.converted_invoice_id) redirect(`/invoicing/challans?toast=${encodeURIComponent("This challan can't be a running bill")}`);
+  const editMode = txt(formData, "edit_mode") === "1" && !!ch!.running_challan_at;
+
+  const items = parseRunningItems(formData, false);
+  if (items.length === 0) redirect(`/invoicing/challans?toast=${encodeURIComponent("Add at least one line item")}`);
+  const now = new Date().toISOString();
+
+  await admin.from("challan_custom_items").delete().eq("challan_id", challanId);
+  await insertCustomItems(admin, challanId, items);
+  await admin.from("challans").update({ ...RUN_TRANSPORT(formData), dropped_at: now, dropped_by: profile.id }).eq("id", challanId);
+  // running_challan_at (mig 182) — best-effort, only stamped on first create.
+  if (!editMode) {
+    try { await admin.from("challans").update({ running_challan_at: now, running_challan_by: profile.id }).eq("id", challanId); } catch { /* pre-mig */ }
+    if (ch!.source_dispatch_id) {
+      await admin.from("dispatches").update({ delivered_at: now, delivered_by: profile.id, delivery_note: "Running bill — no physical on-road leg." }).eq("id", ch!.source_dispatch_id).is("delivered_at", null);
+    }
+  }
+  void logAudit(profile.id, editMode ? "running_challan_edited" : "running_challan_created", "challan", challanId, {});
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/dispatch");
+  revalidatePath("/invoicing/dropped");
+  redirect(`/invoicing/dropped?toast=${encodeURIComponent(editMode ? "Running challan updated" : "Running challan created — dispatch delivered")}`);
+}
+
+export async function convertRunningToInvoiceAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const challanId = txt(formData, "challan_id");
+  if (!challanId) redirect("/invoicing/dropped");
+
+  const { data: c } = await admin.from("challans").select("running_challan_at, inv_seq, challan_date, cancelled_at").eq("id", challanId).maybeSingle();
+  const ch = c as { running_challan_at: string | null; inv_seq: number | null; challan_date: string | null; cancelled_at: string | null } | null;
+  if (!ch) redirect("/invoicing/dropped?toast=Not+found");
+  if (ch!.cancelled_at) redirect(`/invoicing/dropped?toast=${encodeURIComponent("Challan is cancelled")}`);
+  const editMode = txt(formData, "edit_mode") === "1" && ch!.inv_seq != null;
+  if (ch!.inv_seq != null && !editMode) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Already invoiced — open it in Edit mode")}`);
+
+  const items = parseRunningItems(formData, true);
+  if (items.length === 0) redirect(`/invoicing/dropped?toast=${encodeURIComponent("Add rates for the line items")}`);
+  const gm = txt(formData, "gst_mode");
+  const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  const now = new Date().toISOString();
+
+  await admin.from("challan_custom_items").delete().eq("challan_id", challanId);
+  await insertCustomItems(admin, challanId, items);
+  await admin.from("challans").update({
+    gst_mode: gstMode,
+    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
+    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
+    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    custom_billed_at: now, custom_billed_by: profile.id,
+  }).eq("id", challanId);
+  // Assign the locked INV number on first conversion only.
+  if (!editMode) {
+    const fy = financialYear(ch!.challan_date || new Date());
+    try {
+      const { data: seq } = await admin.rpc("next_doc_seq", { p_fy: `INV:${fy}` });
+      if (typeof seq === "number") await admin.from("challans").update({ inv_fy: fy, inv_seq: seq }).eq("id", challanId);
+    } catch { /* counter unavailable */ }
+  }
+  void logAudit(profile.id, editMode ? "running_invoice_edited" : "running_invoiced", "challan", challanId, {});
+  refreshInvoicingPaths({ challanId });
+  revalidatePath("/invoicing/dropped");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent(editMode ? "Invoice updated — number unchanged" : "Running bill invoiced")}`);
+}
+
+/** Send a running challan back to the Challans page — undo the running challan +
+ *  items and un-deliver the dispatch (back to Invoice-in-process). */
+export async function sendRunningBackAction(formData: FormData) {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const id = txt(formData, "id");
+  if (!id) redirect("/invoicing/dropped");
+  const { data: c } = await admin.from("challans").select("inv_seq, source_dispatch_id").eq("id", id).maybeSingle();
+  const ch = c as { inv_seq: number | null; source_dispatch_id: string | null } | null;
+  if (ch?.inv_seq != null) redirect(`/invoicing/dropped?toast=${encodeURIComponent("Cancel the invoice first, then send back")}`);
+  await admin.from("challan_custom_items").delete().eq("challan_id", id);
+  await admin.from("challans").update({ dropped_at: null, dropped_by: null, running_challan_at: null, running_challan_by: null, custom_billed_at: null, custom_billed_by: null }).eq("id", id);
+  if (ch?.source_dispatch_id) {
+    await admin.from("dispatches").update({ delivered_at: null, delivered_by: null, delivery_note: null }).eq("id", ch.source_dispatch_id);
+  }
+  void logAudit(profile.id, "running_sent_back", "challan", id, {});
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/dispatch");
+  revalidatePath("/invoicing/dropped");
+  redirect(`/invoicing/challans?toast=${encodeURIComponent("Running challan sent back to Challans")}`);
+}
+
 /** Create the custom whole-piece bill for a dropped challan — free line items,
  *  SAME CH number — and release the production dispatch straight to Delivered. */
 export async function createCustomBillAction(formData: FormData) {

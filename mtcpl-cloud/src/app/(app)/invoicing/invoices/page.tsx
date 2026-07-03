@@ -158,7 +158,7 @@ export default async function InvoicingListPage() {
           date: r.challan_date, customer: r.temple ?? "—", total: t.grand,
           href: `/invoicing/challan/${r.id}/custom/print`, external: true,
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
-          editHref: `/invoicing/dropped?edit=${r.id}`, cancelKind: "running", cancelId: r.id,
+          editHref: `/invoicing/running/${r.id}/invoice`, cancelKind: "running", cancelId: r.id,
           sourceType: "running", createdBy: nameOf(r.custom_billed_by),
         });
       }

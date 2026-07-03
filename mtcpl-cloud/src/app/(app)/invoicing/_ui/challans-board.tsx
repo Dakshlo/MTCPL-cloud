@@ -124,20 +124,12 @@ export function ChallansBoard({ groups, total, droppedCount, canArchive = false 
   function confirmSend() {
     if (!pendingDrop) return;
     const { id, target } = pendingDrop;
+    // Stay-on-Challans (Daksh Jul 2026): the challan is NOT flagged on drop — we
+    // just OPEN the full-screen setup. The Convert button there sets the flag, so
+    // backing out leaves the challan right here on the board.
     setSending(true);
-    if (target === "bulk") {
-      // Stay-on-Challans (Daksh Jul 2026): the challan is NOT flagged sent-to-bulk
-      // on drop — we just OPEN the full-screen work-order-challan setup. The
-      // "Convert to work order challan" button there sets the flag, so backing out
-      // leaves the challan right here on the board.
-      setPendingDrop(null);
-      startNav(() => router.push(`/invoicing/bulk/prepare/${id}`));
-      return;
-    }
-    // Running bill — current flow (dropped_at set now; two-step running-challan
-    // rework is the next build).
-    if (dropIdRef.current) dropIdRef.current.value = id;
-    dropFormRef.current?.requestSubmit();
+    setPendingDrop(null);
+    startNav(() => router.push(target === "drop" ? `/invoicing/running/prepare/${id}` : `/invoicing/bulk/prepare/${id}`));
   }
 
   return (
