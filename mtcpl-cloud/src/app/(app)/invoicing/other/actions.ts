@@ -28,9 +28,10 @@ function refresh(id?: string) {
   if (id) revalidatePath(`/invoicing/other/${id}/print`);
 }
 
-type ItemIn = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null };
+type ItemIn = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
 
-/** Parse the JSON line-item array; drop wholly-empty rows; recompute amount. */
+/** Parse the JSON line-item array; drop wholly-empty rows; recompute amount.
+ *  Carries the table/head grouping (mig 183). */
 function parseItems(fd: FormData): ItemIn[] {
   let raw: unknown = [];
   try { raw = JSON.parse(txt(fd, "items") || "[]"); } catch { raw = []; }
@@ -49,6 +50,8 @@ function parseItems(fd: FormData): ItemIn[] {
       quantity: qty || null,
       rate: rate || null,
       amount: amount || null,
+      section_index: Number(it?.section_index) || 0,
+      section_head: String(it?.section_head ?? "").trim() || null,
     });
   }
   return out;
@@ -67,9 +70,10 @@ function readGst(fd: FormData) {
 
 async function writeItems(admin: ReturnType<typeof createAdminSupabaseClient>, challanId: string, items: ItemIn[]) {
   if (items.length === 0) return;
-  await admin.from("other_challan_items").insert(
-    items.map((it, i) => ({ other_challan_id: challanId, position: i, ...it })),
-  );
+  const rows = items.map((it, i) => ({ other_challan_id: challanId, position: i, ...it }));
+  const { error } = await admin.from("other_challan_items").insert(rows);
+  // Fall back without the section cols if mig 183 isn't applied yet.
+  if (error) await admin.from("other_challan_items").insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
 }
 
 /** Create a new "other" challan (CH-<fy>-<n>, shared series) with line items. */
