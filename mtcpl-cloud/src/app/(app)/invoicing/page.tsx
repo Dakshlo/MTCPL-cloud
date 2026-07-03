@@ -35,6 +35,7 @@ type ChallanRow = {
   source_dispatch_id: string | null;
   inv_fy: string | null;
   inv_seq: number | null;
+  custom_billed_at: string | null;
   invoice_parties: { name: string } | { name: string }[] | null;
 };
 
@@ -53,7 +54,7 @@ export default async function InvoicingDashboardPage() {
   for (let off = 0; off < 100_000; off += 1000) {
     const { data, error } = await supabase
       .from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, source_dispatch_id, inv_fy, inv_seq, invoice_parties(name)")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, source_dispatch_id, inv_fy, inv_seq, custom_billed_at, invoice_parties(name)")
       // Archived (test/cleanup) challans are hidden here — they only surface in the
       // developer-only Archived section on the Challans page (mig 181).
       .is("archived_at", null)
@@ -118,15 +119,20 @@ export default async function InvoicingDashboardPage() {
 
   const byTemple = new Map<string, DashCard[]>();
   for (const c of challans) {
+    // A RUNNING BILL is custom_billed + inv_seq — it never gets priced_at, so
+    // challanStatus() would wrongly call it "open". Treat it as invoiced.
+    const isRunningInvoice = !!c.custom_billed_at && c.inv_seq != null;
     let status: DashStatus;
     if (onBulkInvoice.has(c.id)) status = "bulk_invoiced";
     else if (inBulk.has(c.id)) status = "in_bulk";
+    else if (isRunningInvoice) status = "invoiced";
     else {
       const s = challanStatus(c);
       status = s === "converted" ? "invoiced" : (s as DashStatus);
     }
     const href =
-      status === "invoiced" ? `/invoicing/challan/${c.id}/print`
+      isRunningInvoice ? `/invoicing/challan/${c.id}/custom/print`
+      : status === "invoiced" ? `/invoicing/challan/${c.id}/print`
       : status === "in_bulk" || status === "bulk_invoiced" ? "/invoicing/bulk"
       : `/invoicing/challans/${c.id}`;
 
