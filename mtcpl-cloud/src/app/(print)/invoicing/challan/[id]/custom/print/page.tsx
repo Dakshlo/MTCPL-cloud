@@ -41,6 +41,8 @@ function Party({ label, name, p, fallback }: { label: string; name: string | nul
 }
 function fmt(n: number, dp = 2): string { return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp }); }
 
+export const dynamic = "force-dynamic";
+
 export default async function CustomBillPrintPage({ params }: { params: Params }) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/");

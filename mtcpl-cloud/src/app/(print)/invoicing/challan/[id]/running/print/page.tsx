@@ -38,6 +38,8 @@ function Party({ label, name, p, fallback }: { label: string; name: string | nul
   );
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function RunningChallanPrintPage({ params }: { params: Params }) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/");

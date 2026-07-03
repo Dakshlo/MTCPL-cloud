@@ -92,6 +92,10 @@ function fmt(n: number, dp = 2): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+// Print pages must never be served stale — an invoice edit has to show up
+// immediately (Daksh Jul 2026: "edit didn't apply on the invoice").
+export const dynamic = "force-dynamic";
+
 export default async function InvoicePrintPage({ params }: { params: Params }) {
   const { profile } = await requireAuth();
   if (!canUseInvoicing(profile)) redirect("/");
