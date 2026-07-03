@@ -186,6 +186,13 @@ export function ReviewForm({
               </tr>
             </thead>
             <tbody>{g.items.map(ItemRow)}</tbody>
+            <tfoot>
+              <tr style={{ background: "var(--bg)", fontWeight: 800 }}>
+                <td colSpan={8} style={{ ...cell, textAlign: "right" }}>Total</td>
+                <td style={{ ...numCell, fontWeight: 800 }}>{g.items.reduce((a, it) => a + it.qty, 0)}</td>
+                <td style={{ ...numCell, fontWeight: 800 }}>{fmt(meas)} {g.unit}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -339,7 +346,7 @@ export function ReviewForm({
           ship={ship}
           challanCode={challanCode}
           invoiceNo={`${invPrefix}${initNum ? initNum.padStart(2, "0") : autoNum}`}
-          groups={groups.map((g) => ({ key: g.key, stone: g.stone, unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0 }))}
+          groups={groups.map((g) => ({ key: g.key, stone: g.stone, unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0, items: g.items.map((it) => ({ codes: it.codes, label: it.label, description: it.description, section: it.component_section, element: it.component_element, l: it.length_ft, w: it.width_ft, h: it.thickness_ft, qty: it.qty, meas: it.measureQty })) }))}
           totals={totals}
           mode={mode}
           igst={Number(igst) || 0}
@@ -360,7 +367,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   ship: { name: string; address: string | null } | null;
   challanCode: string;
   invoiceNo: string;
-  groups: Array<{ key: string; stone: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number }>;
+  groups: Array<{ key: string; stone: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number; items: Array<{ codes: string | null; label: string | null; description: string | null; section: string | null; element: string | null; l: number | null; w: number | null; h: number | null; qty: number; meas: number }> }>;
   totals: { subtotal: number; igstAmt: number; cgstAmt: number; sgstAmt: number; grand: number };
   mode: GstMode; igst: number; cgst: number; sgst: number;
   onClose: () => void;
@@ -406,22 +413,45 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
             </div>
           </div>
           {challanCode && <div style={{ fontSize: 10, color: "#0f2540", fontWeight: 800, background: "#eef5fd", border: "1px solid #c7ddf6", borderRadius: 6, padding: "5px 9px", marginBottom: 6 }}>Against delivery challan: ({challanCode})</div>}
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>
-              <th style={ph}>#</th><th style={{ ...ph, textAlign: "left" }}>Stone</th><th style={ph}>Unit</th><th style={{ ...ph, textAlign: "right" }}>Qty</th><th style={{ ...ph, textAlign: "right" }}>Measure</th><th style={{ ...ph, textAlign: "right" }}>Rate</th><th style={{ ...ph, textAlign: "right" }}>Amount</th>
-            </tr></thead>
-            <tbody>
-              {groups.map((gr, i) => (
-                <tr key={gr.key}>
-                  <td style={pcell}>{i + 1}</td><td style={pcell}>{gr.stone}</td><td style={pcell}>{gr.unit.toUpperCase()}</td>
-                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{gr.qty}</td>
-                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(gr.meas)}</td>
-                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(gr.rate)}</td>
-                  <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{rupee(gr.rate * gr.meas)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* Full per-item detail (codes, dims) grouped by stone — a faithful
+              preview of the tax invoice, so nothing looks different later. */}
+          {groups.map((gr) => (
+            <div key={gr.key} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#0f2540", background: gr.unit === "cft" ? "#eef5fd" : "#fff5e6", border: "1px solid #d3dae3", borderBottom: "none", borderRadius: "5px 5px 0 0", padding: "4px 9px", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <span>{gr.stone} · {gr.unit.toUpperCase()}</span>
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>Rate {fmt(gr.rate)}/{gr.unit} · {rupee(gr.rate * gr.meas)}</span>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr>
+                  <th style={ph}>#</th><th style={{ ...ph, textAlign: "left" }}>Code(s)</th><th style={{ ...ph, textAlign: "left" }}>Label</th><th style={{ ...ph, textAlign: "left" }}>Description</th>
+                  <th style={{ ...ph, textAlign: "right" }}>L</th><th style={{ ...ph, textAlign: "right" }}>W</th><th style={{ ...ph, textAlign: "right" }}>H</th>
+                  <th style={{ ...ph, textAlign: "right" }}>Qty</th><th style={{ ...ph, textAlign: "right" }}>{gr.unit.toUpperCase()}</th><th style={{ ...ph, textAlign: "right" }}>Amount</th>
+                </tr></thead>
+                <tbody>
+                  {gr.items.map((it, i) => (
+                    <tr key={i}>
+                      <td style={pcell}>{i + 1}</td>
+                      <td style={{ ...pcell, fontFamily: "ui-monospace, monospace" }}>{dash(it.codes)}</td>
+                      <td style={pcell}>{dash(it.label)}</td>
+                      <td style={pcell}>{dash(it.description)}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{it.l ?? "-"}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{it.w ?? "-"}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{it.h ?? "-"}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{it.qty}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(it.meas)}</td>
+                      <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{rupee(gr.rate * it.meas)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f3f6fa", fontWeight: 800 }}>
+                    <td colSpan={7} style={{ ...pcell, textAlign: "right" }}>Total</td>
+                    <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{gr.qty}</td>
+                    <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{fmt(gr.meas)}</td>
+                    <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{rupee(gr.rate * gr.meas)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ))}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, marginTop: 10 }}>
             <div style={{ flex: "1 1 auto", maxWidth: "56%" }}>
               <div style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", color: "#0f2540", marginBottom: 3 }}>Terms &amp; Conditions</div>

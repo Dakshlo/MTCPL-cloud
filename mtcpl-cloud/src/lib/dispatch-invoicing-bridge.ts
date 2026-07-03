@@ -68,19 +68,27 @@ export async function createInvoicingChallanFromDispatch(
     addlOv.set(l.slab_requirement_id, l.additional_override);
   }
 
-  const inputs: DispatchSlabInput[] = ((slabs ?? []) as Array<Record<string, unknown>>).map((s) => ({
-    id: s.id as string,
-    label: (s.label as string | null) ?? null,
-    description: descOv.get(s.id as string) ?? ((s.description as string | null) ?? null),
-    additional_description: addlOv.get(s.id as string) ?? ((s.additional_description as string | null) ?? null),
-    component_section: (s.component_section as string | null) ?? null,
-    component_element: (s.component_element as string | null) ?? null,
-    length_ft: Number(s.length_ft) || 0,
-    width_ft: Number(s.width_ft) || 0,
-    thickness_ft: Number(s.thickness_ft) || 0,
-    weight_tonnes: weightBy.get(s.id as string) ?? null,
-    measure_unit: unitBy.get(s.id as string) ?? "cft",
-  }));
+  // CRITICAL (Daksh Jul 2026) — sort slabs by the SAME dispatch order the delivery
+  // challan uses (slabIds = dispatch_logs order) BEFORE grouping. `.in()` returns
+  // rows in arbitrary DB order, so without this the snapshot's row order (and the
+  // resulting tax invoice) diverged from the challan — same items, different sr
+  // numbers. Sorting here makes challan_items an exact replica of the challan.
+  const order = new Map(slabIds.map((sid, i) => [sid, i]));
+  const inputs: DispatchSlabInput[] = ((slabs ?? []) as Array<Record<string, unknown>>)
+    .map((s) => ({
+      id: s.id as string,
+      label: (s.label as string | null) ?? null,
+      description: descOv.get(s.id as string) ?? ((s.description as string | null) ?? null),
+      additional_description: addlOv.get(s.id as string) ?? ((s.additional_description as string | null) ?? null),
+      component_section: (s.component_section as string | null) ?? null,
+      component_element: (s.component_element as string | null) ?? null,
+      length_ft: Number(s.length_ft) || 0,
+      width_ft: Number(s.width_ft) || 0,
+      thickness_ft: Number(s.thickness_ft) || 0,
+      weight_tonnes: weightBy.get(s.id as string) ?? null,
+      measure_unit: unitBy.get(s.id as string) ?? "cft",
+    }))
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   const groups = groupDispatchSlabs(inputs);
   if (groups.length === 0) return "empty";
 
