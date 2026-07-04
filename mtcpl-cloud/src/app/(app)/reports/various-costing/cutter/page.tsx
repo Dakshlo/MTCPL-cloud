@@ -20,6 +20,7 @@ import {
   type CutterPeriodKind,
 } from "@/lib/cutter-cost-report";
 import { CftPeekTile } from "./cft-peek-tile";
+import { CostTrend } from "../_ui/cost-trend";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -319,6 +320,9 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
           />
         )}
       </div>
+
+      {/* ── Cost-per-CFT trend (daily / weekly / monthly) ───── */}
+      <CostTrend plant="cutter" />
 
       {/* ── Expense breakdown + book-value snapshot side by side ── */}
       <div

@@ -33,6 +33,7 @@ import {
   type CncPeriodKind,
 } from "@/lib/cnc-various-cost-report";
 import { OutputPeekCard } from "./output-peek-card";
+import { CostTrend } from "../_ui/cost-trend";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -317,6 +318,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           />
         )}
       </div>
+
+      {/* ── Cost-per-unit trend (daily / weekly / monthly) ──── */}
+      <CostTrend plant="cnc" />
 
       {/* ── Per-vendor breakdown ────────────────────────────── */}
       <Panel title="Per-vendor breakdown">
