@@ -7,6 +7,7 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
+import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -23,6 +24,10 @@ export type InvoiceSummaryRow = {
   sft: number;
   nos: number;
   href: string;
+  /** The invoice's source CHALLAN — code + a link to open that challan doc
+   *  (Daksh: from an invoice you must be able to reach its challan). */
+  challanCode: string | null;
+  challanHref: string | null;
 };
 
 // ── Challans tab (Daksh, Jul 2026) ─────────────────────────────────
@@ -99,13 +104,17 @@ async function itemsBy(
 
 export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]> {
   const out: InvoiceSummaryRow[] = [];
+  // Accountants know a temple by its BILLING name (Daksh) — same resolution as
+  // the ALL board, so all three tabs + exports read the same party names.
+  const billNames = await fetchTempleBillNames(admin);
+  const partyOf = (temple: string | null) => displayNameFor(billNames, temple) || "—";
 
   // 1 — Temple PURCHASE invoices: priced + owner-approved challans (not running,
   // not archived/cancelled/legacy-converted). Items are challan_items (cft/sft).
   {
-    type Row = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; custom_billed_at: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+    type Row = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; source_dispatch_id: string | null; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; custom_billed_at: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
     const rows = await pageAll<Row>((from, to) => admin.from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, invoice_no_override, custom_billed_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, source_dispatch_id, inv_fy, inv_seq, invoice_no_override, custom_billed_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
       .not("priced_at", "is", null).not("owner_approved_at", "is", null)
       .is("cancelled_at", null).is("converted_invoice_id", null).is("archived_at", null)
       .order("challan_date", { ascending: false }).range(from, to));
@@ -114,7 +123,15 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
     for (const r of purchase) {
       const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
       const t = computeInvoiceTotals(it.amounts, gstOf(r));
-      out.push({ id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || invoiceCodeFromDoc(r.doc_fy, r.doc_seq) || r.challan_number), party: r.temple ?? "—", source: "purchase", date: r.challan_date, amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos, href: `/invoicing/challan/${r.id}/print` });
+      out.push({
+        id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || invoiceCodeFromDoc(r.doc_fy, r.doc_seq) || r.challan_number),
+        party: partyOf(r.temple), source: "purchase", date: r.challan_date,
+        amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos,
+        href: `/invoicing/challan/${r.id}/print`,
+        // The source delivery challan — the dispatch print IS that document.
+        challanCode: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number,
+        challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : `/invoicing/challans/${r.id}`,
+      });
     }
   }
 
@@ -126,10 +143,30 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
       .not("owner_approved_at", "is", null).is("cancelled_at", null).order("invoice_date", { ascending: false });
     const rows = (data ?? []) as Row[];
     const items = await itemsBy(admin, "bulk_invoice_items", "bulk_invoice_id", rows.map((r) => r.id), "bulk_invoice_id, amount, rate, quantity, unit", "unit", "quantity");
+    // How many challans each work-order invoice covers (best-effort).
+    const chCount = new Map<string, number>();
+    {
+      const ids = rows.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += 300) {
+        const chunk = ids.slice(i, i + 300);
+        if (!chunk.length) break;
+        const { data: bc, error } = await admin.from("bulk_invoice_challans").select("bulk_invoice_id").in("bulk_invoice_id", chunk);
+        if (error) break;
+        for (const b of (bc ?? []) as Array<{ bulk_invoice_id: string }>) chCount.set(b.bulk_invoice_id, (chCount.get(b.bulk_invoice_id) ?? 0) + 1);
+      }
+    }
     for (const r of rows) {
       const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
       const t = computeInvoiceTotals(it.amounts, gstOf(r));
-      out.push({ id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${r.id.slice(0, 6).toUpperCase()}`), party: r.temple ?? "—", source: "work_order", date: r.invoice_date, amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos, href: `/invoicing/bulk/${r.id}/print` });
+      const n = chCount.get(r.id) ?? 0;
+      out.push({
+        id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${r.id.slice(0, 6).toUpperCase()}`),
+        party: partyOf(r.temple), source: "work_order", date: r.invoice_date,
+        amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos,
+        href: `/invoicing/bulk/${r.id}/print`,
+        challanCode: n > 0 ? `${n} challan${n === 1 ? "" : "s"}` : null,
+        challanHref: n > 0 ? "/invoicing/bulk" : null,
+      });
     }
   }
 
@@ -144,7 +181,14 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
     for (const r of rows) {
       const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
       const t = computeInvoiceTotals(it.amounts, gstOf(r));
-      out.push({ id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || r.challan_number), party: r.temple ?? "—", source: "running", date: r.challan_date, amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos, href: `/invoicing/challan/${r.id}/custom/print` });
+      out.push({
+        id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || r.challan_number),
+        party: partyOf(r.temple), source: "running", date: r.challan_date,
+        amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos,
+        href: `/invoicing/challan/${r.id}/custom/print`,
+        challanCode: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number,
+        challanHref: `/invoicing/challan/${r.id}/running/print`,
+      });
     }
   }
 
@@ -152,7 +196,7 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
   {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await admin.from("other_challans")
-      .select("id, challan_date, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name)")
+      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name)")
       .not("converted_at", "is", null).is("cancelled_at", null).order("converted_at", { ascending: false });
     if (!error) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,7 +206,14 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
         const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
         const t = computeInvoiceTotals(it.amounts, gstOf(r));
         const party = Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name;
-        out.push({ id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`), party: party ?? "—", source: "other", date: r.challan_date, amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos, href: `/invoicing/other/${r.id}/print` });
+        out.push({
+          id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`),
+          party: party ?? "—", source: "other", date: r.challan_date,
+          amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos,
+          href: `/invoicing/other/${r.id}/print`,
+          challanCode: challanCode(r.doc_fy, r.doc_seq),
+          challanHref: `/invoicing/other/${r.id}/print`,
+        });
       }
     }
   }
@@ -173,6 +224,9 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
 /** Every challan document (temple + Other Sales), with stage + qty + value. */
 export async function gatherChallans(admin: Admin): Promise<ChallanSummaryRow[]> {
   const out: ChallanSummaryRow[] = [];
+  // Billing names, same as gatherInvoiced — parties read identically everywhere.
+  const billNames = await fetchTempleBillNames(admin);
+  const partyOf = (temple: string | null) => displayNameFor(billNames, temple) || "—";
 
   // Bulk membership + the bulk invoice's INV code (best-effort — mig 173).
   const inBulk = new Set<string>();
@@ -246,7 +300,7 @@ export async function gatherChallans(admin: Admin): Promise<ChallanSummaryRow[]>
         id: r.id,
         code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number,
         invCode: invCode || null,
-        party: r.temple ?? "—",
+        party: partyOf(r.temple),
         status, date: r.challan_date,
         amount: t.grand, taxed: t.grand - t.subtotal,
         cft: it.cft, sft: it.sft, nos: it.nos, href,

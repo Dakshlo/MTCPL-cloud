@@ -192,24 +192,24 @@ export async function GET(req: NextRequest) {
 
   const isPending = (r: ChallanSummaryRow) => r.status !== "invoiced" && r.status !== "running";
 
-  // Shared column sets.
+  // Shared column sets. Challans carry NO price (Daksh) — quantities only;
+  // money lives on the invoice sheets.
   const CH_COLS: Col[] = [
-    { header: "#", width: 5, align: "right" }, { header: "Challan no", width: 14 }, { header: "Invoice no", width: 14 },
+    { header: "#", width: 5, align: "right" }, { header: "Challan no", width: 14 },
     { header: "Party", width: 30 }, { header: "Status", width: 13 }, { header: "Date", width: 11 },
-    { header: "CFT", width: 10, align: "right", numFmt: QTY }, { header: "SFT", width: 10, align: "right", numFmt: QTY }, { header: "NOS", width: 8, align: "right", numFmt: QTY },
-    { header: "Taxable ₹", width: 14, align: "right", numFmt: MONEY }, { header: "GST ₹", width: 12, align: "right", numFmt: MONEY }, { header: "Total ₹", width: 15, align: "right", numFmt: MONEY },
+    { header: "CFT", width: 11, align: "right", numFmt: QTY }, { header: "SFT", width: 11, align: "right", numFmt: QTY }, { header: "NOS", width: 9, align: "right", numFmt: QTY },
   ];
   const INV_COLS: Col[] = [
-    { header: "#", width: 5, align: "right" }, { header: "Invoice no", width: 15 }, { header: "Party", width: 30 },
+    { header: "#", width: 5, align: "right" }, { header: "Invoice no", width: 15 }, { header: "Challan", width: 13 }, { header: "Party", width: 30 },
     { header: "Type", width: 13 }, { header: "Date", width: 11 },
     { header: "CFT", width: 10, align: "right", numFmt: QTY }, { header: "SFT", width: 10, align: "right", numFmt: QTY }, { header: "NOS", width: 8, align: "right", numFmt: QTY },
     { header: "Taxable ₹", width: 14, align: "right", numFmt: MONEY }, { header: "GST ₹", width: 12, align: "right", numFmt: MONEY }, { header: "Total ₹", width: 15, align: "right", numFmt: MONEY },
   ];
 
-  const chRow = (r: ChallanSummaryRow, i: number): Cell[] => [i + 1, r.code, r.invCode ?? "", clean(r.party), STATUS_LABEL[r.status], r.date, round2(r.cft), round2(r.sft), round2(r.nos), round2(r.amount - r.taxed), round2(r.taxed), round2(r.amount)];
-  const invRow = (r: InvoiceSummaryRow, i: number): Cell[] => [i + 1, r.code, clean(r.party), SRC_LABEL[r.source], r.date, round2(r.cft), round2(r.sft), round2(r.nos), round2(r.amount - r.taxed), round2(r.taxed), round2(r.amount)];
-  const chTotal = (rows: ChallanSummaryRow[]): Cell[] => ["", "TOTAL", "", `${rows.length} challans`, "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos), sum(rows, (r) => r.amount - r.taxed), sum(rows, (r) => r.taxed), sum(rows, (r) => r.amount)];
-  const invTotal = (rows: InvoiceSummaryRow[]): Cell[] => ["", "TOTAL", `${rows.length} invoices`, "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos), sum(rows, (r) => r.amount - r.taxed), sum(rows, (r) => r.taxed), sum(rows, (r) => r.amount)];
+  const chRow = (r: ChallanSummaryRow, i: number): Cell[] => [i + 1, r.code, clean(r.party), STATUS_LABEL[r.status], r.date, round2(r.cft), round2(r.sft), round2(r.nos)];
+  const invRow = (r: InvoiceSummaryRow, i: number): Cell[] => [i + 1, r.code, r.challanCode ?? "", clean(r.party), SRC_LABEL[r.source], r.date, round2(r.cft), round2(r.sft), round2(r.nos), round2(r.amount - r.taxed), round2(r.taxed), round2(r.amount)];
+  const chTotal = (rows: ChallanSummaryRow[]): Cell[] => ["", "TOTAL", `${rows.length} challans`, "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos)];
+  const invTotal = (rows: InvoiceSummaryRow[]): Cell[] => ["", "TOTAL", "", `${rows.length} invoices`, "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos), sum(rows, (r) => r.amount - r.taxed), sum(rows, (r) => r.taxed), sum(rows, (r) => r.amount)];
 
   let fname: string;
 
@@ -220,25 +220,27 @@ export async function GET(req: NextRequest) {
     const inv = allInv.filter((r) => clean(r.party) === clean(party) && inRange(r.date));
     const pend = ch.filter(isPending);
 
-    // 1 — Combined (gold): every challan doc + every invoice, newest first.
+    // 1 — Combined (gold): pending challans + issued invoices, newest first.
+    // (Pending only, so a challan that became an invoice isn't counted twice;
+    // challan rows carry no money — their value lives on the invoice row.)
     {
       const COMB_COLS: Col[] = [
-        { header: "#", width: 5, align: "right" }, { header: "Kind", width: 10 }, { header: "Doc no", width: 14 }, { header: "Invoice no", width: 14 },
+        { header: "#", width: 5, align: "right" }, { header: "Kind", width: 10 }, { header: "Doc no", width: 14 }, { header: "Challan", width: 13 },
         { header: "Status / type", width: 14 }, { header: "Date", width: 11 },
         { header: "CFT", width: 10, align: "right", numFmt: QTY }, { header: "SFT", width: 10, align: "right", numFmt: QTY }, { header: "NOS", width: 8, align: "right", numFmt: QTY },
         { header: "Taxable ₹", width: 14, align: "right", numFmt: MONEY }, { header: "GST ₹", width: 12, align: "right", numFmt: MONEY }, { header: "Total ₹", width: 15, align: "right", numFmt: MONEY },
       ];
-      type Comb = { kind: string; code: string; invCode: string; badge: string; date: string; cft: number; sft: number; nos: number; taxable: number; taxed: number; amount: number };
+      type Comb = { kind: string; code: string; ref: string; badge: string; date: string; cft: number; sft: number; nos: number; taxable: Cell; taxed: Cell; amount: Cell; mTaxable: number; mTaxed: number; mAmount: number };
       const rows: Comb[] = [
-        ...ch.map((r) => ({ kind: "CHALLAN", code: r.code, invCode: r.invCode ?? "", badge: STATUS_LABEL[r.status], date: r.date, cft: r.cft, sft: r.sft, nos: r.nos, taxable: r.amount - r.taxed, taxed: r.taxed, amount: r.amount })),
-        ...inv.map((r) => ({ kind: "INVOICE", code: r.code, invCode: r.code, badge: SRC_LABEL[r.source], date: r.date, cft: r.cft, sft: r.sft, nos: r.nos, taxable: r.amount - r.taxed, taxed: r.taxed, amount: r.amount })),
+        ...pend.map((r) => ({ kind: "CHALLAN", code: r.code, ref: "", badge: STATUS_LABEL[r.status], date: r.date, cft: r.cft, sft: r.sft, nos: r.nos, taxable: "" as Cell, taxed: "" as Cell, amount: "" as Cell, mTaxable: 0, mTaxed: 0, mAmount: 0 })),
+        ...inv.map((r) => ({ kind: "INVOICE", code: r.code, ref: r.challanCode ?? "", badge: SRC_LABEL[r.source], date: r.date, cft: r.cft, sft: r.sft, nos: r.nos, taxable: round2(r.amount - r.taxed) as Cell, taxed: round2(r.taxed) as Cell, amount: round2(r.amount) as Cell, mTaxable: r.amount - r.taxed, mTaxed: r.taxed, mAmount: r.amount })),
       ].sort((a, b) => (a.date < b.date ? 1 : -1));
       const ws = wb.addWorksheet("Combined");
       addStyledTable(ws, {
-        title: `${clean(party)} — Combined (challans + invoices)`,
+        title: `${clean(party)} — Combined (pending challans + invoices)`,
         meta, accent: "FFB45309", zebra: "FFFBF3E6", cols: COMB_COLS,
-        rows: rows.map((r, i) => [i + 1, r.kind, r.code, r.invCode, r.badge, r.date, round2(r.cft), round2(r.sft), round2(r.nos), round2(r.taxable), round2(r.taxed), round2(r.amount)]),
-        totalRow: ["", "TOTAL", `${rows.length} docs`, "", "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos), sum(rows, (r) => r.taxable), sum(rows, (r) => r.taxed), sum(rows, (r) => r.amount)],
+        rows: rows.map((r, i) => [i + 1, r.kind, r.code, r.ref, r.badge, r.date, round2(r.cft), round2(r.sft), round2(r.nos), r.taxable, r.taxed, r.amount]),
+        totalRow: ["", "TOTAL", `${rows.length} docs`, "", "", "", sum(rows, (r) => r.cft), sum(rows, (r) => r.sft), sum(rows, (r) => r.nos), sum(rows, (r) => r.mTaxable), sum(rows, (r) => r.mTaxed), sum(rows, (r) => r.mAmount)],
       });
     }
     // 2 — Only challans (blue) — still-challan documents.
@@ -272,7 +274,7 @@ export async function GET(req: NextRequest) {
       rows: rows.map(chRow), totalRow: chTotal(rows),
     });
 
-    addPartySummary(wb, meta, rows.map((r) => ({ party: clean(r.party), cft: r.cft, sft: r.sft, nos: r.nos, taxed: r.taxed, amount: r.amount })), "challans");
+    addPartySummary(wb, meta, rows.map((r) => ({ party: clean(r.party), cft: r.cft, sft: r.sft, nos: r.nos, taxed: r.taxed, amount: r.amount })), "challans", false);
 
     // Items — temple challan items (custom fallback) + other-sales items.
     const itemsRows: Cell[][] = [];
@@ -307,7 +309,7 @@ export async function GET(req: NextRequest) {
     const ws = wb.addWorksheet("Invoices");
     addStyledTable(ws, { title: "Invoices — full detail", meta, accent: "FF15803D", zebra: "FFEFF7F1", cols: INV_COLS, rows: rows.map(invRow), totalRow: invTotal(rows) });
 
-    addPartySummary(wb, meta, rows.map((r) => ({ party: clean(r.party), cft: r.cft, sft: r.sft, nos: r.nos, taxed: r.taxed, amount: r.amount })), "invoices");
+    addPartySummary(wb, meta, rows.map((r) => ({ party: clean(r.party), cft: r.cft, sft: r.sft, nos: r.nos, taxed: r.taxed, amount: r.amount })), "invoices", true);
 
     const itemsRows: Cell[][] = [];
     const bySource: Record<InvoiceSource, { table: string; col: string }> = {
@@ -340,26 +342,29 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** Party summary sheet (purple) — per-party aggregates + grand total. */
-function addPartySummary(wb: ExcelJS.Workbook, meta: string, rows: Array<{ party: string; cft: number; sft: number; nos: number; taxed: number; amount: number }>, noun: string) {
+/** Party summary sheet (purple) — per-party aggregates + grand total.
+ *  Challans version drops the money columns (challans carry no price). */
+function addPartySummary(wb: ExcelJS.Workbook, meta: string, rows: Array<{ party: string; cft: number; sft: number; nos: number; taxed: number; amount: number }>, noun: string, includeMoney: boolean) {
   const agg = new Map<string, { count: number; cft: number; sft: number; nos: number; taxed: number; amount: number }>();
   for (const r of rows) {
     const a = agg.get(r.party) ?? { count: 0, cft: 0, sft: 0, nos: 0, taxed: 0, amount: 0 };
     a.count += 1; a.cft += r.cft; a.sft += r.sft; a.nos += r.nos; a.taxed += r.taxed; a.amount += r.amount;
     agg.set(r.party, a);
   }
-  const parties = [...agg.entries()].sort((a, b) => b[1].amount - a[1].amount || b[1].count - a[1].count);
+  const parties = [...agg.entries()].sort((a, b) => (includeMoney ? b[1].amount - a[1].amount || b[1].count - a[1].count : b[1].cft - a[1].cft || b[1].count - a[1].count));
   const COLS: Col[] = [
     { header: "Party", width: 32 }, { header: noun === "challans" ? "Challans" : "Invoices", width: 10, align: "right" },
     { header: "CFT", width: 11, align: "right", numFmt: QTY }, { header: "SFT", width: 11, align: "right", numFmt: QTY }, { header: "NOS", width: 8, align: "right", numFmt: QTY },
-    { header: "Taxable ₹", width: 14, align: "right", numFmt: MONEY }, { header: "GST ₹", width: 13, align: "right", numFmt: MONEY }, { header: "Total ₹", width: 15, align: "right", numFmt: MONEY },
+    ...(includeMoney ? ([
+      { header: "Taxable ₹", width: 14, align: "right", numFmt: MONEY }, { header: "GST ₹", width: 13, align: "right", numFmt: MONEY }, { header: "Total ₹", width: 15, align: "right", numFmt: MONEY },
+    ] as Col[]) : []),
   ];
   const g = [...agg.values()].reduce((s, a) => ({ count: s.count + a.count, cft: s.cft + a.cft, sft: s.sft + a.sft, nos: s.nos + a.nos, taxed: s.taxed + a.taxed, amount: s.amount + a.amount }), { count: 0, cft: 0, sft: 0, nos: 0, taxed: 0, amount: 0 });
   const ws = wb.addWorksheet("Party summary");
   addStyledTable(ws, {
     title: "Party summary",
     meta, accent: "FF6D28D9", zebra: "FFF4EFFB", cols: COLS,
-    rows: parties.map(([party, a]) => [party, a.count, round2(a.cft), round2(a.sft), round2(a.nos), round2(a.amount - a.taxed), round2(a.taxed), round2(a.amount)]),
-    totalRow: ["GRAND TOTAL", g.count, round2(g.cft), round2(g.sft), round2(g.nos), round2(g.amount - g.taxed), round2(g.taxed), round2(g.amount)],
+    rows: parties.map(([party, a]) => [party, a.count, round2(a.cft), round2(a.sft), round2(a.nos), ...(includeMoney ? [round2(a.amount - a.taxed), round2(a.taxed), round2(a.amount)] : [])]),
+    totalRow: ["GRAND TOTAL", g.count, round2(g.cft), round2(g.sft), round2(g.nos), ...(includeMoney ? [round2(g.amount - g.taxed), round2(g.taxed), round2(g.amount)] : [])],
   });
 }
