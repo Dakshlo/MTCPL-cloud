@@ -68,6 +68,8 @@ type RoyaltyEntry = {
   // pending_approval and only count toward the net balance once
   // owner approves from the Royalty Approval queue.
   status: "pending_approval" | "approved" | "rejected";
+  // Mig 175 — vendor signature (data-URL). NULL on legacy rows.
+  signature: string | null;
 };
 
 /** Format an entry's date for display on the per-vendor list.
@@ -995,6 +997,14 @@ function RoyaltyColumn({
   onCancel: (entryId: string, amount: number) => void;
   canCancel: boolean;
 }) {
+  // Tap a card's signature → open it big for a proper look (mig 175).
+  const [zoom, setZoom] = useState<string | null>(null);
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") setZoom(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
   // Mig 064 — live = anything not soft-cancelled. The cancelled
   // pile already excluded rejected entries (rejectRoyaltyEntryAction
   // sets both status='rejected' AND cancelled_at). Pending entries
@@ -1186,10 +1196,48 @@ function RoyaltyColumn({
                   by {e.createdByName}
                 </span>
               )}
+              {/* Mig 175 — vendor signature on this entry (if any). Tap to
+                  open it full-size. */}
+              {e.signature && (
+                <button
+                  type="button"
+                  onClick={() => setZoom(e.signature)}
+                  title="Tap to view the vendor's signature full-size"
+                  style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 0", border: "none", background: "transparent", cursor: "zoom-in", alignSelf: "flex-start" }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={e.signature} alt="Vendor signature" style={{ height: 32, maxWidth: 130, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 5, background: "#fff" }} />
+                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)" }}>✍️ sign</span>
+                </button>
+              )}
             </div>
           );
         })}
       </div>
+      {/* Full-size signature viewer — tap anywhere / ✕ / Esc closes. Portaled to
+          <body> so the modal's backdrop-filter ancestor doesn't clip it. */}
+      {zoom && createPortal(
+        <div
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+          style={{ position: "fixed", inset: 0, zIndex: 7000, background: "rgba(15,23,42,0.72)", backdropFilter: "blur(3px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 18, gap: 12 }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#fff", fontWeight: 800, fontSize: 14.5 }}>
+            <span>✍️ Vendor signature</span>
+            <button type="button" onClick={() => setZoom(null)} style={{ fontSize: 13, fontWeight: 800, padding: "7px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.12)", color: "#fff", cursor: "pointer" }}>✕ Close</button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={zoom}
+            alt="Vendor signature"
+            onClick={(ev) => ev.stopPropagation()}
+            style={{ maxWidth: "min(96vw, 900px)", maxHeight: "82vh", objectFit: "contain", background: "#fff", borderRadius: 12, boxShadow: "0 24px 70px rgba(0,0,0,0.5)", padding: 12 }}
+          />
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>Tap anywhere to close</div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

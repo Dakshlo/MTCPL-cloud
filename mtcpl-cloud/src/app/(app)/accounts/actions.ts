@@ -3550,6 +3550,9 @@ type RoyaltyEntryRow = {
   approved_by: string | null;
   rejected_at: string | null;
   rejected_by: string | null;
+  // Mig 175 — on-screen vendor signature (PNG/JPEG data-URL). NULL on
+  // legacy rows added before the signature capture existed.
+  signature_data?: string | null;
 };
 
 /** Mig 064 — extra passphrase the owner enters to view the Royalty
@@ -3579,6 +3582,8 @@ export async function getVendorRoyaltyEntriesAction(
         // render a "PENDING APPROVAL" / "REJECTED" badge and the
         // totals can exclude pending/rejected rows.
         status: "pending_approval" | "approved" | "rejected";
+        // Mig 175 — vendor signature (data-URL) so the card can show it.
+        signature: string | null;
       }>;
       netBalance: number;
       receivedTotal: number;
@@ -3671,6 +3676,7 @@ export async function getVendorRoyaltyEntriesAction(
       cancelledAt: r.cancelled_at,
       cancelReason: r.cancel_reason,
       status: r.status,
+      signature: r.signature_data ?? null,
     })),
     netBalance,
     receivedTotal,
