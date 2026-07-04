@@ -313,8 +313,10 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
 
-  const canDelete = me.isBoss || e.createdBy === me.id;
-  const canAct = me.isBoss || e.createdBy === me.id || e.participants.some((p) => p.id === me.id);
+  // Only the CREATOR (or owner/dev) may manage the entry: close / reopen /
+  // urgent toggle / edit included people / delete. Everyone included can REMARK.
+  const canManage = me.isBoss || e.createdBy === me.id;
+  const canRemark = canManage || e.participants.some((p) => p.id === me.id);
   const pending = busy !== null;
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [e.remarks.length]);
@@ -385,7 +387,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
             <span>✍️ From <strong style={{ color: "var(--text)" }}>{e.createdByName}</strong></span>
             <span>📅 Due <strong style={{ color: "var(--text)" }}>{fmtDate(e.dueDate)}</strong></span>
             <span>🕑 Started {fmtStamp(e.createdAt)}</span>
-            {canAct && !e.closedAt && (
+            {canManage && !e.closedAt && (
               <button
                 type="button"
                 disabled={pending}
@@ -402,7 +404,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
             {e.participants.map((p) => (
               <span key={p.id} style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 10px" }}>👤 {p.name}</span>
             ))}
-            {canAct && (
+            {canManage && (
               <button type="button" onClick={() => { setSel(new Set(e.participants.map((x) => x.id))); setEditPeople((v) => !v); }} style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer", padding: "3px 4px" }}>
                 {editPeople ? "Cancel" : "✎ Manage people"}
               </button>
@@ -479,7 +481,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
         {/* Composer + actions */}
         <div style={{ borderTop: "1px solid var(--border)", padding: "12px 18px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
           {error && <div style={{ fontSize: 12.5, fontWeight: 700, color: "#b91c1c" }}>⚠ {error}</div>}
-          {canAct ? (
+          {canRemark ? (
             <>
               {remarkFiles.length > 0 && (
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -506,7 +508,9 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
                 </button>
               </div>
 
-              {/* Reopen (left) · Close + Delete grouped (right) */}
+              {/* Reopen / Close / Delete — CREATOR or owner/dev only. Other
+                  included users can remark above, but can't manage the entry. */}
+              {canManage && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {e.closedAt && !confirm && (
                   <button type="button" disabled={pending} onClick={() => run("reopen", reopenDiaryEntryAction, {},
@@ -537,14 +541,18 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
                   ) : (
                     <>
                       {!e.closedAt && <button type="button" disabled={pending} onClick={() => setConfirm("close")} style={{ ...btn, background: "#16a34a", color: "#fff", border: "none" }}>✅ Close — work done</button>}
-                      {canDelete && <button type="button" disabled={pending} onClick={() => setConfirm("delete")} style={{ ...btn, color: "#b91c1c" }}>🗑 Delete</button>}
+                      <button type="button" disabled={pending} onClick={() => setConfirm("delete")} style={{ ...btn, color: "#b91c1c" }}>🗑 Delete</button>
                     </>
                   )}
                 </span>
               </div>
+              )}
+              {!canManage && !e.closedAt && (
+                <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Only {e.createdByName} (who started this) or the owner can mark urgent, edit included people, or close it.</div>
+              )}
             </>
           ) : (
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>You&apos;re viewing this entry — only included users can remark or close.</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>You&apos;re viewing this entry — you&apos;re not included, so you can&apos;t remark.</div>
           )}
         </div>
       </div>

@@ -4,9 +4,9 @@
  * Work Diary server actions (mig 185) — the digital "kaam ka register".
  *
  * Rules (Daksh + Naresh, Jul 2026):
- *   • every logged-in user can create entries and remark on entries they're in;
- *   • CLOSE / REOPEN — anyone included (or the creator, or owner/developer);
- *   • DELETE — only the creator (or owner/developer), never other includeds;
+ *   • every logged-in user can create entries and REMARK on entries they're in;
+ *   • MANAGE (close / reopen / urgent toggle / edit included people) and DELETE —
+ *     only the creator (or owner/developer); other includeds can only remark;
  *   • groups are shared quick-pick member sets; delete = creator/owner/dev.
  *
  * All actions return { ok } instead of redirecting so the drawer / modal can
@@ -93,7 +93,9 @@ export async function prepareDiaryUploadsAction(
   return { ok: true, uploads };
 }
 
-/** Load an entry + whether this profile may act on it (boss / creator / included). */
+/** Load an entry + this profile's rights on it.
+ *   • allowed = boss / creator / included  → may REMARK;
+ *   • manage  = boss / creator only        → may close, reopen, urgent, edit people. */
 async function loadEntryFor(admin: Admin, entryId: string, profileId: string, role: string) {
   const { data: e } = await admin
     .from("work_diary_entries")
@@ -101,7 +103,7 @@ async function loadEntryFor(admin: Admin, entryId: string, profileId: string, ro
     .eq("id", entryId)
     .maybeSingle();
   const entry = e as { id: string; activity: string; created_by: string; closed_at: string | null } | null;
-  if (!entry) return { entry: null, allowed: false, participant: false };
+  if (!entry) return { entry: null, allowed: false, manage: false, participant: false };
   const { data: p } = await admin
     .from("work_diary_participants")
     .select("profile_id")
@@ -109,9 +111,13 @@ async function loadEntryFor(admin: Admin, entryId: string, profileId: string, ro
     .eq("profile_id", profileId)
     .maybeSingle();
   const participant = !!p;
-  const allowed = isBoss(role) || entry.created_by === profileId || participant;
-  return { entry, allowed, participant };
+  const manage = isBoss(role) || entry.created_by === profileId;
+  const allowed = manage || participant;
+  return { entry, allowed, manage, participant };
 }
+
+// Shown when a non-creator, non-boss tries a manage action.
+const MANAGE_DENIED = "Only the person who started this activity (or the owner) can change or close it.";
 
 /** New register entry — activity + due date + at least one included user. */
 export async function createDiaryEntryAction(formData: FormData): Promise<ActionResult> {
@@ -163,7 +169,7 @@ export async function createDiaryEntryAction(formData: FormData): Promise<Action
   return { ok: true };
 }
 
-/** Add / remove included users on an existing entry — creator / included / boss.
+/** Add / remove included users on an existing entry — CREATOR or owner/dev only.
  *  Replaces the whole participant set (must keep at least one). */
 export async function updateDiaryParticipantsAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
@@ -173,9 +179,9 @@ export async function updateDiaryParticipantsAction(formData: FormData): Promise
   if (!entryId) return { ok: false, error: "Missing entry." };
   if (people.length === 0) return { ok: false, error: "Keep at least one person included." };
 
-  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  const { entry, manage } = await loadEntryFor(admin, entryId, profile.id, profile.role);
   if (!entry) return { ok: false, error: "Entry not found." };
-  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+  if (!manage) return { ok: false, error: MANAGE_DENIED };
 
   await admin.from("work_diary_participants").delete().eq("entry_id", entryId);
   const { error } = await admin.from("work_diary_participants").insert(people.map((pid) => ({ entry_id: entryId, profile_id: pid })));
@@ -208,16 +214,16 @@ export async function addDiaryRemarkAction(formData: FormData): Promise<ActionRe
   return { ok: true };
 }
 
-/** Close — anyone included (or creator / owner / developer). */
+/** Close — CREATOR or owner/developer only (other includeds can only remark). */
 export async function closeDiaryEntryAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   const admin = createAdminSupabaseClient();
   const entryId = txt(formData, "entry_id");
   if (!entryId) return { ok: false, error: "Missing entry." };
 
-  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  const { entry, manage } = await loadEntryFor(admin, entryId, profile.id, profile.role);
   if (!entry) return { ok: false, error: "Entry not found." };
-  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+  if (!manage) return { ok: false, error: MANAGE_DENIED };
   if (entry.closed_at) return { ok: false, error: "Already closed." };
 
   const { error } = await admin
@@ -235,16 +241,16 @@ export async function closeDiaryEntryAction(formData: FormData): Promise<ActionR
   return { ok: true };
 }
 
-/** Reopen a closed entry — same set of people as close. */
+/** Reopen a closed entry — CREATOR or owner/developer only (same as close). */
 export async function reopenDiaryEntryAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   const admin = createAdminSupabaseClient();
   const entryId = txt(formData, "entry_id");
   if (!entryId) return { ok: false, error: "Missing entry." };
 
-  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  const { entry, manage } = await loadEntryFor(admin, entryId, profile.id, profile.role);
   if (!entry) return { ok: false, error: "Entry not found." };
-  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+  if (!manage) return { ok: false, error: MANAGE_DENIED };
   if (!entry.closed_at) return { ok: false, error: "Entry is already open." };
 
   const { error } = await admin.from("work_diary_entries").update({ closed_at: null, closed_by: null }).eq("id", entryId);
@@ -257,8 +263,8 @@ export async function reopenDiaryEntryAction(formData: FormData): Promise<Action
   return { ok: true };
 }
 
-/** Mark / unmark an entry URGENT (mig 186) — creator / included / boss. Urgent
- *  entries glow, sort on top, and light up the topbar pill's moving border. */
+/** Mark / unmark an entry URGENT (mig 186) — CREATOR or owner/developer only.
+ *  Urgent entries glow, sort on top, and light the topbar pill's moving border. */
 export async function setDiaryUrgentAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   const admin = createAdminSupabaseClient();
@@ -266,9 +272,9 @@ export async function setDiaryUrgentAction(formData: FormData): Promise<ActionRe
   const urgent = txt(formData, "urgent") === "1";
   if (!entryId) return { ok: false, error: "Missing entry." };
 
-  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  const { entry, manage } = await loadEntryFor(admin, entryId, profile.id, profile.role);
   if (!entry) return { ok: false, error: "Entry not found." };
-  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+  if (!manage) return { ok: false, error: MANAGE_DENIED };
 
   const { error } = await admin.from("work_diary_entries").update({ urgent } as never).eq("id", entryId);
   if (error) return { ok: false, error: "Run migration 186 to enable the urgent flag." };
