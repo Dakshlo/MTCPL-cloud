@@ -111,6 +111,21 @@ export async function saveChallanPricingAction(formData: FormData) {
     }
   } catch { /* never block pricing on an HSN-write error */ }
 
+  // Custom per-stone table headings (mig 187, Daksh) — the LEFT of each stone
+  // band on the tax invoice. Stored per-invoice on the challan as a jsonb map
+  // { stone → TITLE } (forced CAPS). A label, not a priced value, so it saves
+  // straight away (even in edit mode) and is best-effort so a pre-mig-187 schema
+  // never blocks pricing.
+  try {
+    const raw = JSON.parse(txt(formData, "heads") || "{}") as Record<string, string>;
+    const heads: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const t = String(v ?? "").trim().toUpperCase().slice(0, 120);
+      if (t) heads[k] = t;
+    }
+    await admin.from("challans").update({ stone_heads: heads } as never).eq("id", challanId);
+  } catch { /* pre-mig-187 — heads simply not stored */ }
+
   // Amount = rate × billable measure (cft/sft qty) — falls back to the line
   // quantity for legacy challans that have no measure snapshot.
   const { data: items } = await admin

@@ -53,6 +53,7 @@ export function ReviewForm({
   transportCompanies = [],
   initTransport = { company: "", phone: "", lr: "", vehicle: "", driverName: "", driverPhone: "" },
   initHsn = {},
+  initHeads = {},
   hsnUseVendor = false,
 }: {
   challanId: string;
@@ -74,6 +75,8 @@ export function ReviewForm({
   initTransport?: { company: string; phone: string; lr: string; vehicle: string; driverName: string; driverPhone: string };
   /** Per-stone HSN pre-fill — mandatory to fill before sending (Daksh). */
   initHsn?: Record<string, string>;
+  /** Mig 187 — per-stone custom table headings (prints LEFT of the stone band). */
+  initHeads?: Record<string, string>;
   hsnUseVendor?: boolean;
 }) {
   // One rate per stone+unit group (key = `${stone}|${unit}`).
@@ -101,6 +104,10 @@ export function ReviewForm({
   // HSN per stone (Daksh) — one code per stone table, MANDATORY, pre-filled from
   // the stone master (edits save back to it on submit).
   const [hsn, setHsn] = useState<Record<string, string>>(() => ({ ...initHsn }));
+  // Mig 187 — custom per-stone table heading (prints LEFT of the stone band on
+  // the tax invoice). Typed in CAPS, keyed by stone (shared across its cft/sft
+  // sub-tables). Optional — falls back to the stone name on the invoice.
+  const [heads, setHeads] = useState<Record<string, string>>(() => ({ ...initHeads }));
   void hsnUseVendor;
   // Custom transport-company combobox (our own dropdown, not the browser datalist).
   const [company, setCompany] = useState(initTransport.company);
@@ -138,6 +145,8 @@ export function ReviewForm({
   // HSN is MANDATORY per stone table (Daksh).
   const allHsn = groups.length > 0 && groups.every((g) => (hsn[g.stone] ?? "").trim().length > 0);
   const hsnsJson = useMemo(() => JSON.stringify(hsn), [hsn]);
+  // Custom heading (mig 187) is OPTIONAL — never blocks submit.
+  const headsJson = useMemo(() => JSON.stringify(heads), [heads]);
   const canSubmit = allRated && allHsn;
 
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
@@ -167,35 +176,57 @@ export function ReviewForm({
     const sub = (Number(rates[g.key]) || 0) * meas;
     return (
       <div key={g.key} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ padding: "10px 14px", background: g.unit === "cft" ? "rgba(37,99,235,0.07)" : "rgba(217,119,6,0.09)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontWeight: 800, fontSize: 13 }}>
-            {g.stone} · {g.unit.toUpperCase()} <span style={{ fontWeight: 600, color: "var(--muted)" }}>· {g.items.length} row{g.items.length !== 1 ? "s" : ""} · {fmt(meas)} {g.unit}</span>
-          </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
-              HSN code
+        <div style={{ background: g.unit === "cft" ? "rgba(37,99,235,0.07)" : "rgba(217,119,6,0.09)", borderBottom: "1px solid var(--border)" }}>
+          {/* Row 1 — mirrors the printed stone band: HEADING (left, CAPS) · HSN
+              (centre, required) · STONE name (right). */}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", padding: "10px 14px 7px" }}>
+            <label style={{ flex: "1 1 220px", minWidth: 170, display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>Table heading · prints left</span>
+              <input
+                type="text"
+                value={heads[g.stone] ?? ""}
+                onChange={(e) => setHeads((p) => ({ ...p, [g.stone]: e.target.value.toUpperCase() }))}
+                placeholder="TYPE A HEADING…"
+                title="Custom heading for this stone table — prints on the LEFT of the invoice band"
+                style={{ width: "100%", textTransform: "uppercase", fontWeight: 800, fontSize: 14, letterSpacing: "0.02em", padding: "7px 10px", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: (hsn[g.stone] ?? "").trim() ? "var(--muted)" : "#dc2626" }}>HSN · required</span>
               <input
                 type="text"
                 value={hsn[g.stone] ?? ""}
                 onChange={(e) => setHsn((p) => ({ ...p, [g.stone]: e.target.value.replace(/[^0-9A-Za-z]/g, "") }))}
                 placeholder="required"
-                title="HSN code for this stone — prints on the tax invoice"
-                style={{ width: 110, textAlign: "center", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "6px 9px", borderRadius: 8, border: `1.5px solid ${(hsn[g.stone] ?? "").trim() ? "var(--border)" : "#dc2626"}`, background: "var(--bg)", color: "var(--text)" }}
+                title="HSN code for this stone — prints in the centre of the invoice band"
+                style={{ width: 122, textAlign: "center", fontFamily: "ui-monospace, monospace", fontSize: 13.5, padding: "7px 9px", borderRadius: 8, border: `1.5px solid ${(hsn[g.stone] ?? "").trim() ? "var(--border)" : "#dc2626"}`, background: "var(--bg)", color: "var(--text)" }}
               />
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
-              Rate ₹/{g.unit}
-              <input
-                type="text"
-                inputMode="decimal"
-                value={rates[g.key] ?? ""}
-                onChange={(e) => setRates((p) => ({ ...p, [g.key]: e.target.value.replace(/[^0-9.]/g, "") }))}
-                placeholder="0"
-                style={{ width: 110, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "6px 9px", borderRadius: 8, border: "1.5px solid var(--gold-dark)", background: "var(--bg)", color: "var(--text)" }}
-              />
-            </label>
-            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5, minWidth: 110, textAlign: "right" }}>{rupee(sub)}</span>
-          </span>
+            <div style={{ textAlign: "right", minWidth: 110, paddingBottom: 2 }}>
+              <span style={{ display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>Stone</span>
+              <span style={{ display: "block", fontWeight: 800, fontSize: 13.5 }}>{g.stone}</span>
+            </div>
+          </div>
+          {/* Row 2 — pricing: unit + counts (left) · Rate + subtotal (right). */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "0 14px 10px" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+              {g.unit.toUpperCase()} · {g.items.length} row{g.items.length !== 1 ? "s" : ""} · {fmt(meas)} {g.unit}
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700 }}>
+                Rate ₹/{g.unit}
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={rates[g.key] ?? ""}
+                  onChange={(e) => setRates((p) => ({ ...p, [g.key]: e.target.value.replace(/[^0-9.]/g, "") }))}
+                  placeholder="0"
+                  style={{ width: 110, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: "6px 9px", borderRadius: 8, border: "1.5px solid var(--gold-dark)", background: "var(--bg)", color: "var(--text)" }}
+                />
+              </label>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5, minWidth: 110, textAlign: "right" }}>{rupee(sub)}</span>
+            </span>
+          </div>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
@@ -229,6 +260,7 @@ export function ReviewForm({
       <input type="hidden" name="edit_mode" value={editMode ? "1" : ""} />
       <input type="hidden" name="rates" value={ratesJson} />
       <input type="hidden" name="hsns" value={hsnsJson} />
+      <input type="hidden" name="heads" value={headsJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
       <input type="hidden" name="igst_percent" value={igst} />
       <input type="hidden" name="cgst_percent" value={cgst} />
@@ -371,7 +403,7 @@ export function ReviewForm({
           ship={ship}
           challanCode={challanCode}
           invoiceNo={`${invPrefix}${initNum ? initNum.padStart(2, "0") : autoNum}`}
-          groups={groups.map((g) => ({ key: g.key, stone: g.stone, unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0, items: g.items.map((it) => ({ codes: it.codes, label: it.label, description: it.description, section: it.component_section, element: it.component_element, l: it.length_ft, w: it.width_ft, h: it.thickness_ft, qty: it.qty, meas: it.measureQty })) }))}
+          groups={groups.map((g) => ({ key: g.key, stone: g.stone, head: (heads[g.stone] ?? "").trim(), hsn: (hsn[g.stone] ?? "").trim(), unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0, items: g.items.map((it) => ({ codes: it.codes, label: it.label, description: it.description, section: it.component_section, element: it.component_element, l: it.length_ft, w: it.width_ft, h: it.thickness_ft, qty: it.qty, meas: it.measureQty })) }))}
           totals={totals}
           mode={mode}
           igst={Number(igst) || 0}
@@ -392,7 +424,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   ship: { name: string; address: string | null } | null;
   challanCode: string;
   invoiceNo: string;
-  groups: Array<{ key: string; stone: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number; items: Array<{ codes: string | null; label: string | null; description: string | null; section: string | null; element: string | null; l: number | null; w: number | null; h: number | null; qty: number; meas: number }> }>;
+  groups: Array<{ key: string; stone: string; head: string; hsn: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number; items: Array<{ codes: string | null; label: string | null; description: string | null; section: string | null; element: string | null; l: number | null; w: number | null; h: number | null; qty: number; meas: number }> }>;
   totals: { subtotal: number; igstAmt: number; cgstAmt: number; sgstAmt: number; grand: number };
   mode: GstMode; igst: number; cgst: number; sgst: number;
   onClose: () => void;
@@ -442,9 +474,15 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
               preview of the tax invoice, so nothing looks different later. */}
           {groups.map((gr) => (
             <div key={gr.key} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#0f2540", background: gr.unit === "cft" ? "#eef5fd" : "#fff5e6", border: "1px solid #d3dae3", borderBottom: "none", borderRadius: "5px 5px 0 0", padding: "4px 9px", display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <span>{gr.stone} · {gr.unit.toUpperCase()}</span>
-                <span style={{ fontFamily: "ui-monospace, monospace" }}>Rate {fmt(gr.rate)}/{gr.unit} · {rupee(gr.rate * gr.meas)}</span>
+              {/* 3-zone band: heading (left) · HSN (centre) · stone (right). */}
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#0f2540", background: gr.unit === "cft" ? "#eef5fd" : "#fff5e6", border: "1px solid #d3dae3", borderBottom: "none", borderRadius: "5px 5px 0 0", padding: "4px 9px", display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ flex: "1 1 0", textAlign: "left" }}>{gr.head || gr.stone}</span>
+                <span style={{ flex: "0 0 auto", textAlign: "center", fontFamily: "ui-monospace, monospace", color: gr.hsn ? "#555" : "#c00" }}>{gr.hsn ? `HSN ${gr.hsn}` : "HSN —"}</span>
+                <span style={{ flex: "1 1 0", textAlign: "right" }}>{gr.head ? gr.stone : ""}</span>
+              </div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#0f2540", background: gr.unit === "cft" ? "#eef5fd" : "#fff5e6", borderLeft: "1px solid #d3dae3", borderRight: "1px solid #d3dae3", padding: "0 9px 3px", display: "flex", justifyContent: "space-between", gap: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <span>{gr.unit === "cft" ? "CFT · volume billed" : "SFT · area billed"}</span>
+                <span style={{ fontFamily: "ui-monospace, monospace", letterSpacing: 0 }}>Rate {fmt(gr.rate)}/{gr.unit} · {rupee(gr.rate * gr.meas)}</span>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>

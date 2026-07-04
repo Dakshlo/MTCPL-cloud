@@ -211,6 +211,19 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     const v = (h.vendor ?? "").trim();
     return templeHsnUseVendor && v ? v : ((h.hsn ?? "").trim() || null);
   };
+  // Mig 187 — this invoice's custom per-stone table headings (LEFT of each band).
+  // Separate best-effort fetch (jsonb column) so a pre-migration schema still
+  // prints; pre-mig the band just falls back to the stone name.
+  const stoneHead = new Map<string, string>();
+  {
+    const { data: sh, error } = await (admin.from("challans") as unknown as {
+      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { stone_heads: Record<string, string> | null } | null; error: unknown }> } };
+    }).select("stone_heads").eq("id", id).maybeSingle();
+    if (!error && sh?.stone_heads && typeof sh.stone_heads === "object") {
+      for (const [k, v] of Object.entries(sh.stone_heads)) { const t = String(v ?? "").trim(); if (t) stoneHead.set(k, t); }
+    }
+  }
+  const headFor = (stone: string): string => stoneHead.get(stone) ?? "";
 
   const items = (itemRows ?? []) as Item[];
 
@@ -394,8 +407,16 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
         .doc-title { text-align: center; margin: 0 0 7px; }
         .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
         .stone-block { margin-top: 4px; }
-        .stone-title { font-size: 12.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
-        .grp-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; margin: 10px 0 3px; }
+        /* Stone band — 3 zones: custom heading (left) · HSN (centre) · stone (right). */
+        .stone-title { display: flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 800; color: #0f2540; background: #eef2f7; border-left: 3px solid #1e3a5f; padding: 5px 10px; margin: 12px 0 0; border-radius: 3px; break-after: avoid; }
+        .stone-title .st-head { flex: 1 1 0; text-align: left; }
+        .stone-title .st-hsn { flex: 0 0 auto; text-align: center; font-weight: 700; color: #555; font-size: 11px; font-family: ui-monospace, monospace; }
+        .stone-title .st-hsn b { color: #0f2540; }
+        .stone-title .st-stone { flex: 1 1 0; text-align: right; font-weight: 800; color: #0f2540; }
+        /* CFT/SFT line is JOINED to its table — a header cap directly on top, no
+           gap, same tint + borders as the table header row (Daksh). */
+        .grp-title { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f2540; background: #eef2f7; border: 1px solid #d3dae3; border-bottom: none; border-radius: 4px 4px 0 0; padding: 3px 9px; margin: 9px 0 0; break-after: avoid; }
+        .grp-title + table.t th { border-top: none; }
         table.t { width: 100%; border-collapse: collapse; font-size: 9.5px; }
         table.t th { background: #eef2f7; padding: 2px 4px; text-align: left; font-size: 8px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.02em; border: 1px solid #d3dae3; }
         table.t td { padding: 2.5px 4px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; word-break: break-word; }
@@ -504,13 +525,24 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No items on this invoice.</p>
         ) : (
           <>
-            {stoneGroups.map(([stone, rows]) => (
-              <div key={stone} className="stone-block">
-                <div className="stone-title">{stonePrintLabel(stone, stoneCatMap)}{hsnFor(stone) ? <span style={{ fontWeight: 600, color: "#555" }}> · HSN: {hsnFor(stone)}</span> : null}</div>
-                <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
-                <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
-              </div>
-            ))}
+            {stoneGroups.map(([stone, rows]) => {
+              // 3-zone band: custom heading (left) · HSN (centre) · stone (right).
+              // No heading typed → fall back to the stone name on the left.
+              const head = headFor(stone);
+              const label = stonePrintLabel(stone, stoneCatMap);
+              const hsn = hsnFor(stone);
+              return (
+                <div key={stone} className="stone-block">
+                  <div className="stone-title">
+                    <span className="st-head">{head || label}</span>
+                    <span className="st-hsn">{hsn ? <>HSN&nbsp;<b>{hsn}</b></> : ""}</span>
+                    <span className="st-stone">{head ? label : ""}</span>
+                  </div>
+                  <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
+                  <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
+                </div>
+              );
+            })}
             <div className="totbox">
               {/* Terms & conditions sit on the LEFT, opposite the totals (Daksh). */}
               <div className="terms">

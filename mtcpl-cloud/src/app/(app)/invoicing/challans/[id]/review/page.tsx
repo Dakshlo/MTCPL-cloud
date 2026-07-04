@@ -158,6 +158,18 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
       }
     }
   }
+  // Mig 187 — this invoice's custom per-stone table headings (jsonb map on the
+  // challan). Separate best-effort select cast to any so a pre-migration schema
+  // never 404s the review page; pre-mig the heading field simply starts blank.
+  const initHeads: Record<string, string> = {};
+  {
+    const { data: sh, error } = await (admin.from("challans") as unknown as {
+      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { stone_heads: Record<string, string> | null } | null; error: unknown }> } };
+    }).select("stone_heads").eq("id", id).maybeSingle();
+    if (!error && sh?.stone_heads && typeof sh.stone_heads === "object") {
+      for (const [k, v] of Object.entries(sh.stone_heads)) initHeads[k] = String(v ?? "");
+    }
+  }
   const priced = !!c.priced_at;
   const challanHasGst = c.gst_mode === "igst" || c.gst_mode === "cgst_sgst";
   const templeHasGst = templeGst.mode === "igst" || templeGst.mode === "cgst_sgst";
@@ -286,6 +298,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             transportCompanies={transportCompanies}
             initTransport={initTransport}
             initHsn={initHsn}
+            initHeads={initHeads}
             hsnUseVendor={hsnUseVendor}
           />
         </div>
