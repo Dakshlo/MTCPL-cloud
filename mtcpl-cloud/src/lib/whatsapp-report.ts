@@ -20,6 +20,8 @@ import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
 import { isMarble, cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
+import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
   buildLineages,
@@ -176,6 +178,9 @@ export type DailyReport = {
   } | null;
   /** Last 10 IST days of activity for the trend chart — counts per day. */
   trend: Array<{ label: string; short: string; blocks: number; cutting: number; carving: number }>;
+  /** Last-24 h challans raised + invoices issued (summary + attached detail).
+   *  null if it couldn't be built — never blocks the daily report. */
+  recent: { challans: RecentDoc[]; invoices: RecentDoc[] } | null;
 };
 
 // dims for a set of slab ids → map id → cft.
@@ -524,6 +529,149 @@ async function buildRecoveryByCategory(
   }
 }
 
+// ── Last-24 h challans & invoices (Daksh, Jul 2026) ─────────────────
+// The daily report now carries every challan RAISED and every invoice ISSUED
+// in the same 24 h window — a summary list PLUS one itemised detail block per
+// document, appended as pages in the same PDF (MSG91's template only carries
+// one document header, so a single combined PDF is the delivery path — no
+// chromium, no extra messages).
+
+export type RecentLine = { name: string; desc: string; unit: string; qty: number; rate: number; amount: number };
+export type RecentDoc = {
+  kind: "challan" | "invoice";
+  code: string; invCode: string | null; party: string; date: string;
+  priced: boolean; cft: number; sft: number; nos: number;
+  subtotal: number; taxed: number; total: number;
+  items: RecentLine[];
+};
+
+const gstOfRow = (r: { gst_mode?: string | null; igst_percent?: number | null; cgst_percent?: number | null; sgst_percent?: number | null }) => ({
+  mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode,
+  igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0,
+});
+const unitBucket = (u: string | null | undefined): "cft" | "sft" | "nos" => {
+  const s = (u ?? "").toLowerCase();
+  if (s.includes("cft") || s.includes("cubic")) return "cft";
+  if (s.includes("sft") || s.includes("sq")) return "sft";
+  return "nos";
+};
+
+/** Fetch + normalise line items for a set of parent ids from one item table. */
+async function fetchLines(
+  admin: AdminClient, table: string, parentCol: string, ids: string[],
+  unitCol: "unit" | "measure_unit", qtyCol: "quantity" | "measure_qty",
+): Promise<Map<string, RecentLine[]>> {
+  const m = new Map<string, RecentLine[]>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    if (!chunk.length) break;
+    const { data, error } = await admin.from(table).select("*").in(parentCol, chunk);
+    if (error) break;
+    for (const it of (data ?? []) as Array<Record<string, unknown>>) {
+      const pid = String(it[parentCol]);
+      const arr = m.get(pid) ?? [];
+      const q = Number(it[qtyCol]) || 0;
+      arr.push({
+        name: String(it.label ?? it.particulars ?? [it.component_section, it.component_element].filter(Boolean).join(" ") ?? "").trim(),
+        desc: String([it.description, it.additional_description].filter(Boolean).join(" - ") ?? "").trim(),
+        unit: String(it[unitCol] ?? it.unit ?? "").trim(),
+        qty: q,
+        rate: Number(it.rate) || 0,
+        amount: it.amount != null ? Number(it.amount) || 0 : q * (Number(it.rate) || 0),
+      });
+      m.set(pid, arr);
+    }
+  }
+  return m;
+}
+
+/** One doc's rolled-up qty buckets + totals from its lines. */
+function rollup(lines: RecentLine[], gst: ReturnType<typeof gstOfRow>): Pick<RecentDoc, "cft" | "sft" | "nos" | "subtotal" | "taxed" | "total" | "priced"> {
+  let cft = 0, sft = 0, nos = 0;
+  for (const l of lines) { const b = unitBucket(l.unit); if (b === "cft") cft += l.qty; else if (b === "sft") sft += l.qty; else nos += l.qty; }
+  const priced = lines.some((l) => l.amount > 0);
+  const t = computeInvoiceTotals(lines.map((l) => l.amount), gst);
+  return { cft, sft, nos, subtotal: t.subtotal, taxed: t.grand - t.subtotal, total: t.grand, priced };
+}
+
+/** Every challan raised + every invoice issued inside [startUTC, endUTC). */
+async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: string): Promise<{ challans: RecentDoc[]; invoices: RecentDoc[] }> {
+  const challans: RecentDoc[] = [];
+  const invoices: RecentDoc[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const win = (q: any, col: string): any => q.gte(col, startUTC).lt(col, endUTC);
+
+  type ChRow = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string | null; owner_approved_at: string | null; custom_billed_at: string | null; converted_invoice_id: string | null; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+  const CH_COLS = "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, owner_approved_at, custom_billed_at, converted_invoice_id, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent";
+  const chCode = (r: ChRow) => challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number;
+  const chInv = (r: ChRow) => r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || null;
+
+  // Line-item maps built lazily per id-set.
+  const chItems = async (ids: string[]) => fetchLines(admin, "challan_items", "challan_id", ids, "measure_unit", "measure_qty");
+  const chCustom = async (ids: string[]) => fetchLines(admin, "challan_custom_items", "challan_id", ids, "unit", "quantity");
+
+  // 1 — CHALLANS raised in the window (temple).
+  try {
+    const { data } = await win(admin.from("challans").select(CH_COLS).is("archived_at", null).is("cancelled_at", null).order("created_at", { ascending: false }) as never, "created_at") as { data: ChRow[] | null };
+    const rows = (data ?? []) as ChRow[];
+    const std = await chItems(rows.map((r) => r.id));
+    const cust = await chCustom(rows.filter((r) => !std.has(r.id)).map((r) => r.id));
+    for (const r of rows) {
+      const lines = std.get(r.id) ?? cust.get(r.id) ?? [];
+      challans.push({ kind: "challan", code: chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+    }
+  } catch { /* never block the report */ }
+
+  // 2 — INVOICES issued in the window: purchase (owner_approved_at) + running (custom_billed_at).
+  try {
+    const { data: appr } = await win(admin.from("challans").select(CH_COLS).is("cancelled_at", null).is("archived_at", null).is("custom_billed_at", null).not("owner_approved_at", "is", null).order("owner_approved_at", { ascending: false }) as never, "owner_approved_at") as { data: ChRow[] | null };
+    const { data: run } = await win(admin.from("challans").select(CH_COLS).is("cancelled_at", null).is("archived_at", null).not("custom_billed_at", "is", null).not("inv_seq", "is", null).order("custom_billed_at", { ascending: false }) as never, "custom_billed_at") as { data: ChRow[] | null };
+    const rows = [...((appr ?? []) as ChRow[]), ...((run ?? []) as ChRow[])];
+    const std = await chItems(rows.filter((r) => !r.custom_billed_at).map((r) => r.id));
+    const cust = await chCustom(rows.filter((r) => r.custom_billed_at).map((r) => r.id));
+    for (const r of rows) {
+      const lines = (r.custom_billed_at ? cust.get(r.id) : std.get(r.id)) ?? [];
+      invoices.push({ kind: "invoice", code: chInv(r) ?? chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+    }
+  } catch { /* skip */ }
+
+  // 3 — WORK-ORDER invoices approved in the window (bulk_invoices).
+  try {
+    type BRow = { id: string; temple: string | null; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+    const { data } = await win(admin.from("bulk_invoices").select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent").is("cancelled_at", null).not("owner_approved_at", "is", null).order("owner_approved_at", { ascending: false }) as never, "owner_approved_at") as { data: BRow[] | null };
+    const rows = (data ?? []) as BRow[];
+    const items = await fetchLines(admin, "bulk_invoice_items", "bulk_invoice_id", rows.map((r) => r.id), "unit", "quantity");
+    for (const r of rows) {
+      const lines = items.get(r.id) ?? [];
+      const code = r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${r.id.slice(0, 6).toUpperCase()}`;
+      invoices.push({ kind: "invoice", code, invCode: code, party: r.temple ?? "-", date: r.invoice_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+    }
+  } catch { /* skip */ }
+
+  // 4 — OTHER SALES: challans created + invoices converted in the window.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parse = (rows: any[]): { row: any; party: string }[] => rows.map((r) => ({ row: r, party: (Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name) ?? "Other Sales" }));
+    const OC = "id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name)";
+    const { data: raised } = await win(admin.from("other_challans").select(OC).is("cancelled_at", null).order("created_at", { ascending: false }) as never, "created_at") as { data: unknown[] | null };
+    const { data: conv } = await win(admin.from("other_challans").select(OC).is("cancelled_at", null).not("converted_at", "is", null).order("converted_at", { ascending: false }) as never, "converted_at") as { data: unknown[] | null };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all = [...parse((raised ?? []) as any[]).map((x) => ({ ...x, kind: "challan" as const })), ...parse((conv ?? []) as any[]).map((x) => ({ ...x, kind: "invoice" as const }))];
+    const items = await fetchLines(admin, "other_challan_items", "other_challan_id", all.map((x) => String(x.row.id)), "unit", "quantity");
+    for (const x of all) {
+      const r = x.row;
+      const lines = items.get(String(r.id)) ?? [];
+      const roll = rollup(lines, gstOfRow(r));
+      const code = x.kind === "invoice" ? (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`) : (challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`);
+      const doc: RecentDoc = { kind: x.kind, code, invCode: x.kind === "invoice" ? code : (r.converted_at ? invoiceCodeFromDoc(r.inv_fy, r.inv_seq) : null), party: x.party, date: String(r.challan_date), items: lines, ...roll };
+      (x.kind === "invoice" ? invoices : challans).push(doc);
+    }
+  } catch { /* skip */ }
+
+  const bySeq = (a: RecentDoc, b: RecentDoc) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  return { challans: challans.sort(bySeq), invoices: invoices.sort(bySeq) };
+}
+
 export async function buildDailyReportData(): Promise<DailyReport> {
   const admin = createAdminSupabaseClient();
   // Main = last 24 h (10 AM → 10 AM); prev = the 24 h before that.
@@ -599,6 +747,10 @@ export async function buildDailyReportData(): Promise<DailyReport> {
 
   const trend = await trendForDays(admin, 10);
 
+  // Last-24 h challans raised + invoices issued (same window as the report).
+  let recent: DailyReport["recent"] = null;
+  try { recent = await gatherRecentDocs(admin, t.startUTC, t.endUTC); } catch { recent = null; }
+
   return {
     label: t.label,
     prevLabel: p.label,
@@ -616,6 +768,7 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     cnc,
     cutter,
     trend,
+    recent,
   };
 }
 
@@ -699,7 +852,20 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     P.r(`Page ${pageNo} of ${pages}`, W - M, 22, 7.5, font, muted);
   };
 
-  const PAGES = 4;
+  // ASCII-only for the standard PDF font (Helvetica/WinAnsi can't encode
+  // Devanagari etc. — strip to printable Latin so a stray char never throws).
+  const asc = (s: string) => (s || "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim();
+
+  // Last-24 h challans/invoices append a summary page + itemised detail pages
+  // to the SAME PDF (MSG91 carries one document). Deterministic pagination:
+  // fixed slot per doc so the page count is known up front for the footer.
+  const recChallans = data.recent?.challans ?? [];
+  const recInvoices = data.recent?.invoices ?? [];
+  const RECENT_CAP = 40, DOCS_PER_PAGE = 5;
+  const detailDocs = [...recChallans, ...recInvoices].slice(0, RECENT_CAP);
+  const hasRecent = detailDocs.length > 0;
+  const detailPages = Math.ceil(detailDocs.length / DOCS_PER_PAGE);
+  const PAGES = 4 + (hasRecent ? 1 + detailPages : 0);
   const newPage = () => {
     const pg = pdf.addPage([W, H]);
     // Vertical slate gradient (banded — pdf-lib has no native gradients).
@@ -920,7 +1086,110 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     footer(P, 4, PAGES);
   }
 
+  // ── Pages 5+ — last-24 h challans & invoices (summary + copies) ──
+  if (hasRecent) {
+    const money = (d: RecentDoc) => (d.priced ? inr(d.total) : "not priced");
+    const qline = (d: { cft: number; sft: number; nos: number }) =>
+      [d.cft ? `${d.cft.toFixed(0)} CFT` : "", d.sft ? `${d.sft.toFixed(0)} SFT` : "", d.nos ? `${d.nos.toFixed(0)} NOS` : ""].filter(Boolean).join(" - ") || "-";
+
+    // Page 5 — SUMMARY (both lists + section totals).
+    {
+      const P = newPage();
+      let y = header(P, H - 26, false);
+      P.t("LAST 24 H - CHALLANS & INVOICES", M, y, 11, bold, ink); y -= 6;
+      P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: COL.teal }); y -= 17;
+
+      const listBlock = (title: string, color: ReturnType<typeof rgb>, docs: RecentDoc[]) => {
+        P.pg.drawRectangle({ x: M, y: y - 1, width: 7, height: 7, color });
+        P.t(`${title} (${docs.length})`, M + 11, y, 9.5, bold, color); y -= 6;
+        P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.9, color }); y -= 15;
+        if (docs.length === 0) { P.t("None in this window.", M, y, 9.5, font, muted); y -= 16; }
+        else {
+          docs.slice(0, 9).forEach((d, i) => {
+            if (i % 2 === 1) P.pg.drawRectangle({ x: M - 4, y: y - 4, width: cw + 8, height: 15, color: rowTint });
+            P.t(asc(P.clip(`${d.code}  ${d.party}`, 30)), M, y, 9.5, font, ink);
+            P.r(money(d), W - M, y, 9.5, bold, d.priced ? ink : muted);
+            P.r(asc(qline(d)), W - M - 92, y, 8, font, muted);
+            y -= 16;
+          });
+          if (docs.length > 9) { P.t(`+ ${docs.length - 9} more`, M, y, 9, font, muted); y -= 14; }
+          const tot = docs.reduce((a, d) => ({ total: a.total + d.total, cft: a.cft + d.cft, sft: a.sft + d.sft, nos: a.nos + d.nos }), { total: 0, cft: 0, sft: 0, nos: 0 });
+          P.pg.drawLine({ start: { x: M, y: y + 5 }, end: { x: W - M, y: y + 5 }, thickness: 0.5, color: line });
+          P.t(`Total  ${qline(tot)}`, M, y - 6, 9, bold, muted);
+          P.r(inr(tot.total), W - M, y - 6, 10.5, bold, color); y -= 24;
+        }
+        y -= 10;
+      };
+      listBlock("CHALLANS RAISED", COL.blue, recChallans);
+      listBlock("INVOICES ISSUED", COL.green, recInvoices);
+      P.t("Full itemised copies of each document on the following pages.", M, y, 8.5, font, muted);
+      footer(P, 5, PAGES);
+    }
+
+    // Detail pages — one itemised block per document (fixed slot).
+    for (let pageIdx = 0; pageIdx < detailPages; pageIdx++) {
+      const P = newPage();
+      const y0 = header(P, H - 26, false);
+      P.t("CHALLAN & INVOICE COPIES  (last 24 h)", M, y0, 10, bold, ink);
+      const top0 = y0 - 22, bottom = 46;
+      const slotH = (top0 - bottom) / DOCS_PER_PAGE;
+      const pageDocs = detailDocs.slice(pageIdx * DOCS_PER_PAGE, (pageIdx + 1) * DOCS_PER_PAGE);
+
+      pageDocs.forEach((d, i) => {
+        const top = top0 - i * slotH;
+        const isInv = d.kind === "invoice";
+        const accent = isInv ? COL.green : COL.blue;
+        // Slot card.
+        P.pg.drawRectangle({ x: M - 3, y: top - slotH + 10, width: cw + 6, height: slotH - 12, color: rowTint, opacity: 0.5 });
+        P.pg.drawRectangle({ x: M - 3, y: top - slotH + 10, width: 3, height: slotH - 12, color: accent });
+        // Header line: badge + code + total.
+        const badge = isInv ? "INVOICE" : "CHALLAN";
+        const bw = bold.widthOfTextAtSize(badge, 7) + 10;
+        P.card(M + 4, top + 2, bw, 12, 3, accent);
+        P.ctr(badge, M + 4 + bw / 2, top - 6.5, 7, bold, white);
+        P.t(asc(d.code), M + 4 + bw + 7, top - 6, 11, bold, ink);
+        P.r(d.priced ? inr(d.total) : "not priced", W - M - 6, top - 6, 12, bold, d.priced ? accent : muted);
+        // Meta line.
+        const meta = [asc(d.party), fmtRecentDate(d.date), d.invCode && d.invCode !== d.code ? `Inv ${asc(d.invCode)}` : ""].filter(Boolean).join("  -  ");
+        P.t(P.clip(meta, 62), M + 6, top - 21, 8.5, font, muted); let yy = top - 36;
+        // Items table.
+        const qx = W - M - 150, rx = W - M - 76, ax = W - M - 6;
+        P.t("ITEM", M + 6, yy, 7, bold, muted); P.r("QTY", qx, yy, 7, bold, muted); P.r("RATE", rx, yy, 7, bold, muted); P.r("AMOUNT", ax, yy, 7, bold, muted); yy -= 12;
+        const maxRows = Math.max(1, Math.floor((yy - (top - slotH) - 26) / 11));
+        const shown = d.items.slice(0, maxRows);
+        shown.forEach((it) => {
+          const nm = asc(it.name || it.desc || "Item");
+          P.t(P.clip(nm, 32), M + 6, yy, 8.5, font, ink);
+          P.r(it.qty ? `${it.qty.toFixed(2).replace(/\.00$/, "")} ${asc(it.unit)}`.trim() : "-", qx, yy, 8, font, muted);
+          P.r(it.rate ? inr(it.rate) : "-", rx, yy, 8, font, muted);
+          P.r(it.amount ? inr(it.amount) : "-", ax, yy, 8.5, font, ink);
+          yy -= 11;
+        });
+        if (d.items.length > shown.length) { P.t(`+ ${d.items.length - shown.length} more item(s)`, M + 6, yy, 7.5, font, muted); yy -= 11; }
+        if (d.items.length === 0) { P.t("No line items on this document.", M + 6, yy, 8, font, muted); yy -= 11; }
+        // Totals footer for the slot.
+        const ty = top - slotH + 16;
+        P.pg.drawLine({ start: { x: M + 6, y: ty + 12 }, end: { x: W - M - 6, y: ty + 12 }, thickness: 0.5, color: line });
+        if (d.priced) {
+          P.t(`Subtotal ${inr(d.subtotal)}   GST ${inr(d.taxed)}`, M + 6, ty + 1, 8, font, muted);
+          P.r(`Total ${inr(d.total)}`, W - M - 6, ty + 1, 9.5, bold, accent);
+        } else {
+          P.t("Not priced yet - value will appear once this challan is priced.", M + 6, ty + 1, 8, font, muted);
+        }
+      });
+      footer(P, 6 + pageIdx, PAGES);
+    }
+  }
+
   return pdf.save();
+}
+
+/** "21 May 2026" for a YYYY-MM-DD doc date (IST). */
+function fmtRecentDate(d: string): string {
+  const s = (d ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || "-";
+  const [y, m, dd] = s.split("-").map(Number);
+  return `${dd} ${MONTHS[(m - 1) % 12]} ${y}`;
 }
 
 // ── Send ────────────────────────────────────────────────────────────
