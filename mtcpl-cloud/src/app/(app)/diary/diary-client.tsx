@@ -153,7 +153,19 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
     ...(me.isBoss ? [{ key: "all" as Tab, label: "👁 All open", count: lists.all.length }] : []),
     { key: "closed", label: "✅ Closed", count: lists.closed.length },
   ];
-  const rows = lists[tab];
+
+  // Search (Daksh) — matches the activity (+details), the FROM name, every
+  // included person's name, and every remark (text + author).
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const blobOf = (e: DiaryEntry) =>
+    [
+      e.activity, e.details ?? "", e.createdByName,
+      ...e.participants.map((p) => p.name),
+      ...e.remarks.map((r) => `${r.body} ${r.author}`),
+    ].join(" ").toLowerCase();
+  const allRows = lists[tab];
+  const rows = needle ? allRows.filter((e) => blobOf(e).includes(needle)) : allRows;
   const open = openId ? entries.find((e) => e.id === openId) ?? null : null;
 
   const th: React.CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap", background: "var(--bg)" };
@@ -191,7 +203,7 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
         ))}
       </div>
 
-      {/* Tabs + new entry */}
+      {/* Tabs + search + new entry */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
           {tabs.map((t) => (
@@ -200,12 +212,29 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
             </button>
           ))}
         </div>
+        {/* Search — activity, included (tags) names, remarks (Daksh). */}
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 180, maxWidth: 380 }}>
+          <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontSize: 13, pointerEvents: "none", opacity: 0.6 }}>🔍</span>
+          <input
+            value={q}
+            onChange={(ev) => setQ(ev.target.value)}
+            placeholder="Search activity, people, remarks…"
+            autoComplete="off"
+            style={{ width: "100%", padding: "10px 30px 10px 32px", borderRadius: 11, border: `1.5px solid ${needle ? "var(--gold-dark)" : "var(--border)"}`, background: "var(--surface)", color: "var(--text)", fontSize: 13 }}
+          />
+          {needle && (
+            <button type="button" onClick={() => setQ("")} title="Clear search" style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", color: "var(--muted)", fontWeight: 800, cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
+          )}
+        </div>
+        {needle && <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", whiteSpace: "nowrap" }}>{rows.length} of {allRows.length}</span>}
         <button type="button" onClick={() => setShowNew(true)} style={{ marginLeft: "auto", fontSize: 13.5, fontWeight: 800, padding: "11px 20px", borderRadius: 11, border: "none", color: "#fff", background: "var(--gold-dark)", cursor: "pointer", boxShadow: "0 3px 10px rgba(180,83,9,0.25)" }}>＋ New entry</button>
       </div>
 
       {rows.length === 0 ? (
         <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 22px", textAlign: "center", color: "var(--muted)" }}>
-          {tab === "closed" ? "Nothing closed yet." : "No open entries here. ＋ New entry to write one in the register."}
+          {needle
+            ? <>No entry matches &ldquo;{q.trim()}&rdquo; in this tab — try another word or <button type="button" onClick={() => setQ("")} style={{ border: "none", background: "transparent", color: "var(--gold-dark)", fontWeight: 800, cursor: "pointer", padding: 0, fontSize: "inherit" }}>clear the search</button>.</>
+            : tab === "closed" ? "Nothing closed yet." : "No open entries here. ＋ New entry to write one in the register."}
         </div>
       ) : tab === "closed" ? (
         /* CLOSED — card grid: BIG who-closed + their closing remark. */
