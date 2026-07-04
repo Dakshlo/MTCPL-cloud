@@ -12,7 +12,7 @@
  * reloads with the new vendor pre-selected via `?picked=<id>`.
  */
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -139,6 +139,11 @@ export function BillEntryForm({
   // creation. Owners can add/replace it later from the bill detail page.
   const [billDoc, setBillDoc] = useState<File | null>(null);
   const [costHead, setCostHead] = useState(initialValues?.cost_head ?? "");
+  // Daksh (Jul 2026) — NEW bills auto-fill the cost head from the picked
+  // vendor's category (still editable). This ref holds whatever we last
+  // auto-filled, so a value the accountant typed by hand is never clobbered
+  // (we only overwrite when the field is empty or still shows a prior auto-fill).
+  const autoCostHead = useRef<string>("");
   const [subtotal, setSubtotal] = useState<string>(
     initialValues?.amount_subtotal != null ? String(initialValues.amount_subtotal) : "",
   );
@@ -242,6 +247,22 @@ export function BillEntryForm({
     }
     if (!v.tcs_applicable) setTcsPercent("");
   }
+
+  // Auto-fill the cost head from the picked vendor's category — NEW bills only
+  // (never in edit mode, so bills already in the system are untouched). Runs on
+  // mount too, so a pre-selected vendor (e.g. after "+ Add new vendor") fills.
+  // Only overwrites when the field is empty or still holds a prior auto-fill,
+  // so a cost head the accountant typed by hand is preserved.
+  useEffect(() => {
+    if (mode === "edit") return;
+    const v = vendors.find((vv) => vv.id === vendorId);
+    const cat = (v?.category ?? "").trim();
+    if (costHead.trim() === "" || costHead === autoCostHead.current) {
+      setCostHead(cat);
+      autoCostHead.current = cat;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorId]);
 
   // ── AI bill scan (June 2026) — OPTIONAL pre-fill. Uploads the photo/
   // PDF to /api/accounts/bill-scan (read-only — no DB writes), maps the
@@ -727,7 +748,7 @@ export function BillEntryForm({
           </FormField>
           <FormField
             label="Cost head"
-            hint="Optional — free-text category for accountant reports later (Tools / Cement / Site overhead / Utilities …)"
+            hint="Auto-filled from the vendor's category — edit if this bill belongs to a different head. Free-text, used for accountant reports later (Tools / Cement / Site overhead / Utilities …)."
           >
             <input
               type="text"
