@@ -223,6 +223,12 @@ export function PrivateNotesModal({
         return;
       }
     }
+    // Jul 2026 (Daksh) — the vendor's signature is MANDATORY on every entry;
+    // the owner sees it on the Royalty approvals page before approving.
+    if (!newEntrySignature) {
+      setError("Vendor signature is required — tap ✍️ Add vendor signature (or 📷 Photo instead) before adding.");
+      return;
+    }
     startTransition(async () => {
       const fd = new FormData();
       fd.set("vendor_id", vendorId);
@@ -230,7 +236,7 @@ export function PrivateNotesModal({
       fd.set("amount", String(amount));
       fd.set("entry_date", newEntryDate);
       if (newEntryDescription.trim()) fd.set("description", newEntryDescription.trim());
-      if (newEntrySignature) fd.set("signature_data", newEntrySignature);
+      fd.set("signature_data", newEntrySignature);
       fd.set("passphrase", passphrase);
       const r = await addVendorRoyaltyEntryAction(fd);
       if (!r.ok) {
@@ -774,10 +780,13 @@ export function PrivateNotesModal({
                     </button>
                   </div>
 
-                  {/* Optional on-screen vendor signature (mig 175) — owner sees
-                      it when approving. Works on tablet (finger/stylus) + desktop. */}
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>Vendor signature <span style={{ fontWeight: 400 }}>(optional)</span>:</span>
+                  {/* On-screen vendor signature (mig 175) — MANDATORY since Jul
+                      2026 (Daksh); the owner sees it when approving. Works on
+                      tablet (finger/stylus) + desktop; 📷 photo-of-paper too. */}
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "7px 10px", borderRadius: 9, border: `1.5px ${newEntrySignature ? "solid rgba(22,101,52,0.35)" : "dashed #dc2626"}`, background: newEntrySignature ? "rgba(22,101,52,0.05)" : "rgba(220,38,38,0.04)" }}>
+                    <span style={{ fontSize: 11.5, color: newEntrySignature ? "#15803d" : "#b91c1c", fontWeight: 800 }}>
+                      Vendor signature <span style={{ fontWeight: 700 }}>*</span>{newEntrySignature ? " ✓" : " — required before adding"}
+                    </span>
                     <SignatureCaptureButton value={newEntrySignature} onChange={setNewEntrySignature} />
                   </div>
 

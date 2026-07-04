@@ -3689,8 +3689,13 @@ export async function addVendorRoyaltyEntryAction(
   const entryType = String(formData.get("entry_type") || "").trim();
   const amountRaw = String(formData.get("amount") || "").trim();
   const description = String(formData.get("description") || "").trim() || null;
-  // Mig 175 — optional on-screen vendor signature (PNG data-URL).
+  // Mig 175 — on-screen vendor signature (PNG/JPEG data-URL). MANDATORY since
+  // Jul 2026 (Daksh): every royalty entry carries the vendor's signature, and
+  // the owner sees it on the Royalty approvals card before approving.
   const signatureData = String(formData.get("signature_data") || "").trim() || null;
+  if (!signatureData) {
+    return { ok: false, error: "Vendor signature is required — capture it with ✍️ Add vendor signature (or 📷 Photo instead)." };
+  }
   const plain = String(formData.get("passphrase") || "");
   // Daksh May 2026 — mig 068. New first-class entry_date so people
   // stop encoding the date inside the description string. Empty
