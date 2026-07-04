@@ -100,6 +100,30 @@ export async function createDiaryEntryAction(formData: FormData): Promise<Action
   return { ok: true };
 }
 
+/** Add / remove included users on an existing entry — creator / included / boss.
+ *  Replaces the whole participant set (must keep at least one). */
+export async function updateDiaryParticipantsAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  const admin = createAdminSupabaseClient();
+  const entryId = txt(formData, "entry_id");
+  const people = [...new Set(ids(formData, "participants"))];
+  if (!entryId) return { ok: false, error: "Missing entry." };
+  if (people.length === 0) return { ok: false, error: "Keep at least one person included." };
+
+  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  if (!entry) return { ok: false, error: "Entry not found." };
+  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+
+  await admin.from("work_diary_participants").delete().eq("entry_id", entryId);
+  const { error } = await admin.from("work_diary_participants").insert(people.map((pid) => ({ entry_id: entryId, profile_id: pid })));
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(profile.id, "diary_participants_updated", "work_diary_entry", entryId, { count: people.length });
+  revalidatePath("/diary");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 /** Status remark on an entry — creator / included / owner / developer. */
 export async function addDiaryRemarkAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
