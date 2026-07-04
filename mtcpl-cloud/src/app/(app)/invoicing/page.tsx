@@ -18,7 +18,7 @@ import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { HeroMenu } from "./_ui/hero-menu";
 import { type DashGroup, type DashCard, type DashStatus } from "./_ui/dashboard-board";
 import { DashboardTabs } from "./_ui/dashboard-tabs";
-import { gatherInvoiced } from "@/lib/invoicing-summary";
+import { gatherInvoiced, gatherChallans } from "@/lib/invoicing-summary";
 import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
 type ChallanRow = {
@@ -187,8 +187,9 @@ export default async function InvoicingDashboardPage() {
 
   const groups: DashGroup[] = [...byTemple.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([temple, rows]) => ({ temple, rows }));
 
-  // Invoiced analytics (temple purchase + work order + running + other sales).
-  const invoiced = await gatherInvoiced(supabase);
+  // Invoiced analytics (temple purchase + work order + running + other sales)
+  // + the Challans-tab summary (every challan doc with stage/qty/value).
+  const [invoiced, challanSummary] = await Promise.all([gatherInvoiced(supabase), gatherChallans(supabase)]);
 
   return (
     <section className="page-card">
@@ -215,7 +216,7 @@ export default async function InvoicingDashboardPage() {
       />
 
       <div style={{ marginTop: 18 }}>
-        <DashboardTabs groups={groups} total={challans.length + otherCount} invoiced={invoiced} />
+        <DashboardTabs groups={groups} total={challans.length + otherCount} invoiced={invoiced} challans={challanSummary} />
       </div>
     </section>
   );

@@ -6,7 +6,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
-import { invoiceCodeFromDoc } from "@/lib/doc-code";
+import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -16,6 +16,27 @@ export type InvoiceSummaryRow = {
   code: string;
   party: string;
   source: InvoiceSource;
+  date: string;
+  amount: number;
+  taxed: number;
+  cft: number;
+  sft: number;
+  nos: number;
+  href: string;
+};
+
+// ── Challans tab (Daksh, Jul 2026) ─────────────────────────────────
+// Every real challan DOCUMENT (temple + Other Sales; archived + cancelled
+// excluded) with its stage, quantity breakdown and — once priced — its value.
+// Bulk-invoiced challans show qty only; their value lives on the work-order
+// invoice (Invoices tab), so tallying both tabs never double-counts.
+export type ChallanStatus = "open" | "in_approval" | "in_bulk" | "invoiced" | "running";
+export type ChallanSummaryRow = {
+  id: string;
+  code: string;
+  invCode: string | null;
+  party: string;
+  status: ChallanStatus;
   date: string;
   amount: number;
   taxed: number;
@@ -142,6 +163,123 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
         const t = computeInvoiceTotals(it.amounts, gstOf(r));
         const party = Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name;
         out.push({ id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`), party: party ?? "—", source: "other", date: r.challan_date, amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos, href: `/invoicing/other/${r.id}/print` });
+      }
+    }
+  }
+
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/** Every challan document (temple + Other Sales), with stage + qty + value. */
+export async function gatherChallans(admin: Admin): Promise<ChallanSummaryRow[]> {
+  const out: ChallanSummaryRow[] = [];
+
+  // Bulk membership + the bulk invoice's INV code (best-effort — mig 173).
+  const inBulk = new Set<string>();
+  {
+    const { data, error } = await admin.from("challans").select("id").not("sent_to_bulk_at", "is", null);
+    if (!error) for (const r of (data ?? []) as Array<{ id: string }>) inBulk.add(r.id);
+  }
+  const bulkByChallan = new Map<string, string>();
+  {
+    const { data, error } = await admin.from("bulk_invoice_challans").select("challan_id, bulk_invoice_id");
+    if (!error) for (const r of (data ?? []) as Array<{ challan_id: string; bulk_invoice_id: string }>) bulkByChallan.set(r.challan_id, r.bulk_invoice_id);
+  }
+  const bulkCodeByChallan = new Map<string, string>();
+  {
+    const bids = [...new Set(bulkByChallan.values())];
+    const codeByBulk = new Map<string, string>();
+    for (let i = 0; i < bids.length; i += 300) {
+      const chunk = bids.slice(i, i + 300);
+      if (!chunk.length) break;
+      const { data } = await admin.from("bulk_invoices").select("id, inv_fy, inv_seq, invoice_no_override").in("id", chunk);
+      for (const b of (data ?? []) as Array<{ id: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null }>) {
+        const code = b.invoice_no_override?.trim() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || "";
+        if (code) codeByBulk.set(b.id, code);
+      }
+    }
+    for (const [ch, bid] of bulkByChallan) { const c = codeByBulk.get(bid); if (c) bulkCodeByChallan.set(ch, c); }
+  }
+
+  // 1 — Temple challans (every stage; archived + cancelled excluded).
+  {
+    type Row = {
+      id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string;
+      temple: string | null; converted_invoice_id: string | null; priced_at: string | null;
+      owner_approved_at: string | null; owner_rejected_at: string | null; custom_billed_at: string | null;
+      inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null;
+      gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
+    };
+    const rows = await pageAll<Row>((from, to) => admin.from("challans")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, converted_invoice_id, priced_at, owner_approved_at, owner_rejected_at, custom_billed_at, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .is("archived_at", null).is("cancelled_at", null)
+      .order("challan_date", { ascending: false }).range(from, to));
+    const ids = rows.map((r) => r.id);
+    const items = await itemsBy(admin, "challan_items", "challan_id", ids, "challan_id, amount, rate, quantity, measure_qty, measure_unit", "measure_unit", "measure_qty");
+    // Running / get-challan docs carry their lines in challan_custom_items
+    // instead — fall back to those when a challan has no challan_items.
+    const customItems = await itemsBy(admin, "challan_custom_items", "challan_id", ids.filter((id) => !items.has(id)), "challan_id, amount, rate, quantity, unit", "unit", "quantity");
+
+    for (const r of rows) {
+      const isRunning = !!r.custom_billed_at && r.inv_seq != null;
+      let status: ChallanStatus;
+      if (isRunning) status = "running";
+      else if (bulkByChallan.has(r.id) || r.converted_invoice_id || (r.priced_at && r.owner_approved_at)) status = "invoiced";
+      else if (r.priced_at && !r.owner_rejected_at) status = "in_approval";
+      else if (inBulk.has(r.id)) status = "in_bulk";
+      else status = "open";
+
+      const it = items.get(r.id) ?? customItems.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
+      // Value only exists once priced/billed — an open challan's items carry no
+      // rates, so totals come out 0 and the UI/export shows "—".
+      const t = computeInvoiceTotals(it.amounts, gstOf(r));
+      const invCode =
+        isRunning || status === "invoiced"
+          ? (bulkCodeByChallan.get(r.id) ?? r.invoice_no_override?.trim() ?? invoiceCodeFromDoc(r.inv_fy, r.inv_seq))
+          : null;
+      const href =
+        isRunning ? `/invoicing/challan/${r.id}/custom/print`
+        : status === "invoiced" && !bulkByChallan.has(r.id) ? `/invoicing/challan/${r.id}/print`
+        : status === "in_bulk" || bulkByChallan.has(r.id) ? "/invoicing/bulk"
+        : `/invoicing/challans/${r.id}`;
+      out.push({
+        id: r.id,
+        code: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number,
+        invCode: invCode || null,
+        party: r.temple ?? "—",
+        status, date: r.challan_date,
+        amount: t.grand, taxed: t.grand - t.subtotal,
+        cft: it.cft, sft: it.sft, nos: it.nos, href,
+      });
+    }
+  }
+
+  // 2 — Other Sales challans (converted or not; cancelled excluded). Best-effort.
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await admin.from("other_challans")
+      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name)")
+      .is("cancelled_at", null).order("challan_date", { ascending: false });
+    if (!error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = (data ?? []) as any[];
+      const items = await itemsBy(admin, "other_challan_items", "other_challan_id", rows.map((r) => String(r.id)), "other_challan_id, amount, rate, quantity, unit", "unit", "quantity");
+      for (const r of rows) {
+        const it = items.get(String(r.id)) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
+        const converted = !!r.converted_at;
+        const t = computeInvoiceTotals(it.amounts, gstOf(r));
+        const party = Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name;
+        out.push({
+          id: `other:${String(r.id)}`,
+          code: challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`,
+          invCode: converted ? invoiceCodeFromDoc(r.inv_fy, r.inv_seq) : null,
+          party: party ?? "Other Sales",
+          status: converted ? "invoiced" : "open",
+          date: String(r.challan_date),
+          amount: t.grand, taxed: t.grand - t.subtotal,
+          cft: it.cft, sft: it.sft, nos: it.nos,
+          href: `/invoicing/other/${String(r.id)}/print`,
+        });
       }
     }
   }
