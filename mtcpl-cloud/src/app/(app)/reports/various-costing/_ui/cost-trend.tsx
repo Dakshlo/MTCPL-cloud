@@ -14,7 +14,7 @@
  * Series are fetched lazily per granularity and cached client-side.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Granularity = "daily" | "weekly" | "monthly";
 type TrendPoint = {
@@ -39,8 +39,18 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // bump to retry after an error
+  // Hover tooltip — custom div (native SVG <title> is slow/flaky, Daksh: "not
+  // working"). px/py are positions inside the chart wrapper.
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<{ i: number; px: number; py: number } | null>(null);
+  function showTip(i: number, ev: React.MouseEvent) {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setHover({ i, px: ev.clientX - r.left, py: ev.clientY - r.top });
+  }
 
   useEffect(() => {
+    setHover(null); // stale index would point at the wrong granularity's dot
     if (cache[g]) return;
     let dead = false;
     setLoading(true);
@@ -129,7 +139,8 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
           </div>
 
           <div style={{ overflowX: "auto" }}>
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: 560, display: "block" }} role="img" aria-label="Cost per unit trend">
+            <div ref={wrapRef} style={{ position: "relative", minWidth: 560 }}>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }} role="img" aria-label="Cost per unit trend">
               {/* gridlines + y labels */}
               {[0, 1, 2, 3, 4].map((k) => {
                 const v = y0 + ((y1 - y0) * k) / 4;
@@ -151,29 +162,61 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
               {points.map((p, i) => {
                 const x = xAt(i);
                 const isLast = i === lastIdx;
+                const hovered = hover?.i === i;
                 return (
                   <g key={i}>
                     {p.value != null && Number.isFinite(p.value) ? (
                       <>
-                        <circle cx={x} cy={yAt(p.value)} r={isLast ? 5 : 3.2} fill={isLast ? "var(--gold-dark)" : "var(--surface)"} stroke="var(--gold-dark)" strokeWidth={2}>
-                          <title>{`${p.label} — ${fmtINR(p.value)} ${unit}\nWindow: ${p.sub}\nCost ₹${fmtN(p.cost)} · Output ${fmtN(p.out)} · ${p.slabs} slabs · ${p.days} day${p.days === 1 ? "" : "s"}`}</title>
-                        </circle>
-                        {isLast && (
+                        <circle cx={x} cy={yAt(p.value)} r={hovered ? 6 : isLast ? 5 : 3.2} fill={isLast || hovered ? "var(--gold-dark)" : "var(--surface)"} stroke="var(--gold-dark)" strokeWidth={2} pointerEvents="none" />
+                        {isLast && !hovered && (
                           <text x={Math.min(x, W - MR - 30)} y={yAt(p.value) - 10} textAnchor="middle" fontSize="11" fontWeight="800" fill="var(--gold-dark)" fontFamily="ui-monospace, monospace">{fmtINR(p.value)}</text>
                         )}
                       </>
                     ) : (
-                      <text x={x} y={MT + IH - 4} textAnchor="middle" fontSize="9" fill="var(--muted)" opacity={0.8}>
-                        ×<title>{`${p.label} — no output in this window`}</title>
-                      </text>
+                      <text x={x} y={MT + IH - 4} textAnchor="middle" fontSize="9" fill="var(--muted)" opacity={0.8} pointerEvents="none">×</text>
                     )}
                     {showLabel(i) && (
                       <text x={x} y={H - MB + 16} textAnchor="middle" fontSize="9.5" fill="var(--muted)">{p.label}</text>
                     )}
+                    {/* BIG invisible hit area — reliable hover (native SVG
+                        <title> tooltips were flaky). Covers the dot AND its
+                        full column strip so it's easy to hit. */}
+                    <rect
+                      x={x - (points.length > 1 ? (IW / (points.length - 1)) / 2 : IW / 2)}
+                      y={MT}
+                      width={points.length > 1 ? IW / (points.length - 1) : IW}
+                      height={IH}
+                      fill="transparent"
+                      style={{ cursor: "crosshair" }}
+                      onMouseMove={(ev) => showTip(i, ev)}
+                      onMouseLeave={() => setHover(null)}
+                    />
                   </g>
                 );
               })}
             </svg>
+            {/* Custom tooltip */}
+            {hover && points[hover.i] && (() => {
+              const p = points[hover.i];
+              const w = wrapRef.current?.clientWidth ?? 560;
+              const left = Math.min(Math.max(hover.px, 90), w - 90);
+              const flipDown = hover.py < 96;
+              return (
+                <div style={{ position: "absolute", left, top: hover.py + (flipDown ? 14 : -12), transform: `translate(-50%, ${flipDown ? "0" : "-100%"})`, pointerEvents: "none", zIndex: 5, background: "rgba(15,23,42,0.94)", color: "#fff", borderRadius: 10, padding: "9px 12px", boxShadow: "0 10px 28px rgba(0,0,0,0.3)", minWidth: 168, maxWidth: 240 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, marginBottom: 3 }}>{p.label}</div>
+                  {p.value != null && Number.isFinite(p.value) ? (
+                    <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#fbbf24" }}>{fmtINR(p.value)} <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>{unit}</span></div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "rgba(255,255,255,0.8)" }}>No output this window</div>
+                  )}
+                  <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", marginTop: 4, lineHeight: 1.5 }}>
+                    Cost ₹{fmtN(p.cost)}<br />Output {fmtN(p.out)} · {p.slabs} slab{p.slabs === 1 ? "" : "s"} · {p.days} day{p.days === 1 ? "" : "s"}<br />
+                    <span style={{ color: "rgba(255,255,255,0.55)" }}>{p.sub}</span>
+                  </div>
+                </div>
+              );
+            })()}
+            </div>
           </div>
           <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
             {g === "daily"
