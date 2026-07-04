@@ -10,9 +10,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-export type DiaryBadgeItem = { id: string; activity: string; due: string; overdue: boolean; urgent: boolean };
+export type DiaryBadgeItem = { id: string; activity: string; due: string | null; overdue: boolean; urgent: boolean };
 
-const fmtDue = (d: string) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
+const fmtDue = (d: string | null) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "");
 
 export function TopbarDiaryBadge({ count, items }: { count: number; items: DiaryBadgeItem[] }) {
   const [open, setOpen] = useState(false);

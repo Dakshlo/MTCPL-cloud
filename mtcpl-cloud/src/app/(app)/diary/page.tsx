@@ -30,7 +30,7 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
 
   type EntryRow = {
     id: string; activity: string; details: string | null; created_by: string;
-    due_date: string; closed_at: string | null; closed_by: string | null; created_at: string;
+    due_date: string | null; closed_at: string | null; closed_by: string | null; created_at: string;
     /** mig 186 — absent on a pre-migration schema (select("*") keeps it best-effort). */
     urgent?: boolean | null;
   };

@@ -464,7 +464,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // or are included in, most urgent first. Best-effort: pre-migration → null
   // hides the pill entirely.
   async function fetchDiaryBadge(): Promise<{ count: number; items: DiaryBadgeItem[] } | null> {
-    type Row = { id: string; activity: string; due_date: string; urgent?: boolean | null };
+    type Row = { id: string; activity: string; due_date: string | null; urgent?: boolean | null };
     const byId = new Map<string, Row>();
     // select("*") keeps the urgent col (mig 186) best-effort — absent pre-mig.
     const { data: mine, error } = await supabase
@@ -481,11 +481,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       for (const r of (data ?? []) as Row[]) byId.set(r.id, r);
     }
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    // Urgent first (they also make the pill's border glow), then nearest due.
-    const all = [...byId.values()].sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || a.due_date.localeCompare(b.due_date));
+    // Urgent first (they also make the pill's border glow), then nearest due;
+    // undated entries (due optional now) sort last.
+    const dueRank = (r: Row) => r.due_date || "9999-99-99";
+    const all = [...byId.values()].sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || dueRank(a).localeCompare(dueRank(b)));
     return {
       count: all.length,
-      items: all.slice(0, 8).map((e) => ({ id: e.id, activity: e.activity, due: e.due_date, overdue: e.due_date < today, urgent: !!e.urgent })),
+      items: all.slice(0, 8).map((e) => ({ id: e.id, activity: e.activity, due: e.due_date, overdue: !!e.due_date && e.due_date < today, urgent: !!e.urgent })),
     };
   }
 

@@ -126,19 +126,20 @@ export async function createDiaryEntryAction(formData: FormData): Promise<Action
 
   // Register style — the activity is written in CAPITALS (Daksh).
   const activity = txt(formData, "activity").toUpperCase();
-  const dueDate = txt(formData, "due_date");
+  // Due date is OPTIONAL (Daksh) — a plain note needs no deadline; date-related
+  // info (due / overdue) only shows when a date is actually set.
+  const dueDate = txt(formData, "due_date") || null;
   // The creator can be the ONLY person included — that's a personal entry
   // (Naresh maintains his own work); others can be added later via Manage people.
   const people = [...new Set(ids(formData, "participants"))];
   const urgent = txt(formData, "urgent") === "1";
   if (!activity) return { ok: false, error: "Write the activity." };
-  if (!dueDate) return { ok: false, error: "Pick a date to complete." };
   if (people.length === 0) return { ok: false, error: "Include at least one person (you can pick just yourself)." };
 
   const base = { activity, details: txt(formData, "details") || null, created_by: profile.id, due_date: dueDate };
   // urgent col is mig 186 — retry without it on a pre-migration schema.
   let ins = await admin.from("work_diary_entries").insert({ ...base, urgent } as never).select("id").single();
-  if (ins.error) ins = await admin.from("work_diary_entries").insert(base).select("id").single();
+  if (ins.error) ins = await admin.from("work_diary_entries").insert(base as never).select("id").single();
   const { data: row, error } = ins;
   if (error || !row) return { ok: false, error: error?.message || "Failed to create the entry." };
   const entryId = (row as { id: string }).id;

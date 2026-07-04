@@ -32,7 +32,7 @@ export type DiaryEntry = {
   details: string | null;
   createdBy: string;
   createdByName: string;
-  dueDate: string;
+  dueDate: string | null;
   createdAt: string;
   closedAt: string | null;
   closedByName: string | null;
@@ -43,7 +43,7 @@ export type DiaryEntry = {
 };
 
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-const fmtDate = (d: string) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
+const fmtDate = (d: string | null) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
 const fmtStamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 const fmtSize = (n: number | null) => (n == null ? "" : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 const hueOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; };
@@ -123,13 +123,15 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
   const [showNew, setShowNew] = useState(!!initialNew);
   const today = todayIST();
 
-  const isOverdue = (e: DiaryEntry) => !e.closedAt && e.dueDate < today;
-  const isDueToday = (e: DiaryEntry) => !e.closedAt && e.dueDate === today;
+  // Date info only applies when a due date is set (it's optional now, Daksh).
+  const isOverdue = (e: DiaryEntry) => !e.closedAt && !!e.dueDate && e.dueDate < today;
+  const isDueToday = (e: DiaryEntry) => !e.closedAt && !!e.dueDate && e.dueDate === today;
   const amIn = (e: DiaryEntry) => e.participants.some((p) => p.id === me.id);
 
-  // Urgent first, then overdue-nearest due date.
+  // Urgent first, then dated entries (earliest due first) before undated ones.
+  const dueRank = (e: DiaryEntry) => e.dueDate || "9999-99-99";
   const openSort = (a: DiaryEntry, b: DiaryEntry) =>
-    (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : a.createdAt.localeCompare(b.createdAt));
+    (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || (dueRank(a) < dueRank(b) ? -1 : dueRank(a) > dueRank(b) ? 1 : a.createdAt.localeCompare(b.createdAt));
   const lists: Record<Tab, DiaryEntry[]> = useMemo(() => ({
     mine: entries.filter((e) => !e.closedAt && amIn(e)).sort(openSort),
     assigned: entries.filter((e) => !e.closedAt && e.createdBy === me.id).sort(openSort),
@@ -258,7 +260,7 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 600 }}>{e.createdByName}</td>
                       <td style={td}><Avatars people={e.participants} /></td>
-                      <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700, color: isOverdue(e) ? "#b91c1c" : "var(--text)" }}>{fmtDate(e.dueDate)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", fontWeight: e.dueDate ? 700 : 500, color: isOverdue(e) ? "#b91c1c" : e.dueDate ? "var(--text)" : "var(--muted)" }}>{e.dueDate ? fmtDate(e.dueDate) : "— no date"}</td>
                       <td style={td}><StatusChip e={e} /></td>
                       <td style={{ ...td, maxWidth: 260 }}>
                         {lastRemark
@@ -385,7 +387,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10, fontSize: 11.5, color: "var(--muted)", alignItems: "center" }}>
             <span>✍️ From <strong style={{ color: "var(--text)" }}>{e.createdByName}</strong></span>
-            <span>📅 Due <strong style={{ color: "var(--text)" }}>{fmtDate(e.dueDate)}</strong></span>
+            {e.dueDate && (() => { const overdue = !e.closedAt && e.dueDate < todayIST(); return <span style={{ color: overdue ? "#b91c1c" : undefined }}>📅 Due <strong style={{ color: overdue ? "#b91c1c" : "var(--text)" }}>{fmtDate(e.dueDate)}</strong></span>; })()}
             <span>🕑 Started {fmtStamp(e.createdAt)}</span>
             {canManage && !e.closedAt && (
               <button
@@ -568,7 +570,7 @@ function NewEntryModal({ me, people, groups, onClose, refresh }: {
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState("");
   const [details, setDetails] = useState("");
-  const [due, setDue] = useState(todayIST());
+  const [due, setDue] = useState(""); // optional — blank = no deadline
   const [urgent, setUrgent] = useState(false);
   // "Me" is pre-included — leave it as just yourself for a PERSONAL entry.
   const [selected, setSelected] = useState<Set<string>>(() => new Set([me.id]));
@@ -580,7 +582,7 @@ function NewEntryModal({ me, people, groups, onClose, refresh }: {
 
   const toggle = (id: string) => setSelected((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const matches = people.filter((p) => !query.trim() || p.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const canCreate = activity.trim().length > 0 && due && selected.size > 0;
+  const canCreate = activity.trim().length > 0 && selected.size > 0;
 
   function create() {
     start(async () => {
@@ -643,9 +645,10 @@ function NewEntryModal({ me, people, groups, onClose, refresh }: {
             <span style={lbl}>Details (optional)</span>
             <textarea value={details} onChange={(ev) => setDetails(ev.target.value)} rows={2} style={{ ...fld, resize: "vertical", fontFamily: "inherit" }} />
           </label>
-          <label style={{ display: "block", flex: "0 0 190px" }}>
-            <span style={lbl}>Date to complete *</span>
+          <label style={{ display: "block", flex: "0 0 200px" }}>
+            <span style={lbl}>Date to complete (optional)</span>
             <input type="date" value={due} onChange={(ev) => setDue(ev.target.value)} style={fld} />
+            {due && <button type="button" onClick={() => setDue("")} style={{ marginTop: 4, fontSize: 10.5, fontWeight: 700, color: "var(--muted)", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✕ Clear date</button>}
           </label>
           <div style={{ flex: "0 0 220px" }}>
             <span style={lbl}>Attachments</span>
