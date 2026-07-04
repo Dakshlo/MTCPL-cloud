@@ -56,6 +56,23 @@ const inr = (n: number) => `Rs ${Math.round(n).toLocaleString("en-IN")}`;
 const inr2 = (n: number) => `Rs ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// The report PDF uses the standard Helvetica font (WinAnsi/CP1252). pdf-lib
+// THROWS on any character it can't encode — e.g. "↳" (0x21B3) once crashed the
+// whole daily send. Sanitise every drawn string to a WinAnsi-safe form: swap
+// the common typographic Unicode for ASCII, then drop anything left outside
+// Latin-1 (0x20-0x7E + 0xA0-0xFF are all valid CP1252). Belt-and-suspenders so
+// a stray char in a vendor/temple/item name can never break the report again.
+function winSafe(s: string): string {
+  return (s ?? "")
+    .replace(/[‘’‚]/g, "'")
+    .replace(/[“”„]/g, '"')
+    .replace(/[–—―]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/[←-⇿•‣⁃▪●]/g, ">") // arrows + bullets
+    .replace(/₹/g, "Rs ")
+    .replace(/[^\x20-\x7E -ÿ]/g, "");
+}
+
 /** IST day window [startUTC, endUTC] + a human label. offset 0 = today, -1 = yesterday. */
 function istDay(offset = 0) {
   const ist = new Date(Date.now() + 5.5 * 3600 * 1000); // UTC fields read as IST wall clock
@@ -812,9 +829,11 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   };
   const mk = (pg: ReturnType<typeof pdf.addPage>) => ({
     pg,
-    t: (s: string, x: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x, y, size: sz, font: f, color: c }),
-    r: (s: string, xr: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x: xr - f.widthOfTextAtSize(s, sz), y, size: sz, font: f, color: c }),
-    ctr: (s: string, cx: number, y: number, sz: number, f = font, c = ink) => pg.drawText(s, { x: cx - f.widthOfTextAtSize(s, sz) / 2, y, size: sz, font: f, color: c }),
+    // Every draw goes through winSafe() so a WinAnsi-unencodable char can never
+    // throw and kill the whole report (the "↳" 0x21B3 crash).
+    t: (s: string, x: number, y: number, sz: number, f = font, c = ink) => { const S = winSafe(s); return pg.drawText(S, { x, y, size: sz, font: f, color: c }); },
+    r: (s: string, xr: number, y: number, sz: number, f = font, c = ink) => { const S = winSafe(s); return pg.drawText(S, { x: xr - f.widthOfTextAtSize(S, sz), y, size: sz, font: f, color: c }); },
+    ctr: (s: string, cx: number, y: number, sz: number, f = font, c = ink) => { const S = winSafe(s); return pg.drawText(S, { x: cx - f.widthOfTextAtSize(S, sz) / 2, y, size: sz, font: f, color: c }); },
     card: (x: number, yTop: number, w: number, h: number, rad: number, color: ReturnType<typeof rgb>, o?: { opacity?: number }) => pg.drawSvgPath(roundPath(w, h, rad), { x, y: yTop, color, opacity: o?.opacity }),
     // Frosted "liquid glass" card: drop shadow → tinted body with a bright
     // rim → top gloss → bottom depth → a crisp specular edge.
