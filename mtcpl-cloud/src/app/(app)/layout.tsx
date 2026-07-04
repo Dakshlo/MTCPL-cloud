@@ -464,25 +464,28 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // or are included in, most urgent first. Best-effort: pre-migration → null
   // hides the pill entirely.
   async function fetchDiaryBadge(): Promise<{ count: number; items: DiaryBadgeItem[] } | null> {
-    const byId = new Map<string, { id: string; activity: string; due_date: string }>();
+    type Row = { id: string; activity: string; due_date: string; urgent?: boolean | null };
+    const byId = new Map<string, Row>();
+    // select("*") keeps the urgent col (mig 186) best-effort — absent pre-mig.
     const { data: mine, error } = await supabase
       .from("work_diary_entries")
-      .select("id, activity, due_date")
+      .select("*")
       .eq("created_by", profile.id)
       .is("closed_at", null);
     if (error) return null; // mig 185 not applied
-    for (const r of (mine ?? []) as Array<{ id: string; activity: string; due_date: string }>) byId.set(r.id, r);
+    for (const r of (mine ?? []) as Row[]) byId.set(r.id, r);
     const { data: parts } = await supabase.from("work_diary_participants").select("entry_id").eq("profile_id", profile.id);
     const pIds = ((parts ?? []) as Array<{ entry_id: string }>).map((r) => r.entry_id).filter((id) => !byId.has(id));
     for (let i = 0; i < pIds.length; i += 300) {
-      const { data } = await supabase.from("work_diary_entries").select("id, activity, due_date").in("id", pIds.slice(i, i + 300)).is("closed_at", null);
-      for (const r of (data ?? []) as Array<{ id: string; activity: string; due_date: string }>) byId.set(r.id, r);
+      const { data } = await supabase.from("work_diary_entries").select("*").in("id", pIds.slice(i, i + 300)).is("closed_at", null);
+      for (const r of (data ?? []) as Row[]) byId.set(r.id, r);
     }
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    const all = [...byId.values()].sort((a, b) => a.due_date.localeCompare(b.due_date));
+    // Urgent first (they also make the pill's border glow), then nearest due.
+    const all = [...byId.values()].sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || a.due_date.localeCompare(b.due_date));
     return {
       count: all.length,
-      items: all.slice(0, 8).map((e) => ({ id: e.id, activity: e.activity, due: e.due_date, overdue: e.due_date < today })),
+      items: all.slice(0, 8).map((e) => ({ id: e.id, activity: e.activity, due: e.due_date, overdue: e.due_date < today, urgent: !!e.urgent })),
     };
   }
 

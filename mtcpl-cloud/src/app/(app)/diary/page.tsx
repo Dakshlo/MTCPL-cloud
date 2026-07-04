@@ -31,8 +31,10 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
   type EntryRow = {
     id: string; activity: string; details: string | null; created_by: string;
     due_date: string; closed_at: string | null; closed_by: string | null; created_at: string;
+    /** mig 186 — absent on a pre-migration schema (select("*") keeps it best-effort). */
+    urgent?: boolean | null;
   };
-  const COLS = "id, activity, details, created_by, due_date, closed_at, closed_by, created_at";
+  const COLS = "*";
 
   // ── Visible entries. Best-effort: a pre-mig-185 deploy shows the banner.
   let needsMigration = false;
@@ -86,6 +88,21 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
     }
   }
 
+  // ── Attachments (mig 186) — entry-level (remark_id null) + per-remark. Best-
+  // effort: pre-migration the table is absent and everything just has no files.
+  const entryFiles = new Map<string, DiaryEntry["files"]>();
+  const remarkFiles = new Map<string, DiaryEntry["files"]>();
+  for (const part of chunk(entryIds, 300)) {
+    const { data: fs, error } = await admin.from("work_diary_files").select("id, entry_id, remark_id, name, path, size").in("entry_id", part);
+    if (error) break;
+    for (const f of (fs ?? []) as Array<{ id: string; entry_id: string; remark_id: string | null; name: string; path: string; size: number | null }>) {
+      const url = admin.storage.from("work-diary").getPublicUrl(f.path).data.publicUrl;
+      const file = { id: f.id, name: f.name, url, size: f.size };
+      if (f.remark_id) { const a = remarkFiles.get(f.remark_id) ?? []; a.push(file); remarkFiles.set(f.remark_id, a); }
+      else { const a = entryFiles.get(f.entry_id) ?? []; a.push(file); entryFiles.set(f.entry_id, a); }
+    }
+  }
+
   const entries: DiaryEntry[] = entryRows.map((e) => ({
     id: e.id,
     activity: e.activity,
@@ -96,8 +113,10 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
     createdAt: e.created_at,
     closedAt: e.closed_at,
     closedByName: e.closed_at ? nameOf(e.closed_by) : null,
+    urgent: !!e.urgent,
+    files: entryFiles.get(e.id) ?? [],
     participants: (partsByEntry.get(e.id) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
-    remarks: remarksByEntry.get(e.id) ?? [],
+    remarks: (remarksByEntry.get(e.id) ?? []).map((r) => ({ ...r, files: remarkFiles.get(r.id) ?? [] })),
   }));
 
   // ── Groups (shared quick-pick member sets).

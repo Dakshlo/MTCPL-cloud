@@ -35,6 +35,64 @@ function ids(fd: FormData, key: string): string[] {
 }
 const isBoss = (role: string) => role === "owner" || role === "developer";
 
+// ── File attachments (mig 186) ──────────────────────────────────────
+// The browser uploads DIRECTLY to the public "work-diary" bucket via signed
+// upload URLs (no server body-size limit — any file type/size), then the
+// create/remark action records the metadata rows here.
+
+const DIARY_BUCKET = "work-diary";
+
+type FileMeta = { name: string; path: string; mime: string | null; size: number | null };
+
+function filesFrom(fd: FormData): FileMeta[] {
+  try {
+    const raw = JSON.parse(txt(fd, "files") || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((f) => f && typeof f.name === "string" && typeof f.path === "string")
+      .map((f) => ({ name: String(f.name).slice(0, 300), path: String(f.path), mime: f.mime ? String(f.mime) : null, size: Number(f.size) || null }));
+  } catch {
+    return [];
+  }
+}
+
+/** Best-effort (pre-mig-186 just skips) — record attachment rows. */
+async function insertDiaryFiles(admin: Admin, entryId: string, remarkId: string | null, files: FileMeta[], uploadedBy: string) {
+  if (files.length === 0) return;
+  await admin.from("work_diary_files").insert(files.map((f) => ({ entry_id: entryId, remark_id: remarkId, name: f.name, path: f.path, mime: f.mime, size: f.size, uploaded_by: uploadedBy })));
+}
+
+/** Hand the browser signed upload URLs for direct-to-storage uploads. */
+export async function prepareDiaryUploadsAction(
+  formData: FormData,
+): Promise<{ ok: true; uploads: Array<{ name: string; path: string; token: string }> } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  const admin = createAdminSupabaseClient();
+  void profile;
+
+  let names: Array<{ name: string }> = [];
+  try {
+    const raw = JSON.parse(txt(formData, "names") || "[]");
+    if (Array.isArray(raw)) names = raw.filter((n) => n && typeof n.name === "string");
+  } catch { /* ignore */ }
+  if (names.length === 0) return { ok: false, error: "No files to upload." };
+  if (names.length > 15) return { ok: false, error: "Max 15 files at once." };
+
+  // Lazily ensure the bucket exists (same pattern as dev-transfer).
+  try { await admin.storage.createBucket(DIARY_BUCKET, { public: true }); } catch { /* already exists */ }
+
+  const month = new Date().toISOString().slice(0, 7); // yyyy-mm folder
+  const uploads: Array<{ name: string; path: string; token: string }> = [];
+  for (const n of names) {
+    const safe = n.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 120) || "file";
+    const path = `${month}/${crypto.randomUUID()}-${safe}`;
+    const { data, error } = await admin.storage.from(DIARY_BUCKET).createSignedUploadUrl(path);
+    if (error || !data) return { ok: false, error: error?.message || "Could not prepare the upload." };
+    uploads.push({ name: n.name, path, token: data.token });
+  }
+  return { ok: true, uploads };
+}
+
 /** Load an entry + whether this profile may act on it (boss / creator / included). */
 async function loadEntryFor(admin: Admin, entryId: string, profileId: string, role: string) {
   const { data: e } = await admin
@@ -60,20 +118,25 @@ export async function createDiaryEntryAction(formData: FormData): Promise<Action
   const { profile } = await requireAuth();
   const admin = createAdminSupabaseClient();
 
-  const activity = txt(formData, "activity");
+  // Register style — the activity is written in CAPITALS (Daksh).
+  const activity = txt(formData, "activity").toUpperCase();
   const dueDate = txt(formData, "due_date");
+  // The creator can be the ONLY person included — that's a personal entry
+  // (Naresh maintains his own work); others can be added later via Manage people.
   const people = [...new Set(ids(formData, "participants"))];
+  const urgent = txt(formData, "urgent") === "1";
   if (!activity) return { ok: false, error: "Write the activity." };
   if (!dueDate) return { ok: false, error: "Pick a date to complete." };
-  if (people.length === 0) return { ok: false, error: "Include at least one person." };
+  if (people.length === 0) return { ok: false, error: "Include at least one person (you can pick just yourself)." };
 
-  const { data: row, error } = await admin
-    .from("work_diary_entries")
-    .insert({ activity, details: txt(formData, "details") || null, created_by: profile.id, due_date: dueDate })
-    .select("id")
-    .single();
+  const base = { activity, details: txt(formData, "details") || null, created_by: profile.id, due_date: dueDate };
+  // urgent col is mig 186 — retry without it on a pre-migration schema.
+  let ins = await admin.from("work_diary_entries").insert({ ...base, urgent } as never).select("id").single();
+  if (ins.error) ins = await admin.from("work_diary_entries").insert(base).select("id").single();
+  const { data: row, error } = ins;
   if (error || !row) return { ok: false, error: error?.message || "Failed to create the entry." };
   const entryId = (row as { id: string }).id;
+  await insertDiaryFiles(admin, entryId, null, filesFrom(formData), profile.id);
 
   const { error: pErr } = await admin
     .from("work_diary_participants")
@@ -130,15 +193,17 @@ export async function addDiaryRemarkAction(formData: FormData): Promise<ActionRe
   const admin = createAdminSupabaseClient();
   const entryId = txt(formData, "entry_id");
   const body = txt(formData, "body");
+  const files = filesFrom(formData);
   if (!entryId) return { ok: false, error: "Missing entry." };
-  if (!body) return { ok: false, error: "Write a remark first." };
+  if (!body && files.length === 0) return { ok: false, error: "Write a remark (or attach a file) first." };
 
   const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
   if (!entry) return { ok: false, error: "Entry not found." };
   if (!allowed) return { ok: false, error: "You're not included in this entry." };
 
-  const { error } = await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body, kind: "remark" });
-  if (error) return { ok: false, error: error.message };
+  const { data: r, error } = await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body, kind: "remark" }).select("id").single();
+  if (error || !r) return { ok: false, error: error?.message || "Failed to add the remark." };
+  await insertDiaryFiles(admin, entryId, (r as { id: string }).id, files, profile.id);
   revalidatePath("/diary");
   return { ok: true };
 }
@@ -160,7 +225,9 @@ export async function closeDiaryEntryAction(formData: FormData): Promise<ActionR
     .update({ closed_at: new Date().toISOString(), closed_by: profile.id })
     .eq("id", entryId);
   if (error) return { ok: false, error: error.message };
-  await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body: "", kind: "closed" });
+  // The optional closing remark rides on the system "closed" line — the Closed
+  // tab card shows it big next to who closed it.
+  await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body: txt(formData, "body"), kind: "closed" });
 
   void logAudit(profile.id, "diary_entry_closed", "work_diary_entry", entryId, { activity: entry.activity });
   revalidatePath("/diary");
@@ -185,6 +252,28 @@ export async function reopenDiaryEntryAction(formData: FormData): Promise<Action
   await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body: "", kind: "reopened" });
 
   void logAudit(profile.id, "diary_entry_reopened", "work_diary_entry", entryId, { activity: entry.activity });
+  revalidatePath("/diary");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** Mark / unmark an entry URGENT (mig 186) — creator / included / boss. Urgent
+ *  entries glow, sort on top, and light up the topbar pill's moving border. */
+export async function setDiaryUrgentAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  const admin = createAdminSupabaseClient();
+  const entryId = txt(formData, "entry_id");
+  const urgent = txt(formData, "urgent") === "1";
+  if (!entryId) return { ok: false, error: "Missing entry." };
+
+  const { entry, allowed } = await loadEntryFor(admin, entryId, profile.id, profile.role);
+  if (!entry) return { ok: false, error: "Entry not found." };
+  if (!allowed) return { ok: false, error: "You're not included in this entry." };
+
+  const { error } = await admin.from("work_diary_entries").update({ urgent } as never).eq("id", entryId);
+  if (error) return { ok: false, error: "Run migration 186 to enable the urgent flag." };
+
+  void logAudit(profile.id, urgent ? "diary_entry_urgent" : "diary_entry_unurgent", "work_diary_entry", entryId, { activity: entry.activity });
   revalidatePath("/diary");
   revalidatePath("/", "layout");
   return { ok: true };
