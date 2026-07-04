@@ -45,6 +45,8 @@ export type DiaryEntry = {
 const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const fmtDate = (d: string | null) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
 const fmtStamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+// Just the day (IST) for the register's "Created" column — matches the Due format.
+const fmtDay = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
 const fmtSize = (n: number | null) => (n == null ? "" : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 const hueOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; };
 
@@ -242,6 +244,7 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
                   <th style={th}>Activity</th>
                   <th style={th}>From</th>
                   <th style={th}>Included</th>
+                  <th style={th}>Created</th>
                   <th style={th}>Due</th>
                   <th style={th}>Status</th>
                   <th style={th}>Last remark</th>
@@ -260,6 +263,7 @@ export function DiaryClient({ me, entries: serverEntries, people, groups, initia
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 600 }}>{e.createdByName}</td>
                       <td style={td}><Avatars people={e.participants} /></td>
+                      <td style={{ ...td, whiteSpace: "nowrap", color: "var(--muted)" }} title={`Added ${fmtStamp(e.createdAt)}`}>{fmtDay(e.createdAt)}</td>
                       <td style={{ ...td, whiteSpace: "nowrap", fontWeight: e.dueDate ? 700 : 500, color: isOverdue(e) ? "#b91c1c" : e.dueDate ? "var(--text)" : "var(--muted)" }}>{e.dueDate ? fmtDate(e.dueDate) : "— no date"}</td>
                       <td style={td}><StatusChip e={e} /></td>
                       <td style={{ ...td, maxWidth: 260 }}>
