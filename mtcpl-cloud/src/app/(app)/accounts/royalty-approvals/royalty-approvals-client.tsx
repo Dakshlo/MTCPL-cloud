@@ -20,7 +20,7 @@
  * model as the Private Notes modal.
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
@@ -94,6 +94,14 @@ export function RoyaltyApprovalsClient({
     Extract<ListResult, { ok: true }>["entries"]
   >([]);
   const [error, setError] = useState<string | null>(null);
+  // Tap a signature thumbnail → open it big for a proper look before approving.
+  const [zoomSig, setZoomSig] = useState<{ src: string; vendor: string } | null>(null);
+  useEffect(() => {
+    if (!zoomSig) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") setZoomSig(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomSig]);
   const [pending, startTransition] = useTransition();
 
   function handleUnlock(e: React.FormEvent<HTMLFormElement>) {
@@ -166,6 +174,29 @@ export function RoyaltyApprovalsClient({
         show={pending}
         label={unlocked ? "Updating queue…" : "Unlocking…"}
       />
+      {/* Full-size signature viewer — tap the thumbnail to inspect the sign
+          properly before approving; tap anywhere / ✕ / Esc to close. */}
+      {zoomSig && (
+        <div
+          onClick={() => setZoomSig(null)}
+          role="dialog"
+          aria-modal="true"
+          style={{ position: "fixed", inset: 0, zIndex: 7000, background: "rgba(15,23,42,0.72)", backdropFilter: "blur(3px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 18, gap: 12 }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#fff", fontWeight: 800, fontSize: 15 }}>
+            <span>✍️ {zoomSig.vendor} — signature</span>
+            <button type="button" onClick={() => setZoomSig(null)} style={{ fontSize: 13, fontWeight: 800, padding: "7px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.12)", color: "#fff", cursor: "pointer" }}>✕ Close</button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={zoomSig.src}
+            alt={`${zoomSig.vendor} signature`}
+            onClick={(ev) => ev.stopPropagation()}
+            style={{ maxWidth: "min(96vw, 900px)", maxHeight: "82vh", objectFit: "contain", background: "#fff", borderRadius: 12, boxShadow: "0 24px 70px rgba(0,0,0,0.5)", padding: 12 }}
+          />
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>Tap anywhere to close</div>
+        </div>
+      )}
       <header style={{ marginBottom: 18 }}>
         <div
           style={{
@@ -364,8 +395,17 @@ export function RoyaltyApprovalsClient({
                       {e.signature && (
                         <div style={{ marginTop: 4, marginBottom: 6 }}>
                           <div style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 3 }}>✍️ VENDOR SIGNATURE</div>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={e.signature} alt="Vendor signature" style={{ height: 54, maxWidth: 240, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }} />
+                          {/* Tap to open full-size for a proper look before approving. */}
+                          <button
+                            type="button"
+                            onClick={() => setZoomSig({ src: e.signature!, vendor: e.vendorName })}
+                            title="Tap to view the signature full-size"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: 0, border: "none", background: "transparent", cursor: "zoom-in" }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={e.signature} alt="Vendor signature" style={{ height: 54, maxWidth: 240, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 6, background: "#fff" }} />
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--gold-dark)" }}>🔍 Open</span>
+                          </button>
                         </div>
                       )}
                       {/* Mig 068 — show the business date prominently
