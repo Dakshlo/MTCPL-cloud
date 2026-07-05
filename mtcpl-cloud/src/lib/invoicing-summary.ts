@@ -172,9 +172,9 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
 
   // 3 — RUNNING bills: custom-billed + invoiced challans. Items = challan_custom_items.
   {
-    type Row = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; inv_fy: string | null; inv_seq: number | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+    type Row = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; inv_fy: string | null; inv_seq: number | null; running_challan_at: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
     const rows = await pageAll<Row>((from, to) => admin.from("challans")
-      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent")
+      .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, running_challan_at, gst_mode, igst_percent, cgst_percent, sgst_percent")
       .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null).is("archived_at", null)
       .order("challan_date", { ascending: false }).range(from, to));
     const items = await itemsBy(admin, "challan_custom_items", "challan_id", rows.map((r) => r.id), "challan_id, amount, rate, quantity, unit", "unit", "quantity");
@@ -187,7 +187,10 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
         amount: t.grand, taxed: t.grand - t.subtotal, cft: it.cft, sft: it.sft, nos: it.nos,
         href: `/invoicing/challan/${r.id}/custom/print`,
         challanCode: challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number,
-        challanHref: `/invoicing/challan/${r.id}/running/print`,
+        // Only route to the running-challan print when that step actually
+        // happened (running_challan_at). A "drop the challan" bill never had it
+        // → running/print 404s; fall back to the custom document (always valid).
+        challanHref: r.running_challan_at ? `/invoicing/challan/${r.id}/running/print` : `/invoicing/challan/${r.id}/custom/print`,
       });
     }
   }

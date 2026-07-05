@@ -33,6 +33,16 @@ const STATUS: Record<ChallanStatus, { label: string; color: string; bg: string }
   running: { label: "Running bill", color: "#b45309", bg: "rgba(180,83,9,0.14)" },
 };
 
+// Sort key from a doc code — "INV-26/27-88" / "CH-26/27-09" → FY-year*1e5 + seq,
+// so ordering is by NUMBER (within its FY), fixing the "88 between 86 and 87"
+// mis-order that came from sorting by date. Falls back to the trailing digits.
+function numKey(code: string): number {
+  const m = code.match(/(\d+)\/\d+\D+(\d+)\s*$/);
+  if (m) return Number(m[1]) * 100000 + Number(m[2]);
+  const d = code.match(/(\d+)\s*$/);
+  return d ? Number(d[1]) : 0;
+}
+
 const money = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qty = (n: number) => (n ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—");
 const moneyDash = (n: number) => (n ? money(n) : "—");
@@ -102,9 +112,15 @@ function SummaryView({ rows, noun }: { rows: ViewRow[]; noun: "challan" | "invoi
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [openParty, setOpenParty] = useState<string | null>(null);
+  // Order by document number. Default ASC = lowest number on top (Daksh).
+  const [order, setOrder] = useState<"asc" | "desc">("asc");
   const showMoney = noun === "invoice"; // challans carry no price (Daksh)
 
-  const filtered = useMemo(() => rows.filter((r) => (!from || r.date >= from) && (!to || r.date <= to)), [rows, from, to]);
+  const byNum = (a: ViewRow, b: ViewRow) => (order === "asc" ? numKey(a.code) - numKey(b.code) : numKey(b.code) - numKey(a.code));
+  const filtered = useMemo(() =>
+    rows.filter((r) => (!from || r.date >= from) && (!to || r.date <= to)).sort(byNum),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, from, to, order]);
   const tot = useMemo(() => filtered.reduce(
     (a, r) => ({ amount: a.amount + r.amount, taxed: a.taxed + r.taxed, taxable: a.taxable + r.taxable, cft: a.cft + r.cft, sft: a.sft + r.sft, nos: a.nos + r.nos }),
     { amount: 0, taxed: 0, taxable: 0, cft: 0, sft: 0, nos: 0 },
@@ -138,6 +154,10 @@ function SummaryView({ rows, noun }: { rows: ViewRow[]; noun: "challan" | "invoi
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, fontWeight: 700, color: "var(--muted)" }}><span>From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={dateInp} /></label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, fontWeight: 700, color: "var(--muted)" }}><span>To</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={dateInp} /></label>
         {(from || to) && <button type="button" onClick={() => { setFrom(""); setTo(""); }} style={{ fontSize: 12, fontWeight: 700, padding: "8px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}>Clear dates</button>}
+        {/* Order by number — default asc (lowest number on top). */}
+        <button type="button" onClick={() => setOrder((o) => (o === "asc" ? "desc" : "asc"))} title="Toggle number order" style={{ fontSize: 12.5, fontWeight: 800, padding: "9px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}>
+          {order === "asc" ? "↑ Low → High" : "↓ High → Low"}
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <a href={exportHref} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12.5, fontWeight: 800, padding: "9px 16px", borderRadius: 10, border: "none", background: "#15803d", color: "#fff", textDecoration: "none", whiteSpace: "nowrap" }}>⬇ Export Excel</a>
           <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 11, background: "var(--bg)", border: "1px solid var(--border)" }}>
