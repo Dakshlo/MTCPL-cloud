@@ -70,4 +70,14 @@ create index if not exists idx_salary_payments_employee on public.salary_payment
 alter table public.salary_employees enable row level security;
 alter table public.salary_payments enable row level security;
 
+-- Let users SWITCH INTO the salary department. profiles.active_department is a
+-- TEXT column with a CHECK constraint (mig 036 → 110); extend it to allow
+-- 'salary', otherwise setActiveDepartmentAction's UPDATE fails the constraint
+-- and the sidebar stays stuck on the previous department.
+alter table public.profiles
+  drop constraint if exists profiles_active_department_check;
+alter table public.profiles
+  add constraint profiles_active_department_check
+    check (active_department in ('production', 'finance', 'inventory', 'invoicing', 'register', 'maintenance', 'salary'));
+
 notify pgrst, 'reload schema';
