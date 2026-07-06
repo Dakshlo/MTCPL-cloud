@@ -34,7 +34,7 @@
 
 import type { AppRole } from "@/lib/types";
 
-export type Department = "production" | "finance" | "inventory" | "invoicing" | "register" | "maintenance";
+export type Department = "production" | "finance" | "inventory" | "invoicing" | "register" | "maintenance" | "salary";
 
 /** Static metadata for the switcher pill row. Order here = order in
  *  the UI. */
@@ -93,6 +93,16 @@ export const DEPARTMENTS: ReadonlyArray<{
     landingHref: "/maintenance",
     tooltip: "Company machines — working status, repair tickets & approvals",
   },
+  {
+    // Mig 189 — Salary / PF: employee master, monthly salary runs, PF
+    // record + the HDFC bulk-payment sheet (same format Finance uploads).
+    // Completely separate tables — owner / developer / ACCOUNTANT★.
+    id: "salary",
+    label: "Salary / PF",
+    icon: "💵",
+    landingHref: "/salary",
+    tooltip: "Employee salaries · PF record · HDFC bank payment sheet",
+  },
 ] as const;
 
 const FINANCE_PREFIXES = ["/accounts"] as const;
@@ -100,6 +110,7 @@ const INVENTORY_PREFIXES = ["/inventory"] as const;
 const INVOICING_PREFIXES = ["/invoicing"] as const;
 const REGISTER_PREFIXES = ["/activity-register"] as const;
 const MAINTENANCE_PREFIXES = ["/maintenance"] as const;
+const SALARY_PREFIXES = ["/salary"] as const;
 
 /**
  * Given a request pathname, return which department owns it. Used by
@@ -123,6 +134,9 @@ export function departmentForRoute(pathname: string): Department {
   }
   for (const p of MAINTENANCE_PREFIXES) {
     if (pathname === p || pathname.startsWith(p + "/")) return "maintenance";
+  }
+  for (const p of SALARY_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p + "/")) return "salary";
   }
   return "production";
 }
@@ -160,11 +174,11 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
   switch (role) {
     case "developer":
     case "owner":
-      return ["production", "finance", "invoicing", "inventory", "register", "maintenance"];
-    // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a 2-tile
-    // Finance / Invoicing switcher.
+      return ["production", "finance", "invoicing", "inventory", "register", "maintenance", "salary"];
+    // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a Finance / Invoicing
+    // switcher. Mig 189 — Salary/PF added (they run the bank sheet).
     case "accountant_star":
-      return ["finance", "invoicing"];
+      return ["finance", "invoicing", "salary"];
     // Mig 061 follow-on (Daksh): crosscheck audits both bills
     // (Finance) and inventory movements (mig 041 audit queue), so
     // they get a 2-tile Finance / Inventory switcher. Without it

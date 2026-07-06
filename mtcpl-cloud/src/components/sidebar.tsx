@@ -79,6 +79,7 @@ const DEPT_ACCENTS: Record<Department, string> = {
   inventory:  "#c87850",  // copper — matches inventory module theme
   register:   "#8a6fb0",  // violet — the records / proof register (mig 102)
   maintenance:"#3f8f86",  // teal — machines / upkeep (mig 108–110)
+  salary:     "#9c5f6e",  // rosewood — people + payroll (mig 189)
 };
 
 /** Convert "#rrggbb" → "rgba(r,g,b,a)" so we can mix tile accents
@@ -394,6 +395,22 @@ const navEntries: NavEntry[] = [
     icon: "🛠️",
     roles: ["developer", "owner", "crosscheck"],
     department: "maintenance",
+  },
+  // ── SALARY / PF section (mig 189) — employee master + monthly salary
+  //    runs + PF record + the HDFC bulk-payment sheet. Completely separate
+  //    department (own tables); owner / developer / ACCOUNTANT★ only.
+  {
+    type: "divider",
+    label: "SALARY / PF",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "salary",
+  },
+  {
+    href: "/salary",
+    label: "Salary & PF",
+    icon: "💵",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "salary",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
