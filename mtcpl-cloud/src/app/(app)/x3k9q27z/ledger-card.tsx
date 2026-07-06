@@ -110,8 +110,8 @@ export function LedgerCard({
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={lbl}>Note <span style={{ fontWeight: 500 }}>(optional)</span></span>
-            <input name="note" autoComplete="off" placeholder="What's this for?" style={inp} />
+            <span style={lbl}>Note <span style={{ color: "#dc2626" }}>*</span> <span style={{ fontWeight: 500, color: "var(--muted)" }}>— required</span></span>
+            <input name="note" required autoComplete="off" placeholder="What's this for? (party name / reason)" style={inp} />
           </label>
 
           <FormPending />
@@ -134,7 +134,7 @@ export function LedgerCard({
               <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(confirm.amount)}</strong>{" "}
               {direction === "receive" ? "from" : "to"} <strong>{confirm.counterparty || "—"}</strong> on <strong>{emoji} {title}</strong>.
             </div>
-            {confirm.note && <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 4 }}>Note: {confirm.note}</div>}
+            {confirm.note && <div style={{ fontSize: 13.5, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>📝 {confirm.note}</div>}
             {isTransfer && (
               <div style={{ fontSize: 12, color: "#4f46e5", fontWeight: 700, background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, padding: "7px 10px", marginTop: 8 }}>
                 ⇄ This moves money between Home and Office.
@@ -206,7 +206,9 @@ function DetailsModal({ title, emoji, balance, positive, entries, canCancel, onC
                     }}>
                       <span style={{ fontSize: 17, color: pend ? "#9ca3af" : recv ? "#15803d" : "#b45309" }}>{recv ? "↓" : "↑"}</span>
                       <span style={{ minWidth: 0, flex: 1 }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, display: "block", color: pend ? "#6b7280" : "var(--text)" }}>
+                        {/* Note first + BOLD (Naresh) — the reason matters most. */}
+                        {e.note && <span style={{ fontSize: 13.5, fontWeight: 800, display: "block", color: pend ? "#4b5563" : "var(--text)", wordBreak: "break-word" }}>📝 {e.note}</span>}
+                        <span style={{ fontSize: e.note ? 11.5 : 13, fontWeight: e.note ? 600 : 700, display: "block", color: pend ? "#6b7280" : e.note ? "var(--muted)" : "var(--text)" }}>
                           {recv ? "From" : "To"} {e.counterparty}
                           {e.isTransfer && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: pend ? "#6b7280" : "#4f46e5", background: pend ? "rgba(107,114,128,0.15)" : "rgba(99,102,241,0.12)", padding: "1px 6px", borderRadius: 6, verticalAlign: "middle" }}>⇄ Transfer</span>}
                         </span>
@@ -214,7 +216,6 @@ function DetailsModal({ title, emoji, balance, positive, entries, canCancel, onC
                           {new Date(`${e.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                           {pend && <span style={{ marginLeft: 6, color: "#b45309", fontWeight: 800 }}>· ⏳ Pending approval</span>}
                         </span>
-                        {e.note && <span style={{ fontSize: 11.5, color: "var(--muted)", display: "block", marginTop: 2 }}>📝 {e.note}</span>}
                       </span>
                       <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, color: pend ? "#6b7280" : recv ? "#15803d" : "#b91c1c", whiteSpace: "nowrap" }}>
                         {recv ? "+" : "−"}{rupee(e.amount)}

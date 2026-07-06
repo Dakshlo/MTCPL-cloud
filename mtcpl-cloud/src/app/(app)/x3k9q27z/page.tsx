@@ -109,7 +109,10 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
                 const idField = p.transfer_group ? "group" : "id";
                 const idValue = p.transfer_group ?? p.id;
                 return (
-                  <div key={p.transfer_group ?? p.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "11px 13px", border: "1px solid #fde68a", borderRadius: 10, background: "#fff" }}>
+                  <div key={p.transfer_group ?? p.id} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "11px 13px", border: "1px solid #fde68a", borderRadius: 10, background: "#fff" }}>
+                    {/* Note first + BOLD (Naresh — the note must be visible before approving). */}
+                    {p.note && <div style={{ fontSize: 13.5, fontWeight: 800, color: "#1f2937", wordBreak: "break-word" }}>📝 {p.note}</div>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 15, color: recv ? "#15803d" : "#b45309" }}>{recv ? "+" : "−"}{rupee(amt)}</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
                       {recv ? "Received from" : "Paid to"} {p.counterparty}
@@ -131,6 +134,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
                         <button type="submit" style={{ fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, border: "1.5px solid rgba(220,38,38,0.4)", color: "#b91c1c", background: "var(--bg)", cursor: "pointer" }}>✕ Reject</button>
                       </form>
                     </span>
+                    </div>
                   </div>
                 );
               })}

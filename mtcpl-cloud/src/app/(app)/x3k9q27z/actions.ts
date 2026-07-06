@@ -53,7 +53,11 @@ export async function addLedgerEntryAction(formData: FormData): Promise<void> {
   if (!counterparty) {
     redirect(`/x3k9q27z?toast=${encodeURIComponent("Choose who this is with")}`);
   }
-  const note = txt(formData, "note").trim() || null;
+  // Note is MANDATORY now (Naresh) — every entry must say what it's for.
+  const note = txt(formData, "note").trim();
+  if (!note) {
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Write a note — it's required")}`);
+  }
 
   // Transfer when "to whom" is the OTHER account keyword.
   const cp = counterparty.toUpperCase();
