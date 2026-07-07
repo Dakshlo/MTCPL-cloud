@@ -14,6 +14,7 @@ import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
 import { PF_WAGE_CEILING } from "@/lib/salary-permissions";
+import { SalaryImportButton } from "./salary-import";
 import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryMonthAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
@@ -125,7 +126,8 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
   }, [employees]);
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
+        <SalaryImportButton />
         <button type="button" onClick={() => onEdit("new")} style={{ ...btnPrimary, background: "var(--gold-dark)" }}>＋ Add employee</button>
       </div>
       {employees.length === 0 ? (
@@ -217,6 +219,70 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
 
 /* ── 💵 Pay month ──────────────────────────────────────────────────── */
 
+/** PF-register download with a designation picker: export everyone, or tick a
+ *  subset. All ticked → no filter param (whole register); a subset → adds
+ *  ?designations=CSV that the route filters on. (Daksh Jul 2026) */
+function PfExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPaymentRow[] }) {
+  const NO_DESIG = "(No designation)";
+  const desigs = useMemo(
+    () => [...new Set(rows.map((r) => (r.designation ?? "").trim() || NO_DESIG))].sort((a, b) => a.localeCompare(b)),
+    [rows],
+  );
+  const [open, setOpen] = useState(false);
+  // null = "all designations"; a Set = an explicit subset.
+  const [sel, setSel] = useState<Set<string> | null>(null);
+
+  const effective = sel === null ? desigs : desigs.filter((d) => sel.has(d));
+  const allOn = effective.length === desigs.length;
+  const noneOn = effective.length === 0;
+  const disabled = rows.length === 0;
+  const href = allOn
+    ? `/api/salary/pf-export?month=${monthYm}`
+    : `/api/salary/pf-export?month=${monthYm}&designations=${encodeURIComponent(effective.join(","))}`;
+  const toggle = (d: string) => setSel((prev) => { const n = new Set(prev ?? desigs); n.has(d) ? n.delete(d) : n.add(d); return n; });
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        title="Monthly Salary & PF register — the PF handler's format. Click to choose designations."
+        style={{ ...btnPrimary, background: disabled ? "var(--border)" : "#6b4652", opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
+      >
+        ⬇ PF register ▾
+      </button>
+      {open && !disabled && (
+        <>
+          <span onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 51, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.2)", padding: 12, width: 260, maxHeight: 360, overflowY: "auto" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)", marginBottom: 8 }}>Designations to export</div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 0", fontWeight: 800, fontSize: 12.5, borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
+              <input type="checkbox" checked={allOn} ref={(el) => { if (el) el.indeterminate = !allOn && !noneOn; }} onChange={() => setSel(allOn ? new Set() : null)} />
+              All ({desigs.length})
+            </label>
+            {desigs.map((d) => (
+              <label key={d} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", fontSize: 12.5 }}>
+                <input type="checkbox" checked={effective.includes(d)} onChange={() => toggle(d)} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d}</span>
+              </label>
+            ))}
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => { if (!noneOn) setOpen(false); }}
+              style={{ ...btnPrimary, background: noneOn ? "var(--border)" : "#15803d", display: "block", textAlign: "center", marginTop: 10, textDecoration: "none", pointerEvents: noneOn ? "none" : "auto", opacity: noneOn ? 0.6 : 1 }}
+            >
+              ⬇ Download {allOn ? "all" : effective.length}
+            </a>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }: {
   monthYm: string; rows: SalaryPaymentRow[]; isBoss: boolean;
   onPickMonth: (ym: string) => void; onEditRow: (r: SalaryPaymentRow) => void; activeCount: number;
@@ -260,15 +326,7 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
           >
             ⬇ HDFC bank sheet · {draft.length}
           </a>
-          <a
-            href={`/api/salary/pf-export?month=${monthYm}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ ...btnPrimary, background: rows.length ? "#6b4652" : "var(--border)", textDecoration: "none", pointerEvents: rows.length ? "auto" : "none" }}
-            title="Monthly Salary & PF register — the PF handler's format"
-          >
-            ⬇ PF register
-          </a>
+          <PfExportControl monthYm={monthYm} rows={rows} />
           {confirmPaid ? (
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>Paid from the bank — mark {draft.length} row{draft.length !== 1 ? "s" : ""} PAID?</span>

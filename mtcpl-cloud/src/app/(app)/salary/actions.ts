@@ -21,6 +21,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseSalary, computePf } from "@/lib/salary-permissions";
@@ -266,4 +267,159 @@ export async function unmarkSalaryPaymentPaidAction(formData: FormData): Promise
   void logAudit(profile.id, "salary_payment_unpaid", "salary_payment", id, {});
   revalidatePath("/salary");
   go("Row moved back to draft");
+}
+
+// ── Import employees from an Excel sheet (Daksh Jul 2026) ────────────
+// The PF handler already keeps employees in an Excel in exactly our register
+// shape. Rather than retype them, upload that sheet: we find the header row and
+// map NAME / FATHER / BANK / IFSC / A/C / FIXED SALARY by label, and read the
+// designation from the column just left of SR.NO (exceljs fills merged cells,
+// so a group label spanning many rows lands on every row). Two-step — parse →
+// preview → import — so NOTHING is written until the user confirms.
+
+type ParsedEmp = { name: string; father: string; designation: string; bank: string; ifsc: string; account: string; salary: number };
+
+function xlText(cell: ExcelJS.Cell): string {
+  const v = cell.value as unknown;
+  if (v == null) return "";
+  if (typeof v === "object") {
+    if ("richText" in (v as object)) return (v as { richText: Array<{ text: string }> }).richText.map((t) => t.text).join("");
+    if ("result" in (v as object)) return String((v as { result: unknown }).result ?? "");
+    if ("text" in (v as object)) return String((v as { text: unknown }).text ?? "");
+    return "";
+  }
+  return String(v);
+}
+const xlDigits = (cell: ExcelJS.Cell) => xlText(cell).replace(/\D/g, "");
+const xlNum = (cell: ExcelJS.Cell) => { const n = Number(xlText(cell).replace(/[,\s₹]/g, "")); return Number.isFinite(n) ? n : 0; };
+const normH = (v: string) => v.replace(/\s+/g, " ").trim().toUpperCase();
+
+export async function parseSalaryImportAction(
+  formData: FormData,
+): Promise<{ ok: true; rows: Array<ParsedEmp & { dup: boolean; note: string }>; sheet: string } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canUseSalary(profile)) return { ok: false, error: "Not allowed." };
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose an .xlsx file first." };
+  if (file.size > 8 * 1024 * 1024) return { ok: false, error: "File too large (max 8 MB)." };
+
+  let wb: ExcelJS.Workbook;
+  try {
+    wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(await file.arrayBuffer()) as never);
+  } catch {
+    return { ok: false, error: "Could not read the file — is it a real .xlsx?" };
+  }
+  const ws = wb.worksheets[0];
+  if (!ws) return { ok: false, error: "The workbook has no sheets." };
+
+  // Locate the header row + map the columns we care about by their labels.
+  let headerRow = -1;
+  const col: Partial<Record<"name" | "father" | "bank" | "ifsc" | "acc" | "salary" | "sr", number>> = {};
+  for (let r = 1; r <= Math.min(25, ws.rowCount); r++) {
+    const row = ws.getRow(r);
+    const f: Partial<Record<"name" | "father" | "bank" | "ifsc" | "acc" | "salary" | "sr", number>> = {};
+    for (let c = 1; c <= ws.columnCount; c++) {
+      const h = normH(xlText(row.getCell(c)));
+      if (!h) continue;
+      if (h === "NAME" && f.name == null) f.name = c;
+      else if (h.includes("FATHER") && f.father == null) f.father = c;
+      else if (h.includes("BANK") && h.includes("NAME") && f.bank == null) f.bank = c;
+      else if (h.includes("IFSC") && f.ifsc == null) f.ifsc = c;
+      else if ((h.includes("A/C") || h.includes("ACCOUNT")) && f.acc == null) f.acc = c;
+      else if (h.includes("FIXED") && h.includes("SALARY") && f.salary == null) f.salary = c;
+      else if (h.includes("SR") && f.sr == null) f.sr = c;
+    }
+    if (f.name != null && (f.father != null || f.ifsc != null || f.bank != null)) {
+      headerRow = r; Object.assign(col, f); break;
+    }
+  }
+  if (headerRow < 0 || col.name == null) {
+    return { ok: false, error: "Couldn't find a header row with NAME / FATHER / BANK / IFSC. Use the same column layout as the PF register." };
+  }
+  // Designation = the column just left of SR.NO (else two left of NAME).
+  const desigCol = col.sr != null ? col.sr - 1 : col.name - 2;
+
+  const parsed: ParsedEmp[] = [];
+  let carried = "";
+  for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const name = xlText(row.getCell(col.name)).replace(/\s+/g, " ").trim();
+    if (!name || normH(name) === "TOTAL") continue;
+    const desigRaw = desigCol >= 1 ? xlText(row.getCell(desigCol)).replace(/\s+/g, " ").trim() : "";
+    if (desigRaw && normH(desigRaw) !== "TOTAL") carried = desigRaw;
+    parsed.push({
+      name,
+      father: col.father ? xlText(row.getCell(col.father)).replace(/\s+/g, " ").trim() : "",
+      designation: desigRaw || carried,
+      bank: col.bank ? xlText(row.getCell(col.bank)).replace(/\s+/g, " ").trim() : "",
+      ifsc: col.ifsc ? normH(xlText(row.getCell(col.ifsc))).replace(/\s/g, "") : "",
+      account: col.acc ? xlDigits(row.getCell(col.acc)) : "",
+      salary: col.salary ? xlNum(row.getCell(col.salary)) : 0,
+    });
+  }
+  if (parsed.length === 0) return { ok: false, error: "No employee rows found under the header." };
+
+  // Flag duplicates against what's already in the DB (by account, then name).
+  const admin = createAdminSupabaseClient();
+  const { data: existing } = await admin.from("salary_employees").select("name, account_number");
+  const existAcc = new Set(((existing ?? []) as Array<{ account_number: string | null }>).map((e) => (e.account_number ?? "").replace(/\D/g, "")).filter(Boolean));
+  const existName = new Set(((existing ?? []) as Array<{ name: string | null }>).map((e) => normH(e.name ?? "")).filter(Boolean));
+  const seenAcc = new Set<string>();
+  const rows = parsed.map((p) => {
+    let dup = false; let note = "";
+    if (p.account && existAcc.has(p.account)) { dup = true; note = "A/c already in system"; }
+    else if (existName.has(normH(p.name))) { dup = true; note = "Name already in system"; }
+    else if (p.account && seenAcc.has(p.account)) { dup = true; note = "Duplicate A/c in this file"; }
+    if (p.account) seenAcc.add(p.account);
+    return { ...p, dup, note };
+  });
+  return { ok: true, rows, sheet: ws.name };
+}
+
+export async function importSalaryEmployeesAction(
+  rows: ParsedEmp[],
+  pfEnabled: boolean,
+): Promise<{ ok: true; inserted: number; skipped: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canUseSalary(profile)) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && String(r.name || "").trim());
+  if (list.length === 0) return { ok: false, error: "Nothing to import." };
+
+  const admin = createAdminSupabaseClient();
+  // Re-check dupes server-side so a stale preview can't double-insert.
+  const { data: existing } = await admin.from("salary_employees").select("account_number");
+  const existAcc = new Set(((existing ?? []) as Array<{ account_number: string | null }>).map((e) => (e.account_number ?? "").replace(/\D/g, "")).filter(Boolean));
+
+  const toInsert: Array<Record<string, unknown>> = [];
+  let skipped = 0;
+  const seen = new Set<string>();
+  for (const r of list) {
+    const acc = String(r.account || "").replace(/\D/g, "");
+    if (acc && (existAcc.has(acc) || seen.has(acc))) { skipped += 1; continue; }
+    if (acc) seen.add(acc);
+    const name = String(r.name).replace(/\s+/g, " ").trim();
+    const beneficiary = name.toUpperCase().replace(/[^A-Z0-9 .]/g, " ").replace(/\s+/g, " ").trim().slice(0, 20);
+    toInsert.push({
+      name,
+      father_name: String(r.father || "").trim() || null,
+      designation: String(r.designation || "").trim() || null,
+      bank_name: String(r.bank || "").trim() || null,
+      account_number: acc || null,
+      ifsc: String(r.ifsc || "").toUpperCase().replace(/\s+/g, "") || null,
+      beneficiary_name: beneficiary || null,
+      monthly_salary: Number(r.salary) > 0 ? Math.round(Number(r.salary) * 100) / 100 : 0,
+      salary_type: "fixed",
+      pf_enabled: !!pfEnabled,
+      pf_percent: 12,
+      is_active: true,
+      created_by: profile.id,
+    });
+  }
+  if (toInsert.length === 0) return { ok: false, error: `All ${list.length} row(s) already exist — nothing new to import.` };
+  const { error } = await admin.from("salary_employees").insert(toInsert as never);
+  if (error) return { ok: false, error: error.message };
+  void logAudit(profile.id, "salary_employees_imported", "salary_employee", "batch", { inserted: toInsert.length, skipped });
+  revalidatePath("/salary");
+  return { ok: true, inserted: toInsert.length, skipped };
 }
