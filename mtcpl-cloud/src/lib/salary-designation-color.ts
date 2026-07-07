@@ -27,15 +27,16 @@ const PALETTE: Array<{ bg: string; fg: string }> = [
   { bg: "#ECEEDB", fg: "#5C6113" }, // olive
 ];
 
-// Blank / "no designation" gets a calm neutral grey rather than a palette hue.
+// Blank / "no designation" / "no organization" gets a calm neutral grey rather
+// than a palette hue (the helper is shared by designations AND site labels).
 const NEUTRAL: { bg: string; fg: string } = { bg: "#EEF0F2", fg: "#475569" };
 
 const toArgb = (hex: string) => "FF" + hex.replace("#", "").toUpperCase();
 
-/** Stable colour for a designation name. Same input → same colour, always. */
+/** Stable colour for a designation / organization label. Same input → same colour, always. */
 export function designationColor(name: string | null | undefined): DesignationColor {
   const key = (name ?? "").trim();
-  const chosen = !key || /^\(?no designation/i.test(key)
+  const chosen = !key || /^\(?no (designation|organization)/i.test(key)
     ? NEUTRAL
     : PALETTE[hash(key.toUpperCase()) % PALETTE.length];
   return { bg: chosen.bg, fg: chosen.fg, bgArgb: toArgb(chosen.bg), fgArgb: toArgb(chosen.fg) };
