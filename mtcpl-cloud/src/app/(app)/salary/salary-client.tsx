@@ -8,10 +8,12 @@
  * house pattern; the MTCPL spinner shows while a form is in flight.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
+import { PF_WAGE_CEILING } from "@/lib/salary-permissions";
 import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryMonthAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
@@ -19,14 +21,15 @@ import {
 } from "./actions";
 
 export type SalaryEmployee = {
-  id: string; name: string; designation: string | null; phone: string | null;
+  id: string; name: string; designation: string | null; fatherName: string | null; phone: string | null; aadhaar: string | null;
   bankName: string | null; accountNumber: string | null; ifsc: string | null; beneficiaryName: string | null;
-  monthlySalary: number; pfEnabled: boolean; uan: string | null; pfPercent: number;
+  monthlySalary: number; salaryType: "fixed" | "variable"; pfEnabled: boolean; uan: string | null; pfPercent: number;
   joinedOn: string | null; isActive: boolean; notes: string | null;
 };
 export type SalaryPaymentRow = {
-  id: string; employeeId: string; employeeName: string; designation: string | null; hasBank: boolean;
-  gross: number; pfAmount: number; otherDeduction: number; addition: number; net: number;
+  id: string; employeeId: string; employeeName: string; designation: string | null; salaryType: "fixed" | "variable"; hasBank: boolean;
+  gross: number; pfAmount: number; otAmount: number; otHours: number | null; advance: number; attendanceDays: number | null; remarks: string | null;
+  otherDeduction: number; addition: number; net: number;
   note: string | null; status: "draft" | "paid"; paidAt: string | null;
 };
 export type PfRow = { employeeId: string; month: string; pfAmount: number };
@@ -51,9 +54,10 @@ function FormPending({ label }: { label: string }) {
   return <FinanceLoadingOverlay show={pending} label={label} />;
 }
 
-export function SalaryClient({ me, employees, monthYm, monthRows, pfRows, initialTab }: {
+export function SalaryClient({ me, employees, designations, monthYm, monthRows, pfRows, initialTab }: {
   me: { id: string; isBoss: boolean };
   employees: SalaryEmployee[];
+  designations: string[];
   monthYm: string;
   monthRows: SalaryPaymentRow[];
   pfRows: PfRow[];
@@ -90,7 +94,7 @@ export function SalaryClient({ me, employees, monthYm, monthRows, pfRows, initia
       {tab === "month" && <MonthTab monthYm={monthYm} rows={monthRows} isBoss={me.isBoss} onPickMonth={(ym) => router.push(`/salary?month=${ym}&tab=month`)} onEditRow={setEditRow} activeCount={active.length} />}
       {tab === "pf" && <PfTab employees={employees} pfRows={pfRows} />}
 
-      {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} monthYm={monthYm} onClose={() => setEditEmp(null)} />}
+      {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} designations={designations} monthYm={monthYm} onClose={() => setEditEmp(null)} />}
       {editRow && <RowModal row={editRow} monthYm={monthYm} onClose={() => setEditRow(null)} />}
     </div>
   );
@@ -113,6 +117,12 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const th: React.CSSProperties = { padding: "8px 10px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", whiteSpace: "nowrap", borderBottom: "2px solid var(--border)", background: "var(--bg)" };
   const td: React.CSSProperties = { padding: "10px", fontSize: 12.5, borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
+  // Group by designation (Daksh) — sorted, "No designation" last.
+  const groups = useMemo(() => {
+    const m = new Map<string, SalaryEmployee[]>();
+    for (const e of employees) { const k = (e.designation ?? "").trim() || "— No designation"; const a = m.get(k) ?? []; a.push(e); m.set(k, a); }
+    return [...m.entries()].sort((a, b) => (a[0].startsWith("—") ? 1 : 0) - (b[0].startsWith("—") ? 1 : 0) || a[0].localeCompare(b[0]));
+  }, [employees]);
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -130,13 +140,23 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
                 <th style={th}>Employee</th><th style={th}>Monthly salary</th><th style={th}>Bank</th><th style={th}>PF</th><th style={th}>Status</th><th style={{ ...th, textAlign: "right" }}>Actions</th>
               </tr></thead>
               <tbody>
-                {employees.map((e) => (
+                {groups.map(([desig, emps]) => (
+                  <Fragment key={desig}>
+                    <tr>
+                      <td colSpan={6} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)", background: "rgba(201,161,74,0.08)", borderBottom: "1px solid var(--border)" }}>
+                        {desig} <span style={{ color: "var(--muted)", fontWeight: 700 }}>· {emps.length}</span>
+                      </td>
+                    </tr>
+                    {emps.map((e) => (
                   <tr key={e.id} style={{ opacity: e.isActive ? 1 : 0.55 }}>
                     <td style={td}>
                       <span style={{ fontWeight: 800, display: "block" }}>{e.name}</span>
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>{[e.designation, e.phone].filter(Boolean).join(" · ") || "—"}</span>
                     </td>
-                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{inr(e.monthlySalary)}</td>
+                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                      {inr(e.monthlySalary)}
+                      <span style={{ display: "block", fontFamily: "inherit", fontSize: 10, fontWeight: 800, marginTop: 2, color: e.salaryType === "variable" ? "#b45309" : "var(--muted)" }}>{e.salaryType === "variable" ? "↕ VARIABLE" : "FIXED"}</span>
+                    </td>
                     <td style={td}>
                       {e.accountNumber ? (
                         <>
@@ -183,6 +203,8 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
                       ))}
                     </td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -237,6 +259,15 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
             title="HDFC ENet Bulk Payment sheet — same format Finance uploads"
           >
             ⬇ HDFC bank sheet · {draft.length}
+          </a>
+          <a
+            href={`/api/salary/pf-export?month=${monthYm}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ ...btnPrimary, background: rows.length ? "#6b4652" : "var(--border)", textDecoration: "none", pointerEvents: rows.length ? "auto" : "none" }}
+            title="Monthly Salary & PF register — the PF handler's format"
+          >
+            ⬇ PF register
           </a>
           {confirmPaid ? (
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
@@ -413,8 +444,10 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
 
 /* ── Modals ────────────────────────────────────────────────────────── */
 
-function EmployeeModal({ emp, monthYm, onClose }: { emp: SalaryEmployee | null; monthYm: string; onClose: () => void }) {
+function EmployeeModal({ emp, designations, monthYm, onClose }: { emp: SalaryEmployee | null; designations: string[]; monthYm: string; onClose: () => void }) {
   const [pfOn, setPfOn] = useState(emp?.pfEnabled ?? false);
+  const [designation, setDesignation] = useState(emp?.designation ?? "");
+  const [salaryType, setSalaryType] = useState<"fixed" | "variable">(emp?.salaryType ?? "fixed");
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
       <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(720px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)", maxHeight: "94vh", overflowY: "auto" }}>
@@ -425,10 +458,38 @@ function EmployeeModal({ emp, monthYm, onClose }: { emp: SalaryEmployee | null; 
           <FormPending label={emp ? "Saving employee…" : "Adding employee…"} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             <label><span style={lbl}>Name *</span><input name="name" required defaultValue={emp?.name ?? ""} style={inp} /></label>
-            <label><span style={lbl}>Designation</span><input name="designation" defaultValue={emp?.designation ?? ""} placeholder="e.g. operator, driver" style={inp} /></label>
+            <label><span style={lbl}>Father / husband name</span><input name="father_name" defaultValue={emp?.fatherName ?? ""} style={inp} /></label>
+            <label>
+              <span style={lbl}>Designation</span>
+              <Combobox value={designation} onChange={setDesignation} options={designations} name="designation" placeholder="Pick or type a new one…" inputStyle={inp} />
+            </label>
             <label><span style={lbl}>Phone</span><input name="phone" defaultValue={emp?.phone ?? ""} style={inp} /></label>
-            <label><span style={lbl}>Monthly salary (₹) *</span><input name="monthly_salary" required inputMode="decimal" defaultValue={emp?.monthlySalary ? String(emp.monthlySalary) : ""} style={inp} /></label>
+            <label><span style={lbl}>Aadhaar no.</span><input name="aadhaar" inputMode="numeric" maxLength={12} defaultValue={emp?.aadhaar ?? ""} placeholder="12 digits" style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></label>
             <label><span style={lbl}>Joined on</span><input type="date" name="joined_on" defaultValue={emp?.joinedOn ?? ""} style={inp} /></label>
+          </div>
+
+          <div style={{ margin: "16px 0 8px", fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)" }}>💰 Salary</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, alignItems: "end" }}>
+            <div>
+              <span style={lbl}>Salary type</span>
+              <input type="hidden" name="salary_type" value={salaryType} />
+              <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)", width: "100%" }}>
+                {(["fixed", "variable"] as const).map((t) => (
+                  <button key={t} type="button" onClick={() => setSalaryType(t)} style={{ flex: 1, fontSize: 12.5, fontWeight: 800, padding: "8px 10px", borderRadius: 8, border: "none", cursor: "pointer", background: salaryType === t ? "var(--gold)" : "transparent", color: salaryType === t ? "#fff" : "var(--muted)" }}>
+                    {t === "fixed" ? "Fixed" : "↕ Variable"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label>
+              <span style={lbl}>{salaryType === "variable" ? "Typical salary (₹)" : "Monthly salary (₹) *"}</span>
+              <input name="monthly_salary" required={salaryType === "fixed"} inputMode="decimal" defaultValue={emp?.monthlySalary ? String(emp.monthlySalary) : ""} style={inp} />
+            </label>
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
+            {salaryType === "variable"
+              ? "Variable — Prepare month drafts a ₹0 row; you type the actual amount for the month before paying."
+              : "Fixed — Prepare month drafts this amount automatically every month."}
           </div>
 
           <div style={{ margin: "16px 0 8px", fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)" }}>🏦 Bank — for the HDFC sheet</div>
@@ -468,30 +529,38 @@ function EmployeeModal({ emp, monthYm, onClose }: { emp: SalaryEmployee | null; 
 function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: string; onClose: () => void }) {
   const [gross, setGross] = useState(String(row.gross || ""));
   const [pf, setPf] = useState(String(row.pfAmount || ""));
+  const [ot, setOt] = useState(String(row.otAmount || ""));
+  const [advance, setAdvance] = useState(String(row.advance || ""));
   const [ded, setDed] = useState(String(row.otherDeduction || ""));
   const [add, setAdd] = useState(String(row.addition || ""));
   const n = (s: string) => Number(s.replace(/,/g, "")) || 0;
-  const net = Math.round((n(gross) - n(pf) - n(ded) + n(add)) * 100) / 100;
+  const net = Math.round((n(gross) - n(pf) + n(ot) - n(advance) - n(ded) + n(add)) * 100) / 100;
   return (
-    <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16 }}>
-      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(520px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)" }}>
-        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 2 }}>✎ {row.employeeName}</div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 14 }}>This month&apos;s amounts — net recalculates live.</div>
+    <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
+      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)", maxHeight: "94vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 2 }}>✎ {row.employeeName}{row.salaryType === "variable" && <span style={{ fontSize: 11, fontWeight: 800, color: "#b45309", marginLeft: 8 }}>↕ VARIABLE</span>}</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 14 }}>This month&apos;s amounts — net recalculates live. Attendance &amp; OT hours feed the PF register.</div>
         <form action={updateSalaryPaymentAction}>
           <input type="hidden" name="id" value={row.id} />
           <ReturnCtx monthYm={monthYm} tab="month" />
           <FormPending label="Saving row…" />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label><span style={lbl}>Gross (₹)</span><input name="gross" inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>PF deduction (₹)</span><input name="pf_amount" inputMode="decimal" value={pf} onChange={(e) => setPf(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>Other deduction (₹)</span><input name="other_deduction" inputMode="decimal" value={ded} onChange={(e) => setDed(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>Addition / bonus (₹)</span><input name="addition" inputMode="decimal" value={add} onChange={(e) => setAdd(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>Gross (₹){row.salaryType === "variable" ? " *" : ""}</span><input name="gross" inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>PF deduction − (₹)</span><input name="pf_amount" inputMode="decimal" value={pf} onChange={(e) => setPf(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>Attendance days</span><input name="attendance_days" inputMode="decimal" defaultValue={row.attendanceDays != null ? String(row.attendanceDays) : ""} style={inp} /></label>
+            <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" defaultValue={row.otHours != null ? String(row.otHours) : ""} style={inp} /></label>
+            <label><span style={lbl}>OT amount + (₹)</span><input name="ot_amount" inputMode="decimal" value={ot} onChange={(e) => setOt(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>Advance − (₹)</span><input name="advance" inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>Other deduction − (₹)</span><input name="other_deduction" inputMode="decimal" value={ded} onChange={(e) => setDed(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>Addition / bonus + (₹)</span><input name="addition" inputMode="decimal" value={add} onChange={(e) => setAdd(e.target.value)} style={inp} /></label>
           </div>
-          <label style={{ display: "block", marginTop: 12 }}><span style={lbl}>Note</span><input name="note" defaultValue={row.note ?? ""} placeholder="e.g. 3 days advance adjusted" style={inp} /></label>
+          <label style={{ display: "block", marginTop: 12 }}><span style={lbl}>Remarks (shown on PF register)</span><input name="remarks" defaultValue={row.remarks ?? ""} placeholder="e.g. joined mid-month, 2 days LOP" style={inp} /></label>
+          <label style={{ display: "block", marginTop: 12 }}><span style={lbl}>Note (internal)</span><input name="note" defaultValue={row.note ?? ""} placeholder="e.g. 3 days advance adjusted" style={inp} /></label>
           <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(22,101,52,0.07)", border: "1px solid rgba(22,101,52,0.25)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", color: "#15803d" }}>Net pay</span>
             <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 18, color: "#15803d" }}>{inr(net)}</span>
           </div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6, textAlign: "right" }}>Gross − PF + OT − Advance − Deduction + Addition</div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
             <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
             <button type="submit" style={btnPrimary}>✓ Save row</button>

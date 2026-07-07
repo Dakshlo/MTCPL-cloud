@@ -54,12 +54,15 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
         id: String(e.id),
         name: String(e.name ?? ""),
         designation: (e.designation as string | null) ?? null,
+        fatherName: (e.father_name as string | null) ?? null,
         phone: (e.phone as string | null) ?? null,
+        aadhaar: (e.aadhaar as string | null) ?? null,
         bankName: (e.bank_name as string | null) ?? null,
         accountNumber: (e.account_number as string | null) ?? null,
         ifsc: (e.ifsc as string | null) ?? null,
         beneficiaryName: (e.beneficiary_name as string | null) ?? null,
         monthlySalary: Number(e.monthly_salary) || 0,
+        salaryType: (e.salary_type as string) === "variable" ? "variable" : "fixed",
         pfEnabled: !!e.pf_enabled,
         uan: (e.uan as string | null) ?? null,
         // An explicit 0% is a real value — only a missing/garbage one shows 12.
@@ -76,7 +79,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
   if (!needsMigration) {
     const { data, error } = await admin
       .from("salary_payments")
-      .select("id, employee_id, month, gross, pf_amount, other_deduction, addition, net, note, status, paid_at")
+      .select("id, employee_id, month, gross, pf_amount, ot_amount, ot_hours, advance, attendance_days, remarks, other_deduction, addition, net, note, status, paid_at")
       .eq("month", monthKey);
     if (!error) {
       const nameOf = new Map(employees.map((e) => [e.id, e] as const));
@@ -87,9 +90,15 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
           employeeId: String(r.employee_id),
           employeeName: emp?.name ?? "—",
           designation: emp?.designation ?? null,
+          salaryType: emp?.salaryType ?? "fixed",
           hasBank: !!(emp?.accountNumber && (emp?.beneficiaryName || emp?.name)),
           gross: Number(r.gross) || 0,
           pfAmount: Number(r.pf_amount) || 0,
+          otAmount: Number(r.ot_amount) || 0,
+          otHours: r.ot_hours == null ? null : Number(r.ot_hours),
+          advance: Number(r.advance) || 0,
+          attendanceDays: r.attendance_days == null ? null : Number(r.attendance_days),
+          remarks: (r.remarks as string | null) ?? null,
           otherDeduction: Number(r.other_deduction) || 0,
           addition: Number(r.addition) || 0,
           net: Number(r.net) || 0,
@@ -135,6 +144,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
       <SalaryClient
         me={{ id: profile.id, isBoss: profile.role === "owner" || profile.role === "developer" }}
         employees={employees}
+        designations={[...new Set(employees.map((e) => (e.designation ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
         monthYm={monthYm}
         monthRows={monthRows}
         pfRows={pfRows}

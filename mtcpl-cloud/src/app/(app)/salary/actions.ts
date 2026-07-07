@@ -23,7 +23,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseSalary } from "@/lib/salary-permissions";
+import { canUseSalary, computePf } from "@/lib/salary-permissions";
 import { logAudit } from "@/lib/audit";
 
 function txt(fd: FormData, key: string): string {
@@ -76,15 +76,19 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   const pfPctRaw = txt(formData, "pf_percent");
   const pfPercent = pfPctRaw === "" ? 12 : num(formData, "pf_percent");
 
+  const salaryType = txt(formData, "salary_type") === "variable" ? "variable" : "fixed";
   const row: Record<string, unknown> = {
     name,
     designation: txt(formData, "designation") || null,
+    father_name: txt(formData, "father_name") || null,
     phone: txt(formData, "phone") || null,
+    aadhaar: txt(formData, "aadhaar").replace(/\D/g, "").slice(0, 12) || null,
     bank_name: txt(formData, "bank_name") || null,
     account_number: txt(formData, "account_number").replace(/\s+/g, "") || null,
     ifsc: txt(formData, "ifsc").toUpperCase().replace(/\s+/g, "") || null,
     beneficiary_name: beneficiary || null,
     monthly_salary: num(formData, "monthly_salary"),
+    salary_type: salaryType,
     pf_enabled: txt(formData, "pf_enabled") === "1",
     joined_on: txt(formData, "joined_on") || null,
     notes: txt(formData, "notes") || null,
@@ -149,23 +153,22 @@ export async function prepareSalaryMonthAction(formData: FormData): Promise<void
 
   const { data: emps, error: e1 } = await admin
     .from("salary_employees")
-    .select("id, monthly_salary, pf_enabled, pf_percent")
+    .select("id, monthly_salary, pf_enabled, pf_percent, salary_type")
     .eq("is_active", true);
   if (e1) go(`Could not load employees: ${e1.message}`);
-  const employees = (emps ?? []) as Array<{ id: string; monthly_salary: number; pf_enabled: boolean; pf_percent: number }>;
+  const employees = (emps ?? []) as Array<{ id: string; monthly_salary: number; pf_enabled: boolean; pf_percent: number; salary_type: string }>;
   if (employees.length === 0) go("No active employees yet — add them first");
 
   const { data: existing } = await admin.from("salary_payments").select("employee_id").eq("month", month!);
   const have = new Set(((existing ?? []) as Array<{ employee_id: string }>).map((r) => r.employee_id));
 
   const rows = employees.filter((e) => !have.has(e.id)).map((e) => {
-    const gross = Number(e.monthly_salary) || 0;
-    // An explicit PF% of 0 is honoured — only a missing/invalid value falls
-    // back to the 12% default (review finding: `|| 12` ate real zeros).
-    const pctRaw = Number(e.pf_percent);
-    const pct = Number.isFinite(pctRaw) ? pctRaw : 12;
-    const pf = e.pf_enabled ? Math.round(gross * pct) / 100 : 0;
-    return { employee_id: e.id, month: month!, gross, pf_amount: pf, other_deduction: 0, addition: 0, net: Math.round((gross - pf) * 100) / 100, status: "draft", created_by: profile.id };
+    // Variable-salary employees start at 0 so the accountant MUST enter this
+    // month's figure; fixed employees prefill their monthly salary.
+    const gross = e.salary_type === "variable" ? 0 : Number(e.monthly_salary) || 0;
+    // PF = pct% of min(gross, ₹15,000 ceiling). Explicit 0% honoured.
+    const pf = computePf(gross, Number(e.pf_percent), e.pf_enabled);
+    return { employee_id: e.id, month: month!, gross, pf_amount: pf, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0, net: Math.round((gross - pf) * 100) / 100, status: "draft", created_by: profile.id };
   });
   if (rows.length === 0) go("Every active employee already has a row for this month");
 
@@ -187,11 +190,22 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
 
   const gross = num(formData, "gross");
   const pf = num(formData, "pf_amount");
+  const ot = num(formData, "ot_amount");
+  const advance = num(formData, "advance");
   const ded = num(formData, "other_deduction");
   const add = num(formData, "addition");
-  const net = Math.round((gross - pf - ded + add) * 100) / 100;
+  // Actual pay = earned − PF + overtime − advance − other deduction + addition.
+  const net = Math.round((gross - pf + ot - advance - ded + add) * 100) / 100;
+  const attendanceRaw = txt(formData, "attendance_days");
+  const otHoursRaw = txt(formData, "ot_hours");
   const { data, error } = await admin.from("salary_payments")
-    .update({ gross, pf_amount: pf, other_deduction: ded, addition: add, net, note: txt(formData, "note") || null } as never)
+    .update({
+      gross, pf_amount: pf, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
+      attendance_days: attendanceRaw === "" ? null : num(formData, "attendance_days"),
+      ot_hours: otHoursRaw === "" ? null : num(formData, "ot_hours"),
+      remarks: txt(formData, "remarks") || null,
+      note: txt(formData, "note") || null,
+    } as never)
     .eq("id", id).eq("status", "draft")
     .select("id");
   if (error) go(`Could not save: ${error.message}`);
