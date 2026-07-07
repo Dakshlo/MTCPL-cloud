@@ -490,6 +490,48 @@ export const AI_TOOLS = [
     },
   },
 
+  // ── Carving / Dispatch / Invoicing / Salary / Work-diary snapshots ──
+  // Daksh Jul 2026 — the assistant now covers the WHOLE pipeline
+  // (cut → carve → dispatch → invoice) plus Salary/PF and the shared
+  // Work Diary. These are compact current-state snapshots; for deep
+  // operational detail point the user at the relevant page.
+  {
+    name: "get_carving_snapshot",
+    description:
+      "Carving department right now. Slabs go from cut → carving (assigned to a CNC / outsource vendor) → completed. Returns how many carving jobs are queued (carving_assigned), actively carving (carving_in_progress), done-and-awaiting-approval (carving_completed), overdue (past due date), plus a sample of the oldest in-progress jobs with vendor + slab. Use for 'carving mein kya chal raha hai', 'how many slabs are being carved', 'carving backlog', 'kaunse carving jobs pending hain'.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_dispatch_snapshot",
+    description:
+      "Dispatch department right now. Returns slabs READY to dispatch (carving-completed, not parked), slabs already DISPATCHED, slabs sitting in Main Storage (parked), dispatch trips ON THE ROAD (approved, not yet delivered) and DELIVERED this month, plus active truck count and a sample of on-road trips (temple, load no, since when). Use for 'dispatch status', 'kitna dispatch ready hai', 'trucks on the road', 'aaj kya dispatch hua', 'kitne slab bache hain bhejne ke liye'.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_invoicing_snapshot",
+    description:
+      "Invoicing department headline. Delivery challans are raised from dispatch, then priced + owner-approved to become tax invoices. Returns open (un-invoiced, live) challan count, challans PENDING owner approval, total invoices raised, and this-month challan/invoice counts. Use for 'invoicing status', 'kitne invoice bane', 'pending approval challans', 'aaj kitne challan bane'. For a specific bill/invoice number point the user at /invoicing.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_salary_snapshot",
+    description:
+      "Salary / PF department headline for a month. Returns active-employee count, PF-enabled count, fixed-vs-variable split, and for the chosen month the prepared salary rows: draft vs paid counts and total gross / PF deducted / net-to-pay. Use for 'salary status', 'is mahine ki salary', 'kitni salary pay karni hai', 'PF kitna kata', 'kitne employees hain'. Pass month=YYYY-MM for a specific month; omit for the current month.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        month: { type: "string", description: "Optional YYYY-MM (e.g. '2026-07'). Omit for the current IST month." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_work_diary",
+    description:
+      "The shared Work Diary (kaam ka register / काम का रजिस्टर) — every team member logs tasks here; anyone tagged can close them. Returns how many entries are OPEN, how many are marked URGENT, how many were closed today, and a sample of the oldest open entries (activity, who created it, age, urgent flag). Use for 'diary mein kya pending hai', 'work diary status', 'urgent kaam kya hai', 'kitne kaam baaki hain', 'open tasks'.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+
   {
     name: "list_blocks",
     description:
@@ -580,6 +622,17 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getInventoryAuditQueue());
       case "list_scaffolding_components":
         return JSON.stringify(await listScaffoldingComponents(input));
+      // Carving / Dispatch / Invoicing / Salary / Work-diary
+      case "get_carving_snapshot":
+        return JSON.stringify(await getCarvingSnapshot());
+      case "get_dispatch_snapshot":
+        return JSON.stringify(await getDispatchSnapshot());
+      case "get_invoicing_snapshot":
+        return JSON.stringify(await getInvoicingSnapshot());
+      case "get_salary_snapshot":
+        return JSON.stringify(await getSalarySnapshot(input));
+      case "get_work_diary":
+        return JSON.stringify(await getWorkDiary());
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -3551,6 +3604,187 @@ async function getInventoryAuditQueue() {
       ageHours: b.ageHours,
       batchNote: b.batchNote,
     })),
+  };
+}
+
+// ─── Carving / Dispatch / Invoicing / Salary / Work-diary snapshots ──────────
+// Daksh Jul 2026 — the assistant now covers the WHOLE pipeline plus Salary/PF
+// and the shared Work Diary. All READ-ONLY, defensive: a missing row/column
+// returns a partial snapshot (the runTool try/catch turns any throw into a
+// graceful { error } the model relays).
+
+/** First-of-month key ("2026-07-01") for the given YYYY-MM, else current IST month. */
+function istMonthKey(input?: string): string {
+  if (typeof input === "string") {
+    const m = input.match(/^(\d{4})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-01`;
+  }
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+async function resolveNames(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ids: Array<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(ids.filter((x): x is string => !!x))];
+  const out = new Map<string, string>();
+  if (uniq.length === 0) return out;
+  const { data } = await admin.from("profiles").select("id, full_name").in("id", uniq);
+  for (const p of (data ?? []) as Array<{ id: string; full_name: string | null }>) out.set(p.id, p.full_name ?? "—");
+  return out;
+}
+
+async function getCarvingSnapshot() {
+  const admin = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const count = async (status: string) =>
+    (await admin.from("slab_requirements").select("*", { count: "exact", head: true }).eq("status", status)).count ?? 0;
+  const [queued, inProgress] = await Promise.all([count("carving_assigned"), count("carving_in_progress")]);
+
+  // Vendor / due-date detail lives on carving_items.
+  const { data: items } = await admin
+    .from("carving_items")
+    .select("status, due_at, vendor_name, slab_requirement_id, assigned_at")
+    .in("status", ["carving_assigned", "carving_in_progress"]);
+  const rows = (items ?? []) as Array<{ status: string; due_at: string | null; vendor_name: string | null; slab_requirement_id: string | null; assigned_at: string | null }>;
+  const overdue = rows.filter((r) => r.due_at && r.due_at < nowIso).length;
+  const sample = rows
+    .filter((r) => r.status === "carving_in_progress")
+    .sort((a, b) => (a.assigned_at ?? "").localeCompare(b.assigned_at ?? ""))
+    .slice(0, 8)
+    .map((r) => ({ slab: r.slab_requirement_id, vendor: r.vendor_name, since: r.assigned_at, due: r.due_at, overdue: !!(r.due_at && r.due_at < nowIso) }));
+
+  return {
+    queued,
+    inProgress,
+    overdue,
+    totalActive: queued + inProgress,
+    sampleInProgress: sample,
+    note: "Slabs in carving. queued = assigned to a vendor, not started; inProgress = being carved. 'completed' slabs have left carving and are dispatch-ready (see get_dispatch_snapshot).",
+  };
+}
+
+async function getDispatchSnapshot() {
+  const admin = createAdminSupabaseClient();
+  const monthStartIso = new Date(istMonthKey() + "T00:00:00+05:30").toISOString();
+
+  const ready = (await admin.from("slab_requirements").select("*", { count: "exact", head: true }).eq("status", "completed").eq("is_parked", false)).count ?? 0;
+  const dispatched = (await admin.from("slab_requirements").select("*", { count: "exact", head: true }).eq("status", "dispatched")).count ?? 0;
+  const inStorage = (await admin.from("slab_requirements").select("*", { count: "exact", head: true }).eq("is_parked", true)).count ?? 0;
+  const deliveredThisMonth = (await admin.from("dispatches").select("*", { count: "exact", head: true }).not("delivered_at", "is", null).gte("delivered_at", monthStartIso)).count ?? 0;
+  const trucks = (await admin.from("trucks").select("*", { count: "exact", head: true })).count ?? 0;
+
+  const { data: onRoad } = await admin
+    .from("dispatches")
+    .select("id, temple, load_number, approved_at, delivered_at")
+    .not("approved_at", "is", null)
+    .is("delivered_at", null)
+    .order("approved_at", { ascending: true })
+    .limit(50);
+  const onRoadRows = (onRoad ?? []) as Array<{ temple: string | null; load_number: number | string | null; approved_at: string | null }>;
+
+  return {
+    readyToDispatch: ready,
+    dispatched,
+    inMainStorage: inStorage,
+    tripsOnRoad: onRoadRows.length,
+    deliveredThisMonth,
+    activeTrucks: trucks,
+    sampleOnRoad: onRoadRows.slice(0, 8).map((d) => ({ temple: d.temple, loadNo: d.load_number, since: d.approved_at })),
+    note: "readyToDispatch = carving-completed slabs not parked in storage. dispatched = already picked onto a trip. tripsOnRoad = approved but not yet delivered.",
+  };
+}
+
+async function getInvoicingSnapshot() {
+  const admin = createAdminSupabaseClient();
+  const monthStart = istMonthKey(); // challan_date is a plain date → 'YYYY-MM-01' compares fine
+  const ch = () => admin.from("challans").select("*", { count: "exact", head: true });
+
+  const openChallans = (await ch().is("converted_invoice_id", null).is("cancelled_at", null).is("archived_at", null)).count ?? 0;
+  const pendingOwnerApproval = (await ch().not("priced_at", "is", null).is("owner_approved_at", null).is("converted_invoice_id", null).is("cancelled_at", null).is("archived_at", null)).count ?? 0;
+  const totalInvoices = (await ch().not("converted_invoice_id", "is", null)).count ?? 0;
+  const challansThisMonth = (await ch().gte("challan_date", monthStart)).count ?? 0;
+
+  return {
+    openChallans,
+    pendingOwnerApproval,
+    totalInvoices,
+    challansThisMonth,
+    note: "Delivery challans → priced → owner-approved → become tax invoices. openChallans = live, not yet invoiced/cancelled/archived. pendingOwnerApproval waits on the owner.",
+  };
+}
+
+async function getSalarySnapshot(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const monthKey = istMonthKey(typeof input.month === "string" ? input.month : undefined);
+
+  const { data: emps } = await admin.from("salary_employees").select("is_active, pf_enabled, salary_type");
+  const e = (emps ?? []) as Array<{ is_active: boolean | null; pf_enabled: boolean | null; salary_type: string | null }>;
+  const active = e.filter((x) => x.is_active).length;
+  const pfEnabled = e.filter((x) => x.pf_enabled).length;
+  const variable = e.filter((x) => x.salary_type === "variable").length;
+
+  const { data: pays } = await admin.from("salary_payments").select("status, gross, pf_amount, net").eq("month", monthKey);
+  const p = (pays ?? []) as Array<{ status: string | null; gross: number | null; pf_amount: number | null; net: number | null }>;
+  const draft = p.filter((x) => x.status === "draft");
+  const paid = p.filter((x) => x.status === "paid");
+  const sum = (arr: typeof p, f: (x: (typeof p)[number]) => number | null) => Math.round(arr.reduce((a, x) => a + (Number(f(x)) || 0), 0) * 100) / 100;
+
+  return {
+    month: monthKey.slice(0, 7),
+    employees: { active, total: e.length, pfEnabled, fixed: e.length - variable, variable },
+    monthRows: {
+      totalRows: p.length,
+      draftCount: draft.length,
+      paidCount: paid.length,
+      grossTotal: sum(p, (x) => x.gross),
+      pfDeducted: sum(p, (x) => x.pf_amount),
+      netToPay: sum(p, (x) => x.net),
+      draftNet: sum(draft, (x) => x.net),
+      paidNet: sum(paid, (x) => x.net),
+    },
+    note: "If monthRows.totalRows is 0, that month hasn't been prepared yet on /salary. netToPay = actual amount to pay; draftNet = still to be paid this run.",
+  };
+}
+
+async function getWorkDiary() {
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("work_diary_entries")
+    .select("*")
+    .is("closed_at", null)
+    .order("created_at", { ascending: true })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const isUrgent = (r: Record<string, unknown>) => r.is_urgent === true || r.urgent === true;
+  const urgent = rows.filter(isUrgent).length;
+
+  const { from } = istRange("today");
+  const closedToday = (await admin.from("work_diary_entries").select("*", { count: "exact", head: true }).gte("closed_at", from)).count ?? 0;
+
+  const names = await resolveNames(admin, rows.map((r) => (typeof r.created_by === "string" ? r.created_by : null)));
+  const text = (r: Record<string, unknown>) => {
+    for (const k of ["activity", "title", "remarks", "text", "note", "description"]) {
+      const v = r[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return "—";
+  };
+  const sample = rows.slice(0, 10).map((r) => ({
+    activity: text(r),
+    by: names.get(typeof r.created_by === "string" ? r.created_by : "") ?? "—",
+    at: typeof r.created_at === "string" ? r.created_at : null,
+    urgent: isUrgent(r),
+  }));
+
+  return {
+    open: rows.length,
+    urgent,
+    closedToday,
+    sampleOpen: sample,
+    note: "Work Diary = shared kaam-ka-register everyone uses. open = not yet closed. urgent entries glow in the app and should be surfaced first.",
   };
 }
 

@@ -32,7 +32,11 @@ import { AI_TOOLS, runTool } from "@/lib/ai/tools";
 import { checkAndIncrement } from "@/lib/ai/rate-limit";
 
 const MAX_TOOL_ROUNDS = 5;
-const MODEL = process.env.ASK_AI_MODEL || "claude-sonnet-4-5";
+// Default upgraded to Opus 4.8 (Daksh Jul 2026) — the most capable model for
+// this cross-department reasoning + bilingual (Hindi/English) formatting + tool
+// selection job. Override with ASK_AI_MODEL=claude-sonnet-5 for a cheaper (still
+// excellent) option, or claude-haiku-4-5 for the fastest/cheapest.
+const MODEL = process.env.ASK_AI_MODEL || "claude-opus-4-8";
 const USD_TO_INR = Number(process.env.USD_TO_INR) || 84; // rough conversion — set exact value via env
 
 /**
@@ -40,10 +44,13 @@ const USD_TO_INR = Number(process.env.USD_TO_INR) || 84; // rough conversion —
  * "cache write" (full price + 25%) and "cache read" (10% of base). We accumulate
  * each bucket separately from finalMessage.usage and sum.
  *
- * Keys match the Anthropic model names (not versioned aliases). If a new model
- * lands we fall back to Sonnet-4.5 rates so the counter still displays something.
+ * Keys match the Anthropic model names. If an unlisted model is set we fall
+ * back to Opus-4.8 rates so the ₹ counter still displays something sane.
  */
 const PRICES_USD_PER_MTOK: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  "claude-opus-4-8":   { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-opus-4-7":   { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-sonnet-5":   { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-haiku-4-5":  { in: 1, out: 5,  cacheRead: 0.1, cacheWrite: 1.25 },
   "claude-opus-4-5":   { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },

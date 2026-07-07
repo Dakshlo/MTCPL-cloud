@@ -37,6 +37,11 @@ const TOOL_LABELS: Record<string, string> = {
   get_temple_requirements: "🏛️ Loading temple requirements…",
   get_cutting_activity: "📅 Loading cutting activity…",
   run_plan_simulation: "📐 Running plan simulation…",
+  get_carving_snapshot: "🪚 Checking carving…",
+  get_dispatch_snapshot: "🚚 Checking dispatch…",
+  get_invoicing_snapshot: "🧾 Checking invoicing…",
+  get_salary_snapshot: "💵 Checking salary/PF…",
+  get_work_diary: "📒 Checking work diary…",
 };
 
 type Msg = {
@@ -80,11 +85,11 @@ function resizeToDataUrl(file: File, maxDim = 1024, quality = 0.8): Promise<stri
 
 const PRESET_QUESTIONS = [
   "आज का काम क्या हुआ?",
-  "कल की पूरी रिपोर्ट दो",
+  "Dispatch ke liye kitna ready hai?",
   "कितने blocks available हैं?",
-  "Urgent slabs कौन-कौन से हैं?",
-  "Aasta Temple के लिए कितने blocks चाहिए?",
-  "पिछले हफ्ते कितनी cutting हुई?",
+  "Carving में क्या चल रहा है?",
+  "इस महीने की salary कितनी है?",
+  "Diary में क्या pending है?",
 ];
 
 // Minimal typing for the browser SpeechRecognition API
