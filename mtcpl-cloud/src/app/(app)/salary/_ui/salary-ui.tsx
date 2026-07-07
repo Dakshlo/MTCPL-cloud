@@ -15,6 +15,8 @@ import { designationColor } from "@/lib/salary-designation-color";
 /** The label a blank designation is grouped under — MUST match the export
  *  route's literal so screen and sheet never drift. */
 export const NO_DESIG = "(No designation)";
+/** Same, for a blank organization / site. */
+export const NO_ORG = "(No organization)";
 
 type Tone = "neutral" | "gold" | "success" | "warn" | "danger";
 const TONE: Record<Tone, { accent: string; chipBg: string; value: string }> = {

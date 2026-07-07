@@ -80,6 +80,7 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   const salaryType = txt(formData, "salary_type") === "variable" ? "variable" : "fixed";
   const row: Record<string, unknown> = {
     name,
+    organization: txt(formData, "organization") || null,
     designation: txt(formData, "designation") || null,
     father_name: txt(formData, "father_name") || null,
     phone: txt(formData, "phone") || null,
@@ -277,7 +278,7 @@ export async function unmarkSalaryPaymentPaidAction(formData: FormData): Promise
 // so a group label spanning many rows lands on every row). Two-step — parse →
 // preview → import — so NOTHING is written until the user confirms.
 
-type ParsedEmp = { name: string; father: string; designation: string; bank: string; ifsc: string; account: string; salary: number };
+type ParsedEmp = { name: string; father: string; organization: string; designation: string; bank: string; ifsc: string; account: string; salary: number };
 
 function xlText(cell: ExcelJS.Cell): string {
   const v = cell.value as unknown;
@@ -338,20 +339,31 @@ export async function parseSalaryImportAction(
     return { ok: false, error: "Couldn't find a header row with NAME / FATHER / BANK / IFSC. Use the same column layout as the PF register." };
   }
   // Designation = the column just left of SR.NO (else two left of NAME).
+  // Organization / site = one further left again (the handler sheet nests
+  // designations under a site column). Both merge-fill via exceljs.
   const desigCol = col.sr != null ? col.sr - 1 : col.name - 2;
+  const orgCol = desigCol - 1;
 
   const parsed: ParsedEmp[] = [];
   let carried = "";
+  let carriedOrg = "";
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const name = xlText(row.getCell(col.name)).replace(/\s+/g, " ").trim();
     if (!name || normH(name) === "TOTAL") continue;
     const desigRaw = desigCol >= 1 ? xlText(row.getCell(desigCol)).replace(/\s+/g, " ").trim() : "";
     if (desigRaw && normH(desigRaw) !== "TOTAL") carried = desigRaw;
+    const orgRaw = orgCol >= 1 ? xlText(row.getCell(orgCol)).replace(/\s+/g, " ").trim() : "";
+    if (orgRaw && normH(orgRaw) !== "TOTAL") carriedOrg = orgRaw;
+    const designation = desigRaw || carried;
+    const organization = orgRaw || carriedOrg;
     parsed.push({
       name,
       father: col.father ? xlText(row.getCell(col.father)).replace(/\s+/g, " ").trim() : "",
-      designation: desigRaw || carried,
+      // If the two left columns turned out identical (a merged single label),
+      // don't duplicate it — keep it as the designation and leave org blank.
+      organization: organization && organization !== designation ? organization : "",
+      designation,
       bank: col.bank ? xlText(row.getCell(col.bank)).replace(/\s+/g, " ").trim() : "",
       ifsc: col.ifsc ? normH(xlText(row.getCell(col.ifsc))).replace(/\s/g, "") : "",
       account: col.acc ? xlDigits(row.getCell(col.acc)) : "",
@@ -403,6 +415,7 @@ export async function importSalaryEmployeesAction(
     toInsert.push({
       name,
       father_name: String(r.father || "").trim() || null,
+      organization: String(r.organization || "").trim() || null,
       designation: String(r.designation || "").trim() || null,
       bank_name: String(r.bank || "").trim() || null,
       account_number: acc || null,

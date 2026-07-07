@@ -15,7 +15,7 @@ import { DesigChip } from "./_ui/salary-ui";
 import { parseSalaryImportAction, importSalaryEmployeesAction } from "./actions";
 
 type PreviewRow = {
-  name: string; father: string; designation: string; bank: string;
+  name: string; father: string; organization: string; designation: string; bank: string;
   ifsc: string; account: string; salary: number; dup: boolean; note: string;
   include: boolean;
 };
@@ -61,7 +61,7 @@ export function SalaryImportButton() {
     setBusy(true); setErr(null); setMsg(null);
     try {
       const res = await importSalaryEmployeesAction(
-        chosen.map(({ name, father, designation, bank, ifsc, account, salary }) => ({ name, father, designation, bank, ifsc, account, salary })),
+        chosen.map(({ name, father, organization, designation, bank, ifsc, account, salary }) => ({ name, father, organization, designation, bank, ifsc, account, salary })),
         pf,
       );
       if (!res.ok) { setErr(res.error); return; }
@@ -88,7 +88,7 @@ export function SalaryImportButton() {
               <button type="button" onClick={() => { setOpen(false); reset(); }} disabled={busy} style={{ ...btnGhost, marginLeft: "auto", padding: "6px 12px" }}>✕ Close</button>
             </div>
             <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "var(--muted)" }}>
-              Upload your employee sheet (same layout as the PF register — columns <strong>NAME · FATHER NAME · BANK NAME · IFSC CODE · BANK A/C NO. · FIXED SALARY</strong>, with the designation in the column just left of SR.NO). We read name, father, designation, bank, IFSC, A/c number and fixed salary.
+              Upload your employee sheet (same layout as the PF register — columns <strong>NAME · FATHER NAME · BANK NAME · IFSC CODE · BANK A/C NO. · FIXED SALARY</strong>, with the designation in the column just left of SR.NO and the site / organization one column further left). We read name, father, site, designation, bank, IFSC, A/c number and fixed salary.
             </p>
 
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
@@ -113,7 +113,7 @@ export function SalaryImportButton() {
                 <div style={{ overflow: "auto", border: "1px solid var(--border)", borderRadius: 10, flex: 1 }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
                     <thead><tr>
-                      <th style={{ ...th, width: 34 }}></th><th style={th}>Name</th><th style={th}>Father</th><th style={th}>Designation</th><th style={th}>Bank</th><th style={th}>IFSC</th><th style={th}>A/c no.</th><th style={{ ...th, textAlign: "right" }}>Fixed salary</th><th style={th}>Note</th>
+                      <th style={{ ...th, width: 34 }}></th><th style={th}>Name</th><th style={th}>Father</th><th style={th}>Site</th><th style={th}>Designation</th><th style={th}>Bank</th><th style={th}>IFSC</th><th style={th}>A/c no.</th><th style={{ ...th, textAlign: "right" }}>Fixed salary</th><th style={th}>Note</th>
                     </tr></thead>
                     <tbody>
                       {rows.map((r, i) => (
@@ -123,6 +123,7 @@ export function SalaryImportButton() {
                           </td>
                           <td style={{ ...td, fontWeight: 700 }}>{r.name}</td>
                           <td style={td}>{r.father || "—"}</td>
+                          <td style={td}>{r.organization ? <DesigChip name={r.organization} size="sm" /> : "—"}</td>
                           <td style={td}>{r.designation ? <DesigChip name={r.designation} size="sm" /> : "—"}</td>
                           <td style={td}>{r.bank || "—"}</td>
                           <td style={{ ...td, fontFamily: "ui-monospace, monospace" }}>{r.ifsc || "—"}</td>

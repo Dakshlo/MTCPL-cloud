@@ -16,7 +16,7 @@ import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
 import { PF_WAGE_CEILING } from "@/lib/salary-permissions";
 import { designationColor } from "@/lib/salary-designation-color";
 import { SalaryImportButton } from "./salary-import";
-import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG } from "./_ui/salary-ui";
+import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG, NO_ORG } from "./_ui/salary-ui";
 import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryMonthAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
@@ -24,13 +24,13 @@ import {
 } from "./actions";
 
 export type SalaryEmployee = {
-  id: string; name: string; designation: string | null; fatherName: string | null; phone: string | null; aadhaar: string | null;
+  id: string; name: string; organization: string | null; designation: string | null; fatherName: string | null; phone: string | null; aadhaar: string | null;
   bankName: string | null; accountNumber: string | null; ifsc: string | null; beneficiaryName: string | null;
   monthlySalary: number; salaryType: "fixed" | "variable"; pfEnabled: boolean; uan: string | null; pfPercent: number;
   joinedOn: string | null; isActive: boolean; notes: string | null;
 };
 export type SalaryPaymentRow = {
-  id: string; employeeId: string; employeeName: string; designation: string | null; salaryType: "fixed" | "variable"; hasBank: boolean;
+  id: string; employeeId: string; employeeName: string; organization: string | null; designation: string | null; salaryType: "fixed" | "variable"; hasBank: boolean;
   gross: number; pfAmount: number; otAmount: number; otHours: number | null; advance: number; attendanceDays: number | null; remarks: string | null;
   otherDeduction: number; addition: number; net: number;
   note: string | null; status: "draft" | "paid"; paidAt: string | null;
@@ -69,9 +69,10 @@ function FormPending({ label }: { label: string }) {
   return <FinanceLoadingOverlay show={pending} label={label} />;
 }
 
-export function SalaryClient({ me, employees, designations, monthYm, monthRows, pfRows, initialTab }: {
+export function SalaryClient({ me, employees, organizations, designations, monthYm, monthRows, pfRows, initialTab }: {
   me: { id: string; isBoss: boolean };
   employees: SalaryEmployee[];
+  organizations: string[];
   designations: string[];
   monthYm: string;
   monthRows: SalaryPaymentRow[];
@@ -116,7 +117,7 @@ export function SalaryClient({ me, employees, designations, monthYm, monthRows, 
       {tab === "month" && <MonthTab monthYm={monthYm} rows={monthRows} isBoss={me.isBoss} onPickMonth={(ym) => router.push(`/salary?month=${ym}&tab=month`)} onEditRow={setEditRow} activeCount={active.length} />}
       {tab === "pf" && <PfTab employees={employees} pfRows={pfRows} />}
 
-      {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} designations={designations} monthYm={monthYm} onClose={() => setEditEmp(null)} />}
+      {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} organizations={organizations} designations={designations} monthYm={monthYm} onClose={() => setEditEmp(null)} />}
       {editRow && <RowModal row={editRow} monthYm={monthYm} onClose={() => setEditRow(null)} />}
     </div>
   );
@@ -145,17 +146,27 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
   const pfCount = activeEmps.filter((e) => e.pfEnabled).length;
   const missingBank = activeEmps.filter((e) => !e.accountNumber).length;
 
-  // In-memory search (name / phone / account / designation) → group by
-  // designation, NO_DESIG last, keyed to the Excel register's colours.
+  // In-memory search (name / phone / account / designation / organization),
+  // then two-level grouping keyed to the Excel register's colours.
   const needle = q.trim().toLowerCase();
   const filtered = needle
-    ? employees.filter((e) => [e.name, e.phone, e.accountNumber, e.designation].some((v) => (v ?? "").toLowerCase().includes(needle)))
+    ? employees.filter((e) => [e.name, e.phone, e.accountNumber, e.designation, e.organization].some((v) => (v ?? "").toLowerCase().includes(needle)))
     : employees;
-  const groups = (() => {
-    const m = new Map<string, SalaryEmployee[]>();
-    for (const e of filtered) { const k = (e.designation ?? "").trim() || NO_DESIG; const a = m.get(k) ?? []; a.push(e); m.set(k, a); }
-    return [...m.entries()].sort((a, b) => (a[0] === NO_DESIG ? 1 : 0) - (b[0] === NO_DESIG ? 1 : 0) || a[0].localeCompare(b[0]));
+  // Two-level grouping: Organization / site → Designation → employees.
+  const orgGroups = (() => {
+    const byOrg = new Map<string, SalaryEmployee[]>();
+    for (const e of filtered) { const k = (e.organization ?? "").trim() || NO_ORG; const a = byOrg.get(k) ?? []; a.push(e); byOrg.set(k, a); }
+    return [...byOrg.entries()]
+      .sort((a, b) => (a[0] === NO_ORG ? 1 : 0) - (b[0] === NO_ORG ? 1 : 0) || a[0].localeCompare(b[0]))
+      .map(([org, emps]) => {
+        const byDesig = new Map<string, SalaryEmployee[]>();
+        for (const e of emps) { const k = (e.designation ?? "").trim() || NO_DESIG; const a = byDesig.get(k) ?? []; a.push(e); byDesig.set(k, a); }
+        const desigGroups = [...byDesig.entries()].sort((a, b) => (a[0] === NO_DESIG ? 1 : 0) - (b[0] === NO_DESIG ? 1 : 0) || a[0].localeCompare(b[0]));
+        return { org, count: emps.length, desigGroups };
+      });
   })();
+  // Only surface the org level once at least one employee has an org set.
+  const showOrg = orgGroups.length > 1 || (orgGroups.length === 1 && orgGroups[0].org !== NO_ORG);
 
   return (
     <div>
@@ -167,7 +178,7 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
       </KpiRow>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, account, designation…" style={{ ...inp, flex: "1 1 240px", maxWidth: 380 }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, account, designation, site…" style={{ ...inp, flex: "1 1 240px", maxWidth: 380 }} />
         {q && <span style={{ fontSize: 12, color: "var(--muted)" }}>{filtered.length} of {employees.length}</span>}
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>
           <SalaryImportButton />
@@ -179,7 +190,7 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 20px", textAlign: "center", color: "var(--muted)" }}>
           No employees yet — ＋ Add employee to start (name, salary, bank a/c for the HDFC sheet, PF details).
         </div>
-      ) : groups.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)" }}>No employee matches &ldquo;{q}&rdquo;.</div>
       ) : (
         <div style={SALARY_TABLE.wrap}>
@@ -189,16 +200,27 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
                 <th style={SALARY_TABLE.th}>Employee</th><th style={SALARY_TABLE.th}>Monthly salary</th><th style={SALARY_TABLE.th}>Bank</th><th style={SALARY_TABLE.th}>PF</th><th style={SALARY_TABLE.th}>Status</th><th style={{ ...SALARY_TABLE.th, textAlign: "right" }}>Actions</th>
               </tr></thead>
               <tbody>
-                {groups.map(([desig, emps]) => {
-                  const dc = designationColor(desig);
+                {orgGroups.map((og) => {
+                  const oc = designationColor(og.org);
                   return (
-                  <Fragment key={desig}>
-                    <tr>
-                      <td colSpan={6} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: dc.bg, borderLeft: `3px solid ${dc.fg}`, borderBottom: "1px solid var(--border)" }}>
-                        {desig} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {emps.length}</span>
-                      </td>
-                    </tr>
-                    {emps.map((e) => (
+                  <Fragment key={og.org}>
+                    {showOrg && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: "9px 12px", fontSize: 12, fontWeight: 900, letterSpacing: "0.03em", color: oc.fg, background: oc.bg, borderTop: "2px solid var(--border)", borderLeft: `4px solid ${oc.fg}`, borderBottom: "1px solid var(--border)" }}>
+                          🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count} employee{og.count === 1 ? "" : "s"}</span>
+                        </td>
+                      </tr>
+                    )}
+                    {og.desigGroups.map(([desig, emps]) => {
+                      const dc = designationColor(desig);
+                      return (
+                      <Fragment key={desig}>
+                        <tr>
+                          <td colSpan={6} style={{ padding: "8px 12px", paddingLeft: showOrg ? 26 : 12, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: dc.bg, borderLeft: `3px solid ${dc.fg}`, borderBottom: "1px solid var(--border)" }}>
+                            {desig} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {emps.length}</span>
+                          </td>
+                        </tr>
+                        {emps.map((e) => (
                       <tr key={e.id} style={{ opacity: e.isActive ? 1 : 0.55 }}>
                         <td style={SALARY_TABLE.td}>
                           <span style={{ fontWeight: 800, display: "block" }}>{e.name}</span>
@@ -254,7 +276,10 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
                           ))}
                         </td>
                       </tr>
-                    ))}
+                        ))}
+                      </Fragment>
+                      );
+                    })}
                   </Fragment>
                   );
                 })}
@@ -566,8 +591,9 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
 
 /* ── Modals ────────────────────────────────────────────────────────── */
 
-function EmployeeModal({ emp, designations, monthYm, onClose }: { emp: SalaryEmployee | null; designations: string[]; monthYm: string; onClose: () => void }) {
+function EmployeeModal({ emp, organizations, designations, monthYm, onClose }: { emp: SalaryEmployee | null; organizations: string[]; designations: string[]; monthYm: string; onClose: () => void }) {
   const [pfOn, setPfOn] = useState(emp?.pfEnabled ?? false);
+  const [organization, setOrganization] = useState(emp?.organization ?? "");
   const [designation, setDesignation] = useState(emp?.designation ?? "");
   const [salaryType, setSalaryType] = useState<"fixed" | "variable">(emp?.salaryType ?? "fixed");
   return (
@@ -581,6 +607,10 @@ function EmployeeModal({ emp, designations, monthYm, onClose }: { emp: SalaryEmp
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             <label><span style={lbl}>Name *</span><input name="name" required defaultValue={emp?.name ?? ""} style={inp} /></label>
             <label><span style={lbl}>Father / husband name</span><input name="father_name" defaultValue={emp?.fatherName ?? ""} style={inp} /></label>
+            <label>
+              <span style={lbl}>Organization / site</span>
+              <Combobox value={organization} onChange={setOrganization} options={organizations} name="organization" placeholder="e.g. Main Office, Ram Mandir Site…" inputStyle={inp} />
+            </label>
             <label>
               <span style={lbl}>Designation</span>
               <Combobox value={designation} onChange={setDesignation} options={designations} name="designation" placeholder="Pick or type a new one…" inputStyle={inp} />

@@ -53,6 +53,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
       employees = ((data ?? []) as Array<Record<string, unknown>>).map((e) => ({
         id: String(e.id),
         name: String(e.name ?? ""),
+        organization: (e.organization as string | null) ?? null,
         designation: (e.designation as string | null) ?? null,
         fatherName: (e.father_name as string | null) ?? null,
         phone: (e.phone as string | null) ?? null,
@@ -89,6 +90,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
           id: String(r.id),
           employeeId: String(r.employee_id),
           employeeName: emp?.name ?? "—",
+          organization: emp?.organization ?? null,
           designation: emp?.designation ?? null,
           salaryType: emp?.salaryType ?? "fixed",
           hasBank: !!(emp?.accountNumber && (emp?.beneficiaryName || emp?.name)),
@@ -144,6 +146,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
       <SalaryClient
         me={{ id: profile.id, isBoss: profile.role === "owner" || profile.role === "developer" }}
         employees={employees}
+        organizations={[...new Set(employees.map((e) => (e.organization ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
         designations={[...new Set(employees.map((e) => (e.designation ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
         monthYm={monthYm}
         monthRows={monthRows}
