@@ -98,6 +98,9 @@ export type CncContributingSlab = {
   cft: number;
   /** 1, or 2 for double-side carving (output counts x2). */
   sides: number;
+  /** review_approved_at (TIMESTAMPTZ ISO) — when this slab's carving was
+   *  approved, i.e. the moment it counts as output. Used for day-wise grouping. */
+  approvedAt: string | null;
 };
 
 export type CncVariousCostReport = {
@@ -536,6 +539,7 @@ export async function buildCncVariousCostReport(
       sft,
       cft,
       sides,
+      approvedAt: (item.review_approved_at as string | null) ?? null,
     });
   }
 

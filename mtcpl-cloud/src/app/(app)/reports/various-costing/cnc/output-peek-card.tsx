@@ -21,7 +21,22 @@ function fmtNum(n: number, decimals = 2): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: decimals });
 }
 
-type SortMode = "cft" | "sft" | "vendor";
+type SortMode = "cft" | "sft" | "vendor" | "day";
+
+/** IST calendar-day key ("YYYY-MM-DD") for a review_approved_at timestamp. */
+function istDayKey(iso: string | null): string {
+  if (!iso) return "unknown";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  return new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function dayLabel(key: string): string {
+  if (key === "unknown") return "Unknown date";
+  const [y, m, dd] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, dd || 1)).toLocaleDateString("en-IN", {
+    weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
+  });
+}
 
 export function OutputPeekCard({
   combinedOutput,
@@ -82,6 +97,31 @@ export function OutputPeekCard({
       };
     });
     groups.sort((a, b) => b.cft - a.cft);
+    return groups;
+  }, [contributingSlabs]);
+
+  // Day-wise grouping — each carving-approved calendar day (IST) with its own
+  // slab count + SFT/CFT subtotal, newest day first. (Daksh Jul 2026)
+  const dayGroups = useMemo(() => {
+    const m = new Map<string, CncContributingSlab[]>();
+    for (const s of contributingSlabs) {
+      const k = istDayKey(s.approvedAt);
+      const arr = m.get(k);
+      if (arr) arr.push(s);
+      else m.set(k, [s]);
+    }
+    const groups = [...m.entries()].map(([day, rows]) => {
+      const sorted = [...rows].sort((a, b) => b.cft - a.cft || b.sft - a.sft);
+      return {
+        day,
+        label: dayLabel(day),
+        rows: sorted,
+        sft: sorted.reduce((a, s) => a + s.sft, 0),
+        cft: sorted.reduce((a, s) => a + s.cft, 0),
+      };
+    });
+    // Newest day on top; unknown-date bucket (if any) sinks to the bottom.
+    groups.sort((a, b) => (a.day === "unknown" ? 1 : b.day === "unknown" ? -1 : b.day.localeCompare(a.day)));
     return groups;
   }, [contributingSlabs]);
 
@@ -176,6 +216,7 @@ export function OutputPeekCard({
                     <SortBtn active={sort === "cft"} onClick={() => setSort("cft")} label="CFT" />
                     <SortBtn active={sort === "sft"} onClick={() => setSort("sft")} label="SFT" />
                     <SortBtn active={sort === "vendor"} onClick={() => setSort("vendor")} label="Vendor-wise" />
+                    <SortBtn active={sort === "day"} onClick={() => setSort("day")} label="Day-wise" />
                   </div>
                   <button
                     type="button"
@@ -194,6 +235,8 @@ export function OutputPeekCard({
                   </div>
                 ) : sort === "vendor" ? (
                   <VendorGroupedTable groups={vendorGroups} totalSft={totalSft} totalCft={totalCft} slabsCount={slabsCount} />
+                ) : sort === "day" ? (
+                  <DayGroupedTable groups={dayGroups} totalSft={totalSft} totalCft={totalCft} slabsCount={slabsCount} />
                 ) : (
                   <FlatTable slabs={flat} highlight={sort === "sft" ? "sft" : "cft"} totalSft={totalSft} totalCft={totalCft} />
                 )}
@@ -314,6 +357,67 @@ function VendorGroupedTable({
       <tfoot>
         <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
           <td style={{ ...td(), fontWeight: 800 }} colSpan={3}>Total · {slabsCount} slab{slabsCount === 1 ? "" : "s"}</td>
+          <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalSft)}</td>
+          <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalCft)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+function DayGroupedTable({
+  groups, totalSft, totalCft, slabsCount,
+}: {
+  groups: Array<{ day: string; label: string; rows: CncContributingSlab[]; sft: number; cft: number }>;
+  totalSft: number;
+  totalCft: number;
+  slabsCount: number;
+}) {
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <thead>
+        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+          <th style={th()}>Size Code</th>
+          <th style={th()}>Vendor</th>
+          <th style={th()}>Stone</th>
+          <th style={{ ...th(), textAlign: "right" }}>Dimensions (in)</th>
+          <th style={{ ...th(), textAlign: "right" }}>SFT</th>
+          <th style={{ ...th(), textAlign: "right" }}>CFT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {groups.map((g) => (
+          <Fragment key={g.day}>
+            <tr style={{ background: "#ecfdf5", borderTop: "2px solid #10b981" }}>
+              <td colSpan={6} style={{ padding: "10px 14px", fontSize: 12, fontWeight: 800, color: "#065f46", letterSpacing: "0.03em" }}>
+                <span>📅 {g.label}</span>
+                <span style={{ marginLeft: 10, color: "#059669", fontWeight: 600, fontSize: 11 }}>
+                  · {g.rows.length} slab{g.rows.length === 1 ? "" : "s"}
+                </span>
+                <span style={{ float: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "#065f46" }}>
+                  {fmtNum(g.sft)} SFT / {fmtNum(g.cft)} CFT
+                </span>
+              </td>
+            </tr>
+            {g.rows.map((s, i) => (
+              <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+                <td style={{ ...td(), fontFamily: "ui-monospace, monospace", fontWeight: 600, paddingLeft: 28 }}>
+                  {s.id}
+                  {s.sides === 2 && <span style={badge()}>2-side</span>}
+                </td>
+                <td style={td()}>{s.vendorName}</td>
+                <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+              </tr>
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+          <td style={{ ...td(), fontWeight: 800 }} colSpan={4}>Total · {slabsCount} slab{slabsCount === 1 ? "" : "s"} · {groups.filter((g) => g.day !== "unknown").length} day{groups.filter((g) => g.day !== "unknown").length === 1 ? "" : "s"}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalSft)}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalCft)}</td>
         </tr>
