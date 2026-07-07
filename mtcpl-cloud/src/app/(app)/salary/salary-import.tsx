@@ -11,6 +11,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { DesigChip } from "./_ui/salary-ui";
 import { parseSalaryImportAction, importSalaryEmployeesAction } from "./actions";
 
 type PreviewRow = {
@@ -122,7 +123,7 @@ export function SalaryImportButton() {
                           </td>
                           <td style={{ ...td, fontWeight: 700 }}>{r.name}</td>
                           <td style={td}>{r.father || "—"}</td>
-                          <td style={td}>{r.designation || "—"}</td>
+                          <td style={td}>{r.designation ? <DesigChip name={r.designation} size="sm" /> : "—"}</td>
                           <td style={td}>{r.bank || "—"}</td>
                           <td style={{ ...td, fontFamily: "ui-monospace, monospace" }}>{r.ifsc || "—"}</td>
                           <td style={{ ...td, fontFamily: "ui-monospace, monospace" }}>{r.account || "—"}</td>

@@ -20,6 +20,7 @@ import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { canUseSalary, PF_WAGE_CEILING } from "@/lib/salary-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { designationColor } from "@/lib/salary-designation-color";
 import { logAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -165,14 +166,16 @@ export async function GET(req: NextRequest) {
       else groups.push({ desig: r.designation, start: row.number, end: row.number });
     }
 
-    // Merge + rotate the leftmost Designation column for each group.
+    // Merge + rotate the leftmost Designation column for each group, each in
+    // its own colour (matched to the on-screen grouping + the subtotal table).
     for (const g of groups) {
       if (g.end > g.start) ws.mergeCells(g.start, 1, g.end, 1);
+      const dc = designationColor(g.desig);
       const c = ws.getCell(g.start, 1);
       c.value = g.desig;
       c.alignment = { textRotation: 90, vertical: "middle", horizontal: "center", wrapText: true };
-      c.font = { bold: true, size: 9.5, color: { argb: "FF4A3540" } };
-      c.fill = fill("FFF1E7EA");
+      c.font = { bold: true, size: 9.5, color: { argb: dc.fgArgb } };
+      c.fill = fill(dc.bgArgb);
       c.border = thin;
     }
 
@@ -217,10 +220,18 @@ export async function GET(req: NextRequest) {
         c.border = thin;
       });
       for (const [desig, v] of [...byDesig.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        const dc = designationColor(desig);
         const rr = ws.addRow([desig, v.count, n2(v.net)]);
         rr.eachCell((c, col) => {
           if (col > 3) return;
-          c.font = { size: 9.5 };
+          // Designation cell wears its colour; the number cells stay plain so
+          // the amounts read cleanly.
+          if (col === 1) {
+            c.font = { size: 9.5, bold: true, color: { argb: dc.fgArgb } };
+            c.fill = fill(dc.bgArgb);
+          } else {
+            c.font = { size: 9.5 };
+          }
           c.alignment = { horizontal: col === 1 ? "left" : "right", vertical: "middle" };
           c.border = thin;
           if (col === 3) c.numFmt = MONEY;

@@ -14,7 +14,9 @@ import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
 import { PF_WAGE_CEILING } from "@/lib/salary-permissions";
+import { designationColor } from "@/lib/salary-designation-color";
 import { SalaryImportButton } from "./salary-import";
+import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG } from "./_ui/salary-ui";
 import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryMonthAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
@@ -44,10 +46,22 @@ const monthShort = (key: string) => {
   const [y, m] = key.split("-").map(Number);
   return new Date(Date.UTC(y, (m || 1) - 1, 1)).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
 };
+/** Step a YYYY-MM value by ±N months. */
+const shiftMonth = (ym: string, delta: number): string => {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, (m || 1) - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+/** Short human date for a timestamp ("5 Jul"). */
+const dayShort = (iso: string | null) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+};
 
 const inp: React.CSSProperties = { padding: "9px 11px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)", width: "100%" };
 const lbl: React.CSSProperties = { fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", display: "block", marginBottom: 4 };
-const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer", whiteSpace: "nowrap" };
+const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "var(--gold-dark)", cursor: "pointer", whiteSpace: "nowrap" };
 const btnGhost: React.CSSProperties = { fontSize: 12.5, fontWeight: 700, padding: "9px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" };
 
 function FormPending({ label }: { label: string }) {
@@ -70,25 +84,32 @@ export function SalaryClient({ me, employees, designations, monthYm, monthRows, 
   const [editRow, setEditRow] = useState<SalaryPaymentRow | null>(null);
 
   const active = employees.filter((e) => e.isActive);
-  const seg = (a: boolean): React.CSSProperties => ({ fontSize: 13, fontWeight: 800, padding: "9px 16px", borderRadius: 10, cursor: "pointer", border: "none", background: a ? "var(--gold)" : "transparent", color: a ? "#fff" : "var(--muted)" });
 
   return (
     <div>
-      {/* Hero */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>💵 Salary / PF</h1>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", padding: "3px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999 }}>
-          {active.length} active employee{active.length !== 1 ? "s" : ""}
-        </span>
+      {/* Hero — Finance-grade: title + flow on the left, status pills on the right. */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>💵 Salary / PF</h1>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--muted)", maxWidth: 660 }}>
+            Employee master → prepare the month → HDFC bulk-payment sheet → pay from the bank → mark paid. PF record builds itself from paid months.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: "var(--gold-dark)", padding: "5px 12px", background: "var(--gold-subtle, rgba(201,161,74,0.14))", border: "1px solid var(--gold-border, var(--border))", borderRadius: 999 }}>
+            👥 {active.length} active
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", padding: "5px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999 }}>
+            📅 {monthLabel(monthYm)}
+          </span>
+        </div>
       </div>
-      <p style={{ margin: "0 0 16px", fontSize: 12.5, color: "var(--muted)" }}>
-        Employee master → prepare the month → download the HDFC bulk-payment sheet (same format as Finance) → pay from the bank → mark paid. PF record builds itself from paid months.
-      </p>
 
-      <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)", marginBottom: 18, flexWrap: "wrap" }}>
-        <button type="button" onClick={() => setTab("employees")} style={seg(tab === "employees")}>👥 Employees · {employees.length}</button>
-        <button type="button" onClick={() => setTab("month")} style={seg(tab === "month")}>💵 Pay month · {monthRows.length}</button>
-        <button type="button" onClick={() => setTab("pf")} style={seg(tab === "pf")}>🏦 PF record</button>
+      {/* Tabs — gold segmented control. */}
+      <div style={{ display: "inline-flex", gap: 2, padding: 3, borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)", marginBottom: 18, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setTab("employees")} style={segStyle(tab === "employees")}>👥 Employees · {employees.length}</button>
+        <button type="button" onClick={() => setTab("month")} style={segStyle(tab === "month")}>💵 Pay month · {monthRows.length}</button>
+        <button type="button" onClick={() => setTab("pf")} style={segStyle(tab === "pf")}>🏦 PF record</button>
       </div>
 
       {tab === "employees" && <EmployeesTab employees={employees} isBoss={me.isBoss} monthYm={monthYm} onEdit={setEditEmp} />}
@@ -116,98 +137,127 @@ function ReturnCtx({ monthYm, tab }: { monthYm: string; tab: "employees" | "mont
 
 function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: SalaryEmployee[]; isBoss: boolean; monthYm: string; onEdit: (e: SalaryEmployee | "new") => void }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const th: React.CSSProperties = { padding: "8px 10px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", whiteSpace: "nowrap", borderBottom: "2px solid var(--border)", background: "var(--bg)" };
-  const td: React.CSSProperties = { padding: "10px", fontSize: 12.5, borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
-  // Group by designation (Daksh) — sorted, "No designation" last.
-  const groups = useMemo(() => {
+  const [q, setQ] = useState("");
+
+  // KPIs over ACTIVE employees.
+  const activeEmps = employees.filter((e) => e.isActive);
+  const monthlyCost = activeEmps.reduce((a, e) => a + (Number(e.monthlySalary) || 0), 0);
+  const pfCount = activeEmps.filter((e) => e.pfEnabled).length;
+  const missingBank = activeEmps.filter((e) => !e.accountNumber).length;
+
+  // In-memory search (name / phone / account / designation) → group by
+  // designation, NO_DESIG last, keyed to the Excel register's colours.
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? employees.filter((e) => [e.name, e.phone, e.accountNumber, e.designation].some((v) => (v ?? "").toLowerCase().includes(needle)))
+    : employees;
+  const groups = (() => {
     const m = new Map<string, SalaryEmployee[]>();
-    for (const e of employees) { const k = (e.designation ?? "").trim() || "— No designation"; const a = m.get(k) ?? []; a.push(e); m.set(k, a); }
-    return [...m.entries()].sort((a, b) => (a[0].startsWith("—") ? 1 : 0) - (b[0].startsWith("—") ? 1 : 0) || a[0].localeCompare(b[0]));
-  }, [employees]);
+    for (const e of filtered) { const k = (e.designation ?? "").trim() || NO_DESIG; const a = m.get(k) ?? []; a.push(e); m.set(k, a); }
+    return [...m.entries()].sort((a, b) => (a[0] === NO_DESIG ? 1 : 0) - (b[0] === NO_DESIG ? 1 : 0) || a[0].localeCompare(b[0]));
+  })();
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 12 }}>
-        <SalaryImportButton />
-        <button type="button" onClick={() => onEdit("new")} style={{ ...btnPrimary, background: "var(--gold-dark)" }}>＋ Add employee</button>
+      <KpiRow>
+        <KpiCard label="Active headcount" value={String(activeEmps.length)} sub={`${employees.length} total on file`} tone="gold" icon="👥" />
+        <KpiCard label="Total monthly cost" value={inr(monthlyCost)} sub="active fixed / typical salaries" tone="success" icon="💰" />
+        <KpiCard label="On PF" value={String(pfCount)} sub={`${Math.max(0, activeEmps.length - pfCount)} without PF`} tone="neutral" icon="🏛" />
+        <KpiCard label="Missing bank a/c" value={String(missingBank)} sub={missingBank > 0 ? "⚠ HDFC sheet will refuse" : "all active have a bank a/c"} tone={missingBank > 0 ? "danger" : "neutral"} icon="🏦" />
+      </KpiRow>
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, account, designation…" style={{ ...inp, flex: "1 1 240px", maxWidth: 380 }} />
+        {q && <span style={{ fontSize: 12, color: "var(--muted)" }}>{filtered.length} of {employees.length}</span>}
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }}>
+          <SalaryImportButton />
+          <button type="button" onClick={() => onEdit("new")} style={btnPrimary}>＋ Add employee</button>
+        </span>
       </div>
+
       {employees.length === 0 ? (
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 20px", textAlign: "center", color: "var(--muted)" }}>
           No employees yet — ＋ Add employee to start (name, salary, bank a/c for the HDFC sheet, PF details).
         </div>
+      ) : groups.length === 0 ? (
+        <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)" }}>No employee matches &ldquo;{q}&rdquo;.</div>
       ) : (
-        <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 880 }}>
+        <div style={SALARY_TABLE.wrap}>
+          <div style={SALARY_TABLE.scroll}>
+            <table style={{ ...SALARY_TABLE.table, minWidth: 880 }}>
               <thead><tr>
-                <th style={th}>Employee</th><th style={th}>Monthly salary</th><th style={th}>Bank</th><th style={th}>PF</th><th style={th}>Status</th><th style={{ ...th, textAlign: "right" }}>Actions</th>
+                <th style={SALARY_TABLE.th}>Employee</th><th style={SALARY_TABLE.th}>Monthly salary</th><th style={SALARY_TABLE.th}>Bank</th><th style={SALARY_TABLE.th}>PF</th><th style={SALARY_TABLE.th}>Status</th><th style={{ ...SALARY_TABLE.th, textAlign: "right" }}>Actions</th>
               </tr></thead>
               <tbody>
-                {groups.map(([desig, emps]) => (
+                {groups.map(([desig, emps]) => {
+                  const dc = designationColor(desig);
+                  return (
                   <Fragment key={desig}>
                     <tr>
-                      <td colSpan={6} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)", background: "rgba(201,161,74,0.08)", borderBottom: "1px solid var(--border)" }}>
-                        {desig} <span style={{ color: "var(--muted)", fontWeight: 700 }}>· {emps.length}</span>
+                      <td colSpan={6} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: dc.bg, borderLeft: `3px solid ${dc.fg}`, borderBottom: "1px solid var(--border)" }}>
+                        {desig} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {emps.length}</span>
                       </td>
                     </tr>
                     {emps.map((e) => (
-                  <tr key={e.id} style={{ opacity: e.isActive ? 1 : 0.55 }}>
-                    <td style={td}>
-                      <span style={{ fontWeight: 800, display: "block" }}>{e.name}</span>
-                      <span style={{ fontSize: 11, color: "var(--muted)" }}>{[e.designation, e.phone].filter(Boolean).join(" · ") || "—"}</span>
-                    </td>
-                    <td style={{ ...td, fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
-                      {inr(e.monthlySalary)}
-                      <span style={{ display: "block", fontFamily: "inherit", fontSize: 10, fontWeight: 800, marginTop: 2, color: e.salaryType === "variable" ? "#b45309" : "var(--muted)" }}>{e.salaryType === "variable" ? "↕ VARIABLE" : "FIXED"}</span>
-                    </td>
-                    <td style={td}>
-                      {e.accountNumber ? (
-                        <>
-                          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, display: "block" }}>{e.accountNumber}</span>
-                          <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{[e.bankName, e.ifsc].filter(Boolean).join(" · ")}{e.beneficiaryName ? ` · ${e.beneficiaryName}` : ""}</span>
-                        </>
-                      ) : (
-                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "#b91c1c" }}>⚠ no bank a/c — HDFC sheet will refuse</span>
-                      )}
-                    </td>
-                    <td style={td}>
-                      {e.pfEnabled ? (
-                        <>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: "#15803d", background: "rgba(22,101,52,0.1)", borderRadius: 999, padding: "2px 9px" }}>PF {e.pfPercent}%</span>
-                          {e.uan && <span style={{ fontSize: 10.5, color: "var(--muted)", display: "block", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>UAN {e.uan}</span>}
-                        </>
-                      ) : <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>}
-                    </td>
-                    <td style={td}>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: e.isActive ? "#15803d" : "var(--muted)", background: e.isActive ? "rgba(22,101,52,0.1)" : "var(--bg)", borderRadius: 999, padding: "2px 9px" }}>{e.isActive ? "Active" : "Inactive"}</span>
-                    </td>
-                    <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
-                      <button type="button" onClick={() => onEdit(e)} style={{ ...btnGhost, padding: "6px 11px", marginRight: 6 }}>✎ Edit</button>
-                      <form action={toggleSalaryEmployeeAction} style={{ display: "inline" }}>
-                        <input type="hidden" name="id" value={e.id} />
-                        <input type="hidden" name="active" value={e.isActive ? "0" : "1"} />
-                        <ReturnCtx monthYm={monthYm} tab="employees" />
-                        <FormPending label={e.isActive ? "Deactivating…" : "Activating…"} />
-                        <button type="submit" style={{ ...btnGhost, padding: "6px 11px", marginRight: isBoss ? 6 : 0 }}>{e.isActive ? "⏸ Deactivate" : "▶ Activate"}</button>
-                      </form>
-                      {isBoss && (confirmDelete === e.id ? (
-                        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c" }}>Delete + all rows?</span>
-                          <form action={deleteSalaryEmployeeAction} style={{ display: "inline" }}>
+                      <tr key={e.id} style={{ opacity: e.isActive ? 1 : 0.55 }}>
+                        <td style={SALARY_TABLE.td}>
+                          <span style={{ fontWeight: 800, display: "block" }}>{e.name}</span>
+                          <span style={{ fontSize: 11, color: "var(--muted)" }}>{[e.designation, e.phone].filter(Boolean).join(" · ") || "—"}</span>
+                        </td>
+                        <td style={{ ...SALARY_TABLE.td, fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
+                          {inr(e.monthlySalary)}
+                          <span style={{ display: "block", fontFamily: "inherit", fontSize: 10, fontWeight: 800, marginTop: 2, color: e.salaryType === "variable" ? "#b45309" : "var(--muted)" }}>{e.salaryType === "variable" ? "↕ VARIABLE" : "FIXED"}</span>
+                        </td>
+                        <td style={SALARY_TABLE.td}>
+                          {e.accountNumber ? (
+                            <>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, display: "block" }}>{e.accountNumber}</span>
+                              <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{[e.bankName, e.ifsc].filter(Boolean).join(" · ")}{e.beneficiaryName ? ` · ${e.beneficiaryName}` : ""}</span>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 11.5, fontWeight: 700, color: "#b91c1c" }}>⚠ no bank a/c — HDFC sheet will refuse</span>
+                          )}
+                        </td>
+                        <td style={SALARY_TABLE.td}>
+                          {e.pfEnabled ? (
+                            <>
+                              <Pill label={`PF ${e.pfPercent}%`} tone="success" />
+                              {e.uan && <span style={{ fontSize: 10.5, color: "var(--muted)", display: "block", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>UAN {e.uan}</span>}
+                            </>
+                          ) : <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>}
+                        </td>
+                        <td style={SALARY_TABLE.td}>
+                          <Pill label={e.isActive ? "Active" : "Inactive"} tone={e.isActive ? "success" : "neutral"} />
+                        </td>
+                        <td style={{ ...SALARY_TABLE.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                          <button type="button" onClick={() => onEdit(e)} style={{ ...btnGhost, padding: "6px 11px", marginRight: 6 }}>✎ Edit</button>
+                          <form action={toggleSalaryEmployeeAction} style={{ display: "inline" }}>
                             <input type="hidden" name="id" value={e.id} />
+                            <input type="hidden" name="active" value={e.isActive ? "0" : "1"} />
                             <ReturnCtx monthYm={monthYm} tab="employees" />
-                            <FormPending label="Deleting…" />
-                            <button type="submit" style={{ ...btnGhost, padding: "6px 10px", color: "#fff", background: "#b91c1c", border: "none" }}>Yes</button>
+                            <FormPending label={e.isActive ? "Deactivating…" : "Activating…"} />
+                            <button type="submit" style={{ ...btnGhost, padding: "6px 11px", marginRight: isBoss ? 6 : 0 }}>{e.isActive ? "⏸ Deactivate" : "▶ Activate"}</button>
                           </form>
-                          <button type="button" onClick={() => setConfirmDelete(null)} style={{ ...btnGhost, padding: "6px 10px" }}>No</button>
-                        </span>
-                      ) : (
-                        <button type="button" onClick={() => setConfirmDelete(e.id)} style={{ ...btnGhost, padding: "6px 11px", color: "#b91c1c" }}>🗑</button>
-                      ))}
-                    </td>
-                  </tr>
+                          {isBoss && (confirmDelete === e.id ? (
+                            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c" }}>Delete + all rows?</span>
+                              <form action={deleteSalaryEmployeeAction} style={{ display: "inline" }}>
+                                <input type="hidden" name="id" value={e.id} />
+                                <ReturnCtx monthYm={monthYm} tab="employees" />
+                                <FormPending label="Deleting…" />
+                                <button type="submit" style={{ ...btnGhost, padding: "6px 10px", color: "#fff", background: "#b91c1c", border: "none" }}>Yes</button>
+                              </form>
+                              <button type="button" onClick={() => setConfirmDelete(null)} style={{ ...btnGhost, padding: "6px 10px" }}>No</button>
+                            </span>
+                          ) : (
+                            <button type="button" onClick={() => setConfirmDelete(e.id)} style={{ ...btnGhost, padding: "6px 11px", color: "#b91c1c" }}>🗑</button>
+                          ))}
+                        </td>
+                      </tr>
                     ))}
                   </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -223,7 +273,6 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
  *  subset. All ticked → no filter param (whole register); a subset → adds
  *  ?designations=CSV that the route filters on. (Daksh Jul 2026) */
 function PfExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPaymentRow[] }) {
-  const NO_DESIG = "(No designation)";
   const desigs = useMemo(
     () => [...new Set(rows.map((r) => (r.designation ?? "").trim() || NO_DESIG))].sort((a, b) => a.localeCompare(b)),
     [rows],
@@ -261,12 +310,16 @@ function PfExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPayme
               <input type="checkbox" checked={allOn} ref={(el) => { if (el) el.indeterminate = !allOn && !noneOn; }} onChange={() => setSel(allOn ? new Set() : null)} />
               All ({desigs.length})
             </label>
-            {desigs.map((d) => (
+            {desigs.map((d) => {
+              const dc = designationColor(d);
+              return (
               <label key={d} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", fontSize: 12.5 }}>
                 <input type="checkbox" checked={effective.includes(d)} onChange={() => toggle(d)} />
+                <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, background: dc.bg, border: `1.5px solid ${dc.fg}`, flexShrink: 0 }} />
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d}</span>
               </label>
-            ))}
+              );
+            })}
             <a
               href={href}
               target="_blank"
@@ -308,7 +361,11 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={lbl}>Salary month</span>
-          <input type="month" value={monthYm} onChange={(e) => e.target.value && onPickMonth(e.target.value)} style={{ ...inp, width: 170, fontWeight: 700 }} />
+          <div style={{ display: "inline-flex", alignItems: "stretch", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)" }}>
+            <button type="button" onClick={() => onPickMonth(shiftMonth(monthYm, -1))} title="Previous month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer" }}>‹</button>
+            <input type="month" value={monthYm} onChange={(e) => e.target.value && onPickMonth(e.target.value)} style={{ ...inp, width: 150, fontWeight: 700, border: "none", borderRadius: 0, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }} />
+            <button type="button" onClick={() => onPickMonth(shiftMonth(monthYm, 1))} title="Next month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer" }}>›</button>
+          </div>
         </label>
         <form action={prepareSalaryMonthAction}>
           <input type="hidden" name="month" value={monthYm} />
@@ -350,23 +407,28 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
         </div>
       )}
 
-      {/* Totals */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-        <Tile label={`${monthLabel(monthYm)} — rows`} value={`${rows.length}`} sub={`${draft.length} draft · ${paid.length} paid`} />
-        <Tile label="Gross total" value={inr(tot.gross)} />
-        <Tile label="PF deducted" value={inr(tot.pf)} />
-        {/* Matches the HDFC sheet exactly — DRAFT rows only. */}
-        <Tile label="Net to pay (draft)" value={inr(draftNet)} sub={paidNet > 0 ? `+ ${inr(paidNet)} already paid` : undefined} strong />
-      </div>
+      {/* Totals — Finance-grade KPI row. Net-to-pay stays DRAFT-only (= HDFC sheet). */}
+      <KpiRow>
+        <KpiCard label={`${monthLabel(monthYm)} · rows`} value={String(rows.length)} sub={`${draft.length} draft · ${paid.length} paid`} tone="neutral" icon="📄" />
+        <KpiCard label="Gross total" value={inr(tot.gross)} tone="gold" icon="💰" />
+        <KpiCard label="PF deducted" value={inr(tot.pf)} tone="neutral" icon="🏛" />
+        <KpiCard
+          label="Net to pay (draft)"
+          value={inr(draftNet)}
+          sub={missingBank.length > 0 ? `⚠ ${missingBank.length} missing bank a/c` : paidNet > 0 ? `+ ${inr(paidNet)} already paid` : "= the HDFC bank sheet"}
+          tone={missingBank.length > 0 ? "danger" : "success"}
+          icon="💸"
+        />
+      </KpiRow>
 
       {rows.length === 0 ? (
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 20px", textAlign: "center", color: "var(--muted)" }}>
           No rows for {monthLabel(monthYm)} yet — hit <strong>⚙ Prepare month</strong> to draft one row per active employee.
         </div>
       ) : (
-        <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+        <div style={SALARY_TABLE.wrap}>
+          <div style={SALARY_TABLE.scroll}>
+            <table style={{ ...SALARY_TABLE.table, minWidth: 900 }}>
               <thead><tr>
                 <th style={thL}>Employee</th><th style={th}>Gross</th><th style={th}>PF −</th><th style={th}>Deduction −</th><th style={th}>Addition +</th><th style={th}>Net pay</th><th style={thL}>Status</th><th style={{ ...th }}>Actions</th>
               </tr></thead>
@@ -375,7 +437,8 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
                   <tr key={r.id} style={{ background: r.status === "paid" ? "rgba(22,101,52,0.05)" : undefined }}>
                     <td style={tdL}>
                       <span style={{ fontWeight: 800 }}>{!r.hasBank && r.status === "draft" ? "⚠ " : ""}{r.employeeName}</span>
-                      {r.note && <span style={{ fontSize: 11, color: "var(--muted)", display: "block" }}>📝 {r.note}</span>}
+                      <span style={{ display: "block", marginTop: 4 }}><DesigChip name={r.designation} size="sm" /></span>
+                      {r.note && <span style={{ fontSize: 11, color: "var(--muted)", display: "block", marginTop: 3 }}>📝 {r.note}</span>}
                     </td>
                     <td style={td}>{inr(r.gross)}</td>
                     <td style={td}>{r.pfAmount ? inr(r.pfAmount) : "—"}</td>
@@ -383,9 +446,8 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
                     <td style={td}>{r.addition ? inr(r.addition) : "—"}</td>
                     <td style={{ ...td, fontWeight: 800 }}>{inr(r.net)}</td>
                     <td style={tdL}>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: r.status === "paid" ? "#15803d" : "#b45309", background: r.status === "paid" ? "rgba(22,101,52,0.1)" : "rgba(217,119,6,0.12)", borderRadius: 999, padding: "2px 9px" }}>
-                        {r.status === "paid" ? "✓ Paid" : "Draft"}
-                      </span>
+                      <Pill label={r.status === "paid" ? "✓ Paid" : "Draft"} tone={r.status === "paid" ? "success" : "warn"} />
+                      {r.status === "paid" && dayShort(r.paidAt) && <span style={{ display: "block", fontSize: 10, color: "var(--muted)", marginTop: 3 }}>on {dayShort(r.paidAt)}</span>}
                     </td>
                     <td style={{ ...td, fontFamily: "inherit" }}>
                       {r.status === "draft" ? (
@@ -449,10 +511,10 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 14 }}>
-        <Tile label="Employees with PF" value={String(withPf.length)} />
-        <Tile label="PF deducted till date" value={inr(grandTotal)} strong sub="employee share, from paid months" />
-      </div>
+      <KpiRow>
+        <KpiCard label="Employees with PF" value={String(withPf.length)} tone="neutral" icon="🏛" />
+        <KpiCard label="PF deducted till date" value={inr(grandTotal)} sub="employee share, from paid months" tone="success" icon="💰" />
+      </KpiRow>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>
         The record below is the <strong>employee share deducted</strong> from paid salaries. The employer contributes an equal share on top when depositing to EPFO.
       </div>
@@ -466,11 +528,13 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
             const rows = (byEmp.get(e.id) ?? []).slice().sort((a, b) => b.month.localeCompare(a.month));
             const total = rows.reduce((a, r) => a + r.pfAmount, 0);
             const isOpen = open === e.id;
+            const dc = designationColor(e.designation);
             return (
-              <div key={e.id} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)" }}>
+              <div key={e.id} style={{ border: "1px solid var(--border)", borderLeft: `3px solid ${dc.fg}`, borderRadius: 12, overflow: "hidden", background: "var(--surface)", boxShadow: "var(--shadow)" }}>
                 <button type="button" onClick={() => setOpen(isOpen ? null : e.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--bg)", border: "none", cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
-                  <span style={{ fontSize: 12, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", color: "var(--gold-dark)" }}>▶</span>
+                  <span style={{ fontSize: 12, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", color: dc.fg }}>▶</span>
                   <span style={{ fontSize: 14, fontWeight: 800 }}>{e.name}</span>
+                  <DesigChip name={e.designation} size="sm" />
                   {e.uan && <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>UAN {e.uan}</span>}
                   <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>{e.pfEnabled ? `PF ${e.pfPercent}%` : "PF off now"} · {rows.length} month{rows.length !== 1 ? "s" : ""}</span>
                   <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>{inr(total)}</span>
@@ -629,12 +693,3 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
   );
 }
 
-function Tile({ label, value, sub, strong }: { label: string; value: string; sub?: string; strong?: boolean }) {
-  return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "10px 14px", background: strong ? "rgba(22,101,52,0.06)" : "var(--surface)" }}>
-      <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>{label}</div>
-      <div style={{ fontSize: 17, fontWeight: 800, fontFamily: "ui-monospace, monospace", marginTop: 2, color: strong ? "#15803d" : "var(--text)" }}>{value}</div>
-      {sub && <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
