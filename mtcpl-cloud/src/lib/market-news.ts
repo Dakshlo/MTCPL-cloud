@@ -37,7 +37,7 @@ export type NewsItem = {
 };
 
 // Mig 156 — daily stock / F&O ideas. Ideas only (can be wrong), shown to
-// developer + owner Naresh. conviction = "out of 100, how much to go for it".
+// every owner + the developer. conviction = "out of 100, how much to go for it".
 export type StockPick = {
   symbol: string;
   name: string;
@@ -135,21 +135,65 @@ function extractJson(text: string): { overview_en?: string; overview_hi?: string
   return JSON.parse(t);
 }
 
-const SYSTEM_PROMPT = `You are a sharp financial-news analyst preparing a pre-market morning brief for the owner of an Indian company. He follows the Indian stock market (Nifty 50, Sensex). Your job each weekday morning, before Indian markets open, is to surface the news that actually matters for Indian equities TODAY — and to be selective, not exhaustive.
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-Use the web_search tool to gather CURRENT news from the last ~24 hours: overnight US/Asian/European market moves, crude oil, USD/INR, US Fed / RBI signals, FII/DII flows, big Indian corporate or policy news, global risk events, and anything likely to move the Nifty/Sensex at the open. Prefer reputable sources (Reuters, Bloomberg, Mint, Economic Times, Moneycontrol, CNBC, Business Standard).
+/** Current wall-clock in IST (as a UTC-shifted Date so getUTC* reads IST). */
+function istNow(): Date {
+  return new Date(Date.now() + 5.5 * 3600 * 1000);
+}
+/** "Tuesday, 7 Jul 2026, 14:05 IST". */
+function istLabel(d: Date): string {
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${WEEKDAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} IST`;
+}
+/** Where the Indian cash market is in its day, right now. */
+function marketPhase(d: Date): string {
+  const dow = d.getUTCDay();
+  if (dow === 0 || dow === 6) return "closed for the weekend";
+  const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+  if (mins < 9 * 60 + 15) return "pre-open (the cash market opens at 9:15 AM IST)";
+  if (mins <= 15 * 60 + 30) return "OPEN and trading live right now";
+  return "closed for the day (post-close)";
+}
+
+/** System + user prompt for a run. The `manual` trigger ("Generate now") asks
+ *  for the market picture AS OF THIS MOMENT (intraday / live), so it works at
+ *  any time of day — not just a fixed pre-open morning brief. The `cron` run
+ *  keeps the classic 8 AM pre-market framing. The JSON shape is identical for
+ *  both, so storage + the UI never change. */
+function buildPrompts(trigger: "cron" | "manual"): { system: string; user: string } {
+  const now = istNow();
+  const when = istLabel(now);
+  const phase = marketPhase(now);
+
+  const timing =
+    trigger === "manual"
+      ? `RIGHT NOW it is ${when}, and the Indian market is ${phase}. This is an ON-DEMAND refresh the owner just requested: give the CURRENT market picture as of this exact moment — the very latest overnight AND intraday developments, live index levels / moves where you can find them, and anything breaking today. Do NOT write it as a fixed "before the open" note — reflect wherever the market actually is right now.`
+      : `It is early morning in India (${when}) — before the market opens. Prepare the PRE-MARKET brief: what happened overnight and what is set to drive the Nifty / Sensex at today's open.`;
+
+  const forWhen = trigger === "manual" ? "for right now / the rest of today" : "for TODAY";
+  const researchLine =
+    trigger === "manual"
+      ? "Research the latest market-moving news as of right now (include intraday moves if the market is open)"
+      : "Research this morning's market-moving news";
+
+  const system = `You are a sharp financial-news analyst for the owner of an Indian company who follows the Indian stock market (Nifty 50, Sensex). ${timing}
+
+Use the web_search tool to gather CURRENT news: overnight US / Asian / European market moves, crude oil, USD/INR, US Fed / RBI signals, FII/DII flows, big Indian corporate or policy news, global risk events — anything likely to move the Nifty / Sensex. Prefer reputable sources (Reuters, Bloomberg, Mint, Economic Times, Moneycontrol, CNBC, Business Standard). Be selective, not exhaustive.
 
 Curate the TOP 8–10 items by likely market impact (most important first). For each item write BOTH a crisp English version AND a natural Hindi (Devanagari) version. Keep summaries to 1–2 sentences and the "impact" line to a short phrase on why it matters for the Indian market.
 
-You also run a decisive IDEAS DESK: suggest 3–5 specific Indian stock or F&O trade ideas for TODAY (buy / sell / watch), each with a conviction score from 0 to 100 (how strongly you'd act on it — "out of 100, how much to go for it") and a one-line reason in both English and Hindi. Be specific (real NSE tickers or index option strikes) and willing to take a view — these are ideas for the owner to consider, and it is perfectly fine to be wrong. Rank by conviction.`;
+You also run a decisive IDEAS DESK: suggest 3–5 specific Indian stock or F&O trade ideas ${forWhen} (buy / sell / watch), each with a conviction score from 0 to 100 (how strongly you'd act on it — "out of 100, how much to go for it") and a one-line reason in both English and Hindi. Be specific (real NSE tickers or index option strikes) and willing to take a view — these are ideas for the owner to consider, and it is perfectly fine to be wrong. Rank by conviction.`;
 
-const USER_PROMPT = `Research this morning's market-moving news and return ONLY a JSON object (no prose, no markdown, no code fences) in exactly this shape:
+  const user = `${researchLine} and return ONLY a JSON object (no prose, no markdown, no code fences) in exactly this shape:
 
 {
-  "stance": "bullish | bearish | neutral (your single best read on whether the Indian market is likely to lean up, down, or sideways/mixed today)",
+  "stance": "bullish | bearish | neutral (your single best read on whether the Indian market is leaning up, down, or sideways/mixed)",
   "stance_note_en": "one short sentence justifying the stance",
   "stance_note_hi": "रुख़ का एक छोटा कारण",
-  "overview_en": "one-line read on the likely market mood at the open",
+  "overview_en": "one-line read on the current / near-term market mood",
   "overview_hi": "बाज़ार के मूड की एक पंक्ति",
   "items": [
     {
@@ -182,8 +226,15 @@ const USER_PROMPT = `Research this morning's market-moving news and return ONLY 
 
 Provide 3–5 picks, ranked by conviction (highest first). Output the JSON object only.`;
 
-/** Call Claude + web search, parse the digest, and compute the generation cost. */
-export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" | "generatedAt" | "trigger" | "error">> {
+  return { system, user };
+}
+
+/** Call Claude + web search, parse the digest, and compute the generation cost.
+ *  `trigger` shapes the prompt: "manual" ("Generate now") = live/current snapshot
+ *  at any time of day; "cron" = the 8 AM pre-market brief. */
+export async function generateMarketNews(
+  trigger: "cron" | "manual",
+): Promise<Omit<DailyNews, "newsDate" | "generatedAt" | "trigger" | "error">> {
   // Key is deployed on Vercel as MTCPL_DAILY_NEWS (falls back to the SDK's
   // default ANTHROPIC_API_KEY if that's ever used instead).
   const apiKey = process.env.MTCPL_DAILY_NEWS || process.env.ANTHROPIC_API_KEY;
@@ -191,6 +242,7 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
     throw new Error("MTCPL_DAILY_NEWS (Anthropic API key) is not set in the environment.");
   }
   const client = new Anthropic({ apiKey });
+  const { system, user } = buildPrompts(trigger);
 
   const resp = await client.messages.create({
     model: MODEL,
@@ -198,8 +250,8 @@ export async function generateMarketNews(): Promise<Omit<DailyNews, "newsDate" |
     // Thinking off → all output tokens go to the JSON (reliable parse, lower cost);
     // the curation judgment comes from the prompt + search results.
     thinking: { type: "disabled" },
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: USER_PROMPT }],
+    system,
+    messages: [{ role: "user", content: user }],
     tools: [
       {
         type: "web_search_20250305",
@@ -276,7 +328,7 @@ export async function generateAndStoreMarketNews(
   const admin = createAdminSupabaseClient();
   const newsDate = istDate();
   try {
-    const news = await generateMarketNews();
+    const news = await generateMarketNews(trigger);
     const { error } = await admin.from("daily_news").upsert({
       news_date: newsDate,
       generated_at: new Date().toISOString(),

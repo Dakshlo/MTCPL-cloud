@@ -6,6 +6,7 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { getLatestMarketNews } from "@/lib/market-news";
+import { getMarketNewsAuto } from "@/lib/market-news-auto";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { MarketNewsView } from "./market-news-view";
 
@@ -13,8 +14,11 @@ export const dynamic = "force-dynamic";
 
 export default async function MarketNewsPage() {
   const { profile } = await requireAuth();
-  // Developer + owner Naresh only (not every owner).
+  // Every owner + the developer.
   if (!canSeeMarketNews(profile)) redirect("/dashboard");
-  const { configured, news, dates } = await getLatestMarketNews();
-  return <MarketNewsView configured={configured} news={news} dates={dates} />;
+  const [{ configured, news, dates }, auto] = await Promise.all([
+    getLatestMarketNews(),
+    getMarketNewsAuto(),
+  ]);
+  return <MarketNewsView configured={configured} news={news} dates={dates} autoOn={auto.enabled} />;
 }

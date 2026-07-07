@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { generateAndStoreMarketNews } from "@/lib/market-news";
 import { canSeeMarketNews } from "@/lib/market-news-access";
+import { getMarketNewsAuto } from "@/lib/market-news-auto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,13 @@ async function isOwner(): Promise<boolean> {
 export async function GET(req: NextRequest) {
   if (!isCron(req)) {
     return NextResponse.json({ ok: false, error: "Unauthorized — cron only." }, { status: 401 });
+  }
+  // Owners can pause the daily auto-generation from the Today's News page. When
+  // it's off, the cron no-ops (200, so Vercel doesn't retry / alarm). Manual
+  // "Generate now" is unaffected — it hits POST, which never checks this.
+  const { enabled } = await getMarketNewsAuto();
+  if (!enabled) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "Daily auto-generation is turned off." });
   }
   const result = await generateAndStoreMarketNews("cron");
   return NextResponse.json(result, { status: result.ok ? 200 : 500 });

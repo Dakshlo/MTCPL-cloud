@@ -5,13 +5,13 @@
 // it, so the blur refracts a shifting band of colour as you scroll (the real
 // iOS glass effect). News in a 2-up grid; tap a card for a centre-peek detail.
 // Plus a daily stock / F&O ideas desk (buy/sell/watch + conviction).
-// Developer + owner Naresh only.
+// Every owner + the developer.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DailyNews, NewsItem, StockPick } from "@/lib/market-news";
-import { getMarketNewsByDateAction, askMarketQuestionAction } from "./actions";
+import { getMarketNewsByDateAction, askMarketQuestionAction, setMarketNewsAutoAction } from "./actions";
 
 const USD_TO_INR = 86;
 
@@ -68,10 +68,12 @@ export function MarketNewsView({
   configured,
   news,
   dates,
+  autoOn,
 }: {
   configured: boolean;
   news: DailyNews | null;
   dates: string[];
+  autoOn: boolean;
 }) {
   const router = useRouter();
   const [lang, setLang] = useState<"en" | "hi">("en");
@@ -79,6 +81,8 @@ export function MarketNewsView({
   const [activeDate, setActiveDate] = useState<string>(news?.newsDate ?? "");
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [auto, setAuto] = useState(autoOn);
+  const [autoBusy, setAutoBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [peek, setPeek] = useState<NewsItem | null>(null);
@@ -117,11 +121,38 @@ export function MarketNewsView({
     }
   }
 
+  async function toggleAuto() {
+    if (autoBusy) return;
+    const next = !auto;
+    setAutoBusy(true);
+    setErr(null);
+    setAuto(next); // optimistic
+    try {
+      const res = await setMarketNewsAutoAction(next);
+      if (!res.ok) {
+        setAuto(!next);
+        setErr(res.error);
+      } else {
+        setAuto(res.enabled);
+        setMsg(
+          res.enabled
+            ? t("Daily auto-brief is ON — it builds every weekday at 8 AM IST.", "रोज़ाना ऑटो-ब्रीफ़ चालू — हर कार्यदिवस सुबह 8 बजे बनेगा।")
+            : t("Daily auto-brief is OFF. Use “Generate now” whenever you want it.", "रोज़ाना ऑटो-ब्रीफ़ बंद। जब चाहें “अभी बनाएँ” दबाएँ।"),
+        );
+      }
+    } catch {
+      setAuto(!next);
+      setErr("Could not change the setting.");
+    } finally {
+      setAutoBusy(false);
+    }
+  }
+
   async function generateNow() {
     if (generating) return;
     setGenerating(true);
     setErr(null);
-    setMsg(t("Researching this morning's market news…", "आज की बाज़ार ख़बरें खोजी जा रही हैं…"));
+    setMsg(t("Fetching the latest market news right now…", "अभी की ताज़ा बाज़ार ख़बरें लाई जा रही हैं…"));
     try {
       const res = await fetch("/api/market-news/generate", { method: "POST" });
       const data = (await res.json()) as { ok: boolean; newsDate?: string; count?: number; error?: string };
@@ -241,8 +272,21 @@ export function MarketNewsView({
                   ))}
                 </select>
               )}
-              <button type="button" onClick={generateNow} disabled={generating} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.82)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
+              <button type="button" onClick={generateNow} disabled={generating} title={t("Generate a fresh brief for RIGHT NOW — works any time of day, not just the morning.", "अभी के लिए ताज़ा ब्रीफ़ बनाएँ — दिन में कभी भी, सिर्फ़ सुबह नहीं।")} style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.82)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {generating ? "⏳ …" : "↻ " + t("Generate now", "अभी बनाएँ")}
+              </button>
+              {/* Daily auto-generate switch — flips the 8 AM weekday cron on / off. */}
+              <button
+                type="button"
+                onClick={toggleAuto}
+                disabled={autoBusy}
+                title={t("Auto-build the brief every weekday morning at 8 AM IST. Turn off to stop; “Generate now” still works any time.", "हर कार्यदिवस सुबह 8 बजे ब्रीफ़ अपने-आप बने। बंद करने पर रुक जाएगा; “अभी बनाएँ” कभी भी चलेगा।")}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 800, padding: "7px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.28)", background: "rgba(24,15,44,0.82)", color: "#fff", cursor: autoBusy ? "wait" : "pointer", whiteSpace: "nowrap", opacity: autoBusy ? 0.7 : 1 }}
+              >
+                <span aria-hidden style={{ position: "relative", width: 34, height: 18, borderRadius: 999, background: auto ? "#34d399" : "rgba(255,255,255,0.28)", transition: "background .15s", flexShrink: 0 }}>
+                  <span style={{ position: "absolute", top: 2, left: auto ? 18 : 2, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,0.45)" }} />
+                </span>
+                {t("Daily auto", "रोज़ाना ऑटो")}: {auto ? t("ON", "चालू") : t("OFF", "बंद")}
               </button>
             </div>
           </div>

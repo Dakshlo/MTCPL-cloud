@@ -6,6 +6,7 @@
 import { requireAuth } from "@/lib/auth";
 import { getMarketNewsByDate, askMarketQuestion, type DailyNews } from "@/lib/market-news";
 import { canSeeMarketNews } from "@/lib/market-news-access";
+import { saveMarketNewsAuto } from "@/lib/market-news-auto";
 
 async function ownerOnly(): Promise<boolean> {
   try {
@@ -14,6 +15,22 @@ async function ownerOnly(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Turn the daily 8 AM auto-generation on / off (any owner + developer). */
+export async function setMarketNewsAutoAction(
+  enabled: boolean,
+): Promise<{ ok: true; enabled: boolean } | { ok: false; error: string }> {
+  let updatedBy: string;
+  try {
+    const { profile } = await requireAuth();
+    if (!canSeeMarketNews(profile)) return { ok: false, error: "Owner / developer only." };
+    updatedBy = profile.id;
+  } catch {
+    return { ok: false, error: "Not signed in." };
+  }
+  const res = await saveMarketNewsAuto(!!enabled, updatedBy);
+  return res.ok ? { ok: true, enabled: res.value.enabled } : { ok: false, error: res.error };
 }
 
 export async function getMarketNewsByDateAction(
