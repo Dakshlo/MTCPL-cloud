@@ -1570,25 +1570,46 @@ function UnassignedByTemple({
           📍 {s.stock_location}
         </div>
       )}
-      {/* Daksh June 2026 — parked carving-storage slab. Assigning it
-          pulls it out of storage (un-parks). */}
+      {/* Parked storage slab. Assigning pulls it out of storage (un-parks).
+          Two-ended storage (Daksh Jul 2026): a 'completed' slab here is a
+          READY slab parked from Make Dispatch — assigning re-carves it, so it
+          gets a distinct blue badge to flag that it's a finished slab. */}
       {s.fromStorage && (
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 800,
-            color: "var(--gold-dark)",
-            background: "rgba(180,140,40,0.12)",
-            border: "1px solid rgba(180,140,40,0.35)",
-            padding: "3px 7px",
-            borderRadius: 5,
-            alignSelf: "flex-start",
-            letterSpacing: 0.3,
-          }}
-          title="Parked in carving storage — assigning will pull it out"
-        >
-          📦 STORAGE
-        </div>
+        s.status === "completed" ? (
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "#2563eb",
+              background: "rgba(37,99,235,0.12)",
+              border: "1px solid rgba(37,99,235,0.4)",
+              padding: "3px 7px",
+              borderRadius: 5,
+              alignSelf: "flex-start",
+              letterSpacing: 0.3,
+            }}
+            title="Ready slab parked from Make Dispatch — assigning sends this finished slab back into carving (re-carve)"
+          >
+            📦 DISPATCH STORAGE · re-carve
+          </div>
+        ) : (
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: "var(--gold-dark)",
+              background: "rgba(180,140,40,0.12)",
+              border: "1px solid rgba(180,140,40,0.35)",
+              padding: "3px 7px",
+              borderRadius: 5,
+              alignSelf: "flex-start",
+              letterSpacing: 0.3,
+            }}
+            title="Parked in carving storage — assigning will pull it out"
+          >
+            📦 STORAGE
+          </div>
+        )
       )}
       {/* Ready-since pill — tells the carving head how long this
           slab has been sitting in cut_done. Older = more pressure. */}

@@ -1325,17 +1325,25 @@ export async function assignCarvingJobAction(formData: FormData) {
   }
 
   // Mig 132 — a slab with a pending cancel request is LOCKED: no new
-  // assignment until the owner approves or rejects the cancel.
-  {
-    const { data: cancelCheck } = await admin
-      .from("slab_requirements")
-      .select("cancel_requested_at")
-      .eq("id", slabId)
-      .maybeSingle();
-    if ((cancelCheck as { cancel_requested_at?: string | null } | null)?.cancel_requested_at) {
-      redirect(`/carving?toast=${encodeURIComponent(`${slabId} has a pending CANCEL request — locked until the owner decides`)}`);
-    }
+  // assignment until the owner approves or rejects the cancel. Also read the
+  // current status here: two-ended storage (Daksh Jul 2026) means an assignable
+  // slab is 'cut_done' (normal) OR 'completed' (a dispatch-storage slab being
+  // pulled back into carving to re-carve). We capture it so the race-guard and
+  // the failure rollback below both restore the RIGHT status.
+  const { data: preRow } = await admin
+    .from("slab_requirements")
+    .select("cancel_requested_at, status, is_parked")
+    .eq("id", slabId)
+    .maybeSingle();
+  const pre = preRow as { cancel_requested_at?: string | null; status?: string | null; is_parked?: boolean | null } | null;
+  if (pre?.cancel_requested_at) {
+    redirect(`/carving?toast=${encodeURIComponent(`${slabId} has a pending CANCEL request — locked until the owner decides`)}`);
   }
+  if (pre?.status !== "cut_done" && pre?.status !== "completed") {
+    redirect(`/carving?toast=Slab+no+longer+available+for+assignment`);
+  }
+  const originalStatus: "cut_done" | "completed" = pre?.status === "completed" ? "completed" : "cut_done";
+  const originalParked = !!pre?.is_parked;
 
   // Load vendor so we can snapshot name/type into carving_items.
   // CNC + Manual are both allowed. Manual vendors skip the receive /
@@ -1415,14 +1423,13 @@ export async function assignCarvingJobAction(formData: FormData) {
   const isOutsource = vendorType === "Outsource";
   const assignedStatus = "carving_assigned";
 
-  // Race guard: slab must currently be cut_done
+  // Race guard: slab must still be in the status we just read (cut_done OR the
+  // completed dispatch-storage case). is_parked:false pulls it OUT of storage.
   const { data: slabRow, error: slabErr } = await admin
     .from("slab_requirements")
-    // is_parked:false — assigning a slab pulls it OUT of (carving) storage
-    // (Daksh June 2026). No-op for a normal unparked slab.
     .update({ status: assignedStatus, is_parked: false, updated_by: profile.id, updated_at: new Date().toISOString() })
     .eq("id", slabId)
-    .eq("status", "cut_done")
+    .eq("status", originalStatus)
     .select("id");
 
   if (slabErr) redirect(`/carving?toast=${encodeURIComponent(slabErr.message)}`);
@@ -1477,10 +1484,12 @@ export async function assignCarvingJobAction(formData: FormData) {
     .single();
 
   if (itemErr || !item) {
-    // Rollback slab status
+    // Rollback to exactly the status + parked state the slab held before this
+    // assignment (cut_done or the completed dispatch-storage case, parked or not)
+    // — never force it to an unparked cut_done.
     await admin
       .from("slab_requirements")
-      .update({ status: "cut_done", updated_by: profile.id, updated_at: new Date().toISOString() })
+      .update({ status: originalStatus, is_parked: originalParked, updated_by: profile.id, updated_at: new Date().toISOString() })
       .eq("id", slabId);
     redirect(`/carving?toast=${encodeURIComponent(itemErr?.message ?? "Failed to create job")}`);
   }
@@ -1618,6 +1627,23 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
     }
   }
 
+  // Two-ended storage (Daksh Jul 2026) — capture each slab's current status +
+  // parked state so the per-slab race-guard and rollback below restore the RIGHT
+  // values. A slab is assignable from 'cut_done' (normal) or 'completed' (a
+  // dispatch-storage slab being pulled back into carving to re-carve).
+  const origById = new Map<string, { status: "cut_done" | "completed"; parked: boolean }>();
+  {
+    const { data: statusRows } = await admin
+      .from("slab_requirements")
+      .select("id, status, is_parked")
+      .in("id", slabIds);
+    for (const r of (statusRows ?? []) as Array<{ id: string; status: string; is_parked: boolean | null }>) {
+      if (r.status === "cut_done" || r.status === "completed") {
+        origById.set(r.id, { status: r.status, parked: !!r.is_parked });
+      }
+    }
+  }
+
   const { data: vendor } = await admin
     .from("vendors")
     .select("id, name, vendor_type, is_active")
@@ -1695,13 +1721,19 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
   const isPendingStockBatch = Object.keys(autoReceiptBatch).length === 0;
   const pendingStockSlabs: string[] = [];
   for (const slabId of slabIds) {
-    // Race-guard the slab transition first.
+    const orig = origById.get(slabId);
+    if (!orig) {
+      failures.push({ slab: slabId, reason: "no longer available" });
+      continue;
+    }
+    // Race-guard the slab transition first — must still be in the status we read
+    // (cut_done OR the completed dispatch-storage case). is_parked:false pulls it
+    // out of storage.
     const { data: slabRow, error: slabErr } = await admin
       .from("slab_requirements")
-      // is_parked:false — assigning pulls the slab out of (carving) storage.
       .update({ status: assignedStatusBatch, is_parked: false, updated_by: profile.id, updated_at: now })
       .eq("id", slabId)
-      .eq("status", "cut_done")
+      .eq("status", orig.status)
       .select("id");
     if (slabErr) {
       failures.push({ slab: slabId, reason: slabErr.message });
@@ -1740,10 +1772,10 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
       .select("id")
       .single();
     if (itemErr || !item) {
-      // Roll back the slab status flip for this one.
+      // Roll back to the slab's exact prior status + parked state for this one.
       await admin
         .from("slab_requirements")
-        .update({ status: "cut_done", updated_by: profile.id, updated_at: now })
+        .update({ status: orig.status, is_parked: orig.parked, updated_by: profile.id, updated_at: now })
         .eq("id", slabId);
       failures.push({ slab: slabId, reason: itemErr?.message ?? "insert failed" });
       continue;
@@ -7934,6 +7966,45 @@ export async function unparkSlabsAction(
   void logAudit(profile.id, "slabs_unparked", "slab", "batch", { count });
   revalidatePath("/carving");
   revalidatePath("/carving/storage");
+  return { ok: true, count };
+}
+
+/**
+ * Bring parked storage slabs back into a CHOSEN list (Daksh Jul 2026 — storage
+ * is one shared pool, so bring-back is now two-ended):
+ *   dest "carving"  → status 'cut_done'  → lands in Carving Unassigned
+ *   dest "dispatch" → status 'completed' → lands in Make Dispatch
+ * Permission is by the LIST you send TO (not the slab's current kind): sending
+ * to Carving needs a carving-storage role; sending to Make Dispatch needs a
+ * dispatch-storage role. Only ever touches genuinely parked storage slabs
+ * (cut_done / completed) — an in-flight or dispatched slab is never moved.
+ */
+export async function bringBackStorageSlabsAction(
+  ids: string[],
+  dest: "carving" | "dispatch",
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  const allowed = dest === "carving"
+    ? ["owner", "developer", "carving_head"].includes(profile.role)
+    : ["owner", "developer", "carving_head", "senior_incharge", "dispatch"].includes(profile.role);
+  if (!allowed) return { ok: false, error: "Not allowed." };
+  const list = (Array.isArray(ids) ? ids : []).map((s) => String(s).trim()).filter(Boolean);
+  if (list.length === 0) return { ok: false, error: "No slabs selected." };
+  const newStatus = dest === "carving" ? "cut_done" : "completed";
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("slab_requirements")
+    .update({ status: newStatus, is_parked: false, parked_at: null, parked_by: null, updated_by: profile.id, updated_at: new Date().toISOString() })
+    .in("id", list)
+    .eq("is_parked", true)
+    .in("status", ["cut_done", "completed"])
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  const count = (data ?? []).length;
+  void logAudit(profile.id, dest === "carving" ? "slabs_brought_to_carving" : "slabs_brought_to_dispatch", "slab", "batch", { count });
+  revalidatePath("/carving");
+  revalidatePath("/carving/storage");
+  revalidatePath("/dispatch");
   return { ok: true, count };
 }
 

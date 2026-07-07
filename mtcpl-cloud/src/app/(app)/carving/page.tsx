@@ -181,8 +181,11 @@ export default async function CarvingDashboardPage({
     return out;
   }
 
-  // Parked (carving-storage) cut-done slabs — surfaced on the Unassigned tab
-  // only when the operator enables "Include storage". Assigning one un-parks it.
+  // Parked STORAGE slabs — surfaced on the Unassigned tab only when the operator
+  // enables "Include storage". Two-ended storage (Daksh Jul 2026): this now pulls
+  // BOTH cut-done (carving storage) AND completed (dispatch storage) parked slabs,
+  // so a slab parked from Make Dispatch can be re-assigned to carving. Assigning
+  // one un-parks it (and, for a completed slab, sends it back into carving).
   async function fetchStorageSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
     const out: UnassignedRow[] = [];
@@ -192,7 +195,7 @@ export default async function CarvingDashboardPage({
         .select(
           "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description",
         )
-        .eq("status", "cut_done")
+        .in("status", ["cut_done", "completed"])
         .eq("is_parked", true)
         .order("priority", { ascending: false })
         .order("created_at", { ascending: true })

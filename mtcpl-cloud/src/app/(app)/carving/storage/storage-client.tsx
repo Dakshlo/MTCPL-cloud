@@ -2,14 +2,16 @@
 
 // Main Storage client (Daksh June 2026 — unified carving + dispatch storage).
 // Park-all cards (one per kind) + a searchable, collapsible per-temple list of
-// parked slabs with multi-select / per-temple / per-slab bring-back. Bring-back
-// is routed by each slab's KIND: cut-done → Carving Unassigned (unparkSlabs),
-// ready → Make Dispatch (unparkDispatchSlabs).
+// parked slabs with multi-select / per-temple / per-slab bring-back.
+// Bring-back is now TWO-ENDED (Daksh Jul 2026): a destination chooser lets you
+// return each slab to EITHER list — Carving Unassigned (→ cut_done) or Make
+// Dispatch (→ completed) — not just its own kind. Default keeps each slab in
+// its own list. bringBackStorageSlabsAction flips status + un-parks in one go.
 
 import { useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { parkAllUnassignedAction, unparkSlabsAction } from "../actions";
-import { parkAllReadyDispatchAction, unparkDispatchSlabsAction } from "../../dispatch/actions";
+import { parkAllUnassignedAction, bringBackStorageSlabsAction } from "../actions";
+import { parkAllReadyDispatchAction } from "../../dispatch/actions";
 
 export type ParkedSlab = {
   id: string; label: string; temple: string; stone: string | null;
@@ -40,6 +42,9 @@ export function StorageClient({
   const [confirmPark, setConfirmPark] = useState<null | "carving" | "dispatch">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Where "Bring back" sends slabs: "same" = each to its own list (default);
+  // "carving"/"dispatch" force ALL brought-back slabs into that one list.
+  const [dest, setDest] = useState<"same" | "carving" | "dispatch">("same");
 
   // id → kind, so bring-back can route each slab to the right action.
   const kindById = useMemo(() => {
@@ -76,7 +81,7 @@ export function StorageClient({
 
   function toggle(id: string) {
     const k = kindById.get(id);
-    if (k && !canManageKind(k)) return; // read-only kind for this viewer
+    if (k && !canBringBack(k)) return; // not returnable to the chosen destination
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
   function toggleTemple(slabs: ParkedSlab[]) {
@@ -99,49 +104,55 @@ export function StorageClient({
     finally { setBusy(false); setConfirmPark(null); }
   }
 
-  // Which kind the current viewer may actually return: CUT-DONE (carving) needs
-  // canCarving, READY (dispatch) needs canDispatch. Drives both the per-row
-  // controls and a defensive filter inside bringBack.
+  // Which kind the current viewer may return in "same" mode: CUT-DONE (carving)
+  // needs canCarving, READY (dispatch) needs canDispatch.
   function canManageKind(kind: ParkedSlab["kind"]) {
     return kind === "carving" ? canCarving : canDispatch;
   }
+  // Destination-aware gate driving row controls + the filter inside bringBack:
+  //  • "carving"  → any slab, needs carving rights   • "dispatch" → any slab, needs dispatch rights
+  //  • "same"     → the slab's own kind's permission.
+  function canBringBack(kind: ParkedSlab["kind"]) {
+    if (dest === "carving") return canCarving;
+    if (dest === "dispatch") return canDispatch;
+    return canManageKind(kind);
+  }
+
+  const destLabel = dest === "carving" ? "Carving Unassigned" : dest === "dispatch" ? "Make Dispatch" : "their own lists";
 
   async function bringBack(ids: string[]) {
     if (busy || ids.length === 0) return;
-    // Route each id by kind, and only attempt the kinds this viewer may manage
-    // (CUT-DONE → carving roles; READY → dispatch roles). Anything else is
-    // skipped rather than firing a server action that would just be rejected.
-    const carvingIds = ids.filter((id) => kindById.get(id) === "carving" && canCarving);
-    const dispatchIds = ids.filter((id) => kindById.get(id) === "dispatch" && canDispatch);
-    const attempt = carvingIds.length + dispatchIds.length;
+    // Resolve each id to a concrete destination list + only keep ids this viewer
+    // may actually send there. "same" routes by kind; a forced dest sends all.
+    let batches: Array<{ to: "carving" | "dispatch"; ids: string[] }>;
+    if (dest === "same") {
+      const carv = ids.filter((id) => kindById.get(id) === "carving" && canCarving);
+      const disp = ids.filter((id) => kindById.get(id) === "dispatch" && canDispatch);
+      batches = [{ to: "carving" as const, ids: carv }, { to: "dispatch" as const, ids: disp }].filter((b) => b.ids.length);
+    } else {
+      const ok = dest === "carving" ? canCarving : canDispatch;
+      batches = ok ? [{ to: dest, ids }] : [];
+    }
+    const attempt = batches.reduce((a, b) => a + b.ids.length, 0);
     const skipped = ids.length - attempt;
-    if (attempt === 0) { setErr("You don't have permission to return these slabs."); return; }
-    const dest =
-      carvingIds.length && dispatchIds.length ? "their lists (Carving / Make Dispatch)"
-        : carvingIds.length ? "Carving Unassigned" : "Make Dispatch";
-    const confirmMsg = attempt === 1
-      ? `Bring slab ${[...carvingIds, ...dispatchIds][0]} back to ${dest}?`
-      : `Bring ${attempt} slab${attempt === 1 ? "" : "s"} back to ${dest}?`;
+    if (attempt === 0) { setErr("You don't have permission to send these slabs there."); return; }
+    const confirmMsg = `Bring ${attempt} slab${attempt === 1 ? "" : "s"} back to ${destLabel}?`;
     if (!window.confirm(confirmMsg)) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
-      // Two independent, non-transactional actions — handle a partial result.
-      const [carvRes, dispRes] = await Promise.all([
-        carvingIds.length ? unparkSlabsAction(carvingIds) : Promise.resolve({ ok: true as const, count: 0 }),
-        dispatchIds.length ? unparkDispatchSlabsAction(dispatchIds) : Promise.resolve({ ok: true as const, count: 0 }),
-      ]);
-      const okCount = (carvRes.ok ? carvRes.count : 0) + (dispRes.ok ? dispRes.count : 0);
-      const failed = [carvRes, dispRes].find((r) => !r.ok) as { ok: false; error: string } | undefined;
-      // Clear only the ids whose action succeeded; keep failed ones selected for a retry.
+      // Independent, non-transactional per-destination calls — handle partials.
+      const results = await Promise.all(batches.map((b) => bringBackStorageSlabsAction(b.ids, b.to)));
+      const okCount = results.reduce((a, r) => a + (r.ok ? r.count : 0), 0);
+      const failed = results.find((r) => !r.ok) as { ok: false; error: string } | undefined;
+      // Clear only the ids whose call succeeded; keep failed ones selected for a retry.
       setSelected((prev) => {
         const n = new Set(prev);
-        if (carvRes.ok) for (const id of carvingIds) n.delete(id);
-        if (dispRes.ok) for (const id of dispatchIds) n.delete(id);
+        batches.forEach((b, i) => { if (results[i].ok) for (const id of b.ids) n.delete(id); });
         return n;
       });
-      if (okCount > 0) setMsg(`Brought ${okCount} slab${okCount === 1 ? "" : "s"} back to ${dest}.`);
+      if (okCount > 0) setMsg(`Brought ${okCount} slab${okCount === 1 ? "" : "s"} back to ${destLabel}.`);
       if (failed) setErr(failed.error);
-      else if (skipped > 0) setErr(`${skipped} slab${skipped === 1 ? "" : "s"} skipped — you can't return those.`);
+      else if (skipped > 0) setErr(`${skipped} slab${skipped === 1 ? "" : "s"} skipped — no permission for that list.`);
       router.refresh();
     } catch { setErr("Failed — check your connection."); }
     finally { setBusy(false); }
@@ -181,6 +192,38 @@ export function StorageClient({
       {msg && <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.3)", borderRadius: 10, padding: "9px 13px" }}>✓ {msg}</div>}
       {err && <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>⚠ {err}</div>}
 
+      {/* Bring-back destination chooser (two-ended storage). */}
+      {parked.length > 0 && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800 }}>↩ Bring back to:</span>
+          <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
+            {([
+              { key: "same", label: "🏠 Its own list", on: true },
+              { key: "carving", label: "🪚 Carving", on: canCarving },
+              { key: "dispatch", label: "🚚 Dispatch", on: canDispatch },
+            ] as const).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                disabled={!opt.on}
+                onClick={() => { setDest(opt.key); setSelected(new Set()); }}
+                title={opt.on ? undefined : "You don't manage that list"}
+                style={{ padding: "6px 13px", fontSize: 12.5, fontWeight: 700, border: "none", borderLeft: opt.key !== "same" ? "1px solid var(--border)" : "none", cursor: opt.on ? "pointer" : "not-allowed", background: dest === opt.key ? "var(--gold-dark)" : "transparent", color: dest === opt.key ? "#fff" : opt.on ? "var(--text)" : "var(--muted)", opacity: opt.on ? 1 : 0.5 }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+            {dest === "same"
+              ? "Cut-done → Carving Unassigned · Ready → Make Dispatch (each to where it came from)."
+              : dest === "carving"
+                ? "Every slab you bring back becomes cut-done in Carving Unassigned — ready to assign."
+                : "Every slab you bring back becomes ready in Make Dispatch."}
+          </span>
+        </div>
+      )}
+
       {/* Search + bring-back-selected */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search parked slabs — code, label, temple, stone, size (e.g. 64x61x19)…" style={{ flex: "1 1 280px", padding: "9px 12px", fontSize: 13.5, border: "1px solid var(--border)", borderRadius: 9, background: "var(--bg)", color: "var(--text)" }} />
@@ -203,9 +246,9 @@ export function StorageClient({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {groups.map(([temple, slabs]) => {
-            // Only slabs of a kind THIS viewer can return participate in
-            // select-all / bring-all (CUT-DONE → carving roles; READY → dispatch).
-            const manageable = slabs.filter((s) => canManageKind(s.kind));
+            // Only slabs this viewer can return to the CHOSEN destination take
+            // part in select-all / bring-all.
+            const manageable = slabs.filter((s) => canBringBack(s.kind));
             const allOn = manageable.length > 0 && manageable.every((s) => selected.has(s.id));
             const expanded = q.trim() !== "" || open.has(temple);
             return (
@@ -225,8 +268,8 @@ export function StorageClient({
                 <div style={{ padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
                   {slabs.map((s) => {
                     const on = selected.has(s.id);
-                    // Read-only for this viewer when they can't manage this kind.
-                    const canMng = canManageKind(s.kind);
+                    // Read-only when this slab can't go to the chosen destination.
+                    const canMng = canBringBack(s.kind);
                     return (
                       <div key={s.id} onClick={canMng ? () => toggle(s.id) : undefined} style={{ border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "rgba(184,115,51,0.06)" : "var(--bg)", borderRadius: 10, padding: "8px 10px", cursor: canMng ? "pointer" : "default", opacity: canMng ? 1 : 0.6, display: "flex", flexDirection: "column", gap: 3 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -236,8 +279,8 @@ export function StorageClient({
                             <span title={`Only ${s.kind === "carving" ? "carving" : "dispatch"} roles can return these`} style={{ fontSize: 12, flexShrink: 0 }}>🔒</span>
                           )}
                           <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
-                          {/* Kind tag — tells the user where this slab returns to. */}
-                          <span title={s.kind === "carving" ? "Cut-done — returns to Carving Unassigned" : "Ready — returns to Make Dispatch"} style={{ marginLeft: "auto", flexShrink: 0, fontSize: 8.5, fontWeight: 800, letterSpacing: "0.03em", color: "#fff", background: s.kind === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 5px" }}>
+                          {/* Kind tag — the slab's current home (where it was parked from). */}
+                          <span title={s.kind === "carving" ? "Cut-done slab — parked from Carving" : "Ready slab — parked from Make Dispatch"} style={{ marginLeft: "auto", flexShrink: 0, fontSize: 8.5, fontWeight: 800, letterSpacing: "0.03em", color: "#fff", background: s.kind === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 5px" }}>
                             {s.kind === "carving" ? "CUT-DONE" : "READY"}
                           </span>
                         </div>

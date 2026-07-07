@@ -81,8 +81,9 @@ export default async function MainStoragePage() {
         <h1 style={{ margin: "6px 0 0", fontSize: 22 }}>🗄 Main Storage</h1>
         <p className="muted" style={{ margin: "2px 0 0", fontSize: 13, maxWidth: 800 }}>
           The plant&apos;s single storage. Park slabs out of their working list to declutter, then bring back only what
-          you need. <strong>Cut-done</strong> slabs return to <strong>Carving Unassigned</strong>; <strong>ready</strong> slabs
-          return to <strong>Make Dispatch</strong>. Parked slabs keep all their data — nothing else changes.
+          you need. By default <strong>cut-done</strong> slabs return to <strong>Carving Unassigned</strong> and{" "}
+          <strong>ready</strong> slabs return to <strong>Make Dispatch</strong> — but the <strong>Bring back to</strong> chooser
+          lets you send any slab to <em>either</em> list. Parked slabs keep all their data.
         </p>
       </div>
       <StorageClient
