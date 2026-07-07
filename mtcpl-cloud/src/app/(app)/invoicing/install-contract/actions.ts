@@ -16,7 +16,10 @@ import { logAudit } from "@/lib/audit";
 import { numberToIndianWords } from "@/app/(app)/accounts/payments/[id]/voucher/number-to-words";
 
 const ROUTE = "/invoicing/install-contract";
-const ALLOWED = ["developer", "owner", "accountant_star", "accountant"];
+// Must match the page's ALLOWED — crosscheck (MANAGER) can view the page, so
+// the add-vendor / add-site / issue-contract actions must accept them too;
+// otherwise submitting the form redirected them with "Not allowed." (Daksh).
+const ALLOWED = ["developer", "owner", "accountant_star", "accountant", "crosscheck"];
 
 function isAllowed(role: string): boolean {
   return ALLOWED.includes(role);
@@ -37,6 +40,8 @@ export async function createInstallVendorAction(formData: FormData) {
   const phone = String(formData.get("phone") || "").trim() || null;
   const address = String(formData.get("address") || "").trim() || null;
   const gstin = String(formData.get("gstin") || "").trim() || null;
+  // Aadhaar — digits only (max 12), spaces/dashes stripped.
+  const aadhaar = String(formData.get("aadhaar") || "").replace(/\D/g, "").slice(0, 12) || null;
 
   const { data: existing } = await admin
     .from("install_vendors")
@@ -47,7 +52,7 @@ export async function createInstallVendorAction(formData: FormData) {
 
   const { data: created, error } = await admin
     .from("install_vendors")
-    .insert({ name, contact_person, phone, address, gstin, created_by: profile.id })
+    .insert({ name, contact_person, phone, address, gstin, aadhaar, created_by: profile.id } as never)
     .select("id")
     .single();
   if (error || !created) redirect(toastUrl(error?.message ?? "Failed to add vendor."));
@@ -104,12 +109,12 @@ export async function createInstallContractAction(formData: FormData) {
   if (!Number.isFinite(price) || price <= 0) redirect(toastUrl("Enter a valid contract price."));
 
   const [{ data: v }, { data: s }] = await Promise.all([
-    admin.from("install_vendors").select("name, contact_person, phone, address, gstin").eq("id", vendorId).maybeSingle(),
+    admin.from("install_vendors").select("name, contact_person, phone, address, gstin, aadhaar").eq("id", vendorId).maybeSingle(),
     admin.from("install_sites").select("project_name, location").eq("id", siteId).maybeSingle(),
   ]);
   if (!v) redirect(toastUrl("Selected vendor not found."));
   if (!s) redirect(toastUrl("Selected site not found."));
-  const vendor = v as { name: string; contact_person: string | null; phone: string | null; address: string | null; gstin: string | null };
+  const vendor = v as { name: string; contact_person: string | null; phone: string | null; address: string | null; gstin: string | null; aadhaar: string | null };
   const site = s as { project_name: string; location: string | null };
 
   // Contract number: MTCPL-IC-{year}-0001, per-year sequence (survives
@@ -138,6 +143,7 @@ export async function createInstallContractAction(formData: FormData) {
     vendor_phone: vendor.phone,
     vendor_address: vendor.address,
     vendor_gstin: vendor.gstin,
+    vendor_aadhaar: vendor.aadhaar,
     site_project: site.project_name,
     site_location: site.location,
     price,

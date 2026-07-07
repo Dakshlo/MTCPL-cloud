@@ -66,7 +66,7 @@ export default async function InstallContractPage({
   const params = await searchParams;
 
   const [{ data: vendors }, { data: sites }, { data: contracts }] = await Promise.all([
-    admin.from("install_vendors").select("id, name, contact_person, phone, gstin, address").eq("is_active", true).order("name"),
+    admin.from("install_vendors").select("id, name, contact_person, phone, gstin, aadhaar, address").eq("is_active", true).order("name"),
     admin.from("install_sites").select("id, project_name, location").eq("is_active", true).order("project_name"),
     admin
       .from("install_contracts")
@@ -74,7 +74,7 @@ export default async function InstallContractPage({
       .order("created_at", { ascending: false })
       .limit(40),
   ]);
-  const vList = (vendors ?? []) as { id: string; name: string; contact_person: string | null; phone: string | null; gstin: string | null; address: string | null }[];
+  const vList = (vendors ?? []) as { id: string; name: string; contact_person: string | null; phone: string | null; gstin: string | null; aadhaar: string | null; address: string | null }[];
   const sList = (sites ?? []) as { id: string; project_name: string; location: string | null }[];
   const cList = (contracts ?? []) as {
     id: string; contract_no: string | null; vendor_name: string; site_project: string;
@@ -147,19 +147,31 @@ export default async function InstallContractPage({
         </PeekSection>
 
         <PeekSection title="Vendors & Sites" icon="🏢" count={vList.length + sList.length} subtitle={`${vList.length} vendor${vList.length === 1 ? "" : "s"} · ${sList.length} site${sList.length === 1 ? "" : "s"} — add or manage`} modalMaxWidth={860}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-            {/* Vendors */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14 }}>🛠 Installation vendors</h3>
+          {/* TWO SEPARATE forms (Daksh) — they used to look like one, so people
+              filled both and only the vendor saved. Each is now its own clearly
+              boxed panel with an accent header + a "saves X only" note. */}
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12, padding: "8px 12px", background: "var(--bg)", border: "1px dashed var(--border)", borderRadius: 8 }}>
+            ⚠ These are <strong>two separate forms</strong> — each has its own <strong>Add</strong> button. Fill and add a <strong>vendor</strong> first, then fill and add a <strong>site</strong>. Adding one does <strong>not</strong> save the other.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
+            {/* ── PANEL 1: Vendors (gold) ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, border: "1.5px solid var(--gold-dark)", borderRadius: 12, padding: 14, background: "rgba(201,161,74,0.05)" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 14.5, color: "var(--gold-dark)" }}>🛠 Add an installation vendor</h3>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>The installer/contractor. Saves a vendor only.</div>
+              </div>
               <form action={createInstallVendorAction} style={{ display: "flex", flexDirection: "column", gap: 10, ...card, padding: 12 }}>
                 <div><label style={lbl}>Vendor name *</label><input name="name" required placeholder="e.g. Shree Installation Works" style={inp} /></div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ flex: "1 1 130px" }}><label style={lbl}>Contact person</label><input name="contact_person" style={inp} /></div>
                   <div style={{ flex: "1 1 130px" }}><label style={lbl}>Phone</label><input name="phone" style={inp} /></div>
                 </div>
-                <div><label style={lbl}>GSTIN</label><input name="gstin" style={{ ...inp, textTransform: "uppercase" }} /></div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 130px" }}><label style={lbl}>GSTIN</label><input name="gstin" style={{ ...inp, textTransform: "uppercase" }} /></div>
+                  <div style={{ flex: "1 1 130px" }}><label style={lbl}>Aadhaar card no.</label><input name="aadhaar" inputMode="numeric" maxLength={14} placeholder="12-digit number" style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></div>
+                </div>
                 <div><label style={lbl}>Address</label><textarea name="address" rows={2} style={{ ...inp, resize: "vertical", fontFamily: "inherit" }} /></div>
-                <button type="submit" className="primary-button" style={{ alignSelf: "flex-start", fontSize: 13, padding: "8px 16px" }}>＋ Add vendor</button>
+                <button type="submit" className="primary-button" style={{ alignSelf: "flex-start", fontSize: 13.5, fontWeight: 800, padding: "9px 20px" }}>＋ Add vendor</button>
               </form>
               {vList.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -176,6 +188,7 @@ export default async function InstallContractPage({
                         <div style={{ fontSize: 12, color: "var(--muted)" }}>👤 {[v.contact_person, v.phone].filter(Boolean).join(" · ") || "—"}</div>
                       )}
                       {v.gstin && <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>GSTIN: {v.gstin}</div>}
+                      {v.aadhaar && <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>Aadhaar: {v.aadhaar.replace(/(\d{4})(?=\d)/g, "$1 ")}</div>}
                       {v.address && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>📍 {v.address}</div>}
                     </div>
                   ))}
@@ -183,13 +196,16 @@ export default async function InstallContractPage({
               )}
             </div>
 
-            {/* Sites */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <h3 style={{ margin: 0, fontSize: 14 }}>🏛 Project sites</h3>
+            {/* ── PANEL 2: Sites (teal) ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, border: "1.5px solid #0f766e", borderRadius: 12, padding: 14, background: "rgba(15,118,110,0.05)" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 14.5, color: "#0f766e" }}>🏛 Add a project site</h3>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>The temple / project location. Saves a site only.</div>
+              </div>
               <form action={createInstallSiteAction} style={{ display: "flex", flexDirection: "column", gap: 10, ...card, padding: 12 }}>
                 <div><label style={lbl}>Temple / Project name *</label><input name="project_name" required placeholder="e.g. Umiya Mataji Temple" style={inp} /></div>
                 <div><label style={lbl}>Site location</label><input name="location" placeholder="e.g. Ahmedabad, Gujarat" style={inp} /></div>
-                <button type="submit" className="primary-button" style={{ alignSelf: "flex-start", fontSize: 13, padding: "8px 16px" }}>＋ Add site</button>
+                <button type="submit" className="primary-button" style={{ alignSelf: "flex-start", fontSize: 13.5, fontWeight: 800, padding: "9px 20px", background: "#0f766e" }}>＋ Add site</button>
               </form>
               {sList.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

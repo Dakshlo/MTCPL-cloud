@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { roleLabel } from "@/lib/role-labels";
 import {
   createDiaryEntryAction, addDiaryRemarkAction, closeDiaryEntryAction,
   reopenDiaryEntryAction, deleteDiaryEntryAction, deleteDiaryGroupAction,
@@ -740,7 +741,7 @@ function NewEntryModal({ me, people, groups, onClose, refresh }: {
                   <input type="checkbox" checked={on} onChange={() => toggle(p.id)} />
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}{p.id === me.id ? " (me)" : ""}</span>
-                    <span style={{ display: "block", fontSize: 10, color: "var(--muted)" }}>{p.role.replace(/_/g, " ")}</span>
+                    <span style={{ display: "block", fontSize: 10, color: "var(--muted)" }}>{roleLabel(p.role)}</span>
                   </span>
                 </label>
               );

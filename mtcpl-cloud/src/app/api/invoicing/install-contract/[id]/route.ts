@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { data } = await admin
     .from("install_contracts")
     .select(
-      "contract_no, doc_date, vendor_name, vendor_contact, vendor_phone, vendor_address, vendor_gstin, site_project, site_location, price, price_unit, price_words, scope_note, deleted_at",
+      "contract_no, doc_date, vendor_name, vendor_contact, vendor_phone, vendor_address, vendor_gstin, vendor_aadhaar, site_project, site_location, price, price_unit, price_words, scope_note, deleted_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     vendor_phone: string | null;
     vendor_address: string | null;
     vendor_gstin: string | null;
+    vendor_aadhaar: string | null;
     site_project: string;
     site_location: string | null;
     price: number | string;
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     vendorPhone: d.vendor_phone,
     vendorAddress: d.vendor_address,
     vendorGstin: d.vendor_gstin,
+    vendorAadhaar: d.vendor_aadhaar,
     siteProject: d.site_project,
     siteLocation: d.site_location,
     price: Number(d.price) || 0,

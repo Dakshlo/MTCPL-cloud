@@ -23,6 +23,7 @@ export type InstallContractInput = {
   vendorPhone: string | null;
   vendorAddress: string | null;
   vendorGstin: string | null;
+  vendorAadhaar: string | null;
   siteProject: string;
   siteLocation: string | null;
   price: number;
@@ -191,6 +192,7 @@ export async function buildInstallContractPdf(inp: InstallContractInput): Promis
   let ryy = kv("Name", inp.vendorName, colRx, ry, colW);
   ryy = kv("Contact / Phone", [inp.vendorContact, inp.vendorPhone].filter(Boolean).join(" · ") || null, colRx, ryy - 2, colW);
   ryy = kv("GSTIN", inp.vendorGstin, colRx, ryy - 2, colW);
+  ryy = kv("Aadhaar", inp.vendorAadhaar ? inp.vendorAadhaar.replace(/(\d{4})(?=\d)/g, "$1 ") : null, colRx, ryy - 2, colW);
   ryy = kv("Address", inp.vendorAddress, colRx, ryy - 2, colW);
 
   const boxBottom = Math.min(lyy, ryy) - 4;
