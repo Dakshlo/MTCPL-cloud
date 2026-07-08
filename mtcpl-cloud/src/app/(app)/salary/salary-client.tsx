@@ -392,6 +392,10 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
   const needle = q.trim().toLowerCase();
   const shownRows = needle ? rows.filter((r) => [r.employeeName, r.designation, r.organization].some((v) => (v ?? "").toLowerCase().includes(needle))) : rows;
   const shownTot = shownRows.reduce((a, r) => ({ gross: a.gross + r.gross, pf: a.pf + r.pfAmount, net: a.net + r.net }), { gross: 0, pf: 0, net: 0 });
+  // Group the table by Organization → Designation, each header showing its own
+  // Net-to-pay total (same grouping as the Employees / PF tabs).
+  const { orgGroups, showOrg } = groupByOrgDesig(shownRows, (r) => r.organization, (r) => r.designation);
+  const groupNet = (emps: SalaryPaymentRow[]) => emps.reduce((a, r) => a + r.net, 0);
 
   const th: React.CSSProperties = { padding: "8px 10px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "right", whiteSpace: "nowrap", borderBottom: "2px solid var(--border)", background: "var(--bg)" };
   const thL: React.CSSProperties = { ...th, textAlign: "left" };
@@ -485,7 +489,34 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
                 <th style={thL}>Employee</th><th style={th}>Gross</th><th style={th}>PF −</th><th style={th}>Deduction −</th><th style={th}>Addition +</th><th style={th}>Net pay</th><th style={thL}>Status</th><th style={{ ...th }}>Actions</th>
               </tr></thead>
               <tbody>
-                {shownRows.map((r) => (
+                {orgGroups.map((og) => {
+                  const oc = designationColor(og.org);
+                  const orgNet = og.desigGroups.reduce((s, [, emps]) => s + groupNet(emps), 0);
+                  return (
+                  <Fragment key={og.org}>
+                    {showOrg && (
+                      <tr>
+                        <td colSpan={8} style={{ padding: "9px 12px", background: oc.bg, color: oc.fg, borderTop: "2px solid var(--border)", borderLeft: `4px solid ${oc.fg}`, borderBottom: "1px solid var(--border)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.03em" }}>🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count} employee{og.count === 1 ? "" : "s"}</span></span>
+                            <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>Net {inr(orgNet)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {og.desigGroups.map(([desig, emps]) => {
+                      const dc = designationColor(desig);
+                      return (
+                      <Fragment key={desig}>
+                        <tr>
+                          <td colSpan={8} style={{ padding: "7px 12px", paddingLeft: showOrg ? 26 : 12, background: dc.bg, color: dc.fg, borderLeft: `3px solid ${dc.fg}`, borderBottom: "1px solid var(--border)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{desig} <span style={{ opacity: 0.7 }}>· {emps.length}</span></span>
+                              <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>Net to pay {inr(groupNet(emps))}</span>
+                            </div>
+                          </td>
+                        </tr>
+                        {emps.map((r) => (
                   <tr key={r.id} style={{ background: r.status === "paid" ? "rgba(22,101,52,0.05)" : undefined }}>
                     <td style={tdL}>
                       <span style={{ fontWeight: 800 }}>{!r.hasBank && r.status === "draft" ? "⚠ " : ""}{r.employeeName}</span>
@@ -529,7 +560,13 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
                       ) : <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>}
                     </td>
                   </tr>
-                ))}
+                        ))}
+                      </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr style={{ background: "var(--bg)", fontWeight: 800 }}>
