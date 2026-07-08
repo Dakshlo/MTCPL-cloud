@@ -792,7 +792,9 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
   const days = daysInSalaryMonth(monthYm);
   const [attendance, setAttendance] = useState(row.attendanceDays != null ? String(row.attendanceDays) : "");
   const [otHours, setOtHours] = useState(row.otHours != null ? String(row.otHours) : "");
-  const [ot, setOt] = useState(String(row.otAmount || ""));
+  // OT is now hours × per-hour rate. The rate isn't stored separately — derive
+  // it from the saved amount ÷ hours so re-opening the row shows it again.
+  const [otRate, setOtRate] = useState(row.otHours && row.otAmount && Number(row.otHours) > 0 ? String(Math.round((row.otAmount / row.otHours) * 100) / 100) : "");
   const [advance, setAdvance] = useState(String(row.advance || ""));
   const [ded, setDed] = useState(String(row.otherDeduction || ""));
   const [add, setAdd] = useState(String(row.addition || ""));
@@ -802,7 +804,9 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
   //   fixed  → full monthly salary; worker → salary × attendance ÷ days-in-month.
   const gross = earnedSalary({ monthlySalary: row.monthlySalary, salaryType: row.salaryType, attendanceDays: attendanceNum, monthKey: monthYm });
   const pf = computePf(gross, row.pfPercent, row.pfEnabled);
-  const net = Math.round((gross - pf + n(ot) - n(advance) - n(ded) + n(add)) * 100) / 100;
+  // OT amount = total OT hours × per-hour rate (flows into net).
+  const otAmount = Math.round(n(otHours) * n(otRate) * 100) / 100;
+  const net = Math.round((gross - pf + otAmount - n(advance) - n(ded) + n(add)) * 100) / 100;
   const readBox: React.CSSProperties = { ...inp, background: "var(--surface)", fontFamily: "ui-monospace, monospace", fontWeight: 800, display: "flex", alignItems: "center", minHeight: 38 };
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
@@ -837,8 +841,14 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
               </span>
             </div>
             <label><span style={lbl}>Attendance days{isWorker ? " *" : ""}</span><input name="attendance_days" inputMode="decimal" value={attendance} onChange={(e) => setAttendance(e.target.value)} placeholder={isWorker ? `days present of ${days}` : "info only — doesn't change fixed pay"} style={inp} /></label>
-            <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" value={otHours} onChange={(e) => setOtHours(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>OT amount + (₹)</span><input name="ot_amount" inputMode="decimal" value={ot} onChange={(e) => setOt(e.target.value)} style={inp} /></label>
+            <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" value={otHours} onChange={(e) => setOtHours(e.target.value)} placeholder="total OT hours" style={inp} /></label>
+            <label><span style={lbl}>OT rate / hour (₹)</span><input name="ot_rate" inputMode="decimal" value={otRate} onChange={(e) => setOtRate(e.target.value)} placeholder="₹ per OT hour" style={inp} /></label>
+            <div>
+              <span style={lbl}>OT amount + (₹)</span>
+              <div style={readBox}>{inr(otAmount)}</div>
+              <input type="hidden" name="ot_amount" value={otAmount} />
+              <span style={{ fontSize: 10, color: "var(--muted)", display: "block", marginTop: 3 }}>{n(otHours) > 0 && n(otRate) > 0 ? `${n(otHours)} hr × ₹${n(otRate)}/hr` : "hours × rate"}</span>
+            </div>
             <label><span style={lbl}>Advance − (₹)</span><input name="advance" inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} style={inp} /></label>
             <label><span style={lbl}>Other deduction − (₹)</span><input name="other_deduction" inputMode="decimal" value={ded} onChange={(e) => setDed(e.target.value)} style={inp} /></label>
             <label><span style={lbl}>Addition / bonus + (₹)</span><input name="addition" inputMode="decimal" value={add} onChange={(e) => setAdd(e.target.value)} style={inp} /></label>
