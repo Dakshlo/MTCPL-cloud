@@ -696,7 +696,8 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
 /* ── Modals ────────────────────────────────────────────────────────── */
 
 function EmployeeModal({ emp, organizations, designations, monthYm, onClose }: { emp: SalaryEmployee | null; organizations: string[]; designations: string[]; monthYm: string; onClose: () => void }) {
-  const [pfOn, setPfOn] = useState(emp?.pfEnabled ?? false);
+  // New employees default to PF ON (Daksh); editing keeps the employee's own value.
+  const [pfOn, setPfOn] = useState(emp ? emp.pfEnabled : true);
   const [organization, setOrganization] = useState(emp?.organization ?? "");
   const [designation, setDesignation] = useState(emp?.designation ?? "");
   // Salary type is DERIVED from the designation now — no hand-set toggle.
