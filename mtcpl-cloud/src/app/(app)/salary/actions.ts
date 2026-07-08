@@ -24,7 +24,7 @@ import { revalidatePath } from "next/cache";
 import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseSalary, computePf } from "@/lib/salary-permissions";
+import { canUseSalary, computePf, earnedSalary, salaryTypeForDesignation } from "@/lib/salary-permissions";
 import { logAudit } from "@/lib/audit";
 
 function txt(fd: FormData, key: string): string {
@@ -77,11 +77,14 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   const pfPctRaw = txt(formData, "pf_percent");
   const pfPercent = pfPctRaw === "" ? 12 : num(formData, "pf_percent");
 
-  const salaryType = txt(formData, "salary_type") === "variable" ? "variable" : "fixed";
+  // Salary type follows the designation — "Worker" ⇒ paid by attendance,
+  // anything else ⇒ fixed. No hand-set toggle any more.
+  const designation = txt(formData, "designation") || null;
+  const salaryType = salaryTypeForDesignation(designation);
   const row: Record<string, unknown> = {
     name,
     organization: txt(formData, "organization") || null,
-    designation: txt(formData, "designation") || null,
+    designation,
     father_name: txt(formData, "father_name") || null,
     phone: txt(formData, "phone") || null,
     aadhaar: txt(formData, "aadhaar").replace(/\D/g, "").slice(0, 12) || null,
@@ -155,19 +158,21 @@ export async function prepareSalaryMonthAction(formData: FormData): Promise<void
 
   const { data: emps, error: e1 } = await admin
     .from("salary_employees")
-    .select("id, monthly_salary, pf_enabled, pf_percent, salary_type")
+    .select("id, monthly_salary, pf_enabled, pf_percent, designation")
     .eq("is_active", true);
   if (e1) go(`Could not load employees: ${e1.message}`);
-  const employees = (emps ?? []) as Array<{ id: string; monthly_salary: number; pf_enabled: boolean; pf_percent: number; salary_type: string }>;
+  const employees = (emps ?? []) as Array<{ id: string; monthly_salary: number; pf_enabled: boolean; pf_percent: number; designation: string | null }>;
   if (employees.length === 0) go("No active employees yet — add them first");
 
   const { data: existing } = await admin.from("salary_payments").select("employee_id").eq("month", month!);
   const have = new Set(((existing ?? []) as Array<{ employee_id: string }>).map((r) => r.employee_id));
 
   const rows = employees.filter((e) => !have.has(e.id)).map((e) => {
-    // Variable-salary employees start at 0 so the accountant MUST enter this
-    // month's figure; fixed employees prefill their monthly salary.
-    const gross = e.salary_type === "variable" ? 0 : Number(e.monthly_salary) || 0;
+    // Salary type follows the designation. Fixed prefills the full monthly
+    // salary; a Worker starts at 0 (attendance is null until the accountant
+    // records days present) — earnedSalary() encodes both.
+    const salaryType = salaryTypeForDesignation(e.designation);
+    const gross = earnedSalary({ monthlySalary: Number(e.monthly_salary) || 0, salaryType, attendanceDays: null, monthKey: month! });
     // PF = pct% of min(gross, ₹15,000 ceiling). Explicit 0% honoured.
     const pf = computePf(gross, Number(e.pf_percent), e.pf_enabled);
     return { employee_id: e.id, month: month!, gross, pf_amount: pf, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0, net: Math.round((gross - pf) * 100) / 100, status: "draft", created_by: profile.id };
@@ -190,20 +195,38 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
   const id = txt(formData, "id");
   if (!id) go("Missing row");
 
-  const gross = num(formData, "gross");
-  const pf = num(formData, "pf_amount");
+  // Load the row's month + employee so gross/PF are recomputed AUTHORITATIVELY
+  // here (the accountant only enters attendance + OT/advance/deduction/addition —
+  // the earned base and PF are DERIVED, never typed).
+  const { data: rowData, error: rErr } = await admin
+    .from("salary_payments").select("employee_id, month").eq("id", id).maybeSingle();
+  if (rErr) go(`Could not load the row: ${rErr.message}`);
+  if (!rowData) go("Row not found");
+  const r0 = rowData as { employee_id: string; month: string };
+  const { data: empData } = await admin
+    .from("salary_employees").select("monthly_salary, designation, pf_enabled, pf_percent").eq("id", r0.employee_id).maybeSingle();
+  const emp = (empData ?? {}) as { monthly_salary?: number; designation?: string | null; pf_enabled?: boolean; pf_percent?: number };
+
+  const attendanceRaw = txt(formData, "attendance_days");
+  const attendance = attendanceRaw === "" ? null : num(formData, "attendance_days");
+  const otHoursRaw = txt(formData, "ot_hours");
   const ot = num(formData, "ot_amount");
   const advance = num(formData, "advance");
   const ded = num(formData, "other_deduction");
   const add = num(formData, "addition");
+
+  // Fixed ⇒ full monthly salary whatever the attendance; Worker ⇒ salary ×
+  // (attendance ÷ days-in-month). PF follows the earned gross.
+  const salaryType = salaryTypeForDesignation(emp.designation ?? null);
+  const gross = earnedSalary({ monthlySalary: Number(emp.monthly_salary) || 0, salaryType, attendanceDays: attendance, monthKey: r0.month });
+  const pf = computePf(gross, Number(emp.pf_percent), !!emp.pf_enabled);
   // Actual pay = earned − PF + overtime − advance − other deduction + addition.
   const net = Math.round((gross - pf + ot - advance - ded + add) * 100) / 100;
-  const attendanceRaw = txt(formData, "attendance_days");
-  const otHoursRaw = txt(formData, "ot_hours");
+
   const { data, error } = await admin.from("salary_payments")
     .update({
       gross, pf_amount: pf, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
-      attendance_days: attendanceRaw === "" ? null : num(formData, "attendance_days"),
+      attendance_days: attendance,
       ot_hours: otHoursRaw === "" ? null : num(formData, "ot_hours"),
       remarks: txt(formData, "remarks") || null,
       note: txt(formData, "note") || null,
@@ -422,7 +445,7 @@ export async function importSalaryEmployeesAction(
       ifsc: String(r.ifsc || "").toUpperCase().replace(/\s+/g, "") || null,
       beneficiary_name: beneficiary || null,
       monthly_salary: Number(r.salary) > 0 ? Math.round(Number(r.salary) * 100) / 100 : 0,
-      salary_type: "fixed",
+      salary_type: salaryTypeForDesignation(String(r.designation || "")),
       pf_enabled: !!pfEnabled,
       pf_percent: 12,
       is_active: true,

@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
-import { PF_WAGE_CEILING } from "@/lib/salary-permissions";
+import { PF_WAGE_CEILING, computePf, earnedSalary, daysInSalaryMonth, isWorkerDesignation } from "@/lib/salary-permissions";
 import { designationColor } from "@/lib/salary-designation-color";
 import { SalaryImportButton } from "./salary-import";
 import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG, NO_ORG } from "./_ui/salary-ui";
@@ -31,6 +31,9 @@ export type SalaryEmployee = {
 };
 export type SalaryPaymentRow = {
   id: string; employeeId: string; employeeName: string; organization: string | null; designation: string | null; salaryType: "fixed" | "variable"; hasBank: boolean;
+  /** Employee's full monthly salary + PF settings — for the RowModal's live
+   *  gross/PF preview (a worker's gross is salary × attendance ÷ days-in-month). */
+  monthlySalary: number; pfEnabled: boolean; pfPercent: number;
   gross: number; pfAmount: number; otAmount: number; otHours: number | null; advance: number; attendanceDays: number | null; remarks: string | null;
   otherDeduction: number; addition: number; net: number;
   note: string | null; status: "draft" | "paid"; paidAt: string | null;
@@ -228,7 +231,7 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
                         </td>
                         <td style={{ ...SALARY_TABLE.td, fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                           {inr(e.monthlySalary)}
-                          <span style={{ display: "block", fontFamily: "inherit", fontSize: 10, fontWeight: 800, marginTop: 2, color: e.salaryType === "variable" ? "#b45309" : "var(--muted)" }}>{e.salaryType === "variable" ? "↕ VARIABLE" : "FIXED"}</span>
+                          <span style={{ display: "block", fontFamily: "inherit", fontSize: 10, fontWeight: 800, marginTop: 2, color: e.salaryType === "variable" ? "#b45309" : "var(--muted)" }}>{e.salaryType === "variable" ? "⏱ BY ATTENDANCE" : "FIXED"}</span>
                         </td>
                         <td style={SALARY_TABLE.td}>
                           {e.accountNumber ? (
@@ -595,7 +598,8 @@ function EmployeeModal({ emp, organizations, designations, monthYm, onClose }: {
   const [pfOn, setPfOn] = useState(emp?.pfEnabled ?? false);
   const [organization, setOrganization] = useState(emp?.organization ?? "");
   const [designation, setDesignation] = useState(emp?.designation ?? "");
-  const [salaryType, setSalaryType] = useState<"fixed" | "variable">(emp?.salaryType ?? "fixed");
+  // Salary type is DERIVED from the designation now — no hand-set toggle.
+  const employeeIsWorker = isWorkerDesignation(designation);
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
       <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(720px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)", maxHeight: "94vh", overflowY: "auto" }}>
@@ -622,26 +626,17 @@ function EmployeeModal({ emp, organizations, designations, monthYm, onClose }: {
 
           <div style={{ margin: "16px 0 8px", fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)" }}>💰 Salary</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, alignItems: "end" }}>
-            <div>
-              <span style={lbl}>Salary type</span>
-              <input type="hidden" name="salary_type" value={salaryType} />
-              <div style={{ display: "inline-flex", gap: 4, padding: 4, borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)", width: "100%" }}>
-                {(["fixed", "variable"] as const).map((t) => (
-                  <button key={t} type="button" onClick={() => setSalaryType(t)} style={{ flex: 1, fontSize: 12.5, fontWeight: 800, padding: "8px 10px", borderRadius: 8, border: "none", cursor: "pointer", background: salaryType === t ? "var(--gold)" : "transparent", color: salaryType === t ? "#fff" : "var(--muted)" }}>
-                    {t === "fixed" ? "Fixed" : "↕ Variable"}
-                  </button>
-                ))}
-              </div>
-            </div>
             <label>
-              <span style={lbl}>{salaryType === "variable" ? "Typical salary (₹)" : "Monthly salary (₹) *"}</span>
-              <input name="monthly_salary" required={salaryType === "fixed"} inputMode="decimal" defaultValue={emp?.monthlySalary ? String(emp.monthlySalary) : ""} style={inp} />
+              <span style={lbl}>Monthly salary (₹) *</span>
+              <input name="monthly_salary" required inputMode="decimal" defaultValue={emp?.monthlySalary ? String(emp.monthlySalary) : ""} style={inp} />
             </label>
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
-            {salaryType === "variable"
-              ? "Variable — Prepare month drafts a ₹0 row; you type the actual amount for the month before paying."
-              : "Fixed — Prepare month drafts this amount automatically every month."}
+          <div style={{ fontSize: 11, marginTop: 8, padding: "9px 12px", borderRadius: 9, border: "1px solid var(--border)", background: employeeIsWorker ? "rgba(217,119,6,0.08)" : "var(--bg)", color: "var(--muted)", lineHeight: 1.5 }}>
+            {employeeIsWorker ? (
+              <><b style={{ color: "#b45309" }}>⏱ Worker — paid by attendance.</b> The full-month salary above is prorated by days present each month (e.g. 20 of 30 days → 20⁄30 of the salary). Enter attendance on the Pay-month row.</>
+            ) : (
+              <><b style={{ color: "var(--gold-dark)" }}>Fixed salary.</b> The full amount is paid every month, whatever the attendance. Set the designation to <b>Worker</b> to pay by attendance instead.</>
+            )}
           </div>
 
           <div style={{ margin: "16px 0 8px", fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--gold-dark)" }}>🏦 Bank — for the HDFC sheet</div>
@@ -679,28 +674,56 @@ function EmployeeModal({ emp, organizations, designations, monthYm, onClose }: {
 }
 
 function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: string; onClose: () => void }) {
-  const [gross, setGross] = useState(String(row.gross || ""));
-  const [pf, setPf] = useState(String(row.pfAmount || ""));
+  const isWorker = row.salaryType === "variable";
+  const days = daysInSalaryMonth(monthYm);
+  const [attendance, setAttendance] = useState(row.attendanceDays != null ? String(row.attendanceDays) : "");
+  const [otHours, setOtHours] = useState(row.otHours != null ? String(row.otHours) : "");
   const [ot, setOt] = useState(String(row.otAmount || ""));
   const [advance, setAdvance] = useState(String(row.advance || ""));
   const [ded, setDed] = useState(String(row.otherDeduction || ""));
   const [add, setAdd] = useState(String(row.addition || ""));
   const n = (s: string) => Number(s.replace(/,/g, "")) || 0;
-  const net = Math.round((n(gross) - n(pf) + n(ot) - n(advance) - n(ded) + n(add)) * 100) / 100;
+  const attendanceNum = attendance.trim() === "" ? null : n(attendance);
+  // Gross + PF are DERIVED (the server recomputes them identically on save):
+  //   fixed  → full monthly salary; worker → salary × attendance ÷ days-in-month.
+  const gross = earnedSalary({ monthlySalary: row.monthlySalary, salaryType: row.salaryType, attendanceDays: attendanceNum, monthKey: monthYm });
+  const pf = computePf(gross, row.pfPercent, row.pfEnabled);
+  const net = Math.round((gross - pf + n(ot) - n(advance) - n(ded) + n(add)) * 100) / 100;
+  const readBox: React.CSSProperties = { ...inp, background: "var(--surface)", fontFamily: "ui-monospace, monospace", fontWeight: 800, display: "flex", alignItems: "center", minHeight: 38 };
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
       <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)", maxHeight: "94vh", overflowY: "auto" }}>
-        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 2 }}>✎ {row.employeeName}{row.salaryType === "variable" && <span style={{ fontSize: 11, fontWeight: 800, color: "#b45309", marginLeft: 8 }}>↕ VARIABLE</span>}</div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 14 }}>This month&apos;s amounts — net recalculates live. Attendance &amp; OT hours feed the PF register.</div>
+        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 2 }}>✎ {row.employeeName}
+          {isWorker
+            ? <span style={{ fontSize: 11, fontWeight: 800, color: "#b45309", marginLeft: 8 }}>⏱ BY ATTENDANCE</span>
+            : <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", marginLeft: 8 }}>FIXED</span>}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 14 }}>
+          {isWorker
+            ? `Worker — ${inr(row.monthlySalary)} for a full ${days}-day month, prorated by days present. Enter attendance; net recalculates live.`
+            : "Fixed salary — the full amount is paid whatever the attendance. Adjust with OT / advance / deduction / addition if needed."}
+        </div>
         <form action={updateSalaryPaymentAction}>
           <input type="hidden" name="id" value={row.id} />
           <ReturnCtx monthYm={monthYm} tab="month" />
           <FormPending label="Saving row…" />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label><span style={lbl}>Gross (₹){row.salaryType === "variable" ? " *" : ""}</span><input name="gross" inputMode="decimal" value={gross} onChange={(e) => setGross(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>PF deduction − (₹)</span><input name="pf_amount" inputMode="decimal" value={pf} onChange={(e) => setPf(e.target.value)} style={inp} /></label>
-            <label><span style={lbl}>Attendance days</span><input name="attendance_days" inputMode="decimal" defaultValue={row.attendanceDays != null ? String(row.attendanceDays) : ""} style={inp} /></label>
-            <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" defaultValue={row.otHours != null ? String(row.otHours) : ""} style={inp} /></label>
+            <div>
+              <span style={lbl}>Earned salary (₹)</span>
+              <div style={readBox}>{inr(gross)}</div>
+              <span style={{ fontSize: 10, color: "var(--muted)", display: "block", marginTop: 3 }}>
+                {isWorker ? (attendanceNum == null ? "enter attendance →" : `${inr(row.monthlySalary)} × ${attendanceNum}⁄${days} days`) : "full fixed salary"}
+              </span>
+            </div>
+            <div>
+              <span style={lbl}>PF deduction − (₹)</span>
+              <div style={readBox}>{inr(pf)}</div>
+              <span style={{ fontSize: 10, color: "var(--muted)", display: "block", marginTop: 3 }}>
+                {row.pfEnabled ? `${row.pfPercent}% of min(earned, ${inr(PF_WAGE_CEILING)})` : "PF not applicable"}
+              </span>
+            </div>
+            <label><span style={lbl}>Attendance days{isWorker ? " *" : ""}</span><input name="attendance_days" inputMode="decimal" value={attendance} onChange={(e) => setAttendance(e.target.value)} placeholder={isWorker ? `days present of ${days}` : "info only — doesn't change fixed pay"} style={inp} /></label>
+            <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" value={otHours} onChange={(e) => setOtHours(e.target.value)} style={inp} /></label>
             <label><span style={lbl}>OT amount + (₹)</span><input name="ot_amount" inputMode="decimal" value={ot} onChange={(e) => setOt(e.target.value)} style={inp} /></label>
             <label><span style={lbl}>Advance − (₹)</span><input name="advance" inputMode="decimal" value={advance} onChange={(e) => setAdvance(e.target.value)} style={inp} /></label>
             <label><span style={lbl}>Other deduction − (₹)</span><input name="other_deduction" inputMode="decimal" value={ded} onChange={(e) => setDed(e.target.value)} style={inp} /></label>
@@ -712,7 +735,7 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
             <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", color: "#15803d" }}>Net pay</span>
             <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 18, color: "#15803d" }}>{inr(net)}</span>
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6, textAlign: "right" }}>Gross − PF + OT − Advance − Deduction + Addition</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6, textAlign: "right" }}>Earned − PF + OT − Advance − Deduction + Addition</div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
             <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
             <button type="submit" style={btnPrimary}>✓ Save row</button>

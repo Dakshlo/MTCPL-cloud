@@ -13,7 +13,7 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseSalary } from "@/lib/salary-permissions";
+import { canUseSalary, salaryTypeForDesignation } from "@/lib/salary-permissions";
 import { SalaryClient, type SalaryEmployee, type SalaryPaymentRow, type PfRow } from "./salary-client";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +63,10 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
         ifsc: (e.ifsc as string | null) ?? null,
         beneficiaryName: (e.beneficiary_name as string | null) ?? null,
         monthlySalary: Number(e.monthly_salary) || 0,
-        salaryType: (e.salary_type as string) === "variable" ? "variable" : "fixed",
+        // Salary type follows the designation ("Worker" ⇒ by attendance),
+        // derived at read time so the rule applies to every employee — even
+        // ones added before the stored salary_type column existed.
+        salaryType: salaryTypeForDesignation((e.designation as string | null) ?? null),
         pfEnabled: !!e.pf_enabled,
         uan: (e.uan as string | null) ?? null,
         // An explicit 0% is a real value — only a missing/garbage one shows 12.
@@ -93,6 +96,10 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
           organization: emp?.organization ?? null,
           designation: emp?.designation ?? null,
           salaryType: emp?.salaryType ?? "fixed",
+          // For the RowModal's live gross/PF preview (worker proration).
+          monthlySalary: emp?.monthlySalary ?? 0,
+          pfEnabled: emp?.pfEnabled ?? false,
+          pfPercent: emp?.pfPercent ?? 12,
           hasBank: !!(emp?.accountNumber && (emp?.beneficiaryName || emp?.name)),
           gross: Number(r.gross) || 0,
           pfAmount: Number(r.pf_amount) || 0,
@@ -147,7 +154,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
         me={{ id: profile.id, isBoss: profile.role === "owner" || profile.role === "developer" }}
         employees={employees}
         organizations={[...new Set(employees.map((e) => (e.organization ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
-        designations={[...new Set(employees.map((e) => (e.designation ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
+        designations={[...new Set(["Worker", ...employees.map((e) => (e.designation ?? "").trim()).filter(Boolean)])].sort((a, b) => a.localeCompare(b))}
         monthYm={monthYm}
         monthRows={monthRows}
         pfRows={pfRows}
