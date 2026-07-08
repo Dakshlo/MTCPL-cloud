@@ -387,6 +387,10 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
   const draftNet = draft.reduce((a, r) => a + r.net, 0);
   const paidNet = paid.reduce((a, r) => a + r.net, 0);
   const missingBank = draft.filter((r) => !r.hasBank);
+  // A Worker with no attendance yet earns ₹0 — block the bank sheet until the
+  // accountant records days present for EVERY worker in the month (Daksh).
+  const workersNoAttendance = draft.filter((r) => r.salaryType === "variable" && r.attendanceDays == null);
+  const hdfcReady = draft.length > 0 && workersNoAttendance.length === 0;
   // Search filters only the visible TABLE — the KPI cards + HDFC sheet stay over
   // the whole month (they're the payment source of truth).
   const needle = q.trim().toLowerCase();
@@ -422,11 +426,13 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
         </form>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
           <a
-            href={`/api/salary/hdfc-export?month=${monthYm}`}
+            href={hdfcReady ? `/api/salary/hdfc-export?month=${monthYm}` : undefined}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ ...btnPrimary, background: draft.length ? "#15803d" : "var(--border)", textDecoration: "none", pointerEvents: draft.length ? "auto" : "none" }}
-            title="HDFC ENet Bulk Payment sheet — same format Finance uploads"
+            onClick={(e) => { if (!hdfcReady) e.preventDefault(); }}
+            aria-disabled={!hdfcReady}
+            style={{ ...btnPrimary, background: hdfcReady ? "#15803d" : "var(--border)", color: hdfcReady ? "#fff" : "var(--muted)", textDecoration: "none", pointerEvents: hdfcReady ? "auto" : "none", opacity: hdfcReady ? 1 : 0.7 }}
+            title={workersNoAttendance.length > 0 ? `Add attendance for ${workersNoAttendance.length} worker${workersNoAttendance.length === 1 ? "" : "s"} first` : draft.length === 0 ? "No draft rows to pay" : "HDFC ENet Bulk Payment sheet — same format Finance uploads"}
           >
             ⬇ HDFC bank sheet · {draft.length}
           </a>
@@ -447,6 +453,12 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, ac
           )}
         </span>
       </div>
+
+      {workersNoAttendance.length > 0 && (
+        <div style={{ marginBottom: 12, border: "1px solid rgba(217,119,6,0.4)", borderRadius: 10, background: "rgba(217,119,6,0.08)", padding: "9px 13px", fontSize: 12, fontWeight: 700, color: "#b45309" }}>
+          ⏱ Add attendance for {workersNoAttendance.length} worker{workersNoAttendance.length === 1 ? "" : "s"} before downloading the HDFC bank sheet: {workersNoAttendance.map((r) => r.employeeName).join(", ")} — open each row (✎) and enter days present.
+        </div>
+      )}
 
       {missingBank.length > 0 && (
         <div style={{ marginBottom: 12, border: "1px solid rgba(220,38,38,0.35)", borderRadius: 10, background: "rgba(220,38,38,0.06)", padding: "9px 13px", fontSize: 12, fontWeight: 700, color: "#b91c1c" }}>
