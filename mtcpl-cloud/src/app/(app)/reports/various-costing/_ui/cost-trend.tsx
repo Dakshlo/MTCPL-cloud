@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * Cost-per-unit trend graph (Daksh, Jul 2026) — shared by the CNC and Cutter
- * Various-Costing pages. Three granularities:
- *   • Daily   — the headline cost/unit AS OF each of the last 16 days (the
- *               month-to-date elapsed-days number, evaluated day by day; going
- *               past the 1st shows last month's running curve).
- *   • Weekly  — each of the last 8 weeks' own cost (Mon–Sun).
- *   • Monthly — each of the last 6 months (current = month-to-date).
+ * Output trend graph (Daksh, Jul 2026) — shared by the CNC and Cutter
+ * Various-Costing pages. Plots carved OUTPUT per period (CNC: SFT+CFT combined,
+ * Cutter: CFT). Three granularities:
+ *   • Daily   — each of the last 16 days' own output.
+ *   • Weekly  — each of the last 8 weeks' output (Mon–Sun).
+ *   • Monthly — each of the last 6 months' output (current = month-to-date).
  *
  * Every point comes from /api/reports/cost-trend, which runs the SAME report
- * engine as the page headline — the graph can never disagree with the cards.
- * Series are fetched lazily per granularity and cached client-side.
+ * engine as the page headline — the graph can never disagree with the Output
+ * cards. Each point also carries its cost (shown in the hover tooltip). Series
+ * are fetched lazily per granularity and cached client-side.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -23,19 +23,19 @@ type TrendPoint = {
 };
 type ApiOk = { ok: true; plant: string; granularity: Granularity; unit: string; points: TrendPoint[] };
 
-const fmtINR = (n: number) => `₹${n >= 100 ? Math.round(n).toLocaleString("en-IN") : n.toFixed(1)}`;
 const fmtN = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 
 const G_META: Record<Granularity, { label: string; caption: string }> = {
-  daily: { label: "Daily", caption: "cost/unit as of each day (month-to-date)" },
-  weekly: { label: "Weekly", caption: "each week's own cost (Mon–Sun)" },
-  monthly: { label: "Monthly", caption: "each month's cost (current = MTD)" },
+  daily: { label: "Daily", caption: "output each day (last 16 days)" },
+  weekly: { label: "Weekly", caption: "each week's output (Mon–Sun)" },
+  monthly: { label: "Monthly", caption: "each month's output (current = MTD)" },
 };
 
 export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
   const [g, setG] = useState<Granularity>("daily");
   const [cache, setCache] = useState<Partial<Record<Granularity, TrendPoint[]>>>({});
-  const [unit, setUnit] = useState(plant === "cnc" ? "per unit (SFT+CFT)" : "per CFT");
+  // Output unit for this plant (CNC counts combined SFT+CFT; Cutter counts CFT).
+  const outUnit = plant === "cnc" ? "units (SFT+CFT)" : "CFT";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // bump to retry after an error
@@ -60,7 +60,6 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
         const j = (await res.json()) as ApiOk | { ok: false; error: string };
         if (dead) return;
         if (!j.ok) { setError(j.error || "Failed to load the trend."); return; }
-        setUnit(j.unit);
         setCache((p) => ({ ...p, [g]: j.points }));
       })
       .catch((e) => { if (!dead) setError(e instanceof Error ? e.message : String(e)); })
@@ -70,7 +69,9 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
   }, [g, plant, tick]);
 
   const points = cache[g] ?? [];
-  const vals = points.map((p) => p.value).filter((v): v is number => v != null && Number.isFinite(v));
+  // The plotted metric is OUTPUT; a window with no output is a gap (×), not 0.
+  const plotOf = (p: TrendPoint): number | null => (p.out > 0 && Number.isFinite(p.out) ? p.out : null);
+  const vals = points.map(plotOf).filter((v): v is number => v != null);
   const hasData = vals.length > 0;
 
   const seg = (active: boolean): React.CSSProperties => ({
@@ -93,12 +94,13 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
   {
     let cur: string[] = [];
     points.forEach((p, i) => {
-      if (p.value == null || !Number.isFinite(p.value)) { if (cur.length > 1) segments.push(cur.join(" ")); cur = []; return; }
-      cur.push(`${xAt(i).toFixed(1)},${yAt(p.value).toFixed(1)}`);
+      const v = plotOf(p);
+      if (v == null) { if (cur.length > 1) segments.push(cur.join(" ")); cur = []; return; }
+      cur.push(`${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
     });
     if (cur.length > 1) segments.push(cur.join(" "));
   }
-  const lastIdx = (() => { for (let i = points.length - 1; i >= 0; i--) if (points[i].value != null) return i; return -1; })();
+  const lastIdx = (() => { for (let i = points.length - 1; i >= 0; i--) if (plotOf(points[i]) != null) return i; return -1; })();
   const avg = hasData ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   // Thin labels when daily (16 points) so the x-axis stays readable.
   const showLabel = (i: number) => points.length <= 9 || i % 2 === (points.length - 1) % 2 || i === lastIdx;
@@ -107,8 +109,8 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", padding: "14px 16px", marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
         <div>
-          <div style={{ fontSize: 14.5, fontWeight: 800 }}>📈 Cost {plant === "cnc" ? "per unit" : "per CFT"} — trend</div>
-          <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{G_META[g].caption} · same calculation as the card above</div>
+          <div style={{ fontSize: 14.5, fontWeight: 800 }}>📈 Output — trend</div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{G_META[g].caption} · {plant === "cnc" ? "SFT + CFT" : "CFT"}, counted at carving approval</div>
         </div>
         <div style={{ marginLeft: "auto", display: "inline-flex", gap: 4, padding: 4, borderRadius: 11, background: "var(--bg)", border: "1px solid var(--border)" }}>
           {(Object.keys(G_META) as Granularity[]).map((k) => (
@@ -132,15 +134,16 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
         <>
           {/* Summary strip */}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "8px 0 4px", fontSize: 12 }}>
-            <span style={{ fontWeight: 800, color: "var(--gold-dark)" }}>Latest {lastIdx >= 0 && points[lastIdx].value != null ? fmtINR(points[lastIdx].value as number) : "—"} <span style={{ fontWeight: 600, color: "var(--muted)" }}>{unit}</span></span>
-            <span style={{ color: "var(--muted)" }}>Low <strong>{fmtINR(Math.min(...vals))}</strong></span>
-            <span style={{ color: "var(--muted)" }}>High <strong>{fmtINR(Math.max(...vals))}</strong></span>
-            <span style={{ color: "var(--muted)" }}>Average <strong>{fmtINR(avg)}</strong></span>
+            <span style={{ fontWeight: 800, color: "var(--gold-dark)" }}>Latest {lastIdx >= 0 && points[lastIdx].out > 0 ? fmtN(points[lastIdx].out) : "—"} <span style={{ fontWeight: 600, color: "var(--muted)" }}>{outUnit}</span></span>
+            <span style={{ color: "var(--muted)" }}>Low <strong>{fmtN(Math.min(...vals))}</strong></span>
+            <span style={{ color: "var(--muted)" }}>High <strong>{fmtN(Math.max(...vals))}</strong></span>
+            <span style={{ color: "var(--muted)" }}>Average <strong>{fmtN(avg)}</strong></span>
+            <span style={{ color: "var(--muted)" }}>Total <strong>{fmtN(vals.reduce((a, b) => a + b, 0))}</strong></span>
           </div>
 
           <div style={{ overflowX: "auto" }}>
             <div ref={wrapRef} style={{ position: "relative", minWidth: 560 }}>
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }} role="img" aria-label="Cost per unit trend">
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }} role="img" aria-label="Output trend">
               {/* gridlines + y labels */}
               {[0, 1, 2, 3, 4].map((k) => {
                 const v = y0 + ((y1 - y0) * k) / 4;
@@ -148,7 +151,7 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
                 return (
                   <g key={k}>
                     <line x1={ML} x2={W - MR} y1={yy} y2={yy} stroke="var(--border)" strokeWidth={k === 0 ? 1.2 : 0.6} opacity={k === 0 ? 1 : 0.7} />
-                    <text x={ML - 8} y={yy + 3.5} textAnchor="end" fontSize="10" fill="var(--muted)" fontFamily="ui-monospace, monospace">{fmtINR(v)}</text>
+                    <text x={ML - 8} y={yy + 3.5} textAnchor="end" fontSize="10" fill="var(--muted)" fontFamily="ui-monospace, monospace">{fmtN(v)}</text>
                   </g>
                 );
               })}
@@ -165,11 +168,11 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
                 const hovered = hover?.i === i;
                 return (
                   <g key={i}>
-                    {p.value != null && Number.isFinite(p.value) ? (
+                    {p.out > 0 && Number.isFinite(p.out) ? (
                       <>
-                        <circle cx={x} cy={yAt(p.value)} r={hovered ? 6 : isLast ? 5 : 3.2} fill={isLast || hovered ? "var(--gold-dark)" : "var(--surface)"} stroke="var(--gold-dark)" strokeWidth={2} pointerEvents="none" />
+                        <circle cx={x} cy={yAt(p.out)} r={hovered ? 6 : isLast ? 5 : 3.2} fill={isLast || hovered ? "var(--gold-dark)" : "var(--surface)"} stroke="var(--gold-dark)" strokeWidth={2} pointerEvents="none" />
                         {isLast && !hovered && (
-                          <text x={Math.min(x, W - MR - 30)} y={yAt(p.value) - 10} textAnchor="middle" fontSize="11" fontWeight="800" fill="var(--gold-dark)" fontFamily="ui-monospace, monospace">{fmtINR(p.value)}</text>
+                          <text x={Math.min(x, W - MR - 30)} y={yAt(p.out) - 10} textAnchor="middle" fontSize="11" fontWeight="800" fill="var(--gold-dark)" fontFamily="ui-monospace, monospace">{fmtN(p.out)}</text>
                         )}
                       </>
                     ) : (
@@ -204,13 +207,13 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
               return (
                 <div style={{ position: "absolute", left, top: hover.py + (flipDown ? 14 : -12), transform: `translate(-50%, ${flipDown ? "0" : "-100%"})`, pointerEvents: "none", zIndex: 5, background: "rgba(15,23,42,0.94)", color: "#fff", borderRadius: 10, padding: "9px 12px", boxShadow: "0 10px 28px rgba(0,0,0,0.3)", minWidth: 168, maxWidth: 240 }}>
                   <div style={{ fontSize: 11.5, fontWeight: 800, marginBottom: 3 }}>{p.label}</div>
-                  {p.value != null && Number.isFinite(p.value) ? (
-                    <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#fbbf24" }}>{fmtINR(p.value)} <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>{unit}</span></div>
+                  {p.out > 0 && Number.isFinite(p.out) ? (
+                    <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#fbbf24" }}>{fmtN(p.out)} <span style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>{outUnit}</span></div>
                   ) : (
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: "rgba(255,255,255,0.8)" }}>No output this window</div>
                   )}
                   <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", marginTop: 4, lineHeight: 1.5 }}>
-                    Cost ₹{fmtN(p.cost)}<br />Output {fmtN(p.out)} · {p.slabs} slab{p.slabs === 1 ? "" : "s"} · {p.days} day{p.days === 1 ? "" : "s"}<br />
+                    {p.slabs} slab{p.slabs === 1 ? "" : "s"} · {p.days} day{p.days === 1 ? "" : "s"} · cost ₹{fmtN(p.cost)}<br />
                     <span style={{ color: "rgba(255,255,255,0.55)" }}>{p.sub}</span>
                   </div>
                 </div>
@@ -220,11 +223,11 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
           </div>
           <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
             {g === "daily"
-              ? "Each point = the COST PER UNIT card recalculated as of that day (expenses prorated to days elapsed ÷ output so far). Crossing the 1st shows last month's curve."
+              ? "Each point = that day's own carved output, counted at approval."
               : g === "weekly"
-              ? "Each point = that week's own prorated cost ÷ that week's output."
-              : "Each point = that month's cost ÷ that month's output (current month runs to today)."}
-            {" "}Hover a dot for cost, output and days. × = no output that window.
+              ? "Each point = that week's carved output (Mon–Sun)."
+              : "Each point = that month's carved output (current month runs to today)."}
+            {" "}Hover a dot for output, slabs, days and cost. × = no output in that window.
           </div>
         </>
       )}

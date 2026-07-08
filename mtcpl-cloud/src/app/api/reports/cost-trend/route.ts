@@ -1,21 +1,20 @@
 /**
  * GET /api/reports/cost-trend?plant=cnc|cutter&granularity=daily|weekly|monthly
  *
- * Cost-per-unit TREND series for the Various Costing pages (Daksh, Jul 2026).
+ * OUTPUT + cost TREND series for the Various Costing pages (Daksh, Jul 2026).
  * Every point is computed by the SAME report engine as the page headline, so
- * the graph always matches the "COST PER UNIT" card:
+ * the graph always matches the Output / Cost cards. The graph plots the
+ * period's carved OUTPUT; each point also carries its cost (for the tooltip):
  *
- *   • daily   — last 16 days; each point = the headline metric AS OF that day
- *               (window = 1st of that day's month → that day, i.e. the
- *               month-to-date elapsed-days calculation evaluated on each day;
- *               crossing into last month shows its running curve too).
- *   • weekly  — last 8 weeks; each point = that week's own cost (Mon–Sun
+ *   • daily   — last 16 days; each point = that DAY's own output (single-day
+ *               window, counted at carving approval).
+ *   • weekly  — last 8 weeks; each point = that week's output (Mon–Sun
  *               window, current week clipped to today).
- *   • monthly — last 6 months; each point = that full month's cost (current
+ *   • monthly — last 6 months; each point = that full month's output (current
  *               month clamps to today inside the engine).
  *
- * CNC value = total cost ÷ (SFT + CFT) — the combined "/unit" headline.
- * Cutter value = cost per CFT. No output in a window → value: null (gap).
+ * CNC out = SFT + CFT (combined carved output). Cutter out = CFT.
+ * value (cost/unit) is still returned for reference; no output → value: null.
  *
  * Points are built with parallel engine calls (≤16) — heavier than a plain
  * query but guarantees the numbers can never drift from the page.
@@ -49,15 +48,16 @@ function windows(granularity: "daily" | "weekly" | "monthly"): Win[] {
   const out: Win[] = [];
 
   if (granularity === "daily") {
+    // Each point = that single day's own output (not month-to-date).
     for (let i = 15; i >= 0; i--) {
       const ms = todayMs - i * dayMs;
       const d = new Date(ms);
-      const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+      const k = keyOf(ms);
       out.push({
-        startDate: keyOf(start),
-        endDate: keyOf(ms),
+        startDate: k,
+        endDate: k,
         label: `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`,
-        sub: `1–${d.getUTCDate()} ${MON[d.getUTCMonth()]} (month-to-date as of this day)`,
+        sub: `${d.getUTCDate()} ${MON[d.getUTCMonth()]} — this day's output`,
       });
     }
     return out;
