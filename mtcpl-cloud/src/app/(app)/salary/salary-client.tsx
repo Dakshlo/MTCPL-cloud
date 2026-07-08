@@ -8,7 +8,7 @@
  * house pattern; the MTCPL spinner shows while a form is in flight.
  */
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
@@ -86,6 +86,10 @@ export function SalaryClient({ me, employees, organizations, designations, month
   const [tab, setTab] = useState<"employees" | "month" | "pf">(initialTab);
   const [editEmp, setEditEmp] = useState<SalaryEmployee | "new" | null>(null);
   const [editRow, setEditRow] = useState<SalaryPaymentRow | null>(null);
+  // Month changes are a server round-trip — wrap in a transition so the overlay
+  // shows IMMEDIATELY (was silent + felt frozen).
+  const [navPending, startNav] = useTransition();
+  const pickMonth = (ym: string) => startNav(() => router.push(`/salary?month=${ym}&tab=month`));
 
   const active = employees.filter((e) => e.isActive);
 
@@ -117,11 +121,12 @@ export function SalaryClient({ me, employees, organizations, designations, month
       </div>
 
       {tab === "employees" && <EmployeesTab employees={employees} isBoss={me.isBoss} monthYm={monthYm} onEdit={setEditEmp} />}
-      {tab === "month" && <MonthTab monthYm={monthYm} rows={monthRows} isBoss={me.isBoss} onPickMonth={(ym) => router.push(`/salary?month=${ym}&tab=month`)} onEditRow={setEditRow} activeCount={active.length} />}
+      {tab === "month" && <MonthTab monthYm={monthYm} rows={monthRows} isBoss={me.isBoss} onPickMonth={pickMonth} monthBusy={navPending} onEditRow={setEditRow} activeCount={active.length} />}
       {tab === "pf" && <PfTab employees={employees} pfRows={pfRows} />}
 
       {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} organizations={organizations} designations={designations} monthYm={monthYm} onClose={() => setEditEmp(null)} />}
       {editRow && <RowModal row={editRow} monthYm={monthYm} onClose={() => setEditRow(null)} />}
+      <FinanceLoadingOverlay show={navPending} label="Loading month…" />
     </div>
   );
 }
@@ -137,6 +142,23 @@ function ReturnCtx({ monthYm, tab }: { monthYm: string; tab: "employees" | "mont
       <input type="hidden" name="return_tab" value={tab} />
     </>
   );
+}
+
+/** Two-level Organization → Designation grouping shared by the Employees and
+ *  PF-record tabs. Blank org / designation sort last under NO_ORG / NO_DESIG. */
+function groupByOrgDesig<T>(items: T[], getOrg: (t: T) => string | null, getDesig: (t: T) => string | null) {
+  const byOrg = new Map<string, T[]>();
+  for (const it of items) { const k = (getOrg(it) ?? "").trim() || NO_ORG; const a = byOrg.get(k) ?? []; a.push(it); byOrg.set(k, a); }
+  const orgGroups = [...byOrg.entries()]
+    .sort((a, b) => (a[0] === NO_ORG ? 1 : 0) - (b[0] === NO_ORG ? 1 : 0) || a[0].localeCompare(b[0]))
+    .map(([org, list]) => {
+      const byDesig = new Map<string, T[]>();
+      for (const it of list) { const k = (getDesig(it) ?? "").trim() || NO_DESIG; const a = byDesig.get(k) ?? []; a.push(it); byDesig.set(k, a); }
+      const desigGroups = [...byDesig.entries()].sort((a, b) => (a[0] === NO_DESIG ? 1 : 0) - (b[0] === NO_DESIG ? 1 : 0) || a[0].localeCompare(b[0]));
+      return { org, count: list.length, desigGroups };
+    });
+  const showOrg = orgGroups.length > 1 || (orgGroups.length === 1 && orgGroups[0].org !== NO_ORG);
+  return { orgGroups, showOrg };
 }
 
 function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: SalaryEmployee[]; isBoss: boolean; monthYm: string; onEdit: (e: SalaryEmployee | "new") => void }) {
@@ -156,20 +178,7 @@ function EmployeesTab({ employees, isBoss, monthYm, onEdit }: { employees: Salar
     ? employees.filter((e) => [e.name, e.phone, e.accountNumber, e.designation, e.organization].some((v) => (v ?? "").toLowerCase().includes(needle)))
     : employees;
   // Two-level grouping: Organization / site → Designation → employees.
-  const orgGroups = (() => {
-    const byOrg = new Map<string, SalaryEmployee[]>();
-    for (const e of filtered) { const k = (e.organization ?? "").trim() || NO_ORG; const a = byOrg.get(k) ?? []; a.push(e); byOrg.set(k, a); }
-    return [...byOrg.entries()]
-      .sort((a, b) => (a[0] === NO_ORG ? 1 : 0) - (b[0] === NO_ORG ? 1 : 0) || a[0].localeCompare(b[0]))
-      .map(([org, emps]) => {
-        const byDesig = new Map<string, SalaryEmployee[]>();
-        for (const e of emps) { const k = (e.designation ?? "").trim() || NO_DESIG; const a = byDesig.get(k) ?? []; a.push(e); byDesig.set(k, a); }
-        const desigGroups = [...byDesig.entries()].sort((a, b) => (a[0] === NO_DESIG ? 1 : 0) - (b[0] === NO_DESIG ? 1 : 0) || a[0].localeCompare(b[0]));
-        return { org, count: emps.length, desigGroups };
-      });
-  })();
-  // Only surface the org level once at least one employee has an org set.
-  const showOrg = orgGroups.length > 1 || (orgGroups.length === 1 && orgGroups[0].org !== NO_ORG);
+  const { orgGroups, showOrg } = groupByOrgDesig(filtered, (e) => e.organization, (e) => e.designation);
 
   return (
     <div>
@@ -364,12 +373,13 @@ function PfExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPayme
   );
 }
 
-function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }: {
+function MonthTab({ monthYm, rows, isBoss, onPickMonth, monthBusy, onEditRow, activeCount }: {
   monthYm: string; rows: SalaryPaymentRow[]; isBoss: boolean;
-  onPickMonth: (ym: string) => void; onEditRow: (r: SalaryPaymentRow) => void; activeCount: number;
+  onPickMonth: (ym: string) => void; monthBusy: boolean; onEditRow: (r: SalaryPaymentRow) => void; activeCount: number;
 }) {
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const draft = rows.filter((r) => r.status === "draft");
   const paid = rows.filter((r) => r.status === "paid");
   const tot = rows.reduce((a, r) => ({ gross: a.gross + r.gross, pf: a.pf + r.pfAmount, net: a.net + r.net }), { gross: 0, pf: 0, net: 0 });
@@ -377,6 +387,11 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
   const draftNet = draft.reduce((a, r) => a + r.net, 0);
   const paidNet = paid.reduce((a, r) => a + r.net, 0);
   const missingBank = draft.filter((r) => !r.hasBank);
+  // Search filters only the visible TABLE — the KPI cards + HDFC sheet stay over
+  // the whole month (they're the payment source of truth).
+  const needle = q.trim().toLowerCase();
+  const shownRows = needle ? rows.filter((r) => [r.employeeName, r.designation, r.organization].some((v) => (v ?? "").toLowerCase().includes(needle))) : rows;
+  const shownTot = shownRows.reduce((a, r) => ({ gross: a.gross + r.gross, pf: a.pf + r.pfAmount, net: a.net + r.net }), { gross: 0, pf: 0, net: 0 });
 
   const th: React.CSSProperties = { padding: "8px 10px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "right", whiteSpace: "nowrap", borderBottom: "2px solid var(--border)", background: "var(--bg)" };
   const thL: React.CSSProperties = { ...th, textAlign: "left" };
@@ -388,11 +403,11 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
       {/* Controls */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={lbl}>Salary month</span>
-          <div style={{ display: "inline-flex", alignItems: "stretch", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)" }}>
-            <button type="button" onClick={() => onPickMonth(shiftMonth(monthYm, -1))} title="Previous month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer" }}>‹</button>
-            <input type="month" value={monthYm} onChange={(e) => e.target.value && onPickMonth(e.target.value)} style={{ ...inp, width: 150, fontWeight: 700, border: "none", borderRadius: 0, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }} />
-            <button type="button" onClick={() => onPickMonth(shiftMonth(monthYm, 1))} title="Next month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: "pointer" }}>›</button>
+          <span style={lbl}>Salary month{monthBusy ? " · loading…" : ""}</span>
+          <div style={{ display: "inline-flex", alignItems: "stretch", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)", opacity: monthBusy ? 0.6 : 1 }}>
+            <button type="button" disabled={monthBusy} onClick={() => onPickMonth(shiftMonth(monthYm, -1))} title="Previous month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: monthBusy ? "wait" : "pointer" }}>‹</button>
+            <input type="month" value={monthYm} disabled={monthBusy} onChange={(e) => e.target.value && onPickMonth(e.target.value)} style={{ ...inp, width: 150, fontWeight: 700, border: "none", borderRadius: 0, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }} />
+            <button type="button" disabled={monthBusy} onClick={() => onPickMonth(shiftMonth(monthYm, 1))} title="Next month" style={{ padding: "0 13px", fontSize: 18, fontWeight: 800, color: "var(--gold-dark)", background: "transparent", border: "none", cursor: monthBusy ? "wait" : "pointer" }}>›</button>
           </div>
         </label>
         <form action={prepareSalaryMonthAction}>
@@ -449,10 +464,19 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
         />
       </KpiRow>
 
+      {rows.length > 0 && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, designation, site…" style={{ ...inp, flex: "1 1 240px", maxWidth: 380 }} />
+          {q && <span style={{ fontSize: 12, color: "var(--muted)" }}>{shownRows.length} of {rows.length}</span>}
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 20px", textAlign: "center", color: "var(--muted)" }}>
           No rows for {monthLabel(monthYm)} yet — hit <strong>⚙ Prepare month</strong> to draft one row per active employee.
         </div>
+      ) : shownRows.length === 0 ? (
+        <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)" }}>No row matches &ldquo;{q}&rdquo;.</div>
       ) : (
         <div style={SALARY_TABLE.wrap}>
           <div style={SALARY_TABLE.scroll}>
@@ -461,7 +485,7 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
                 <th style={thL}>Employee</th><th style={th}>Gross</th><th style={th}>PF −</th><th style={th}>Deduction −</th><th style={th}>Addition +</th><th style={th}>Net pay</th><th style={thL}>Status</th><th style={{ ...th }}>Actions</th>
               </tr></thead>
               <tbody>
-                {rows.map((r) => (
+                {shownRows.map((r) => (
                   <tr key={r.id} style={{ background: r.status === "paid" ? "rgba(22,101,52,0.05)" : undefined }}>
                     <td style={tdL}>
                       <span style={{ fontWeight: 800 }}>{!r.hasBank && r.status === "draft" ? "⚠ " : ""}{r.employeeName}</span>
@@ -509,11 +533,11 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
               </tbody>
               <tfoot>
                 <tr style={{ background: "var(--bg)", fontWeight: 800 }}>
-                  <td style={tdL}>TOTAL — {rows.length} employee{rows.length !== 1 ? "s" : ""}</td>
-                  <td style={{ ...td, fontWeight: 800 }}>{inr(tot.gross)}</td>
-                  <td style={{ ...td, fontWeight: 800 }}>{inr(tot.pf)}</td>
+                  <td style={tdL}>TOTAL — {shownRows.length}{needle ? ` of ${rows.length}` : ""} employee{shownRows.length !== 1 ? "s" : ""}</td>
+                  <td style={{ ...td, fontWeight: 800 }}>{inr(shownTot.gross)}</td>
+                  <td style={{ ...td, fontWeight: 800 }}>{inr(shownTot.pf)}</td>
                   <td style={td}></td><td style={td}></td>
-                  <td style={{ ...td, fontWeight: 800 }}>{inr(tot.net)}</td>
+                  <td style={{ ...td, fontWeight: 800 }}>{inr(shownTot.net)}</td>
                   <td style={tdL} colSpan={2}></td>
                 </tr>
               </tfoot>
@@ -529,6 +553,7 @@ function MonthTab({ monthYm, rows, isBoss, onPickMonth, onEditRow, activeCount }
 
 function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfRow[] }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const byEmp = useMemo(() => {
     const m = new Map<string, PfRow[]>();
     for (const r of pfRows) { const a = m.get(r.employeeId) ?? []; a.push(r); m.set(r.employeeId, a); }
@@ -536,6 +561,50 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
   }, [pfRows]);
   const withPf = employees.filter((e) => e.pfEnabled || byEmp.has(e.id));
   const grandTotal = pfRows.reduce((a, r) => a + r.pfAmount, 0);
+
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? withPf.filter((e) => [e.name, e.designation, e.organization, e.uan, e.accountNumber].some((v) => (v ?? "").toLowerCase().includes(needle)))
+    : withPf;
+  // Same Organization → Designation grouping as the Employees tab.
+  const { orgGroups, showOrg } = groupByOrgDesig(filtered, (e) => e.organization, (e) => e.designation);
+
+  // One employee's collapsible PF card. Called inline (not <Card/>) so it never
+  // remounts — grouping just wraps these.
+  const card = (e: SalaryEmployee) => {
+    const rows = (byEmp.get(e.id) ?? []).slice().sort((a, b) => b.month.localeCompare(a.month));
+    const total = rows.reduce((a, r) => a + r.pfAmount, 0);
+    const isOpen = open === e.id;
+    const dc = designationColor(e.designation);
+    return (
+      <div key={e.id} style={{ border: "1px solid var(--border)", borderLeft: `3px solid ${dc.fg}`, borderRadius: 12, overflow: "hidden", background: "var(--surface)", boxShadow: "var(--shadow)" }}>
+        <button type="button" onClick={() => setOpen(isOpen ? null : e.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--bg)", border: "none", cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
+          <span style={{ fontSize: 12, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", color: dc.fg }}>▶</span>
+          <span style={{ fontSize: 14, fontWeight: 800 }}>{e.name}</span>
+          <DesigChip name={e.designation} size="sm" />
+          {e.uan && <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>UAN {e.uan}</span>}
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>{e.pfEnabled ? `PF ${e.pfPercent}%` : "PF off now"} · {rows.length} month{rows.length !== 1 ? "s" : ""}</span>
+          <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>{inr(total)}</span>
+        </button>
+        {isOpen && (
+          <div style={{ padding: "8px 14px 14px" }}>
+            {rows.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Nothing deducted yet — appears once a month with PF is marked paid.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 7 }}>
+                {rows.map((r) => (
+                  <div key={r.month} style={{ border: "1px solid var(--border)", borderRadius: 9, padding: "7px 11px", background: "var(--bg)" }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase" }}>{monthShort(r.month)}</div>
+                    <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{inr(r.pfAmount)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -546,43 +615,38 @@ function PfTab({ employees, pfRows }: { employees: SalaryEmployee[]; pfRows: PfR
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>
         The record below is the <strong>employee share deducted</strong> from paid salaries. The employer contributes an equal share on top when depositing to EPFO.
       </div>
+      {withPf.length > 0 && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, designation, site, UAN…" style={{ ...inp, flex: "1 1 240px", maxWidth: 380 }} />
+          {q && <span style={{ fontSize: 12, color: "var(--muted)" }}>{filtered.length} of {withPf.length}</span>}
+        </div>
+      )}
       {withPf.length === 0 ? (
         <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "34px 20px", textAlign: "center", color: "var(--muted)" }}>
           No PF yet — enable PF on an employee (Employees tab → ✎ Edit) and pay a month; the record builds itself.
         </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ border: "1px dashed var(--border)", borderRadius: 12, padding: "26px 20px", textAlign: "center", color: "var(--muted)" }}>No employee matches &ldquo;{q}&rdquo;.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-          {withPf.map((e) => {
-            const rows = (byEmp.get(e.id) ?? []).slice().sort((a, b) => b.month.localeCompare(a.month));
-            const total = rows.reduce((a, r) => a + r.pfAmount, 0);
-            const isOpen = open === e.id;
-            const dc = designationColor(e.designation);
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {orgGroups.map((og) => {
+            const oc = designationColor(og.org);
             return (
-              <div key={e.id} style={{ border: "1px solid var(--border)", borderLeft: `3px solid ${dc.fg}`, borderRadius: 12, overflow: "hidden", background: "var(--surface)", boxShadow: "var(--shadow)" }}>
-                <button type="button" onClick={() => setOpen(isOpen ? null : e.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--bg)", border: "none", cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
-                  <span style={{ fontSize: 12, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", color: dc.fg }}>▶</span>
-                  <span style={{ fontSize: 14, fontWeight: 800 }}>{e.name}</span>
-                  <DesigChip name={e.designation} size="sm" />
-                  {e.uan && <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>UAN {e.uan}</span>}
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>{e.pfEnabled ? `PF ${e.pfPercent}%` : "PF off now"} · {rows.length} month{rows.length !== 1 ? "s" : ""}</span>
-                  <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>{inr(total)}</span>
-                </button>
-                {isOpen && (
-                  <div style={{ padding: "8px 14px 14px" }}>
-                    {rows.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>Nothing deducted yet — appears once a month with PF is marked paid.</div>
-                    ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 7 }}>
-                        {rows.map((r) => (
-                          <div key={r.month} style={{ border: "1px solid var(--border)", borderRadius: 9, padding: "7px 11px", background: "var(--bg)" }}>
-                            <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase" }}>{monthShort(r.month)}</div>
-                            <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{inr(r.pfAmount)}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+              <div key={og.org} style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                {showOrg && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: oc.bg, color: oc.fg, borderLeft: `4px solid ${oc.fg}`, fontSize: 12, fontWeight: 900, letterSpacing: "0.03em" }}>
+                    🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count} employee{og.count === 1 ? "" : "s"}</span>
                   </div>
                 )}
+                {og.desigGroups.map(([desig, emps]) => {
+                  const dc = designationColor(desig);
+                  return (
+                    <div key={desig} style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: showOrg ? 12 : 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg }}>{desig} <span style={{ opacity: 0.7 }}>· {emps.length}</span></div>
+                      {emps.map(card)}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}

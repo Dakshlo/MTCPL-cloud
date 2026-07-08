@@ -158,7 +158,7 @@ export default async function SalaryPage({ searchParams }: { searchParams: Searc
         monthYm={monthYm}
         monthRows={monthRows}
         pfRows={pfRows}
-        initialTab={sp.tab === "month" || sp.tab === "pf" ? sp.tab : employees.length === 0 ? "employees" : "month"}
+        initialTab={sp.tab === "employees" || sp.tab === "month" || sp.tab === "pf" ? sp.tab : employees.length === 0 ? "employees" : "month"}
       />
     </section>
   );
