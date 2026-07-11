@@ -24,7 +24,7 @@ import { revalidatePath } from "next/cache";
 import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseSalary, computePf, earnedSalary, salaryTypeForDesignation } from "@/lib/salary-permissions";
+import { canUseSalary, computePf, computeEsi, earnedSalary } from "@/lib/salary-permissions";
 import { logAudit } from "@/lib/audit";
 
 function txt(fd: FormData, key: string): string {
@@ -59,6 +59,16 @@ async function guard() {
   return { profile, admin: createAdminSupabaseClient() };
 }
 
+/** True when the row's batch is already inside an HDFC file (locked). Editing
+ *  or removing such a row would make the records drift from the bank file the
+ *  team is about to upload — blocked until the owner re-allows the sheet. */
+async function rowBatchLocked(admin: ReturnType<typeof createAdminSupabaseClient>, batchId: string | null): Promise<boolean> {
+  if (!batchId) return false;
+  const { data } = await admin.from("salary_batches").select("hdfc_generated_at, status").eq("id", batchId).maybeSingle();
+  const b = (data ?? null) as { hdfc_generated_at: string | null; status: string } | null;
+  return !!b && b.status === "draft" && !!b.hdfc_generated_at;
+}
+
 // ── Employee master ─────────────────────────────────────────────────
 
 export async function upsertSalaryEmployeeAction(formData: FormData): Promise<void> {
@@ -77,10 +87,10 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   const pfPctRaw = txt(formData, "pf_percent");
   const pfPercent = pfPctRaw === "" ? 12 : num(formData, "pf_percent");
 
-  // Salary type follows the designation — "Worker" ⇒ paid by attendance,
-  // anything else ⇒ fixed. No hand-set toggle any more.
+  // Salary type is an EXPLICIT per-employee toggle (fixed / by attendance) —
+  // any designation can be either (Daksh, Jul 2026).
   const designation = txt(formData, "designation") || null;
-  const salaryType = salaryTypeForDesignation(designation);
+  const salaryType = txt(formData, "salary_type") === "variable" ? "variable" : "fixed";
   const row: Record<string, unknown> = {
     name,
     organization: txt(formData, "organization") || null,
@@ -100,9 +110,16 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   };
   // UAN / PF% inputs are disabled (thus NOT submitted) while "PF applicable"
   // is unchecked — only overwrite them when actually present, so unticking PF
-  // never wipes a stored UAN (review finding).
+  // never wipes a stored UAN (review finding). Same presence-guard for ESI.
   if (formData.has("uan")) row.uan = txt(formData, "uan") || null;
   if (formData.has("pf_percent")) row.pf_percent = pfPercent;
+  // ESI (mig 193): enabled flag + ESI number + employee-share % (default 1).
+  row.esi_enabled = txt(formData, "esi_enabled") === "1";
+  if (formData.has("esi_number")) row.esi_number = txt(formData, "esi_number") || null;
+  if (formData.has("esi_percent")) {
+    const esiPctRaw = txt(formData, "esi_percent");
+    row.esi_percent = esiPctRaw === "" ? 1 : num(formData, "esi_percent");
+  }
 
   if (id) {
     const { error } = await admin.from("salary_employees").update({ ...row, updated_at: new Date().toISOString() } as never).eq("id", id);
@@ -148,42 +165,98 @@ export async function deleteSalaryEmployeeAction(formData: FormData): Promise<vo
 
 // ── Monthly run ─────────────────────────────────────────────────────
 
-/** Create one DRAFT row per active employee for the month (skips employees who
- *  already have a row — re-running never duplicates or overwrites edits). */
-export async function prepareSalaryMonthAction(formData: FormData): Promise<void> {
+/** Prepare a salary BATCH for the month (mig 193): pick a scope — everyone /
+ *  one organization / one designation / hand-picked employees — and one DRAFT
+ *  row per matching active employee is created inside a new batch. Employees
+ *  who already have a row this month (in any batch, or paid) are SKIPPED, so
+ *  re-preparing can never duplicate a payment. */
+export async function prepareSalaryBatchAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
   const go = (t: string): never => goBack(formData, "month", t);
   const month = monthKey(txt(formData, "month"));
   if (!month) go("Pick a month first");
 
+  const kind = txt(formData, "scope_kind");
+  if (!["all", "organization", "designation", "employees"].includes(kind)) go("Pick who to prepare");
+  let values: string[] = [];
+  try {
+    const parsed = JSON.parse(txt(formData, "scope_values") || "[]");
+    values = Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
+  } catch { values = []; }
+  if (kind !== "all" && values.length === 0) go("Pick at least one option");
+
   const { data: emps, error: e1 } = await admin
     .from("salary_employees")
-    .select("id, monthly_salary, pf_enabled, pf_percent, designation")
+    .select("*")
     .eq("is_active", true);
   if (e1) go(`Could not load employees: ${e1.message}`);
-  const employees = (emps ?? []) as Array<{ id: string; monthly_salary: number; pf_enabled: boolean; pf_percent: number; designation: string | null }>;
+  const employees = ((emps ?? []) as Array<Record<string, unknown>>).map((e) => ({
+    id: String(e.id),
+    name: String(e.name ?? ""),
+    organization: ((e.organization as string | null) ?? "").trim(),
+    designation: ((e.designation as string | null) ?? "").trim(),
+    monthlySalary: Number(e.monthly_salary) || 0,
+    salaryType: (e.salary_type as string) === "variable" ? ("variable" as const) : ("fixed" as const),
+    pfEnabled: !!e.pf_enabled,
+    pfPercent: Number.isFinite(Number(e.pf_percent)) ? Number(e.pf_percent) : 12,
+    esiEnabled: !!e.esi_enabled,
+    esiPercent: Number.isFinite(Number(e.esi_percent)) ? Number(e.esi_percent) : 1,
+  }));
   if (employees.length === 0) go("No active employees yet — add them first");
 
+  // Scope filter. "" in values matches employees with a blank org/designation.
+  const want = new Set(values.map((v) => v.trim()));
+  const scoped = employees.filter((e) => {
+    if (kind === "all") return true;
+    if (kind === "organization") return want.has(e.organization);
+    if (kind === "designation") return want.has(e.designation);
+    return want.has(e.id);
+  });
+  if (scoped.length === 0) go("No active employee matches that selection");
+
+  // Skip anyone already in this month (any batch / already paid) — the
+  // unique(employee, month) constraint is the hard backstop.
   const { data: existing } = await admin.from("salary_payments").select("employee_id").eq("month", month!);
   const have = new Set(((existing ?? []) as Array<{ employee_id: string }>).map((r) => r.employee_id));
+  const fresh = scoped.filter((e) => !have.has(e.id));
+  if (fresh.length === 0) go("Everyone in that selection is already in a batch (or paid) for this month");
 
-  const rows = employees.filter((e) => !have.has(e.id)).map((e) => {
-    // Salary type follows the designation. Fixed prefills the full monthly
-    // salary; a Worker starts at 0 (attendance is null until the accountant
-    // records days present) — earnedSalary() encodes both.
-    const salaryType = salaryTypeForDesignation(e.designation);
-    const gross = earnedSalary({ monthlySalary: Number(e.monthly_salary) || 0, salaryType, attendanceDays: null, monthKey: month! });
-    // PF = pct% of min(gross, ₹15,000 ceiling). Explicit 0% honoured.
-    const pf = computePf(gross, Number(e.pf_percent), e.pf_enabled);
-    return { employee_id: e.id, month: month!, gross, pf_amount: pf, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0, net: Math.round((gross - pf) * 100) / 100, status: "draft", created_by: profile.id };
+  // Create the batch first, then its rows.
+  const label =
+    txt(formData, "label") ||
+    (kind === "all" ? "All employees"
+      : kind === "employees" ? `Picked · ${fresh.length} employee${fresh.length === 1 ? "" : "s"}`
+      : values.map((v) => v.trim() || "(none)").join(", "));
+  const { data: batchRow, error: bErr } = await admin
+    .from("salary_batches")
+    .insert({ month: month!, label, scope: { kind, values }, created_by: profile.id } as never)
+    .select("id")
+    .maybeSingle();
+  if (bErr || !batchRow) go(`Could not create the batch: ${bErr?.message ?? "run migration 193 first"}`);
+  const batchId = (batchRow as { id: string }).id;
+
+  const rows = fresh.map((e) => {
+    // Fixed prefills the full monthly salary; a by-attendance employee starts
+    // at 0 (attendance is null until recorded) — earnedSalary() encodes both.
+    const gross = earnedSalary({ monthlySalary: e.monthlySalary, salaryType: e.salaryType, attendanceDays: null, monthKey: month! });
+    const pf = computePf(gross, e.pfPercent, e.pfEnabled);
+    const esi = computeEsi(gross, e.esiPercent, e.esiEnabled);
+    return {
+      employee_id: e.id, month: month!, batch_id: batchId,
+      gross, pf_amount: pf, esi_amount: esi, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0,
+      net: Math.round((gross - pf - esi) * 100) / 100, status: "draft", created_by: profile.id,
+    };
   });
-  if (rows.length === 0) go("Every active employee already has a row for this month");
-
   const { error } = await admin.from("salary_payments").insert(rows as never);
-  if (error) go(`Could not prepare: ${error.message}`);
-  void logAudit(profile.id, "salary_month_prepared", "salary_month", month!, { rows: rows.length });
+  if (error) {
+    // Clean up the empty batch so a failed prepare leaves nothing behind.
+    await admin.from("salary_batches").delete().eq("id", batchId).then(() => undefined, () => undefined);
+    go(`Could not prepare: ${error.message}`);
+  }
+  const skipped = scoped.length - fresh.length;
+  void logAudit(profile.id, "salary_batch_prepared", "salary_batch", batchId, { month: month!, kind, values, rows: rows.length, skipped });
   revalidatePath("/salary");
-  go(`Prepared ${rows.length} salary row${rows.length === 1 ? "" : "s"}`);
+  go(`Batch "${label}" — ${rows.length} employee${rows.length === 1 ? "" : "s"} prepared${skipped > 0 ? ` (${skipped} already done)` : ""}`);
 }
 
 /** Edit one DRAFT row's amounts — net recomputed server-side. The UPDATE
@@ -199,13 +272,16 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
   // here (the accountant only enters attendance + OT/advance/deduction/addition —
   // the earned base and PF are DERIVED, never typed).
   const { data: rowData, error: rErr } = await admin
-    .from("salary_payments").select("employee_id, month").eq("id", id).maybeSingle();
+    .from("salary_payments").select("employee_id, month, batch_id").eq("id", id).maybeSingle();
   if (rErr) go(`Could not load the row: ${rErr.message}`);
   if (!rowData) go("Row not found");
-  const r0 = rowData as { employee_id: string; month: string };
+  const r0 = rowData as { employee_id: string; month: string; batch_id: string | null };
+  if (await rowBatchLocked(admin, r0.batch_id)) {
+    go("This batch is already IN an HDFC FILE — amounts are locked so the records match the bank file. Owner can ↺ re-allow the sheet first.");
+  }
   const { data: empData } = await admin
-    .from("salary_employees").select("monthly_salary, designation, pf_enabled, pf_percent").eq("id", r0.employee_id).maybeSingle();
-  const emp = (empData ?? {}) as { monthly_salary?: number; designation?: string | null; pf_enabled?: boolean; pf_percent?: number };
+    .from("salary_employees").select("*").eq("id", r0.employee_id).maybeSingle();
+  const emp = (empData ?? {}) as Record<string, unknown>;
 
   const attendanceRaw = txt(formData, "attendance_days");
   const attendance = attendanceRaw === "" ? null : num(formData, "attendance_days");
@@ -215,17 +291,18 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
   const ded = num(formData, "other_deduction");
   const add = num(formData, "addition");
 
-  // Fixed ⇒ full monthly salary whatever the attendance; Worker ⇒ salary ×
-  // (attendance ÷ days-in-month). PF follows the earned gross.
-  const salaryType = salaryTypeForDesignation(emp.designation ?? null);
+  // Fixed ⇒ full monthly salary whatever the attendance; by-attendance ⇒
+  // salary × (attendance ÷ days-in-month). PF + ESI follow the earned gross.
+  const salaryType = (emp.salary_type as string) === "variable" ? ("variable" as const) : ("fixed" as const);
   const gross = earnedSalary({ monthlySalary: Number(emp.monthly_salary) || 0, salaryType, attendanceDays: attendance, monthKey: r0.month });
   const pf = computePf(gross, Number(emp.pf_percent), !!emp.pf_enabled);
-  // Actual pay = earned − PF + overtime − advance − other deduction + addition.
-  const net = Math.round((gross - pf + ot - advance - ded + add) * 100) / 100;
+  const esi = computeEsi(gross, Number.isFinite(Number(emp.esi_percent)) ? Number(emp.esi_percent) : 1, !!emp.esi_enabled);
+  // Actual pay = earned − PF − ESI + overtime − advance − other deduction + addition.
+  const net = Math.round((gross - pf - esi + ot - advance - ded + add) * 100) / 100;
 
   const { data, error } = await admin.from("salary_payments")
     .update({
-      gross, pf_amount: pf, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
+      gross, pf_amount: pf, esi_amount: esi, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
       attendance_days: attendance,
       ot_hours: otHoursRaw === "" ? null : num(formData, "ot_hours"),
       remarks: txt(formData, "remarks") || null,
@@ -246,6 +323,12 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
   const go = (t: string): never => goBack(formData, "month", t);
   const id = txt(formData, "id");
   if (!id) go("Missing row");
+  // A row inside a generated HDFC file can't be silently removed — the bank
+  // file would no longer match the records.
+  const { data: r0 } = await admin.from("salary_payments").select("batch_id").eq("id", id).maybeSingle();
+  if (r0 && (await rowBatchLocked(admin, (r0 as { batch_id: string | null }).batch_id))) {
+    go("This batch is already IN an HDFC FILE — rows are locked so the records match the bank file. Owner can ↺ re-allow the sheet first.");
+  }
   const { data, error } = await admin.from("salary_payments")
     .delete()
     .eq("id", id).eq("status", "draft")
@@ -257,22 +340,73 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
   go("Row removed for this month");
 }
 
-/** Mark the WHOLE month's draft rows paid (after paying via the bank sheet). */
-export async function markSalaryMonthPaidAction(formData: FormData): Promise<void> {
+/** Mark ONE batch's draft rows paid (after paying via its bank sheet). */
+export async function markSalaryBatchPaidAction(formData: FormData): Promise<void> {
+  const { profile, admin } = await guard();
+  const go = (t: string): never => goBack(formData, "month", t);
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) go("Missing batch");
+  const now = new Date().toISOString();
+  const { data, error } = await admin.from("salary_payments")
+    .update({ status: "paid", paid_at: now, paid_by: profile.id } as never)
+    .eq("batch_id", batchId).eq("status", "draft")
+    .select("id");
+  if (error) go(`Could not mark paid: ${error.message}`);
+  const n = (data ?? []).length;
+  if (n === 0) go("Nothing in draft in this batch");
+  await admin.from("salary_batches")
+    .update({ status: "paid", paid_at: now, paid_by: profile.id } as never)
+    .eq("id", batchId);
+  void logAudit(profile.id, "salary_batch_paid", "salary_batch", batchId, { rows: n });
+  revalidatePath("/salary");
+  go(`Batch marked PAID — ${n} salary row${n === 1 ? "" : "s"}`);
+}
+
+/** Wrap a month's pre-mig-193 UNBATCHED rows into a batch so they use the
+ *  same batch flow (HDFC sheet + lock + mark paid). One-time helper. */
+export async function groupUnbatchedIntoBatchAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
   const go = (t: string): never => goBack(formData, "month", t);
   const month = monthKey(txt(formData, "month"));
   if (!month) go("Pick a month first");
+  const { data: batchRow, error: bErr } = await admin
+    .from("salary_batches")
+    .insert({ month: month!, label: "Earlier rows", scope: { kind: "legacy", values: [] }, created_by: profile.id } as never)
+    .select("id")
+    .maybeSingle();
+  if (bErr || !batchRow) go(`Could not create the batch: ${bErr?.message ?? "run migration 193 first"}`);
+  const batchId = (batchRow as { id: string }).id;
   const { data, error } = await admin.from("salary_payments")
-    .update({ status: "paid", paid_at: new Date().toISOString(), paid_by: profile.id } as never)
-    .eq("month", month!).eq("status", "draft")
+    .update({ batch_id: batchId } as never)
+    .eq("month", month!).eq("status", "draft").is("batch_id", null)
     .select("id");
-  if (error) go(`Could not mark paid: ${error.message}`);
+  if (error) go(`Could not group: ${error.message}`);
   const n = (data ?? []).length;
-  if (n === 0) go("Nothing in draft for this month");
-  void logAudit(profile.id, "salary_month_paid", "salary_month", month!, { rows: n });
+  if (n === 0) {
+    await admin.from("salary_batches").delete().eq("id", batchId).then(() => undefined, () => undefined);
+    go("No unbatched draft rows to group");
+  }
+  void logAudit(profile.id, "salary_rows_batched", "salary_batch", batchId, { month: month!, rows: n });
   revalidatePath("/salary");
-  go(`Marked ${n} salary row${n === 1 ? "" : "s"} PAID`);
+  go(`Grouped ${n} row${n === 1 ? "" : "s"} into a batch`);
+}
+
+/** Owner/developer only — clear a batch's "IN HDFC FILE" lock so the sheet
+ *  can be generated again (e.g. the file was lost before uploading). Mirrors
+ *  Finance's hdfc_csv_unlocked escape hatch. */
+export async function unlockBatchHdfcAction(formData: FormData): Promise<void> {
+  const { profile, admin } = await guard();
+  const go = (t: string): never => goBack(formData, "month", t);
+  if (!["owner", "developer"].includes(profile.role)) go("Only the owner can re-allow the bank sheet");
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) go("Missing batch");
+  const { error } = await admin.from("salary_batches")
+    .update({ hdfc_generated_at: null, hdfc_generated_by: null } as never)
+    .eq("id", batchId).eq("status", "draft");
+  if (error) go(`Could not unlock: ${error.message}`);
+  void logAudit(profile.id, "salary_batch_hdfc_unlocked", "salary_batch", batchId, {});
+  revalidatePath("/salary");
+  go("Bank sheet re-allowed for this batch");
 }
 
 /** Revert ONE paid row to draft — owner/developer only (mistake fix). */
@@ -285,9 +419,18 @@ export async function unmarkSalaryPaymentPaidAction(formData: FormData): Promise
   const { data, error } = await admin.from("salary_payments")
     .update({ status: "draft", paid_at: null, paid_by: null } as never)
     .eq("id", id).eq("status", "paid")
-    .select("id");
+    .select("id, batch_id");
   if (error) go(`Could not revert: ${error.message}`);
   if ((data ?? []).length === 0) go("Row is not in PAID state");
+  // A paid batch with a reverted row is no longer fully paid — move the batch
+  // back to draft so it shows its buttons again.
+  const bId = ((data ?? [])[0] as { batch_id?: string | null }).batch_id;
+  if (bId) {
+    await admin.from("salary_batches")
+      .update({ status: "draft", paid_at: null, paid_by: null } as never)
+      .eq("id", bId)
+      .then(() => undefined, () => undefined);
+  }
   void logAudit(profile.id, "salary_payment_unpaid", "salary_payment", id, {});
   revalidatePath("/salary");
   go("Row moved back to draft");
@@ -445,7 +588,9 @@ export async function importSalaryEmployeesAction(
       ifsc: String(r.ifsc || "").toUpperCase().replace(/\s+/g, "") || null,
       beneficiary_name: beneficiary || null,
       monthly_salary: Number(r.salary) > 0 ? Math.round(Number(r.salary) * 100) / 100 : 0,
-      salary_type: salaryTypeForDesignation(String(r.designation || "")),
+      // Imported employees default to FIXED — flip the per-employee toggle
+      // to "By attendance" afterwards for anyone paid by days present.
+      salary_type: "fixed",
       pf_enabled: !!pfEnabled,
       pf_percent: 12,
       is_active: true,

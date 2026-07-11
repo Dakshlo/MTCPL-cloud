@@ -396,19 +396,19 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "crosscheck"],
     department: "maintenance",
   },
-  // ── SALARY / PF section (mig 189) — employee master + monthly salary
-  //    runs + PF record + the HDFC bulk-payment sheet. Completely separate
-  //    department (own tables); owner / developer / ACCOUNTANT★ only.
+  // ── EMPLOYEES section (mig 189/193) — employee master + monthly salary
+  //    batches + PF / ESI records + the HDFC bulk-payment sheet. Completely
+  //    separate department (own tables); owner / developer / ACCOUNTANT★ only.
   {
     type: "divider",
-    label: "SALARY / PF",
+    label: "EMPLOYEES",
     roles: ["developer", "owner", "accountant_star"],
     department: "salary",
   },
   {
     href: "/salary",
-    label: "Salary & PF",
-    icon: "💵",
+    label: "Employees",
+    icon: "👥",
     roles: ["developer", "owner", "accountant_star"],
     department: "salary",
   },

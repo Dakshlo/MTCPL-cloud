@@ -11,7 +11,6 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { isWorkerDesignation } from "@/lib/salary-permissions";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
@@ -3720,12 +3719,12 @@ async function getSalarySnapshot(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
   const monthKey = istMonthKey(typeof input.month === "string" ? input.month : undefined);
 
-  const { data: emps } = await admin.from("salary_employees").select("is_active, pf_enabled, designation");
-  const e = (emps ?? []) as Array<{ is_active: boolean | null; pf_enabled: boolean | null; designation: string | null }>;
+  const { data: emps } = await admin.from("salary_employees").select("is_active, pf_enabled, salary_type");
+  const e = (emps ?? []) as Array<{ is_active: boolean | null; pf_enabled: boolean | null; salary_type: string | null }>;
   const active = e.filter((x) => x.is_active).length;
   const pfEnabled = e.filter((x) => x.pf_enabled).length;
-  // Salary type follows the designation now ("Worker" ⇒ paid by attendance).
-  const variable = e.filter((x) => isWorkerDesignation(x.designation)).length;
+  // Salary type is the explicit per-employee toggle (variable = by attendance).
+  const variable = e.filter((x) => x.salary_type === "variable").length;
 
   const { data: pays } = await admin.from("salary_payments").select("status, gross, pf_amount, net").eq("month", monthKey);
   const p = (pays ?? []) as Array<{ status: string | null; gross: number | null; pf_amount: number | null; net: number | null }>;

@@ -23,23 +23,22 @@ export function computePf(base: number, pct: number, enabled: boolean): number {
   return Math.round(wage * p) / 100;
 }
 
-// ── Fixed vs by-attendance ("worker") pay ───────────────────────────
-// Salary type is NOT chosen by hand any more — it follows the designation.
-// A "Worker" is paid BY ATTENDANCE (days present ÷ days in the month × salary);
-// every other designation is FIXED (the full monthly salary, whatever the
-// attendance). Daksh, Jul 2026.
-
-/** True when a designation means "paid by attendance" (a worker). Case-
- *  insensitive; the singular or plural word both count. */
-export function isWorkerDesignation(designation: string | null | undefined): boolean {
-  const d = (designation ?? "").trim().toLowerCase();
-  return d === "worker" || d === "workers";
+/** Employee-share ESI for a month: pct% (default 1) of the earned gross —
+ *  SAME base as the salary, no wage ceiling (Daksh: "salary 10000 → 1% of
+ *  10000 is the ESI"). Mig 193. */
+export function computeEsi(base: number, pct: number, enabled: boolean): number {
+  if (!enabled) return 0;
+  const wage = Math.max(0, base);
+  const p = Number.isFinite(pct) ? pct : 1;
+  return Math.round(wage * p) / 100;
 }
 
-/** The salary type a designation implies. */
-export function salaryTypeForDesignation(designation: string | null | undefined): "fixed" | "variable" {
-  return isWorkerDesignation(designation) ? "variable" : "fixed";
-}
+// ── Fixed vs by-attendance pay ──────────────────────────────────────
+// The salary type is an EXPLICIT per-employee toggle (Daksh, Jul 2026 —
+// replaced the short-lived "designation Worker ⇒ by attendance" rule):
+//   fixed    → the full monthly salary, whatever the attendance;
+//   variable → paid BY ATTENDANCE (days present ÷ days in month × salary).
+// Any designation can be either.
 
 /** Calendar days in the month of a "YYYY-MM" / "YYYY-MM-01" key (28–31). */
 export function daysInSalaryMonth(monthKey: string): number {

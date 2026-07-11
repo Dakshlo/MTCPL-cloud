@@ -94,14 +94,14 @@ export const DEPARTMENTS: ReadonlyArray<{
     tooltip: "Company machines — working status, repair tickets & approvals",
   },
   {
-    // Mig 189 — Salary / PF: employee master, monthly salary runs, PF
-    // record + the HDFC bulk-payment sheet (same format Finance uploads).
+    // Mig 189/193 — Employees: employee master, monthly salary BATCHES,
+    // PF + ESI records + the HDFC bulk-payment sheet (Finance's format).
     // Completely separate tables — owner / developer / ACCOUNTANT★.
     id: "salary",
-    label: "Salary / PF",
-    icon: "💵",
+    label: "Employees",
+    icon: "👥",
     landingHref: "/salary",
-    tooltip: "Employee salaries · PF record · HDFC bank payment sheet",
+    tooltip: "Employees · salary batches · PF / ESI records · HDFC bank sheet",
   },
 ] as const;
 
