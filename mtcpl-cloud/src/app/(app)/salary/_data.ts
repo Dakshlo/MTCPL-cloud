@@ -28,7 +28,9 @@ function mapEmployee(e: Record<string, unknown>): SalaryEmployee {
     pfPercent: Number.isFinite(Number(e.pf_percent)) ? Number(e.pf_percent) : 12,
     esiEnabled: !!e.esi_enabled,
     esiNumber: (e.esi_number as string | null) ?? null,
-    esiPercent: Number.isFinite(Number(e.esi_percent)) ? Number(e.esi_percent) : 1,
+    esiPercent: Number.isFinite(Number(e.esi_percent)) ? Number(e.esi_percent) : 0.75,
+    tdsEnabled: !!e.tds_enabled,
+    tdsPercent: Number.isFinite(Number(e.tds_percent)) ? Number(e.tds_percent) : 10,
     joinedOn: (e.joined_on as string | null) ?? null,
     isActive: !!e.is_active,
     notes: (e.notes as string | null) ?? null,
@@ -43,9 +45,9 @@ export async function loadEmployees(admin: Admin): Promise<{ employees: SalaryEm
     .from("salary_employees").select("*").order("is_active", { ascending: false }).order("name");
   if (error) return { employees: [], needsMigration: true, needs193: false };
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  // Probe the mig-193 (esi_enabled) + mig-194 (daily_salary) columns — errors
-  // if EITHER is missing, regardless of row count.
-  const { error: probeErr } = await admin.from("salary_employees").select("esi_enabled, daily_salary").limit(1);
+  // Probe the mig-193 (esi_enabled) + 194 (daily_salary) + 196 (tds_enabled)
+  // columns — errors if ANY is missing, regardless of row count.
+  const { error: probeErr } = await admin.from("salary_employees").select("esi_enabled, daily_salary, tds_enabled").limit(1);
   return { employees: rows.map(mapEmployee), needsMigration: false, needs193: !!probeErr };
 }
 
@@ -74,12 +76,15 @@ export async function loadMonthRows(admin: Admin, monthKey: string, employees: S
       pfEnabled: emp?.pfEnabled ?? false,
       pfPercent: emp?.pfPercent ?? 12,
       esiEnabled: emp?.esiEnabled ?? false,
-      esiPercent: emp?.esiPercent ?? 1,
+      esiPercent: emp?.esiPercent ?? 0.75,
+      tdsEnabled: emp?.tdsEnabled ?? false,
+      tdsPercent: emp?.tdsPercent ?? 10,
       hasBank: !!(emp?.accountNumber && emp?.ifsc && (emp?.beneficiaryName || emp?.name)),
       batchId: (r.batch_id as string | null) ?? null,
       gross: Number(r.gross) || 0,
       pfAmount: Number(r.pf_amount) || 0,
       esiAmount: Number(r.esi_amount) || 0,
+      tdsAmount: Number(r.tds_amount) || 0,
       otAmount: Number(r.ot_amount) || 0,
       otHours: r.ot_hours == null ? null : Number(r.ot_hours),
       advance: Number(r.advance) || 0,

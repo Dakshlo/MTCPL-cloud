@@ -7,7 +7,7 @@ export function MigrationBanner({ needsMigration, needs193 }: { needsMigration: 
     return <div style={style}>⚠ Run migration <span style={mono}>189_salary_pf.sql</span> on Supabase to switch the Employees department on.</div>;
   }
   if (needs193) {
-    return <div style={style}>⚠ Run migrations <span style={mono}>193_salary_esi_batches.sql</span> + <span style={mono}>194_salary_daily_wage.sql</span> on Supabase to enable ESI, payment batches and daily wages.</div>;
+    return <div style={style}>⚠ Run migrations <span style={mono}>193_salary_esi_batches.sql</span>, <span style={mono}>194_salary_daily_wage.sql</span> + <span style={mono}>196_salary_tds.sql</span> on Supabase to enable ESI, batches, daily wages and TDS.</div>;
   }
   return null;
 }

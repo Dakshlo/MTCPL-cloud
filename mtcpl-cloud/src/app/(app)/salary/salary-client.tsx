@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { Combobox } from "@/app/(app)/invoicing/_ui/combobox";
-import { PF_WAGE_CEILING, computePf, computeEsi, earnedSalary, daysInSalaryMonth } from "@/lib/salary-permissions";
+import { PF_WAGE_CEILING, computePf, computeEsi, computeTds, earnedSalary, daysInSalaryMonth } from "@/lib/salary-permissions";
 import { designationColor } from "@/lib/salary-designation-color";
 import { SalaryImportButton } from "./salary-import";
 import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG, NO_ORG } from "./_ui/salary-ui";
@@ -320,6 +320,7 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <button type="button" onClick={() => setPrepareOpen(true)} style={{ ...btnPrimary, background: "var(--gold-dark)" }}>＋ Prepare batch</button>
         <PfExportControl monthYm={monthYm} rows={monthRows} />
+        <RegisterExportControl monthYm={monthYm} rows={monthRows} />
         <span style={{ marginLeft: "auto", flex: "1 1 200px", maxWidth: 340, display: monthRows.length ? "block" : "none" }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, designation, site…" style={{ ...inp, width: "100%" }} />
         </span>
@@ -662,6 +663,63 @@ function PfExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPayme
   );
 }
 
+/** Register of Wages (Form 11) download — of the month's PAID employees, for
+ *  Everyone / chosen organizations / chosen designations. */
+function RegisterExportControl({ monthYm, rows }: { monthYm: string; rows: SalaryPaymentRow[] }) {
+  const paid = useMemo(() => rows.filter((r) => r.status === "paid"), [rows]);
+  const orgs = useMemo(() => [...new Set(paid.map((r) => (r.organization ?? "").trim() || NO_ORG))].sort((a, b) => a.localeCompare(b)), [paid]);
+  const desigs = useMemo(() => [...new Set(paid.map((r) => (r.designation ?? "").trim() || NO_DESIG))].sort((a, b) => a.localeCompare(b)), [paid]);
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"all" | "organization" | "designation">("all");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const disabled = paid.length === 0;
+  const options = mode === "organization" ? orgs : mode === "designation" ? desigs : [];
+  const chosen = [...sel];
+  const canDownload = mode === "all" || chosen.length > 0;
+  const href = mode === "all"
+    ? `/api/salary/wage-register-export?month=${monthYm}`
+    : `/api/salary/wage-register-export?month=${monthYm}&${mode === "organization" ? "organizations" : "designations"}=${encodeURIComponent(chosen.join(","))}`;
+  const toggle = (v: string) => setSel((p) => { const n = new Set(p); n.has(v) ? n.delete(v) : n.add(v); return n; });
+  const setModeReset = (k: "all" | "organization" | "designation") => { setMode(k); setSel(new Set()); };
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)} title={disabled ? "Mark a batch paid first — the register is of paid wages." : "Register of Wages (Form 11) — Excel template of paid employees."} style={{ ...btnGhost, fontWeight: 800, color: disabled ? "var(--muted)" : "var(--gold-dark)", opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "pointer" }}>📋 Register (Form 11) ▾</button>
+      {open && !disabled && (
+        <>
+          <span onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 51, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.2)", padding: 12, width: 280, maxHeight: 380, overflowY: "auto" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)", marginBottom: 8 }}>Register of paid wages — who?</div>
+            <div style={{ display: "flex", gap: 3, padding: 3, borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)", marginBottom: 10 }}>
+              {(["all", "organization", "designation"] as const).map((k) => (
+                <button key={k} type="button" onClick={() => setModeReset(k)} style={{ flex: 1, fontSize: 11.5, fontWeight: 800, padding: "6px 6px", borderRadius: 7, border: "none", cursor: "pointer", background: mode === k ? "var(--gold)" : "transparent", color: mode === k ? "#fff" : "var(--muted)", whiteSpace: "nowrap" }}>{k === "all" ? "All" : k === "organization" ? "Org" : "Desig"}</button>
+              ))}
+            </div>
+            {mode !== "all" && (
+              <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 8 }}>
+                {options.map((o) => {
+                  const dc = designationColor(o);
+                  return (
+                    <label key={o} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", fontSize: 12.5 }}>
+                      <input type="checkbox" checked={sel.has(o)} onChange={() => toggle(o)} />
+                      <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, background: dc.bg, border: `1.5px solid ${dc.fg}`, flexShrink: 0 }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => { if (!canDownload) { e.preventDefault(); return; } setOpen(false); }} aria-disabled={!canDownload}
+              style={{ ...btnPrimary, background: canDownload ? "#15803d" : "var(--border)", display: "block", textAlign: "center", textDecoration: "none", pointerEvents: canDownload ? "auto" : "none", opacity: canDownload ? 1 : 0.6 }}>
+              ⬇ Download register{mode === "all" ? " (all paid)" : chosen.length ? ` (${chosen.length})` : ""}
+            </a>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 /* ═══════════════════ 📊 RECORDS VIEW ═══════════════════ */
 
 export function RecordsView({ employees, paidRows, toast }: { employees: SalaryEmployee[]; paidRows: PaidRow[]; toast?: string }) {
@@ -841,6 +899,7 @@ function BigToggle({ on, onChange, onLabel, offLabel, accent }: { on: boolean; o
 function EmployeeModal({ emp, organizations, designations, onClose }: { emp: SalaryEmployee | null; organizations: string[]; designations: string[]; onClose: () => void }) {
   const [pfOn, setPfOn] = useState(emp ? emp.pfEnabled : true);
   const [esiOn, setEsiOn] = useState(emp ? emp.esiEnabled : false);
+  const [tdsOn, setTdsOn] = useState(emp ? emp.tdsEnabled : false);
   const [organization, setOrganization] = useState(emp?.organization ?? "");
   const [designation, setDesignation] = useState(emp?.designation ?? "");
   // Salary type is NOT pre-selected for a new employee — the salary field stays
@@ -866,9 +925,10 @@ function EmployeeModal({ emp, organizations, designations, onClose }: { emp: Sal
           {emp && <input type="hidden" name="id" value={emp.id} />}
           <ReturnCtx monthYm="" page="employees" />
           <FormPending label={emp ? "Saving employee…" : "Adding employee…"} />
-          {/* The PF/ESI switches are buttons — carry their state to the server. */}
+          {/* The PF/ESI/TDS switches are buttons — carry their state to the server. */}
           <input type="hidden" name="pf_enabled" value={pfOn ? "1" : "0"} />
           <input type="hidden" name="esi_enabled" value={esiOn ? "1" : "0"} />
+          <input type="hidden" name="tds_enabled" value={tdsOn ? "1" : "0"} />
 
           <FormSection title="🪪 Basic details">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
@@ -924,7 +984,7 @@ function EmployeeModal({ emp, organizations, designations, onClose }: { emp: Sal
             </div>
           </FormSection>
 
-          <FormSection title="🏛 PF & 🏥 ESI">
+          <FormSection title="🏛 PF · 🏥 ESI · 🧾 TDS">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 14 }}>
               <div>
                 <BigToggle on={pfOn} onChange={setPfOn} onLabel="PF applicable ✓" offLabel="PF not applicable" accent={green} />
@@ -938,9 +998,16 @@ function EmployeeModal({ emp, organizations, designations, onClose }: { emp: Sal
                 <BigToggle on={esiOn} onChange={setEsiOn} onLabel="ESI applicable ✓" offLabel="ESI not applicable" accent="#7c3aed" />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10, opacity: esiOn ? 1 : 0.5 }}>
                   <label><span style={lbl}>ESI number</span><input name="esi_number" defaultValue={emp?.esiNumber ?? ""} disabled={!esiOn} style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></label>
-                  <label><span style={lbl}>ESI %</span><input name="esi_percent" inputMode="decimal" defaultValue={String(emp?.esiPercent ?? 1)} disabled={!esiOn} style={inp} /></label>
+                  <label><span style={lbl}>ESI %</span><input name="esi_percent" inputMode="decimal" defaultValue={String(emp?.esiPercent ?? 0.75)} disabled={!esiOn} style={inp} /></label>
                 </div>
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>ESI = esi% of earned salary (default 1% — ₹10,000 → ₹100).</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>ESI = esi% of earned salary (default 0.75%).</div>
+              </div>
+              <div>
+                <BigToggle on={tdsOn} onChange={setTdsOn} onLabel="TDS applicable ✓" offLabel="TDS not applicable" accent="#0891b2" />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginTop: 10, opacity: tdsOn ? 1 : 0.5 }}>
+                  <label><span style={lbl}>TDS %</span><input name="tds_percent" inputMode="decimal" defaultValue={String(emp?.tdsPercent ?? 10)} disabled={!tdsOn} style={inp} /></label>
+                </div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>TDS = tds% of earned salary (default OFF).</div>
               </div>
             </div>
           </FormSection>
@@ -973,8 +1040,9 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
   const gross = earnedSalary({ monthlySalary: row.monthlySalary, dailySalary: row.dailySalary, salaryType: row.salaryType, attendanceDays: attendanceNum, monthKey: monthYm });
   const pf = computePf(gross, row.pfPercent, row.pfEnabled);
   const esi = computeEsi(gross, row.esiPercent, row.esiEnabled);
+  const tds = computeTds(gross, row.tdsPercent, row.tdsEnabled);
   const otAmount = Math.round(n(otHours) * n(otRate) * 100) / 100;
-  const net = Math.round((gross - pf - esi + otAmount - n(advance) - n(ded) + n(add)) * 100) / 100;
+  const net = Math.round((gross - pf - esi - tds + otAmount - n(advance) - n(ded) + n(add)) * 100) / 100;
   const readBox: React.CSSProperties = { ...inp, background: "var(--surface)", fontFamily: "ui-monospace, monospace", fontWeight: 800, display: "flex", alignItems: "center", minHeight: 38 };
   const dailyRate = byAttendance && row.dailySalary ? row.dailySalary : null;
   return (
@@ -1007,6 +1075,11 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
               <div style={readBox}>{inr(esi)}</div>
               <span style={{ fontSize: 10, color: "var(--muted)", display: "block", marginTop: 3 }}>{row.esiEnabled ? `${row.esiPercent}% of earned` : "ESI not applicable"}</span>
             </div>
+            <div>
+              <span style={lbl}>TDS − (₹)</span>
+              <div style={readBox}>{inr(tds)}</div>
+              <span style={{ fontSize: 10, color: "var(--muted)", display: "block", marginTop: 3 }}>{row.tdsEnabled ? `${row.tdsPercent}% of earned` : "TDS not applicable"}</span>
+            </div>
             <label><span style={lbl}>OT hours</span><input name="ot_hours" inputMode="decimal" value={otHours} onChange={(e) => setOtHours(e.target.value)} placeholder="total OT hours" style={inp} /></label>
             <label><span style={lbl}>OT rate / hour (₹)</span><input name="ot_rate" inputMode="decimal" value={otRate} onChange={(e) => setOtRate(e.target.value)} placeholder="₹ per OT hour" style={inp} /></label>
             <div>
@@ -1025,7 +1098,7 @@ function RowModal({ row, monthYm, onClose }: { row: SalaryPaymentRow; monthYm: s
             <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", color: "#15803d" }}>Net pay</span>
             <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 18, color: "#15803d" }}>{inr(net)}</span>
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6, textAlign: "right" }}>Earned − PF − ESI + OT − Advance − Deduction + Addition</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6, textAlign: "right" }}>Earned − PF − ESI − TDS + OT − Advance − Deduction + Addition</div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
             <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
             <button type="submit" style={btnPrimary}>✓ Save row</button>

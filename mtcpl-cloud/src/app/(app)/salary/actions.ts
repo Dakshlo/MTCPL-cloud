@@ -24,7 +24,7 @@ import { revalidatePath } from "next/cache";
 import ExcelJS from "exceljs";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canUseSalary, computePf, computeEsi, earnedSalary } from "@/lib/salary-permissions";
+import { canUseSalary, computePf, computeEsi, computeTds, earnedSalary } from "@/lib/salary-permissions";
 import { logAudit } from "@/lib/audit";
 
 function txt(fd: FormData, key: string): string {
@@ -120,12 +120,18 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   // other figure; the visible field submits the one that applies.
   if (formData.has("monthly_salary")) row.monthly_salary = num(formData, "monthly_salary");
   if (formData.has("daily_salary")) row.daily_salary = txt(formData, "daily_salary") ? num(formData, "daily_salary") : null;
-  // ESI (mig 193): enabled flag + ESI number + employee-share % (default 1).
+  // ESI (mig 193): enabled flag + ESI number + employee-share % (default 0.75).
   row.esi_enabled = txt(formData, "esi_enabled") === "1";
   if (formData.has("esi_number")) row.esi_number = txt(formData, "esi_number") || null;
   if (formData.has("esi_percent")) {
     const esiPctRaw = txt(formData, "esi_percent");
-    row.esi_percent = esiPctRaw === "" ? 1 : num(formData, "esi_percent");
+    row.esi_percent = esiPctRaw === "" ? 0.75 : num(formData, "esi_percent");
+  }
+  // TDS (mig 196): enabled flag + employee-share % (default 10). Default OFF.
+  row.tds_enabled = txt(formData, "tds_enabled") === "1";
+  if (formData.has("tds_percent")) {
+    const tdsPctRaw = txt(formData, "tds_percent");
+    row.tds_percent = tdsPctRaw === "" ? 10 : num(formData, "tds_percent");
   }
 
   if (id) {
@@ -208,7 +214,9 @@ export async function prepareSalaryBatchAction(formData: FormData): Promise<void
     pfEnabled: !!e.pf_enabled,
     pfPercent: Number.isFinite(Number(e.pf_percent)) ? Number(e.pf_percent) : 12,
     esiEnabled: !!e.esi_enabled,
-    esiPercent: Number.isFinite(Number(e.esi_percent)) ? Number(e.esi_percent) : 1,
+    esiPercent: Number.isFinite(Number(e.esi_percent)) ? Number(e.esi_percent) : 0.75,
+    tdsEnabled: !!e.tds_enabled,
+    tdsPercent: Number.isFinite(Number(e.tds_percent)) ? Number(e.tds_percent) : 10,
   }));
   if (employees.length === 0) go("No active employees yet — add them first");
 
@@ -249,10 +257,11 @@ export async function prepareSalaryBatchAction(formData: FormData): Promise<void
     const gross = earnedSalary({ monthlySalary: e.monthlySalary, dailySalary: e.dailySalary, salaryType: e.salaryType, attendanceDays: null, monthKey: month! });
     const pf = computePf(gross, e.pfPercent, e.pfEnabled);
     const esi = computeEsi(gross, e.esiPercent, e.esiEnabled);
+    const tds = computeTds(gross, e.tdsPercent, e.tdsEnabled);
     return {
       employee_id: e.id, month: month!, batch_id: batchId,
-      gross, pf_amount: pf, esi_amount: esi, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0,
-      net: Math.round((gross - pf - esi) * 100) / 100, status: "draft", created_by: profile.id,
+      gross, pf_amount: pf, esi_amount: esi, tds_amount: tds, ot_amount: 0, advance: 0, other_deduction: 0, addition: 0,
+      net: Math.round((gross - pf - esi - tds) * 100) / 100, status: "draft", created_by: profile.id,
     };
   });
   const { error } = await admin.from("salary_payments").insert(rows as never);
@@ -304,13 +313,14 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
   const salaryType = (emp.salary_type as string) === "variable" ? ("variable" as const) : ("fixed" as const);
   const gross = earnedSalary({ monthlySalary: Number(emp.monthly_salary) || 0, dailySalary: emp.daily_salary == null ? null : Number(emp.daily_salary), salaryType, attendanceDays: attendance, monthKey: r0.month });
   const pf = computePf(gross, Number(emp.pf_percent), !!emp.pf_enabled);
-  const esi = computeEsi(gross, Number.isFinite(Number(emp.esi_percent)) ? Number(emp.esi_percent) : 1, !!emp.esi_enabled);
-  // Actual pay = earned − PF − ESI + overtime − advance − other deduction + addition.
-  const net = Math.round((gross - pf - esi + ot - advance - ded + add) * 100) / 100;
+  const esi = computeEsi(gross, Number.isFinite(Number(emp.esi_percent)) ? Number(emp.esi_percent) : 0.75, !!emp.esi_enabled);
+  const tds = computeTds(gross, Number.isFinite(Number(emp.tds_percent)) ? Number(emp.tds_percent) : 10, !!emp.tds_enabled);
+  // Actual pay = earned − PF − ESI − TDS + overtime − advance − other deduction + addition.
+  const net = Math.round((gross - pf - esi - tds + ot - advance - ded + add) * 100) / 100;
 
   const { data, error } = await admin.from("salary_payments")
     .update({
-      gross, pf_amount: pf, esi_amount: esi, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
+      gross, pf_amount: pf, esi_amount: esi, tds_amount: tds, ot_amount: ot, advance, other_deduction: ded, addition: add, net,
       attendance_days: attendance,
       ot_hours: otHoursRaw === "" ? null : num(formData, "ot_hours"),
       remarks: txt(formData, "remarks") || null,

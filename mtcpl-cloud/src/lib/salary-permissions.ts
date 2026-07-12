@@ -24,13 +24,21 @@ export function computePf(base: number, pct: number, enabled: boolean): number {
   return Math.round(wage * p) / 100;
 }
 
-/** Employee-share ESI for a month: pct% (default 1) of the earned gross —
- *  SAME base as the salary, no wage ceiling (Daksh: "salary 10000 → 1% of
- *  10000 is the ESI"). Mig 193. */
+/** Employee-share ESI for a month: pct% (default 0.75 — statutory share) of the
+ *  earned gross, no wage ceiling. Mig 193; default corrected in mig 196. */
 export function computeEsi(base: number, pct: number, enabled: boolean): number {
   if (!enabled) return 0;
   const wage = Math.max(0, base);
-  const p = Number.isFinite(pct) ? pct : 1;
+  const p = Number.isFinite(pct) ? pct : 0.75;
+  return Math.round(wage * p) / 100;
+}
+
+/** Employee TDS for a month: pct% (default 10) of the earned gross, no ceiling.
+ *  Mig 196 — a per-employee flat rate; use "other deduction" for one-off tax. */
+export function computeTds(base: number, pct: number, enabled: boolean): number {
+  if (!enabled) return 0;
+  const wage = Math.max(0, base);
+  const p = Number.isFinite(pct) ? pct : 10;
   return Math.round(wage * p) / 100;
 }
 
