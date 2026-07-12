@@ -426,6 +426,14 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant", "accountant_star", "employee_register"],
     department: "salary",
   },
+  {
+    // Mig 198 — owner approves salary batches before their HDFC CSV unlocks.
+    href: "/salary/approvals",
+    label: "Batch approval",
+    icon: "✅",
+    roles: ["developer", "owner"],
+    department: "salary",
+  },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
     type: "divider",

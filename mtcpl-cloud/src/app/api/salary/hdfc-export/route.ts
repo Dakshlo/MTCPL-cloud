@@ -46,11 +46,16 @@ export async function GET(req: NextRequest) {
     // Batch mode: the batch must exist and must NOT already be in an HDFC file.
     if (batchId) {
       const { data: batch, error: bErr } = await admin
-        .from("salary_batches").select("id, status, hdfc_generated_at").eq("id", batchId).maybeSingle();
+        .from("salary_batches").select("*").eq("id", batchId).maybeSingle();
       if (bErr) return NextResponse.json({ ok: false, error: bErr.message }, { status: 500 });
       if (!batch) return NextResponse.json({ ok: false, error: "Batch not found." }, { status: 404 });
-      const b = batch as { status: string; hdfc_generated_at: string | null };
+      const b = batch as { status: string; hdfc_generated_at: string | null; approved_at?: string | null };
       if (b.status === "paid") return NextResponse.json({ ok: false, error: "This batch is already PAID." }, { status: 409 });
+      // Mig 198 — owner approval gate. `null` = pending (blocked); `undefined`
+      // (pre-migration) or a timestamp (approved) → allowed.
+      if (b.approved_at === null) {
+        return NextResponse.json({ ok: false, error: "This batch is waiting for OWNER APPROVAL — the HDFC CSV is blocked until an owner approves it." }, { status: 409 });
+      }
       if (b.hdfc_generated_at) {
         return NextResponse.json({ ok: false, error: "This batch is already IN an HDFC FILE — re-downloading is blocked to prevent a duplicate payment. Owner can re-allow it if the file was lost." }, { status: 409 });
       }

@@ -40,7 +40,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-export type TopbarTaskDepartment = "production" | "finance" | "inventory";
+export type TopbarTaskDepartment = "production" | "finance" | "inventory" | "salary";
 
 export type TopbarTask = {
   id: string;
@@ -72,6 +72,7 @@ const DEPT_META: Record<
   production: { label: "Production", color: "#c9a14a" },
   finance:    { label: "Finance",    color: "#5e8c4e" },
   inventory:  { label: "Inventory",  color: "#c87850" },
+  salary:     { label: "Employees",  color: "#9c5f6e" },
 };
 
 export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
@@ -124,7 +125,7 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
     items: TopbarTask[];
   }> = [];
   if (ownerItems.length > 0) grouped.push({ dept: "owner", items: ownerItems });
-  const order: TopbarTaskDepartment[] = ["production", "finance", "inventory"];
+  const order: TopbarTaskDepartment[] = ["production", "finance", "inventory", "salary"];
   for (const dept of order) {
     const deptItems = items.filter((it) => it.department === dept && !it.ownerCritical);
     if (deptItems.length > 0) grouped.push({ dept, items: deptItems });

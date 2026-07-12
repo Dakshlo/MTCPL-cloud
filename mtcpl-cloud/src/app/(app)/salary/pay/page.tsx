@@ -31,16 +31,17 @@ export default async function PaySalaryPage({ searchParams }: { searchParams: Pr
 
   const { employees, needsMigration, needs193: e193 } = await loadEmployees(admin);
   const monthRows = needsMigration ? [] : await loadMonthRows(admin, monthKey, employees);
-  const { batches, needs193: b193 } = needsMigration ? { batches: [], needs193: false } : await loadBatches(admin, monthKey);
+  const { batches, needs193: b193, needs198 } = needsMigration ? { batches: [], needs193: false, needs198: false } : await loadBatches(admin, monthKey);
 
   return (
     <section className="page-card">
-      <MigrationBanner needsMigration={needsMigration} needs193={e193 || b193} />
+      <MigrationBanner needsMigration={needsMigration} needs193={e193 || b193} needs198={needs198} />
       <PayMonthView
         employees={employees}
         monthYm={monthYm}
         monthRows={monthRows}
         batches={batches}
+        approvalEnabled={!needs198}
         isBoss={profile.role === "owner" || profile.role === "developer"}
         toast={sp.toast}
       />

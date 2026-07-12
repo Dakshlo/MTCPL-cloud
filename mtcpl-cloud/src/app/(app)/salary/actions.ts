@@ -387,7 +387,11 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
  *  row is already PAID, or the batch is IN an HDFC file (owner re-allows first). */
 export async function dropSalaryBatchAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "pay", t);
+  const fromApprovals = txt(formData, "return_page") === "approvals";
+  const go = (t: string): never => {
+    if (fromApprovals) redirect(`/salary/approvals?toast=${encodeURIComponent(t)}`);
+    return goBack(formData, "pay", t);
+  };
   const batchId = txt(formData, "batch_id");
   if (!batchId) go("Missing batch");
   const { data: batch } = await admin.from("salary_batches").select("id, status, hdfc_generated_at").eq("id", batchId).maybeSingle();
@@ -403,6 +407,30 @@ export async function dropSalaryBatchAction(formData: FormData): Promise<void> {
   void logAudit(profile.id, "salary_batch_dropped", "salary_batch", batchId, {});
   revalidatePath("/salary");
   go("Batch dropped");
+}
+
+/** Owner (or developer) approves a salary batch (mig 198) → unlocks its HDFC CSV.
+ *  Every batch is created PENDING (approved_at null); the CSV stays blocked and
+ *  the card shows a "waiting for owner approval" banner until this runs. Callable
+ *  from the Pay page or the Batch-approval panel (return_page=approvals). */
+export async function approveSalaryBatchAction(formData: FormData): Promise<void> {
+  const { profile, admin } = await guard();
+  const fromApprovals = txt(formData, "return_page") === "approvals";
+  const go = (t: string): never => {
+    if (fromApprovals) redirect(`/salary/approvals?toast=${encodeURIComponent(t)}`);
+    return goBack(formData, "pay", t);
+  };
+  if (!["owner", "developer"].includes(profile.role)) go("Only an owner can approve a batch");
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) go("Missing batch");
+  const { data, error } = await admin.from("salary_batches")
+    .update({ approved_at: new Date().toISOString(), approved_by: profile.id } as never)
+    .eq("id", batchId).is("approved_at", null).select("id");
+  if (error) go(`Could not approve: ${error.message}`);
+  if ((data ?? []).length === 0) go("Batch already approved (or not found)");
+  void logAudit(profile.id, "salary_batch_approved", "salary_batch", batchId, {});
+  revalidatePath("/salary");
+  go("Batch approved — HDFC CSV unlocked");
 }
 
 /** Mark ONE batch's draft rows paid (after paying via its bank sheet). */

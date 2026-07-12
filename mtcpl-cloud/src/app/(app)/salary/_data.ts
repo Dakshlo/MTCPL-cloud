@@ -3,7 +3,7 @@
 // salary_employees / salary_payments / salary_batches.
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow } from "./salary-types";
+import type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow, PendingBatch } from "./salary-types";
 
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -101,10 +101,14 @@ export async function loadMonthRows(admin: Admin, monthKey: string, employees: S
   }).sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 }
 
-export async function loadBatches(admin: Admin, monthKey: string): Promise<{ batches: SalaryBatch[]; needs193: boolean }> {
+export async function loadBatches(admin: Admin, monthKey: string): Promise<{ batches: SalaryBatch[]; needs193: boolean; needs198: boolean }> {
   const { data, error } = await admin
     .from("salary_batches").select("*").eq("month", monthKey).order("created_at", { ascending: true });
-  if (error) return { batches: [], needs193: true };
+  if (error) return { batches: [], needs193: true, needs198: true };
+  // Probe the mig-198 approval column — until it exists, approval gating is OFF
+  // so the CSV keeps working between deploy and running the migration.
+  const { error: probe198 } = await admin.from("salary_batches").select("approved_at").limit(1);
+  const needs198 = !!probe198;
   const batches = ((data ?? []) as Array<Record<string, unknown>>).map((b) => ({
     id: String(b.id),
     label: String(b.label ?? "Batch"),
@@ -112,8 +116,31 @@ export async function loadBatches(admin: Admin, monthKey: string): Promise<{ bat
     hdfcGeneratedAt: (b.hdfc_generated_at as string | null) ?? null,
     paidAt: (b.paid_at as string | null) ?? null,
     createdAt: String(b.created_at ?? ""),
+    approvedAt: (b.approved_at as string | null) ?? null,
   }));
-  return { batches, needs193: false };
+  return { batches, needs193: false, needs198 };
+}
+
+/** Every salary batch awaiting owner approval (across all months), newest first,
+ *  with its employee count + total net — for the Batch-approval panel. Returns []
+ *  (not an error) when mig 198 hasn't run yet. */
+export async function loadPendingApprovalBatches(admin: Admin): Promise<PendingBatch[]> {
+  const { data, error } = await admin
+    .from("salary_batches").select("id, label, month, created_at").is("approved_at", null).order("created_at", { ascending: false });
+  if (error) return [];
+  const batches = (data ?? []) as Array<Record<string, unknown>>;
+  if (batches.length === 0) return [];
+  const ids = batches.map((b) => String(b.id));
+  const { data: rows } = await admin.from("salary_payments").select("batch_id, net").in("batch_id", ids);
+  const agg = new Map<string, { employees: number; net: number }>();
+  for (const r of (rows ?? []) as Array<{ batch_id: string; net: number }>) {
+    const a = agg.get(r.batch_id) ?? { employees: 0, net: 0 };
+    a.employees += 1; a.net += Number(r.net) || 0; agg.set(r.batch_id, a);
+  }
+  return batches.map((b) => {
+    const a = agg.get(String(b.id)) ?? { employees: 0, net: 0 };
+    return { id: String(b.id), label: String(b.label ?? "Batch"), month: String(b.month ?? "").slice(0, 7), createdAt: String(b.created_at ?? ""), employees: a.employees, net: a.net };
+  });
 }
 
 // ── Register of Wages (Form 11) — one shared computation for the Excel route

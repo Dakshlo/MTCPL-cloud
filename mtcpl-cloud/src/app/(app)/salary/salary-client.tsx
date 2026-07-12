@@ -21,12 +21,12 @@ import { PF_WAGE_CEILING, computePf, computeEsi, computeTds, earnedSalary, daysI
 import { designationColor } from "@/lib/salary-designation-color";
 import { SalaryImportButton } from "./salary-import";
 import { KpiCard, KpiRow, DesigChip, SALARY_TABLE, segStyle, Pill, NO_DESIG, NO_ORG } from "./_ui/salary-ui";
-import type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow } from "./salary-types";
+import type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow, PendingBatch } from "./salary-types";
 import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryBatchAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
   markSalaryBatchPaidAction, groupUnbatchedIntoBatchAction, unlockBatchHdfcAction,
-  unmarkSalaryPaymentPaidAction, dropSalaryBatchAction,
+  unmarkSalaryPaymentPaidAction, dropSalaryBatchAction, approveSalaryBatchAction,
 } from "./actions";
 
 export type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow };
@@ -293,8 +293,8 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 /* ═══════════════════ 💵 PAY MONTH VIEW ═══════════════════ */
 
-export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, toast }: {
-  employees: SalaryEmployee[]; monthYm: string; monthRows: SalaryPaymentRow[]; batches: SalaryBatch[]; isBoss: boolean; toast?: string;
+export function PayMonthView({ employees, monthYm, monthRows, batches, approvalEnabled, isBoss, toast }: {
+  employees: SalaryEmployee[]; monthYm: string; monthRows: SalaryPaymentRow[]; batches: SalaryBatch[]; approvalEnabled: boolean; isBoss: boolean; toast?: string;
 }) {
   const router = useRouter();
   const [navPending, startNav] = useTransition();
@@ -351,11 +351,11 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {visibleBatches.map((b, i) => (
-            <BatchCard key={b.id} seq={i + 1} batch={b} rows={rowsOfBatch(b.id).filter(match)} allRows={rowsOfBatch(b.id)} monthYm={monthYm} isBoss={isBoss}
+            <BatchCard key={b.id} seq={i + 1} batch={b} rows={rowsOfBatch(b.id).filter(match)} allRows={rowsOfBatch(b.id)} monthYm={monthYm} isBoss={isBoss} approvalEnabled={approvalEnabled}
               onEditRow={setEditRow} confirmPaid={confirmPaidBatch === b.id} setConfirmPaid={(on) => setConfirmPaidBatch(on ? b.id : null)} />
           ))}
           {unbatched.length > 0 && (
-            <BatchCard seq={0} batch={null} rows={unbatched.filter(match)} allRows={unbatched} monthYm={monthYm} isBoss={isBoss}
+            <BatchCard seq={0} batch={null} rows={unbatched.filter(match)} allRows={unbatched} monthYm={monthYm} isBoss={isBoss} approvalEnabled={false}
               onEditRow={setEditRow} confirmPaid={false} setConfirmPaid={() => undefined} />
           )}
         </div>
@@ -369,9 +369,9 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
 }
 
 /** One payment batch — header, employee mini-cards, HDFC CSV + mark-paid. */
-function BatchCard({ seq, batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPaid, setConfirmPaid }: {
+function BatchCard({ seq, batch, rows, allRows, monthYm, isBoss, approvalEnabled, onEditRow, confirmPaid, setConfirmPaid }: {
   seq: number; batch: SalaryBatch | null; rows: SalaryPaymentRow[]; allRows: SalaryPaymentRow[];
-  monthYm: string; isBoss: boolean; onEditRow: (r: SalaryPaymentRow) => void;
+  monthYm: string; isBoss: boolean; approvalEnabled: boolean; onEditRow: (r: SalaryPaymentRow) => void;
   confirmPaid: boolean; setConfirmPaid: (on: boolean) => void;
 }) {
   const [confirmDrop, setConfirmDrop] = useState(false);
@@ -382,10 +382,15 @@ function BatchCard({ seq, batch, rows, allRows, monthYm, isBoss, onEditRow, conf
   const noAttendance = draft.filter((r) => r.salaryType === "variable" && r.attendanceDays == null);
   const isPaid = batch ? batch.status === "paid" : draft.length === 0 && paidRows.length > 0;
   const locked = !!batch?.hdfcGeneratedAt;
-  const hdfcReady = !!batch && !isPaid && !locked && draft.length > 0 && missingBank.length === 0 && noAttendance.length === 0;
+  // Mig 198 — owner approval. When approvalEnabled is off (pre-migration) or
+  // there's no batch, everything counts as approved so the CSV keeps working.
+  const approved = !approvalEnabled || !batch || !!batch.approvedAt;
+  const pendingApproval = !!batch && approvalEnabled && !batch.approvedAt && !isPaid;
+  const hdfcReady = !!batch && !isPaid && !locked && approved && draft.length > 0 && missingBank.length === 0 && noAttendance.length === 0;
   const blockReason =
     !batch ? "Group these rows into a batch first"
     : isPaid ? "Batch is already paid"
+    : pendingApproval ? "Waiting for owner approval"
     : draft.length === 0 ? "No draft rows"
     : missingBank.length > 0 ? `Incomplete info: ${missingBank.map((r) => r.employeeName).join(", ")}`
     : noAttendance.length > 0 ? `Attendance needed: ${noAttendance.map((r) => r.employeeName).join(", ")}`
@@ -418,6 +423,21 @@ function BatchCard({ seq, batch, rows, allRows, monthYm, isBoss, onEditRow, conf
         <div style={{ position: "relative", zIndex: 3, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", background: "rgba(30,64,175,0.1)", borderBottom: "1px solid rgba(30,64,175,0.35)", color: "#1e40af" }}>
           <span style={{ fontSize: 14, fontWeight: 900, letterSpacing: "0.06em" }}>🔒 IN HDFC FILE</span>
           <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.85 }}>downloaded {dayShort(batch!.hdfcGeneratedAt)} — re-download blocked so this batch can&apos;t be paid twice. Mark it paid, or {isBoss ? "↺ re-allow below" : "ask an owner to re-allow"}.</span>
+        </div>
+      )}
+
+      {pendingApproval && (
+        <div style={{ position: "relative", zIndex: 3, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", background: "rgba(217,119,6,0.1)", borderBottom: "1px solid rgba(217,119,6,0.35)", color: "#b45309" }}>
+          <span style={{ fontSize: 14, fontWeight: 900, letterSpacing: "0.04em" }}>⏳ WAITING FOR OWNER APPROVAL</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.9 }}>The HDFC bank CSV is locked until an owner approves this batch.</span>
+          {isBoss && (
+            <form action={approveSalaryBatchAction} style={{ marginLeft: "auto" }}>
+              <input type="hidden" name="batch_id" value={batch!.id} />
+              <ReturnCtx monthYm={monthYm} page="pay" />
+              <FormPending label="Approving…" />
+              <button type="submit" style={{ ...btnPrimary, background: "#b45309", padding: "7px 14px" }}>✓ Approve batch</button>
+            </form>
+          )}
         </div>
       )}
 
@@ -843,6 +863,54 @@ function RegisterExportControl({ monthYm, rows }: { monthYm: string; rows: Salar
         </>
       )}
     </span>
+  );
+}
+
+/* ═══════════════════ ✅ BATCH APPROVAL VIEW (owner) ═══════════════════ */
+
+export function SalaryApprovalsView({ batches, toast }: { batches: PendingBatch[]; toast?: string }) {
+  const [confirmReject, setConfirmReject] = useState<string | null>(null);
+  return (
+    <div>
+      <Hero icon="✅" title="Batch approval" subtitle="Salary batches waiting for your sign-off. Approve to unlock the HDFC bank CSV, or reject to drop the whole batch." toast={toast} />
+      {batches.length === 0 ? (
+        <Empty>No batches waiting for approval — all clear. 🎉</Empty>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {batches.map((b) => (
+            <div key={b.id} style={{ border: "1px solid var(--border)", borderLeft: "4px solid #b45309", borderRadius: 12, background: "var(--surface)", boxShadow: "var(--shadow)", padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 14.5, fontWeight: 900 }}>🗂 {b.label}</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{monthLabel(b.month)} · {b.employees} employee{b.employees === 1 ? "" : "s"} · created {dayShort(b.createdAt)}</div>
+              </div>
+              <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 15 }}>{inr(b.net)}</span>
+              <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {confirmReject === b.id ? (
+                  <>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c" }}>Drop this whole batch?</span>
+                    <form action={dropSalaryBatchAction} style={{ display: "inline" }}>
+                      <input type="hidden" name="batch_id" value={b.id} />
+                      <input type="hidden" name="return_page" value="approvals" />
+                      <FormPending label="Dropping…" />
+                      <button type="submit" style={{ ...btnGhost, color: "#fff", background: "#b91c1c", border: "none" }}>Yes, drop</button>
+                    </form>
+                    <button type="button" onClick={() => setConfirmReject(null)} style={btnGhost}>No</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => setConfirmReject(b.id)} style={{ ...btnGhost, color: "#b91c1c" }}>🗑 Reject</button>
+                )}
+                <form action={approveSalaryBatchAction} style={{ display: "inline" }}>
+                  <input type="hidden" name="batch_id" value={b.id} />
+                  <input type="hidden" name="return_page" value="approvals" />
+                  <FormPending label="Approving…" />
+                  <button type="submit" style={{ ...btnPrimary, background: "#15803d" }}>✓ Approve</button>
+                </form>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

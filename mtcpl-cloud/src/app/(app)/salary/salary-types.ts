@@ -26,6 +26,14 @@ export type SalaryPaymentRow = {
 export type SalaryBatch = {
   id: string; label: string; status: "draft" | "paid";
   hdfcGeneratedAt: string | null; paidAt: string | null; createdAt: string;
+  /** Mig 198 — owner approval. null = pending (HDFC CSV blocked until approved). */
+  approvedAt: string | null;
+};
+
+/** One batch awaiting owner approval — for the Batch-approval panel. */
+export type PendingBatch = {
+  id: string; label: string; month: string; createdAt: string;
+  employees: number; net: number;
 };
 
 /** One PAID row (any month) — feeds the Records page (Salary paid / PF / ESI). */

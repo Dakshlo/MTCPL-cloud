@@ -460,6 +460,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     return (count ?? 0) + bulk + changes;
   }
 
+  // Mig 198 — salary batches awaiting the OWNER's approval before their HDFC CSV
+  // unlocks. Owner / developer only. Best-effort: pre-198 (no column) → null
+  // hides the item entirely.
+  async function fetchSalaryApprovalBadge(): Promise<number | null> {
+    if (!["owner", "developer"].includes(profile.role)) return null;
+    const { count, error: sErr } = await supabase
+      .from("salary_batches")
+      .select("*", { count: "exact", head: true })
+      .is("approved_at", null);
+    if (sErr) return null;
+    return count ?? 0;
+  }
+
   // Mig 185 — Work Diary pill (every user): open register entries you created
   // or are included in, most urgent first. Best-effort: pre-migration → null
   // hides the pill entirely.
@@ -508,6 +521,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     slabImportBadge,
     dispatchApprovalBadge,
     invoiceApprovalBadge,
+    salaryApprovalBadge,
     templeCancelAlert,
     diaryBadge,
   ] = await Promise.all([
@@ -527,6 +541,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchSlabImportBadge(),
     fetchDispatchApprovalBadge(),
     fetchInvoiceApprovalBadge(),
+    fetchSalaryApprovalBadge(),
     fetchTempleCancelAlert(),
     fetchDiaryBadge(),
   ]);
@@ -781,6 +796,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               slabImportBadge,
               dispatchApprovalBadge,
               invoiceApprovalBadge,
+              salaryApprovalBadge,
               ownerView: ["owner", "developer"].includes(profile.role),
             })} />
 
@@ -915,6 +931,9 @@ function buildTopbarTaskItems(counts: {
   /** Mig 167 — priced challans awaiting the OWNER's invoice approval.
    *  Owner / developer only; null otherwise. */
   invoiceApprovalBadge: number | null;
+  /** Mig 198 — salary batches awaiting the OWNER's approval before their HDFC
+   *  CSV unlocks. Owner / developer only; null otherwise. */
+  salaryApprovalBadge: number | null;
   /** True only for the OWNER — floats the owner-only approvals into a
    *  highlighted "Needs your approval" group at the top of the dropdown. */
   ownerView: boolean;
@@ -1108,6 +1127,19 @@ function buildTopbarTaskItems(counts: {
       count: counts.invoiceApprovalBadge,
       icon: "🧾",
       department: "finance",
+    });
+  }
+  // Mig 198 — Salary batch approval (OWNER): salary batches waiting for your
+  // sign-off before their HDFC bank CSV can be downloaded.
+  if (counts.salaryApprovalBadge !== null) {
+    items.push({
+      id: "salary-approval",
+      href: "/salary/approvals",
+      label: "Batch Approval",
+      description: "Salary batches waiting for your approval to unlock the bank CSV",
+      count: counts.salaryApprovalBadge,
+      icon: "✅",
+      department: "salary",
     });
   }
   // Mig 118 — slabs flagged to the owner during Carving Done Approval.
