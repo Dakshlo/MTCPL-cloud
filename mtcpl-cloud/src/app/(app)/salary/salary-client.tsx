@@ -936,7 +936,12 @@ export function RecordsView({ employees, paidRows, toast }: { employees: SalaryE
 function RecordSection({ kind, employees, paidRows }: { kind: "paid" | "pf" | "esi"; employees: SalaryEmployee[]; paidRows: PaidRow[] }) {
   const [openEmp, setOpenEmp] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const { isOpen, toggle } = useCollapse();
+  // Organizations default OPEN; designation subgroups default COLLAPSED (search
+  // force-opens both so the matched employee shows).
+  const [orgCollapsed, setOrgCollapsed] = useState<Set<string>>(new Set());
+  const [desigOpened, setDesigOpened] = useState<Set<string>>(new Set());
+  const toggleOrg = (k: string) => setOrgCollapsed((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleDesig = (k: string) => setDesigOpened((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const amountOf = (r: PaidRow) => (kind === "paid" ? r.net : kind === "pf" ? r.pfAmount : r.esiAmount);
   const enabledOf = (e: SalaryEmployee) => (kind === "paid" ? true : kind === "pf" ? e.pfEnabled : e.esiEnabled);
@@ -964,6 +969,9 @@ function RecordSection({ kind, employees, paidRows }: { kind: "paid" | "pf" | "e
   const needle = q.trim().toLowerCase();
   const filtered = needle ? withIt.filter((e) => [e.name, e.designation, e.organization, numOf(e), e.accountNumber].some((v) => (v ?? "").toLowerCase().includes(needle))) : withIt;
   const { orgGroups, showOrg } = groupByOrgDesig(filtered, (e) => e.organization, (e) => e.designation);
+  const searching = needle.length > 0;
+  const orgOpen = (k: string) => searching || !orgCollapsed.has(k);
+  const desigOpen = (k: string) => searching || desigOpened.has(k);
 
   const groupTotal = (emps: SalaryEmployee[]) => emps.reduce((a, e) => a + (byEmp.get(e.id) ?? []).reduce((s, r) => s + amountOf(r), 0), 0);
 
@@ -983,18 +991,30 @@ function RecordSection({ kind, employees, paidRows }: { kind: "paid" | "pf" | "e
           <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, fontFamily: "ui-monospace, monospace", color: "#15803d" }}>{inr(total)}</span>
         </button>
         {isCardOpen && (
-          <div style={{ padding: "8px 14px 14px" }}>
+          <div style={{ padding: "8px 14px 14px", overflowX: "auto" }}>
             {empRows.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Nothing yet — appears once a month with {NAME} is marked paid.</div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 7 }}>
-                {empRows.map((r) => (
-                  <div key={r.month} style={{ border: "1px solid var(--border)", borderRadius: 9, padding: "7px 11px", background: "var(--bg)" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase" }}>{monthShort(r.month)}</div>
-                    <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{inr(amountOf(r))}</div>
-                  </div>
-                ))}
-              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 340 }}>
+                <thead><tr>
+                  {["Month", "Paid on", NAME].map((h, i) => (
+                    <th key={h} style={{ textAlign: i === 2 ? "right" : "left", padding: "6px 9px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {empRows.map((r) => (
+                    <tr key={r.month}>
+                      <td style={{ padding: "7px 9px", fontSize: 12.5, fontWeight: 700, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{monthLabel(r.month)}</td>
+                      <td style={{ padding: "7px 9px", fontSize: 12, color: "var(--muted)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{dayShort(r.paidAt) || "—"}</td>
+                      <td style={{ padding: "7px 9px", fontSize: 13, fontWeight: 800, fontFamily: "ui-monospace, monospace", textAlign: "right", borderBottom: "1px solid var(--border)" }}>{inr(amountOf(r))}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={2} style={{ padding: "7px 9px", fontSize: 11.5, fontWeight: 900, borderTop: "2px solid var(--border)" }}>Total · {empRows.length} month{empRows.length === 1 ? "" : "s"}</td>
+                    <td style={{ padding: "7px 9px", fontSize: 13.5, fontWeight: 900, fontFamily: "ui-monospace, monospace", textAlign: "right", borderTop: "2px solid var(--border)", color: "#15803d" }}>{inr(total)}</td>
+                  </tr>
+                </tbody>
+              </table>
             )}
           </div>
         )}
@@ -1035,11 +1055,11 @@ function RecordSection({ kind, employees, paidRows }: { kind: "paid" | "pf" | "e
           {orgGroups.map((og) => {
             const oc = designationColor(og.org);
             const oKey = `o:${og.org}`;
-            const oOpen = isOpen(oKey);
+            const oOpen = orgOpen(oKey);
             return (
               <div key={og.org} style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {showOrg && (
-                  <button type="button" onClick={() => toggle(oKey)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: oc.bg, color: oc.fg, borderLeft: `4px solid ${oc.fg}`, fontSize: 12, fontWeight: 900, letterSpacing: "0.03em", border: "none", cursor: "pointer", textAlign: "left" }}>
+                  <button type="button" onClick={() => toggleOrg(oKey)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: oc.bg, color: oc.fg, borderLeft: `4px solid ${oc.fg}`, fontSize: 12, fontWeight: 900, letterSpacing: "0.03em", border: "none", cursor: "pointer", textAlign: "left" }}>
                     <span style={caret(oOpen, oc.fg)}>▶</span> 🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count}</span>
                     <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace" }}>{inr(groupTotal(og.desigGroups.flatMap(([, e]) => e)))}</span>
                   </button>
@@ -1047,10 +1067,10 @@ function RecordSection({ kind, employees, paidRows }: { kind: "paid" | "pf" | "e
                 {oOpen && og.desigGroups.map(([desig, emps]) => {
                   const dc = designationColor(desig);
                   const dKey = `${oKey}|d:${desig}`;
-                  const dOpen = isOpen(dKey);
+                  const dOpen = desigOpen(dKey);
                   return (
                     <div key={desig} style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: showOrg ? 12 : 0 }}>
-                      <button type="button" onClick={() => toggle(dKey)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+                      <button type="button" onClick={() => toggleDesig(dKey)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
                         <span style={caret(dOpen, dc.fg)}>▶</span> {desig} <span style={{ opacity: 0.7 }}>· {emps.length}</span>
                         <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>{inr(groupTotal(emps))}</span>
                       </button>
