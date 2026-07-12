@@ -105,7 +105,7 @@ export default async function WageRegisterPage({ searchParams }: { searchParams:
                       <td style={{ ...tdC, background: bg }}>{r.sr}</td>
                       <td style={{ ...td, background: bg }}><strong>{r.name}</strong>{r.father ? <span style={{ display: "block", fontSize: 10, color: "#6B5560" }}>s/o {r.father}</span> : null}</td>
                       <td style={{ ...tdC, background: bg }}>{reg.monthName} {reg.year}</td>
-                      <td style={{ ...tdC, background: bg }}>—</td>
+                      <td style={{ ...tdC, background: bg }}>{r.minWage > 0 ? inr(r.minWage) : "—"}</td>
                       <td style={{ ...tdC, background: bg }}>{r.rate > 0 ? `${inr(r.rate)} / ${r.variable ? "day" : "month"}` : "—"}</td>
                       <td style={{ ...tdC, background: bg }}>{r.attendance != null ? r.attendance : "—"}</td>
                       <td style={{ ...tdR, background: bg }}>{inr(r.basic)}</td>

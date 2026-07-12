@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
         r.sr,
         r.father ? `${r.name}\ns/o ${r.father}` : r.name,
         `${monthName} ${year}`,
-        "—",
+        r.minWage > 0 ? r.minWage.toLocaleString("en-IN") : "—",
         r.rate > 0 ? `${r.rate.toLocaleString("en-IN")} / ${r.variable ? "day" : "month"}` : "—",
         r.attendance != null ? r.attendance : "—",
         r.basic,

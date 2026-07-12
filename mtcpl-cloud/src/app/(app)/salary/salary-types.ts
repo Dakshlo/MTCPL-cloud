@@ -5,6 +5,8 @@ export type SalaryEmployee = {
   id: string; name: string; organization: string | null; designation: string | null; fatherName: string | null; phone: string | null; aadhaar: string | null;
   bankName: string | null; accountNumber: string | null; ifsc: string | null; beneficiaryName: string | null;
   monthlySalary: number; dailySalary: number | null; salaryType: "fixed" | "variable";
+  /** Mig 197 — statutory minimum wage rate (₹/month), reference only, shown on the register. */
+  minWageRate: number | null;
   pfEnabled: boolean; uan: string | null; pfPercent: number;
   esiEnabled: boolean; esiNumber: string | null; esiPercent: number;
   tdsEnabled: boolean; tdsPercent: number;

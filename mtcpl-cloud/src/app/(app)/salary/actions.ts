@@ -134,14 +134,27 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
     row.tds_percent = tdsPctRaw === "" ? 10 : num(formData, "tds_percent");
   }
 
+  // Minimum wage rate (mig 197) — reference figure for the register. Written in
+  // a SEPARATE, best-effort update so a DB that hasn't run 197 yet still saves
+  // the employee (the update just errors silently and is ignored).
+  const minWage = formData.has("min_wage_rate")
+    ? (txt(formData, "min_wage_rate") === "" ? null : num(formData, "min_wage_rate"))
+    : undefined;
+
+  let savedId = id;
   if (id) {
     const { error } = await admin.from("salary_employees").update({ ...row, updated_at: new Date().toISOString() } as never).eq("id", id);
     if (error) go(`Could not save: ${error.message}`);
     void logAudit(profile.id, "salary_employee_updated", "salary_employee", id, { name });
   } else {
-    const { error } = await admin.from("salary_employees").insert({ ...row, created_by: profile.id } as never);
+    const { data: ins, error } = await admin.from("salary_employees").insert({ ...row, created_by: profile.id } as never).select("id").single();
     if (error) go(`Could not add: ${error.message}`);
+    savedId = (ins as { id: string } | null)?.id ?? "";
     void logAudit(profile.id, "salary_employee_added", "salary_employee", name, { name });
+  }
+  if (minWage !== undefined && savedId) {
+    // Error (e.g. column missing before mig 197) is intentionally not surfaced.
+    await admin.from("salary_employees").update({ min_wage_rate: minWage } as never).eq("id", savedId);
   }
   revalidatePath("/salary");
   go(id ? "Employee updated" : "Employee added");

@@ -16,30 +16,41 @@ export function canUseSalary(profile: SalaryProfile): boolean {
  *  ₹15,000 salary the PF stays ₹1,800 no matter how high the pay (Daksh). */
 export const PF_WAGE_CEILING = 15000;
 
-/** Employee-share PF for a month: pct% of the wage capped at the ceiling. */
+// ── Rounding rule (Daksh, Jul 2026) — deductions are always WHOLE rupees so the
+// wage register / bank file never carry paise:
+//   • PF  → normal round-half-up   (560.40 → 560, 560.52 → 561)
+//   • ESI → always round UP (ceil)  (560.20 → 561, 560.70 → 561) — the statutory
+//           ESI rule rounds the contribution up to the next rupee.
+//   • TDS → normal round-half-up    (kept in step with PF so the Total column
+//           stays whole; not separately specified).
+
+/** Employee-share PF for a month: pct% of the wage capped at the ceiling,
+ *  rounded to the nearest whole rupee. */
 export function computePf(base: number, pct: number, enabled: boolean): number {
   if (!enabled) return 0;
   const wage = Math.min(Math.max(0, base), PF_WAGE_CEILING);
   const p = Number.isFinite(pct) ? pct : 12;
-  return Math.round(wage * p) / 100;
+  return Math.round((wage * p) / 100);
 }
 
 /** Employee-share ESI for a month: pct% (default 0.75 — statutory share) of the
- *  earned gross, no wage ceiling. Mig 193; default corrected in mig 196. */
+ *  earned gross, no wage ceiling, ALWAYS ROUNDED UP to the next whole rupee.
+ *  Mig 193; default corrected in mig 196. */
 export function computeEsi(base: number, pct: number, enabled: boolean): number {
   if (!enabled) return 0;
   const wage = Math.max(0, base);
   const p = Number.isFinite(pct) ? pct : 0.75;
-  return Math.round(wage * p) / 100;
+  return Math.ceil((wage * p) / 100);
 }
 
-/** Employee TDS for a month: pct% (default 10) of the earned gross, no ceiling.
- *  Mig 196 — a per-employee flat rate; use "other deduction" for one-off tax. */
+/** Employee TDS for a month: pct% (default 10) of the earned gross, no ceiling,
+ *  rounded to the nearest whole rupee. Mig 196 — a per-employee flat rate; use
+ *  "other deduction" for one-off tax. */
 export function computeTds(base: number, pct: number, enabled: boolean): number {
   if (!enabled) return 0;
   const wage = Math.max(0, base);
   const p = Number.isFinite(pct) ? pct : 10;
-  return Math.round(wage * p) / 100;
+  return Math.round((wage * p) / 100);
 }
 
 // ── Fixed vs by-attendance pay ──────────────────────────────────────

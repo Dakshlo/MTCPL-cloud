@@ -22,6 +22,7 @@ function mapEmployee(e: Record<string, unknown>): SalaryEmployee {
     beneficiaryName: (e.beneficiary_name as string | null) ?? null,
     monthlySalary: Number(e.monthly_salary) || 0,
     dailySalary: e.daily_salary == null ? null : Number(e.daily_salary),
+    minWageRate: e.min_wage_rate == null ? null : Number(e.min_wage_rate),
     salaryType: (e.salary_type as string) === "variable" ? "variable" : "fixed",
     pfEnabled: !!e.pf_enabled,
     uan: (e.uan as string | null) ?? null,
@@ -123,7 +124,7 @@ const MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "Ju
 
 export type WageRegRow = {
   sr: number; name: string; father: string; org: string; desig: string;
-  variable: boolean; rate: number; attendance: number | null;
+  variable: boolean; rate: number; minWage: number; attendance: number | null;
   basic: number; allow: number; gross: number;
   esi: number; pf: number; tds: number; ded: number; net: number;
   paidAt: string | null;
@@ -174,6 +175,7 @@ export async function loadWageRegister(
       name: String(e.name ?? "—"), father: (e.father_name as string | null) ?? "",
       org, desig, variable,
       rate: variable ? Number(e.daily_salary) || 0 : Number(e.monthly_salary) || 0,
+      minWage: Number(e.min_wage_rate) || 0,
       attendance: r.attendance_days,
       basic: Number(r.gross) || 0, allow: (Number(r.ot_amount) || 0) + (Number(r.addition) || 0),
       pf: Number(r.pf_amount) || 0, esi: Number(r.esi_amount) || 0, tds: Number(r.tds_amount) || 0,

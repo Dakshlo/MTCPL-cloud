@@ -377,8 +377,11 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
     : "";
 
   // A locked (downloaded-into-HDFC, not-yet-paid) batch gets a big banner + a
-  // diagonal watermark + greyed-out cards so it's obviously in a bank file.
+  // diagonal watermark + greyed-out table so it's obviously in a bank file.
   const showLock = locked && !isPaid;
+  // Whole-rupee cell formatters for the batch register table.
+  const m0 = (n: number) => (n ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—");
+  const mAll = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
   return (
     <div style={{ position: "relative", border: showLock ? "2px solid #1e40af" : "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", boxShadow: "var(--shadow)", overflow: "hidden", opacity: isPaid ? 0.92 : 1 }}>
@@ -407,30 +410,55 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
         {rows.length === 0 ? (
           <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "6px 2px" }}>No employee matches the search in this batch.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 230px), 1fr))", gap: 10, filter: showLock ? "grayscale(1)" : undefined, opacity: showLock ? 0.6 : 1 }}>
-            {rows.map((r) => {
-              const isDraft = r.status === "draft";
-              const issue = isDraft && !r.hasBank ? "bank" : isDraft && r.salaryType === "variable" && r.attendanceDays == null ? "attendance" : null;
-              const border = issue === "bank" ? "#b91c1c" : issue === "attendance" ? "#b45309" : r.status === "paid" ? "rgba(21,128,61,0.45)" : "var(--border)";
-              const bg = issue === "bank" ? "rgba(220,38,38,0.05)" : issue === "attendance" ? "rgba(217,119,6,0.06)" : r.status === "paid" ? "rgba(22,101,52,0.05)" : "var(--bg)";
-              return (
-                <button key={r.id} type="button" onClick={() => onEditRow(r)} title={isDraft ? "Edit this row (attendance, OT, advance…)" : "Paid — open to view (owner can un-mark)"}
-                  style={{ textAlign: "left", border: `1.5px solid ${border}`, background: bg, borderRadius: 11, padding: "10px 12px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 5, color: "var(--text)" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontWeight: 800, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.employeeName}</span>
-                    <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>{inr(r.net)}</span>
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <DesigChip name={r.designation} size="sm" />
-                    {r.salaryType === "variable" && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309" }}>⏱ {r.attendanceDays != null ? `${r.attendanceDays}d` : "BY ATTENDANCE"}</span>}
-                  </span>
-                  {issue === "bank" && <span style={{ fontSize: 10.5, fontWeight: 800, color: "#b91c1c" }}>⚠ incomplete info — bank a/c missing</span>}
-                  {issue === "attendance" && <span style={{ fontSize: 10.5, fontWeight: 800, color: "#b45309" }}>⏱ attendance needed — tap to enter</span>}
-                  {r.status === "paid" && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#15803d" }}>✓ paid{dayShort(r.paidAt) ? ` · ${dayShort(r.paidAt)}` : ""}</span>}
-                  {!issue && isDraft && <span style={{ fontSize: 10.5, color: locked ? "#1e40af" : "var(--muted)", fontWeight: locked ? 800 : 400 }}>{locked ? "🔒 in HDFC file — locked" : "ready · tap to edit"}</span>}
-                </button>
-              );
-            })}
+          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, filter: showLock ? "grayscale(1)" : undefined, opacity: showLock ? 0.6 : 1 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+              <thead>
+                <tr>
+                  {["#", "Employee", "Earned", "OT +", "PF −", "ESI −", "TDS −", "Adv −", "Deduct −", "Add +", "Net", ""].map((h, i) => (
+                    <th key={i} style={{ padding: "7px 9px", fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--muted)", textAlign: i >= 2 && i <= 10 ? "right" : "left", whiteSpace: "nowrap", borderBottom: "2px solid var(--border)", background: "var(--bg)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, idx) => {
+                  const isDraft = r.status === "draft";
+                  const issue = isDraft && !r.hasBank ? "bank" : isDraft && r.salaryType === "variable" && r.attendanceDays == null ? "attendance" : null;
+                  const rowBg = issue === "bank" ? "rgba(220,38,38,0.06)" : issue === "attendance" ? "rgba(217,119,6,0.07)" : r.status === "paid" ? "rgba(22,101,52,0.045)" : idx % 2 ? "var(--bg)" : "transparent";
+                  const cell: React.CSSProperties = { padding: "8px 9px", fontSize: 12, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", color: "var(--text)" };
+                  const num: React.CSSProperties = { ...cell, textAlign: "right", fontFamily: "ui-monospace, monospace" };
+                  return (
+                    <tr key={r.id} onClick={() => onEditRow(r)} title={isDraft ? "Edit this row — attendance, OT, advance, deduction…" : "Paid — open to view (owner can un-mark)"} style={{ background: rowBg, cursor: "pointer" }}>
+                      <td style={{ ...cell, color: "var(--muted)" }}>{idx + 1}</td>
+                      <td style={cell}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 800 }}>{r.employeeName}</span>
+                          <DesigChip name={r.designation} size="sm" />
+                          {r.salaryType === "variable" && <span style={{ fontSize: 9, fontWeight: 800, color: "#b45309" }}>⏱ {r.attendanceDays != null ? `${r.attendanceDays}d` : "NO ATT"}</span>}
+                          {issue === "bank" && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b91c1c" }}>⚠ no bank a/c</span>}
+                          {issue === "attendance" && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309" }}>⏱ needs attendance</span>}
+                          {r.status === "paid" && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#15803d" }}>✓ paid{dayShort(r.paidAt) ? ` ${dayShort(r.paidAt)}` : ""}</span>}
+                        </span>
+                      </td>
+                      <td style={{ ...num, fontWeight: 700 }}>{mAll(r.gross)}</td>
+                      <td style={num}>{m0(r.otAmount)}</td>
+                      <td style={num}>{m0(r.pfAmount)}</td>
+                      <td style={num}>{m0(r.esiAmount)}</td>
+                      <td style={num}>{m0(r.tdsAmount)}</td>
+                      <td style={num}>{m0(r.advance)}</td>
+                      <td style={num}>{m0(r.otherDeduction)}</td>
+                      <td style={num}>{m0(r.addition)}</td>
+                      <td style={{ ...num, fontWeight: 800, color: r.status === "paid" ? "#15803d" : "var(--text)" }}>{mAll(r.net)}</td>
+                      <td style={{ ...cell, textAlign: "center", color: locked && isDraft ? "#1e40af" : "var(--muted)" }}>{isDraft ? (locked ? "🔒" : "✎") : "✓"}</td>
+                    </tr>
+                  );
+                })}
+                <tr>
+                  <td style={{ padding: "8px 9px", fontSize: 11, fontWeight: 900, background: "var(--bg)", borderTop: "2px solid var(--border)" }} colSpan={10}>TOTAL · {rows.length} employee{rows.length === 1 ? "" : "s"}</td>
+                  <td style={{ padding: "8px 9px", fontSize: 12.5, fontWeight: 900, textAlign: "right", fontFamily: "ui-monospace, monospace", background: "var(--bg)", borderTop: "2px solid var(--border)", color: "#15803d" }}>{mAll(rows.reduce((a, r) => a + r.net, 0))}</td>
+                  <td style={{ background: "var(--bg)", borderTop: "2px solid var(--border)" }} />
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
 
@@ -438,15 +466,11 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
             {batch ? (
               <>
-                <a
-                  href={hdfcReady ? `/api/salary/hdfc-export?month=${monthYm}&batch=${batch.id}` : undefined}
-                  target="_blank" rel="noopener noreferrer"
-                  onClick={(e) => { if (!hdfcReady) e.preventDefault(); }}
-                  aria-disabled={!hdfcReady}
-                  title={hdfcReady ? "HDFC bulk-payment CSV for THIS batch (Finance's format) — locks the batch after download" : locked ? "Already downloaded — button blocked so it can't be paid twice" : blockReason}
-                  style={{ ...btnPrimary, background: hdfcReady ? "#15803d" : "var(--border)", color: hdfcReady ? "#fff" : "var(--muted)", textDecoration: "none", pointerEvents: hdfcReady ? "auto" : "none", opacity: hdfcReady ? 1 : 0.65 }}
-                >
-                  {locked ? "🔒 HDFC CSV downloaded" : `⬇ HDFC CSV · ${draft.length}`}
+                <HdfcCsvButton month={monthYm} batchId={batch.id} ready={hdfcReady} locked={locked} count={draft.length} blockReason={blockReason} />
+                <a href={`/api/salary/hdfc-preview-export?month=${monthYm}&batch=${batch.id}`} target="_blank" rel="noopener noreferrer"
+                  title="Readable Excel of this batch — names, bank details & amounts. Download any number of times to verify what the CSV contains."
+                  style={{ ...btnGhost, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  📊 Excel view
                 </a>
                 {locked && isBoss && !isPaid && (
                   <form action={unlockBatchHdfcAction}>
@@ -488,6 +512,62 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
         )}
       </div>
     </div>
+  );
+}
+
+/** HDFC bulk-payment CSV download for one batch. Fetches the CSV client-side so
+ *  the button blocks the INSTANT the download succeeds (the server also stamps
+ *  the batch lock) — no page refresh needed, which fixes the old "nothing seems
+ *  to happen until I refresh" gap. A 409 (already in a file / raced in another
+ *  tab) also flips it straight to the locked state. */
+function HdfcCsvButton({ month, batchId, ready, locked, count, blockReason }: {
+  month: string; batchId: string; ready: boolean; locked: boolean; count: number; blockReason: string;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const blocked = locked || done;
+  const disabled = !ready || busy || blocked;
+
+  async function download() {
+    if (disabled) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch(`/api/salary/hdfc-export?month=${month}&batch=${batchId}`, { cache: "no-store" });
+      if (!res.ok) {
+        let msg = "Download failed — try again.";
+        try { const j = await res.json(); if (j?.error) msg = String(j.error); } catch { /* non-JSON body */ }
+        setErr(msg);
+        if (res.status === 409) { setDone(true); router.refresh(); } // already in a file — reflect the lock
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const fn = /filename="?([^"]+)"?/.exec(cd)?.[1] || `salary-hdfc-${month}.001`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fn; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      setDone(true);    // block immediately on a successful download
+      router.refresh(); // re-render with the server lock stamp → whole-batch banner + greyscale
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Download failed — try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const okColor = ready && !blocked;
+  return (
+    <>
+      <button type="button" onClick={download} disabled={disabled}
+        title={blocked ? "Already downloaded into an HDFC file — blocked so this batch can't be paid twice." : ready ? "HDFC bulk-payment CSV for THIS batch (Finance's format) — downloads, then locks the batch." : blockReason}
+        style={{ ...btnPrimary, background: okColor ? "#15803d" : "var(--border)", color: okColor ? "#fff" : "var(--muted)", cursor: disabled ? "not-allowed" : "pointer", opacity: okColor || busy ? 1 : 0.65 }}>
+        {busy ? "⏳ Downloading…" : blocked ? "🔒 HDFC CSV downloaded" : `⬇ HDFC CSV · ${count}`}
+      </button>
+      {err && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#b91c1c", maxWidth: 340 }}>{err}</span>}
+    </>
   );
 }
 
@@ -985,6 +1065,11 @@ function EmployeeModal({ emp, organizations, designations, onClose }: { emp: Sal
                 placeholder={salaryType ? (salaryType === "variable" ? "e.g. 600 per day" : "e.g. 20000 per month") : "Pick Fixed or By attendance ↑"}
                 style={{ ...inp, background: salaryType ? "var(--bg)" : "var(--surface)", opacity: salaryType ? 1 : 0.6, cursor: salaryType ? "text" : "not-allowed" }}
               />
+            </label>
+            <label style={{ display: "block", marginTop: 12 }}>
+              <span style={lbl}>Min. rate of wages (₹ / month)</span>
+              <input name="min_wage_rate" inputMode="decimal" defaultValue={emp?.minWageRate != null ? String(emp.minWageRate) : ""} placeholder="statutory minimum — for the register" style={inp} />
+              <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Reference only — prints in the register&apos;s &ldquo;Min. Rate of Wages (A)&rdquo; column. Does not change pay.</span>
             </label>
           </FormSection>
 
