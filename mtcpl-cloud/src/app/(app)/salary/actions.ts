@@ -382,6 +382,29 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
   go("Row removed for this month");
 }
 
+/** Drop an ENTIRE batch — delete all its draft rows AND the batch itself, so the
+ *  whole thing goes at once (vs. removing employees one-by-one). Refuses if any
+ *  row is already PAID, or the batch is IN an HDFC file (owner re-allows first). */
+export async function dropSalaryBatchAction(formData: FormData): Promise<void> {
+  const { profile, admin } = await guard();
+  const go = (t: string): never => goBack(formData, "pay", t);
+  const batchId = txt(formData, "batch_id");
+  if (!batchId) go("Missing batch");
+  const { data: batch } = await admin.from("salary_batches").select("id, status, hdfc_generated_at").eq("id", batchId).maybeSingle();
+  if (!batch) go("Batch not found — it may already be gone");
+  const b = batch as { status: string; hdfc_generated_at: string | null };
+  if (b.status === "paid") go("This batch is already PAID — it can't be dropped.");
+  if (b.hdfc_generated_at) go("This batch is IN an HDFC FILE — an owner must ↺ re-allow it before it can be dropped.");
+  const { count: paidCount } = await admin.from("salary_payments").select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("status", "paid");
+  if ((paidCount ?? 0) > 0) go("This batch has paid rows — it can't be dropped.");
+  const { error: delRows } = await admin.from("salary_payments").delete().eq("batch_id", batchId).eq("status", "draft");
+  if (delRows) go(`Could not drop the batch: ${delRows.message}`);
+  await admin.from("salary_batches").delete().eq("id", batchId);
+  void logAudit(profile.id, "salary_batch_dropped", "salary_batch", batchId, {});
+  revalidatePath("/salary");
+  go("Batch dropped");
+}
+
 /** Mark ONE batch's draft rows paid (after paying via its bank sheet). */
 export async function markSalaryBatchPaidAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();

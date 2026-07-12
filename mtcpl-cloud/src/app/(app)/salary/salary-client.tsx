@@ -26,7 +26,7 @@ import {
   upsertSalaryEmployeeAction, toggleSalaryEmployeeAction, deleteSalaryEmployeeAction,
   prepareSalaryBatchAction, updateSalaryPaymentAction, removeSalaryPaymentAction,
   markSalaryBatchPaidAction, groupUnbatchedIntoBatchAction, unlockBatchHdfcAction,
-  unmarkSalaryPaymentPaidAction,
+  unmarkSalaryPaymentPaidAction, dropSalaryBatchAction,
 } from "./actions";
 
 export type { SalaryEmployee, SalaryPaymentRow, SalaryBatch, PaidRow };
@@ -135,7 +135,12 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
   const [editEmp, setEditEmp] = useState<SalaryEmployee | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const { isOpen, toggle } = useCollapse();
+  // Organizations default OPEN; designation subgroups default COLLAPSED. So we
+  // track org COLLAPSES (default open) and designation OPENS (default closed).
+  const [orgCollapsed, setOrgCollapsed] = useState<Set<string>>(new Set());
+  const [desigOpened, setDesigOpened] = useState<Set<string>>(new Set());
+  const toggleOrg = (k: string) => setOrgCollapsed((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleDesig = (k: string) => setDesigOpened((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const active = employees.filter((e) => e.isActive);
   const monthlyCost = active.reduce((a, e) => a + (e.salaryType === "fixed" ? e.monthlySalary : 0), 0);
@@ -147,6 +152,11 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
   const filtered = needle
     ? employees.filter((e) => [e.name, e.phone, e.accountNumber, e.designation, e.organization].some((v) => (v ?? "").toLowerCase().includes(needle)))
     : employees;
+  // While searching, force every group open so the matched employee shows,
+  // EXPANDED out of its designation group (not just its designation surfaced).
+  const searching = needle.length > 0;
+  const orgOpen = (k: string) => searching || !orgCollapsed.has(k);
+  const desigOpen = (k: string) => searching || desigOpened.has(k);
   const { orgGroups, showOrg } = groupByOrgDesig(filtered, (e) => e.organization, (e) => e.designation);
 
   return (
@@ -187,23 +197,23 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
                 {orgGroups.map((og) => {
                   const oc = designationColor(og.org);
                   const orgKey = `o:${og.org}`;
-                  const orgOpen = isOpen(orgKey);
+                  const oOpen = orgOpen(orgKey);
                   return (
                   <Fragment key={og.org}>
                     {showOrg && (
-                      <tr onClick={() => toggle(orgKey)} style={{ cursor: "pointer" }}>
+                      <tr onClick={() => toggleOrg(orgKey)} style={{ cursor: "pointer" }}>
                         <td colSpan={6} style={{ padding: "9px 12px", fontSize: 12, fontWeight: 900, letterSpacing: "0.03em", color: oc.fg, background: oc.bg, borderTop: "2px solid var(--border)", borderLeft: `4px solid ${oc.fg}`, borderBottom: "1px solid var(--border)" }}>
-                          <span style={caret(orgOpen, oc.fg)}>▶</span> 🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count} employee{og.count === 1 ? "" : "s"}</span>
+                          <span style={caret(oOpen, oc.fg)}>▶</span> 🏢 {og.org} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {og.count} employee{og.count === 1 ? "" : "s"}</span>
                         </td>
                       </tr>
                     )}
-                    {orgOpen && og.desigGroups.map(([desig, emps]) => {
+                    {oOpen && og.desigGroups.map(([desig, emps]) => {
                       const dc = designationColor(desig);
                       const dKey = `${orgKey}|d:${desig}`;
-                      const dOpen = isOpen(dKey);
+                      const dOpen = desigOpen(dKey);
                       return (
                       <Fragment key={desig}>
-                        <tr onClick={() => toggle(dKey)} style={{ cursor: "pointer" }}>
+                        <tr onClick={() => toggleDesig(dKey)} style={{ cursor: "pointer" }}>
                           <td colSpan={6} style={{ padding: "8px 12px", paddingLeft: showOrg ? 26 : 12, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: dc.fg, background: dc.bg, borderLeft: `3px solid ${dc.fg}`, borderBottom: "1px solid var(--border)" }}>
                             <span style={caret(dOpen, dc.fg)}>▶</span> {desig} <span style={{ opacity: 0.7, fontWeight: 700 }}>· {emps.length}</span>
                           </td>
@@ -340,12 +350,12 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
         <Empty>Nothing for {monthLabel(monthYm)} yet — hit <strong>＋ Prepare batch</strong> and choose who to pay.</Empty>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {visibleBatches.map((b) => (
-            <BatchCard key={b.id} batch={b} rows={rowsOfBatch(b.id).filter(match)} allRows={rowsOfBatch(b.id)} monthYm={monthYm} isBoss={isBoss}
+          {visibleBatches.map((b, i) => (
+            <BatchCard key={b.id} seq={i + 1} batch={b} rows={rowsOfBatch(b.id).filter(match)} allRows={rowsOfBatch(b.id)} monthYm={monthYm} isBoss={isBoss}
               onEditRow={setEditRow} confirmPaid={confirmPaidBatch === b.id} setConfirmPaid={(on) => setConfirmPaidBatch(on ? b.id : null)} />
           ))}
           {unbatched.length > 0 && (
-            <BatchCard batch={null} rows={unbatched.filter(match)} allRows={unbatched} monthYm={monthYm} isBoss={isBoss}
+            <BatchCard seq={0} batch={null} rows={unbatched.filter(match)} allRows={unbatched} monthYm={monthYm} isBoss={isBoss}
               onEditRow={setEditRow} confirmPaid={false} setConfirmPaid={() => undefined} />
           )}
         </div>
@@ -359,11 +369,12 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
 }
 
 /** One payment batch — header, employee mini-cards, HDFC CSV + mark-paid. */
-function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPaid, setConfirmPaid }: {
-  batch: SalaryBatch | null; rows: SalaryPaymentRow[]; allRows: SalaryPaymentRow[];
+function BatchCard({ seq, batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPaid, setConfirmPaid }: {
+  seq: number; batch: SalaryBatch | null; rows: SalaryPaymentRow[]; allRows: SalaryPaymentRow[];
   monthYm: string; isBoss: boolean; onEditRow: (r: SalaryPaymentRow) => void;
   confirmPaid: boolean; setConfirmPaid: (on: boolean) => void;
 }) {
+  const [confirmDrop, setConfirmDrop] = useState(false);
   const draft = allRows.filter((r) => r.status === "draft");
   const paidRows = allRows.filter((r) => r.status === "paid");
   const netTotal = allRows.reduce((a, r) => a + r.net, 0);
@@ -395,7 +406,7 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 16px", background: "var(--bg)", borderBottom: "1px solid var(--border)", position: "relative", zIndex: 3 }}>
-        <span style={{ fontSize: 14.5, fontWeight: 900 }}>{batch ? `🗂 ${batch.label}` : "🗂 Earlier rows (no batch)"}</span>
+        <span style={{ fontSize: 14.5, fontWeight: 900 }}>{batch ? `${seq}. 🗂 ${batch.label}` : "🗂 Earlier rows (no batch)"}</span>
         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{allRows.length} employee{allRows.length === 1 ? "" : "s"}</span>
         {isPaid ? <Pill label={`✓ PAID${batch?.paidAt ? ` · ${dayShort(batch.paidAt)}` : ""}`} tone="success" />
           : locked ? <Pill label="🔒 In HDFC file" tone="gold" />
@@ -487,6 +498,20 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
                 {!hdfcReady && !locked && blockReason && (
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: missingBank.length > 0 ? "#b91c1c" : "#b45309" }}>{blockReason}</span>
                 )}
+                {!locked && (confirmDrop ? (
+                  <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c" }}>Drop this whole batch ({draft.length})?</span>
+                    <form action={dropSalaryBatchAction} style={{ display: "inline" }}>
+                      <input type="hidden" name="batch_id" value={batch.id} />
+                      <ReturnCtx monthYm={monthYm} page="pay" />
+                      <FormPending label="Dropping…" />
+                      <button type="submit" style={{ ...btnGhost, color: "#fff", background: "#b91c1c", border: "none" }}>Yes, drop</button>
+                    </form>
+                    <button type="button" onClick={() => setConfirmDrop(false)} style={btnGhost}>No</button>
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => setConfirmDrop(true)} title="Delete this whole batch (all its employees) at once" style={{ ...btnGhost, color: "#b91c1c" }}>🗑 Drop batch</button>
+                ))}
                 {draft.length > 0 && (confirmPaid ? (
                   <span style={{ display: "inline-flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>Paid from the bank — mark {draft.length} row{draft.length === 1 ? "" : "s"} PAID?</span>
