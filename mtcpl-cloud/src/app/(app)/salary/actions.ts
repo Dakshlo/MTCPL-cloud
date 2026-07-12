@@ -367,6 +367,17 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
   if (error) go(`Could not remove: ${error.message}`);
   if ((data ?? []).length === 0) go("Row not found or already PAID — paid rows can't be removed");
   void logAudit(profile.id, "salary_payment_removed", "salary_payment", id, {});
+  // If that was the batch's LAST row, delete the now-empty batch so it doesn't
+  // linger as a "0 employees" card (Daksh). Paid rows can't be removed, so a
+  // batch with any paid row never reaches 0 — only fully-emptied drafts drop.
+  const emptiedBatch = (r0 as { batch_id: string | null } | null)?.batch_id ?? null;
+  if (emptiedBatch) {
+    const { count } = await admin.from("salary_payments").select("id", { count: "exact", head: true }).eq("batch_id", emptiedBatch);
+    if ((count ?? 0) === 0) {
+      await admin.from("salary_batches").delete().eq("id", emptiedBatch);
+      void logAudit(profile.id, "salary_batch_removed_empty", "salary_batch", emptiedBatch, {});
+    }
+  }
   revalidatePath("/salary");
   go("Row removed for this month");
 }

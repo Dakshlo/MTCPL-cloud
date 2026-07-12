@@ -304,6 +304,10 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
   const rowsOfBatch = (batchId: string | null) => monthRows.filter((r) => r.batchId === batchId);
   const unbatched = rowsOfBatch(null);
   const inMonthIds = useMemo(() => new Set(monthRows.map((r) => r.employeeId)), [monthRows]);
+  // Hide a batch once every employee has been removed from it, so an emptied
+  // batch doesn't linger as a "0 employees" card. Uses the UNFILTERED rows, so a
+  // batch whose rows merely don't match the search still shows (with its note).
+  const visibleBatches = batches.filter((b) => rowsOfBatch(b.id).length > 0);
 
   return (
     <div>
@@ -327,16 +331,16 @@ export function PayMonthView({ employees, monthYm, monthRows, batches, isBoss, t
       </div>
 
       <KpiRow>
-        <KpiCard label={`${monthLabel(monthYm)} · batches`} value={String(batches.length + (unbatched.length > 0 ? 1 : 0))} sub={`${monthRows.length} employee row${monthRows.length === 1 ? "" : "s"}`} tone="neutral" icon="🗂" />
+        <KpiCard label={`${monthLabel(monthYm)} · batches`} value={String(visibleBatches.length + (unbatched.length > 0 ? 1 : 0))} sub={`${monthRows.length} employee row${monthRows.length === 1 ? "" : "s"}`} tone="neutral" icon="🗂" />
         <KpiCard label="Net to pay (draft)" value={inr(draftNet)} sub={`${draft.length} draft row${draft.length === 1 ? "" : "s"}`} tone={draft.length > 0 ? "warn" : "neutral"} icon="💸" />
         <KpiCard label="Paid this month" value={inr(paidNet)} sub={`${paid.length} row${paid.length === 1 ? "" : "s"} paid`} tone="success" icon="✓" />
       </KpiRow>
 
-      {monthRows.length === 0 && batches.length === 0 ? (
+      {monthRows.length === 0 ? (
         <Empty>Nothing for {monthLabel(monthYm)} yet — hit <strong>＋ Prepare batch</strong> and choose who to pay.</Empty>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {batches.map((b) => (
+          {visibleBatches.map((b) => (
             <BatchCard key={b.id} batch={b} rows={rowsOfBatch(b.id).filter(match)} allRows={rowsOfBatch(b.id)} monthYm={monthYm} isBoss={isBoss}
               onEditRow={setEditRow} confirmPaid={confirmPaidBatch === b.id} setConfirmPaid={(on) => setConfirmPaidBatch(on ? b.id : null)} />
           ))}
