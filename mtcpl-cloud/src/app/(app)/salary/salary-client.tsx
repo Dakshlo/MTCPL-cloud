@@ -376,9 +376,18 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
     : noAttendance.length > 0 ? `Attendance needed: ${noAttendance.map((r) => r.employeeName).join(", ")}`
     : "";
 
+  // A locked (downloaded-into-HDFC, not-yet-paid) batch gets a big banner + a
+  // diagonal watermark + greyed-out cards so it's obviously in a bank file.
+  const showLock = locked && !isPaid;
+
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", boxShadow: "var(--shadow)", overflow: "hidden", opacity: isPaid ? 0.92 : 1 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 16px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+    <div style={{ position: "relative", border: showLock ? "2px solid #1e40af" : "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", boxShadow: "var(--shadow)", overflow: "hidden", opacity: isPaid ? 0.92 : 1 }}>
+      {showLock && (
+        <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none", display: "grid", placeItems: "center", overflow: "hidden" }}>
+          <span style={{ transform: "rotate(-18deg)", fontSize: "clamp(28px, 6vw, 60px)", fontWeight: 900, letterSpacing: "0.12em", color: "rgba(30,64,175,0.13)", whiteSpace: "nowrap" }}>🔒 IN HDFC FILE</span>
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 16px", background: "var(--bg)", borderBottom: "1px solid var(--border)", position: "relative", zIndex: 3 }}>
         <span style={{ fontSize: 14.5, fontWeight: 900 }}>{batch ? `🗂 ${batch.label}` : "🗂 Earlier rows (no batch)"}</span>
         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{allRows.length} employee{allRows.length === 1 ? "" : "s"}</span>
         {isPaid ? <Pill label={`✓ PAID${batch?.paidAt ? ` · ${dayShort(batch.paidAt)}` : ""}`} tone="success" />
@@ -387,11 +396,18 @@ function BatchCard({ batch, rows, allRows, monthYm, isBoss, onEditRow, confirmPa
         <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 15, color: isPaid ? "#15803d" : "var(--text)" }}>{inr(netTotal)}</span>
       </div>
 
-      <div style={{ padding: 14 }}>
+      {showLock && (
+        <div style={{ position: "relative", zIndex: 3, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 16px", background: "rgba(30,64,175,0.1)", borderBottom: "1px solid rgba(30,64,175,0.35)", color: "#1e40af" }}>
+          <span style={{ fontSize: 14, fontWeight: 900, letterSpacing: "0.06em" }}>🔒 IN HDFC FILE</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.85 }}>downloaded {dayShort(batch!.hdfcGeneratedAt)} — re-download blocked so this batch can&apos;t be paid twice. Mark it paid, or {isBoss ? "↺ re-allow below" : "ask an owner to re-allow"}.</span>
+        </div>
+      )}
+
+      <div style={{ padding: 14, position: "relative", zIndex: 3 }}>
         {rows.length === 0 ? (
           <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "6px 2px" }}>No employee matches the search in this batch.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 230px), 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 230px), 1fr))", gap: 10, filter: showLock ? "grayscale(1)" : undefined, opacity: showLock ? 0.6 : 1 }}>
             {rows.map((r) => {
               const isDraft = r.status === "draft";
               const issue = isDraft && !r.hasBank ? "bank" : isDraft && r.salaryType === "variable" && r.attendanceDays == null ? "attendance" : null;
