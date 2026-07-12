@@ -42,15 +42,15 @@ function monthKey(raw: string): string | null {
   return m ? `${m[1]}-${m[2]}-01` : null;
 }
 
-/** Redirect back to /salary keeping the working month + tab. */
-function goBack(fd: FormData, fallbackTab: "employees" | "month" | "pf", toast: string): never {
+/** Redirect back to the right Employees-dept PAGE keeping the working month. */
+function goBack(fd: FormData, fallbackPage: "employees" | "pay", toast: string): never {
   const ym = txt(fd, "return_month");
-  const tab = txt(fd, "return_tab") || fallbackTab;
+  const page = (txt(fd, "return_page") || fallbackPage) === "pay" ? "pay" : "employees";
+  const base = page === "pay" ? "/salary/pay" : "/salary";
   const q = new URLSearchParams();
-  if (/^\d{4}-\d{2}$/.test(ym)) q.set("month", ym);
-  q.set("tab", tab);
+  if (page === "pay" && /^\d{4}-\d{2}$/.test(ym)) q.set("month", ym);
   q.set("toast", toast);
-  redirect(`/salary?${q.toString()}`);
+  redirect(`${base}?${q.toString()}`);
 }
 
 async function guard() {
@@ -91,6 +91,10 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   // any designation can be either (Daksh, Jul 2026).
   const designation = txt(formData, "designation") || null;
   const salaryType = txt(formData, "salary_type") === "variable" ? "variable" : "fixed";
+  // Fixed employees enter a monthly salary; by-attendance employees enter a
+  // daily rate (mig 194). Store the one that applies; keep the other column so
+  // toggling type back doesn't lose the prior figure. Only overwrite a column
+  // when its field is actually submitted.
   const row: Record<string, unknown> = {
     name,
     organization: txt(formData, "organization") || null,
@@ -102,7 +106,6 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
     account_number: txt(formData, "account_number").replace(/\s+/g, "") || null,
     ifsc: txt(formData, "ifsc").toUpperCase().replace(/\s+/g, "") || null,
     beneficiary_name: beneficiary || null,
-    monthly_salary: num(formData, "monthly_salary"),
     salary_type: salaryType,
     pf_enabled: txt(formData, "pf_enabled") === "1",
     joined_on: txt(formData, "joined_on") || null,
@@ -113,6 +116,10 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   // never wipes a stored UAN (review finding). Same presence-guard for ESI.
   if (formData.has("uan")) row.uan = txt(formData, "uan") || null;
   if (formData.has("pf_percent")) row.pf_percent = pfPercent;
+  // Monthly / daily salary — presence-guarded so switching type keeps the
+  // other figure; the visible field submits the one that applies.
+  if (formData.has("monthly_salary")) row.monthly_salary = num(formData, "monthly_salary");
+  if (formData.has("daily_salary")) row.daily_salary = txt(formData, "daily_salary") ? num(formData, "daily_salary") : null;
   // ESI (mig 193): enabled flag + ESI number + employee-share % (default 1).
   row.esi_enabled = txt(formData, "esi_enabled") === "1";
   if (formData.has("esi_number")) row.esi_number = txt(formData, "esi_number") || null;
@@ -172,7 +179,7 @@ export async function deleteSalaryEmployeeAction(formData: FormData): Promise<vo
  *  re-preparing can never duplicate a payment. */
 export async function prepareSalaryBatchAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   const month = monthKey(txt(formData, "month"));
   if (!month) go("Pick a month first");
 
@@ -196,6 +203,7 @@ export async function prepareSalaryBatchAction(formData: FormData): Promise<void
     organization: ((e.organization as string | null) ?? "").trim(),
     designation: ((e.designation as string | null) ?? "").trim(),
     monthlySalary: Number(e.monthly_salary) || 0,
+    dailySalary: e.daily_salary == null ? null : Number(e.daily_salary),
     salaryType: (e.salary_type as string) === "variable" ? ("variable" as const) : ("fixed" as const),
     pfEnabled: !!e.pf_enabled,
     pfPercent: Number.isFinite(Number(e.pf_percent)) ? Number(e.pf_percent) : 12,
@@ -238,7 +246,7 @@ export async function prepareSalaryBatchAction(formData: FormData): Promise<void
   const rows = fresh.map((e) => {
     // Fixed prefills the full monthly salary; a by-attendance employee starts
     // at 0 (attendance is null until recorded) — earnedSalary() encodes both.
-    const gross = earnedSalary({ monthlySalary: e.monthlySalary, salaryType: e.salaryType, attendanceDays: null, monthKey: month! });
+    const gross = earnedSalary({ monthlySalary: e.monthlySalary, dailySalary: e.dailySalary, salaryType: e.salaryType, attendanceDays: null, monthKey: month! });
     const pf = computePf(gross, e.pfPercent, e.pfEnabled);
     const esi = computeEsi(gross, e.esiPercent, e.esiEnabled);
     return {
@@ -264,7 +272,7 @@ export async function prepareSalaryBatchAction(formData: FormData): Promise<void
  *  tab can never be rewritten (review finding — check-then-act race). */
 export async function updateSalaryPaymentAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   const id = txt(formData, "id");
   if (!id) go("Missing row");
 
@@ -294,7 +302,7 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
   // Fixed ⇒ full monthly salary whatever the attendance; by-attendance ⇒
   // salary × (attendance ÷ days-in-month). PF + ESI follow the earned gross.
   const salaryType = (emp.salary_type as string) === "variable" ? ("variable" as const) : ("fixed" as const);
-  const gross = earnedSalary({ monthlySalary: Number(emp.monthly_salary) || 0, salaryType, attendanceDays: attendance, monthKey: r0.month });
+  const gross = earnedSalary({ monthlySalary: Number(emp.monthly_salary) || 0, dailySalary: emp.daily_salary == null ? null : Number(emp.daily_salary), salaryType, attendanceDays: attendance, monthKey: r0.month });
   const pf = computePf(gross, Number(emp.pf_percent), !!emp.pf_enabled);
   const esi = computeEsi(gross, Number.isFinite(Number(emp.esi_percent)) ? Number(emp.esi_percent) : 1, !!emp.esi_enabled);
   // Actual pay = earned − PF − ESI + overtime − advance − other deduction + addition.
@@ -320,7 +328,7 @@ export async function updateSalaryPaymentAction(formData: FormData): Promise<voi
 /** Remove one DRAFT row (employee skipped this month) — same atomic guard. */
 export async function removeSalaryPaymentAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   const id = txt(formData, "id");
   if (!id) go("Missing row");
   // A row inside a generated HDFC file can't be silently removed — the bank
@@ -343,7 +351,7 @@ export async function removeSalaryPaymentAction(formData: FormData): Promise<voi
 /** Mark ONE batch's draft rows paid (after paying via its bank sheet). */
 export async function markSalaryBatchPaidAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   const batchId = txt(formData, "batch_id");
   if (!batchId) go("Missing batch");
   const now = new Date().toISOString();
@@ -366,7 +374,7 @@ export async function markSalaryBatchPaidAction(formData: FormData): Promise<voi
  *  same batch flow (HDFC sheet + lock + mark paid). One-time helper. */
 export async function groupUnbatchedIntoBatchAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   const month = monthKey(txt(formData, "month"));
   if (!month) go("Pick a month first");
   const { data: batchRow, error: bErr } = await admin
@@ -396,7 +404,7 @@ export async function groupUnbatchedIntoBatchAction(formData: FormData): Promise
  *  Finance's hdfc_csv_unlocked escape hatch. */
 export async function unlockBatchHdfcAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   if (!["owner", "developer"].includes(profile.role)) go("Only the owner can re-allow the bank sheet");
   const batchId = txt(formData, "batch_id");
   if (!batchId) go("Missing batch");
@@ -412,7 +420,7 @@ export async function unlockBatchHdfcAction(formData: FormData): Promise<void> {
 /** Revert ONE paid row to draft — owner/developer only (mistake fix). */
 export async function unmarkSalaryPaymentPaidAction(formData: FormData): Promise<void> {
   const { profile, admin } = await guard();
-  const go = (t: string): never => goBack(formData, "month", t);
+  const go = (t: string): never => goBack(formData, "pay", t);
   if (!["owner", "developer"].includes(profile.role)) go("Only the owner can un-mark a paid salary");
   const id = txt(formData, "id");
   if (!id) go("Missing row");

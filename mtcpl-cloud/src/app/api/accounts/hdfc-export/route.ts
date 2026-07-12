@@ -306,7 +306,10 @@ async function handleHdfcExport(req: NextRequest) {
   const { count: priorTodayCount } = await admin
     .from("audit_logs")
     .select("id", { count: "exact", head: true })
-    .eq("action", "hdfc_export_generated")
+    // Salary uses the SAME HDFC client-code filename scheme — count its files
+    // too so two exports the same day never share a filename (would clash on
+    // upload). Only affects the sequence number, not the file contents.
+    .in("action", ["hdfc_export_generated", "salary_hdfc_export_generated"])
     .gte("created_at", dayStart)
     .lte("created_at", dayEnd);
   const daySequence = (priorTodayCount ?? 0) + 1;

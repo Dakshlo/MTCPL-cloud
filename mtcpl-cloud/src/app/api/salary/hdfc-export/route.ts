@@ -1,53 +1,32 @@
 /**
  * GET /api/salary/hdfc-export?month=YYYY-MM&batch=<batch-id>
  *
- * Employees dept HDFC bulk-payment sheet (mig 189 + 193, Daksh Jul 2026) — the
- * SAME ENet upload format Finance uses for vendor payments
- * (/api/accounts/hdfc-payment-export), which itself mirrors HDFC's working
- * salary-file template:
+ * Employees dept HDFC bulk-payment CSV (mig 189 + 193/194, Daksh Jul 2026).
  *
- *   Sheet "Bulk Payment", 9 columns —
- *   CBX Reference number (bank fills) · Transfer From (picked in ENet) ·
- *   Transfer To (employee a/c) · Amount (net pay) · Initiation date ·
- *   Value date · Beneficiary name (UPPERCASE, must match the ENet
- *   Beneficiary Master) · Input user (bank) · Input Date time (bank).
+ * Produces the EXACT SAME .001 CSV as Finance's vendor-payment export
+ * (src/lib/hdfc-export.ts — 28 columns, no header, quoted fields, CRLF, HDFC
+ * client-code filename), so the same ENet upload tool eats it. Salary net pay
+ * is the amount; employee bank + beneficiary name feed the bene columns.
  *
- * Mig 193 — the sheet is generated PER BATCH (`batch` param):
- *   • rows = that batch's DRAFT rows;
- *   • pre-flight refuses on missing bank details, and on by-attendance
- *     employees whose attendance isn't recorded yet (net 0);
- *   • generating ATOMICALLY stamps the batch's hdfc_generated_at ("IN HDFC
- *     FILE") — a second download attempt gets a 409, so the same batch can
- *     never be exported twice → no duplicate payment. Owner/developer can
- *     re-allow via unlockBatchHdfcAction.
- * Without `batch` (legacy months) only UNBATCHED draft rows are included, so
- * batched rows can never leak into a month-wide file.
+ * Per BATCH (`batch` param): rows = that batch's DRAFT rows; pre-flight refuses
+ * on missing bank / by-attendance-without-attendance / zero net; generating
+ * ATOMICALLY stamps the batch hdfc_generated_at so it can't be exported twice.
+ * Without `batch` (legacy months) only UNBATCHED draft rows are included.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import * as XLSX from "xlsx";
 
 import { requireAuth } from "@/lib/auth";
 import { canUseSalary } from "@/lib/salary-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
+import { buildHdfcCsvFile, buildHdfcFilename, type HdfcExportRow } from "@/lib/hdfc-export";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
-
-/** DD/MM/YYYY HH:MM:SS AM/PM — matches the finance ENet sheet exactly. */
-function initiationStamp(d: Date): string {
-  let h = d.getHours();
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(h)}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} ${ampm}`;
-}
-/** DD-MM-YYYY value date — same as the finance sheet. */
-function valueStamp(d: Date): string {
-  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
-}
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
   try {
@@ -79,24 +58,25 @@ export async function GET(req: NextRequest) {
 
     let q = admin
       .from("salary_payments")
-      .select("id, net, gross, status, batch_id, attendance_days, salary_employees(name, beneficiary_name, account_number, bank_name, salary_type)")
+      .select("id, net, status, batch_id, attendance_days, salary_employees(name, beneficiary_name, account_number, bank_name, ifsc, salary_type)")
       .eq("status", "draft");
     q = batchId ? q.eq("batch_id", batchId) : q.eq("month", month).is("batch_id", null);
     const { data, error } = await q;
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-    type Emp = { name: string; beneficiary_name: string | null; account_number: string | null; bank_name: string | null; salary_type: string | null };
+    type Emp = { name: string; beneficiary_name: string | null; account_number: string | null; bank_name: string | null; ifsc: string | null; salary_type: string | null };
     type Row = { id: string; net: number; attendance_days: number | null; salary_employees: Emp | Emp[] | null };
     const rows = ((data ?? []) as unknown as Row[]).map((r) => {
       const e = Array.isArray(r.salary_employees) ? r.salary_employees[0] : r.salary_employees;
       return {
-        id: r.id,
         net: Number(r.net) || 0,
         attendance: r.attendance_days,
         variable: (e?.salary_type ?? "fixed") === "variable",
         name: e?.name ?? "—",
-        beneficiary: (e?.beneficiary_name ?? e?.name ?? "").trim().toUpperCase(),
+        beneficiary: (e?.beneficiary_name ?? e?.name ?? "").trim(),
         account: (e?.account_number ?? "").trim(),
+        ifsc: (e?.ifsc ?? "").trim().toUpperCase(),
+        bank: (e?.bank_name ?? "").trim(),
       };
     });
 
@@ -104,9 +84,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "No DRAFT rows to pay here — prepare a batch first (or everything is already paid)." }, { status: 400 });
     }
     // Pre-flight 1 — bank details (HDFC rejects the whole file otherwise).
-    const missing = rows.filter((r) => !r.account || !r.beneficiary).map((r) => r.name);
+    const missing = rows.filter((r) => !r.account || !r.beneficiary || !r.ifsc).map((r) => r.name);
     if (missing.length > 0) {
-      return NextResponse.json({ ok: false, error: `Incomplete info (bank details) for: ${missing.join(", ")}. Fill account number + beneficiary name on the employee first.` }, { status: 400 });
+      return NextResponse.json({ ok: false, error: `Incomplete info for: ${missing.join(", ")}. Fill account number, IFSC + beneficiary name on the employee first.` }, { status: 400 });
     }
     // Pre-flight 2 — by-attendance employees need their attendance recorded.
     const noAtt = rows.filter((r) => r.variable && r.attendance == null).map((r) => r.name);
@@ -133,42 +113,49 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      // ── Build the sheet — EXACT ENet Bulk Payment layout. ──────────
       const now = new Date();
-      const initiation = initiationStamp(now);
-      const value = valueStamp(now);
-      const sheetRows = rows.map((r) => ({
-        "CBX Reference number": "",
-        "Transfer From": "",
-        "Transfer To": r.account,
-        "Amount": r.net,
-        "Initiation date": initiation,
-        "Value date": value,
-        "Beneficiary name": r.beneficiary,
-        "Input user": "",
-        "Input Date time": "",
+      const valueDate = now;
+      const exportRows: HdfcExportRow[] = rows.map((r) => ({
+        hdfcBeneName: r.beneficiary,
+        accountNumber: r.account,
+        ifsc: r.ifsc,
+        bankName: r.bank,
+        beneEmail: null, // falls back to the shared HDFC bounce email
+        amountInr: r.net,
+        valueDate,
       }));
 
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(sheetRows);
-      ws["!cols"] = [{ wch: 22 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 30 }, { wch: 14 }, { wch: 22 }];
-      XLSX.utils.book_append_sheet(wb, ws, "Bulk Payment");
-      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+      // Day sequence for the .NNN filename — count today's salary + finance
+      // HDFC files (shared client code) so two files the same day never collide.
+      const istNowMs = now.getTime() + IST_OFFSET_MS;
+      const istMidnightMs = Math.floor(istNowMs / DAY_MS) * DAY_MS;
+      const dayStart = new Date(istMidnightMs - IST_OFFSET_MS).toISOString();
+      const dayEnd = new Date(istMidnightMs - IST_OFFSET_MS + DAY_MS - 1).toISOString();
+      const { count } = await admin
+        .from("audit_logs")
+        .select("id", { count: "exact", head: true })
+        .in("action", ["hdfc_export_generated", "salary_hdfc_export_generated"])
+        .gte("created_at", dayStart)
+        .lte("created_at", dayEnd);
+      const daySequence = (count ?? 0) + 1;
 
-      const totalInr = rows.reduce((a, r) => a + r.net, 0);
-      void logAudit(profile.id, "salary_hdfc_export_generated", batchId ? "salary_batch" : "salary_month", batchId ?? month, { month, rows: rows.length, total_inr: totalInr });
+      const csv = buildHdfcCsvFile(exportRows);
+      const filename = buildHdfcFilename(now, daySequence, "001");
 
-      const fname = `salary-bulk-payment-${m[1]}-${m[2]}${batchId ? `-batch-${batchId.slice(0, 8)}` : ""}.xlsx`;
-      return new Response(new Uint8Array(buf), {
+      const totalInr = exportRows.reduce((a, r) => a + r.amountInr, 0);
+      void logAudit(profile.id, "salary_hdfc_export_generated", batchId ? "salary_batch" : "salary_month", batchId ?? month, { month, rows: exportRows.length, total_inr: totalInr, filename });
+
+      return new NextResponse(csv, {
+        status: 200,
         headers: {
-          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${fname}"`,
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${filename}"`,
           "Cache-Control": "no-store, must-revalidate",
         },
       });
     } catch (buildErr) {
       // Building failed AFTER the claim — release the lock so the batch isn't
-      // stuck showing "IN HDFC FILE" for a file that never existed.
+      // stuck locked for a file that never existed.
       if (batchId) {
         await admin.from("salary_batches")
           .update({ hdfc_generated_at: null, hdfc_generated_by: null } as never)

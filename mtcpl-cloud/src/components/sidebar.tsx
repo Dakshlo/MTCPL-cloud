@@ -412,6 +412,20 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant_star"],
     department: "salary",
   },
+  {
+    href: "/salary/pay",
+    label: "Pay salary",
+    icon: "💵",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "salary",
+  },
+  {
+    href: "/salary/records",
+    label: "Records",
+    icon: "📊",
+    roles: ["developer", "owner", "accountant_star"],
+    department: "salary",
+  },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {
     type: "divider",

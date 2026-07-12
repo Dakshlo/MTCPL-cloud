@@ -50,22 +50,30 @@ export function daysInSalaryMonth(monthKey: string): number {
 }
 
 /** A row's EARNED base salary for the month, BEFORE OT / advances / deductions
- *  / PF:
- *    • fixed  → the full monthly salary, whatever the attendance;
- *    • worker → monthly salary × (attendance ÷ days-in-month), capped at the
- *               full month; an UNSET attendance earns 0 (days present must be
- *               recorded before the worker is paid).
+ *  / PF / ESI:
+ *    • fixed        → the full monthly salary, whatever the attendance;
+ *    • by attendance → dailySalary × days present (mig 194). Falls back to the
+ *                      legacy monthlySalary × (attendance ÷ days-in-month),
+ *                      capped, when no daily rate is stored, so employees added
+ *                      before the daily-wage change keep working.
+ *  An UNSET attendance earns 0 (days present must be recorded first).
  *  ONE source of truth for the server (authoritative) and the live UI preview. */
 export function earnedSalary(args: {
   monthlySalary: number;
+  dailySalary?: number | null;
   salaryType: "fixed" | "variable";
   attendanceDays: number | null;
   monthKey: string;
 }): number {
-  const base = Math.max(0, Number(args.monthlySalary) || 0);
-  if (args.salaryType !== "variable") return Math.round(base * 100) / 100;
+  if (args.salaryType !== "variable") {
+    return Math.round(Math.max(0, Number(args.monthlySalary) || 0) * 100) / 100;
+  }
   if (args.attendanceDays == null || !Number.isFinite(args.attendanceDays)) return 0;
+  const daily = Math.max(0, Number(args.dailySalary) || 0);
+  if (daily > 0) return Math.round(daily * Math.max(0, args.attendanceDays) * 100) / 100;
+  // Legacy fallback — monthly salary prorated by days-in-month, capped.
+  const monthly = Math.max(0, Number(args.monthlySalary) || 0);
   const days = daysInSalaryMonth(args.monthKey);
   const factor = Math.max(0, Math.min(1, args.attendanceDays / days));
-  return Math.round(base * factor * 100) / 100;
+  return Math.round(monthly * factor * 100) / 100;
 }
