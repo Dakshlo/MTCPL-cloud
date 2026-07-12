@@ -36,6 +36,41 @@ function num(fd: FormData, key: string): number {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
 }
 
+// ── Employee change timeline (owner/dev) — audit_logs entries carry a diff of
+// the tracked fields so the history reads "Monthly salary 30,000 → 35,000". ──
+const TRACKED_FIELDS: Array<{ key: string; label: string }> = [
+  { key: "monthly_salary", label: "Monthly salary" }, { key: "daily_salary", label: "Daily salary" },
+  { key: "salary_type", label: "Salary type" }, { key: "min_wage_rate", label: "Min wage rate" },
+  { key: "designation", label: "Designation" }, { key: "organization", label: "Organization" },
+  { key: "pf_enabled", label: "PF" }, { key: "pf_percent", label: "PF %" },
+  { key: "esi_enabled", label: "ESI" }, { key: "esi_percent", label: "ESI %" },
+  { key: "tds_enabled", label: "TDS" }, { key: "tds_percent", label: "TDS %" },
+  { key: "bank_name", label: "Bank" }, { key: "account_number", label: "Account no." }, { key: "ifsc", label: "IFSC" },
+  { key: "beneficiary_name", label: "Beneficiary" }, { key: "phone", label: "Phone" },
+  { key: "uan", label: "UAN" }, { key: "esi_number", label: "ESI no." }, { key: "aadhaar", label: "Aadhaar" },
+  { key: "father_name", label: "Father / husband" }, { key: "joined_on", label: "Joined on" },
+];
+const NUMERIC_FIELDS = new Set(["monthly_salary", "daily_salary", "min_wage_rate", "pf_percent", "esi_percent", "tds_percent"]);
+function normField(key: string, v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  const s = String(v).trim();
+  if (NUMERIC_FIELDS.has(key)) { const n = Number(s); return Number.isFinite(n) && s !== "" ? String(n) : s; }
+  return s;
+}
+/** Fields that changed between an existing employee row and the proposed values.
+ *  Only keys present in `proposed` are compared (disabled inputs aren't submitted). */
+function diffEmployee(before: Record<string, unknown>, proposed: Record<string, unknown>): Array<{ field: string; from: string; to: string }> {
+  const out: Array<{ field: string; from: string; to: string }> = [];
+  for (const { key, label } of TRACKED_FIELDS) {
+    if (!(key in proposed)) continue;
+    const from = normField(key, before[key]);
+    const to = normField(key, proposed[key]);
+    if (from !== to) out.push({ field: label, from, to });
+  }
+  return out;
+}
+
 /** First-of-month key ("2026-07-01") from a month input ("2026-07"). */
 function monthKey(raw: string): string | null {
   const m = raw.match(/^(\d{4})-(\d{2})/);
@@ -140,17 +175,22 @@ export async function upsertSalaryEmployeeAction(formData: FormData): Promise<vo
   const minWage = formData.has("min_wage_rate")
     ? (txt(formData, "min_wage_rate") === "" ? null : num(formData, "min_wage_rate"))
     : undefined;
+  const proposed: Record<string, unknown> = { ...row, ...(minWage !== undefined ? { min_wage_rate: minWage } : {}) };
 
   let savedId = id;
   if (id) {
+    // Snapshot before the write so the timeline can log what changed.
+    const { data: before } = await admin.from("salary_employees").select("*").eq("id", id).maybeSingle();
     const { error } = await admin.from("salary_employees").update({ ...row, updated_at: new Date().toISOString() } as never).eq("id", id);
     if (error) go(`Could not save: ${error.message}`);
-    void logAudit(profile.id, "salary_employee_updated", "salary_employee", id, { name });
+    const changes = before ? diffEmployee(before as Record<string, unknown>, proposed) : [];
+    void logAudit(profile.id, "salary_employee_updated", "salary_employee", id, { name, changes });
   } else {
     const { data: ins, error } = await admin.from("salary_employees").insert({ ...row, created_by: profile.id } as never).select("id").single();
     if (error) go(`Could not add: ${error.message}`);
     savedId = (ins as { id: string } | null)?.id ?? "";
-    void logAudit(profile.id, "salary_employee_added", "salary_employee", name, { name });
+    // Key the "added" event by the new employee id so the timeline finds it.
+    void logAudit(profile.id, "salary_employee_added", "salary_employee", savedId || name, { name, added: true });
   }
   if (minWage !== undefined && savedId) {
     // Error (e.g. column missing before mig 197) is intentionally not surfaced.

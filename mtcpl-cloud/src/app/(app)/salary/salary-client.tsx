@@ -134,6 +134,7 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
 }) {
   const [editEmp, setEditEmp] = useState<SalaryEmployee | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [timelineEmp, setTimelineEmp] = useState<SalaryEmployee | null>(null);
   const [q, setQ] = useState("");
   // Organizations default OPEN; designation subgroups default COLLAPSED. So we
   // track org COLLAPSES (default open) and designation OPENS (default closed).
@@ -246,6 +247,7 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
                             <td style={SALARY_TABLE.td}><Pill label={e.isActive ? "Active" : "Inactive"} tone={e.isActive ? "success" : "neutral"} /></td>
                             <td style={{ ...SALARY_TABLE.td, textAlign: "right", whiteSpace: "nowrap" }}>
                               <button type="button" onClick={() => setEditEmp(e)} style={{ ...btnGhost, padding: "6px 11px", marginRight: 6 }}>✎ Edit</button>
+                              {isBoss && <button type="button" onClick={() => setTimelineEmp(e)} title="Full change history — added, edits, salary rises (owner / developer only)" style={{ ...btnGhost, padding: "6px 11px", marginRight: 6 }}>🕑 Timeline</button>}
                               <form action={toggleSalaryEmployeeAction} style={{ display: "inline" }}>
                                 <input type="hidden" name="id" value={e.id} />
                                 <input type="hidden" name="active" value={e.isActive ? "0" : "1"} />
@@ -283,6 +285,71 @@ export function EmployeesView({ employees, organizations, designations, isBoss, 
       )}
 
       {editEmp && <EmployeeModal emp={editEmp === "new" ? null : editEmp} organizations={organizations} designations={designations} onClose={() => setEditEmp(null)} />}
+      {timelineEmp && <EmployeeTimelineModal emp={timelineEmp} onClose={() => setTimelineEmp(null)} />}
+    </div>
+  );
+}
+
+type TimelineEvent = { id: string; action: string; createdAt: string; actor: string | null; added: boolean; changes: Array<{ field: string; from: string; to: string }> };
+
+/** Owner/dev-only change history for one employee — fetched on open from
+ *  /api/salary/employee-timeline. Shows added + each edit's field diffs so you
+ *  can see salary rises and other changes over time. */
+function EmployeeTimelineModal({ emp, onClose }: { emp: SalaryEmployee; onClose: () => void }) {
+  const [events, setEvents] = useState<TimelineEvent[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/salary/employee-timeline?id=${emp.id}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!alive) return; j.ok ? setEvents(j.events as TimelineEvent[]) : setErr(j.error || "Could not load the timeline."); })
+      .catch(() => { if (alive) setErr("Could not load the timeline."); });
+    return () => { alive = false; };
+  }, [emp.id]);
+
+  const fmt = (v: string) => { const n = Number(v.replace(/,/g, "")); return v !== "" && /^[\d.]+$/.test(v) && Number.isFinite(n) ? n.toLocaleString("en-IN") : (v || "—"); };
+  const label = (ev: TimelineEvent) => ev.added ? "➕ Employee added" : ev.action === "salary_employee_activated" ? "▶ Re-activated" : ev.action === "salary_employee_deactivated" ? "⏸ Deactivated" : "✎ Edited";
+
+  return (
+    <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}>
+      <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "20px 24px", boxShadow: "0 26px 60px rgba(0,0,0,0.35)", maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 16, fontWeight: 900, marginBottom: 2 }}>🕑 {emp.name} — timeline</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 16 }}>Every change to this employee, newest first. Owner / developer only.</div>
+        {err ? (
+          <div style={{ fontSize: 12.5, color: "#b91c1c" }}>{err}</div>
+        ) : events === null ? (
+          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Loading…</div>
+        ) : events.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No history recorded yet — changes appear here from now on.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {events.map((ev) => (
+              <div key={ev.id} style={{ borderLeft: "3px solid var(--gold-dark)", paddingLeft: 12 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 800 }}>{label(ev)}</span>
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{dayShort(ev.createdAt) || ""}{ev.actor ? ` · ${ev.actor}` : ""}</span>
+                </div>
+                {ev.added ? (
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>Added to the employee master.</div>
+                ) : ev.changes.length === 0 ? (
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>Saved (no tracked field changed).</div>
+                ) : (
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 12 }}>
+                    {ev.changes.map((c, i) => (
+                      <li key={i} style={{ marginBottom: 2 }}>
+                        <strong>{c.field}</strong>: <span style={{ color: "#b91c1c", textDecoration: "line-through" }}>{fmt(c.from)}</span> → <span style={{ color: "#15803d", fontWeight: 700 }}>{fmt(c.to)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+          <button type="button" onClick={onClose} style={btnGhost}>Close</button>
+        </div>
+      </div>
     </div>
   );
 }
