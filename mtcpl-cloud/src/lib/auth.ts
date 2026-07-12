@@ -3,6 +3,12 @@ import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
+import {
+  DEPARTMENTS,
+  allowedDepartmentsForRole,
+  departmentForRoute,
+  type Department,
+} from "@/lib/departments";
 
 export function getDefaultRouteForRole(role?: AppRole | null) {
   switch (role) {
@@ -79,6 +85,12 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
       // Mig 053 — UTR / bank-statement recheck. Lands on the
       // dedicated Final Audit queue.
       return "/accounts/final-audit";
+    case "employee_register":
+      // Mig 195 — Employee-register role is locked to the Employees
+      // department; the employee master is its home. Without this case
+      // it fell into default → "/login" and looped (requireAuth bounces
+      // signed-in users to their default route, /login bounces back).
+      return "/salary";
     case "cnc_expense_entry":
       // Mig 054 — single-page portal for CNC operational expense
       // entry. The role has no other surface in the app; this is
@@ -99,7 +111,9 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
   }
 }
 
-export function getDefaultRouteForProfile(profile?: Pick<Profile, "role" | "is_active"> | null) {
+export function getDefaultRouteForProfile(
+  profile?: Pick<Profile, "role" | "is_active" | "active_department"> | null,
+) {
   if (!profile) {
     return "/login";
   }
@@ -108,7 +122,27 @@ export function getDefaultRouteForProfile(profile?: Pick<Profile, "role" | "is_a
     return "/pending";
   }
 
-  return getDefaultRouteForRole(profile.role);
+  const roleRoute = getDefaultRouteForRole(profile.role);
+
+  // Reopen the app where the user left off. This used to always land
+  // on the ROLE's fixed home — so an accountant who'd switched into the
+  // Employees department and was working there got bounced back to
+  // /accounts (the Finance "due bills" page) on every reload. If they
+  // have an active_department their role still permits, and it isn't the
+  // role's own home department, send them to that department's landing
+  // instead. (When active_department == the role's home we keep
+  // roleRoute so role-specific deep landings are preserved, e.g.
+  // accountant★ → /accounts/final-audit rather than the generic
+  // /accounts.)
+  const dept = (profile.active_department ?? null) as Department | null;
+  if (dept && allowedDepartmentsForRole(profile.role).includes(dept)) {
+    if (dept !== departmentForRoute(roleRoute)) {
+      const landing = DEPARTMENTS.find((d) => d.id === dept)?.landingHref;
+      if (landing) return landing;
+    }
+  }
+
+  return roleRoute;
 }
 
 const DEV_MOCK_PROFILE: Profile = {
@@ -159,7 +193,7 @@ export async function getAuthContext() {
     theme_preference?: "light" | "dark" | null;
     can_approve_cuts?: boolean;
     can_approve_bills?: boolean;
-    active_department?: "production" | "finance" | "inventory" | "invoicing" | null;
+    active_department?: Department | null;
   };
   let { data: profile } = (await admin
     .from("profiles")

@@ -101,12 +101,21 @@ export type Profile = {
    *  always qualify in code regardless of the bit (the
    *  canApproveBills helper enforces that). */
   can_approve_bills?: boolean;
-  /** Migration 036 (+ 038 added 'invoicing') — which "department" the
-   *  user is currently in. Only meaningful for developer + owner (the
-   *  lockedDepartmentForRole helper enforces the lock for every other
-   *  role). Defaults to 'production' for existing accounts. See
-   *  src/lib/departments.ts. */
-  active_department?: "production" | "finance" | "inventory" | "invoicing" | null;
+  /** Migration 036 (+ 038 'invoicing', 102 'register', 110 'maintenance',
+   *  189 'salary') — which "department" the user is currently in. Kept in
+   *  sync with the CHECK constraint on profiles.active_department and with
+   *  the Department union in src/lib/departments.ts. Reopening the app lands
+   *  the user back in this department (see getDefaultRouteForProfile).
+   *  Defaults to 'production' for existing accounts. */
+  active_department?:
+    | "production"
+    | "finance"
+    | "inventory"
+    | "invoicing"
+    | "register"
+    | "maintenance"
+    | "salary"
+    | null;
   /** Migration 074 — carving-head-lite flag. When TRUE, the user can
    *  access /carving (Unassigned + Active + Carving Done, but NOT
    *  Awaiting Review) and /slabs (Required Sizes) in addition to
