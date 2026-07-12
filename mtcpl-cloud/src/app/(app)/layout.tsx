@@ -829,6 +829,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 // stays 'crosscheck'.
                 crosscheck: "MANAGER",
                 cnc_expense_entry: "EXPENSES ENTRY",
+                employee_register: "EMPLOYEE REGISTER",
               } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
             </span>
             <TopbarRefreshButton />

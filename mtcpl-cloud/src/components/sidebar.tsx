@@ -396,34 +396,34 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "crosscheck"],
     department: "maintenance",
   },
-  // ── EMPLOYEES section (mig 189/193) — employee master + monthly salary
-  //    batches + PF / ESI records + the HDFC bulk-payment sheet. Completely
-  //    separate department (own tables); owner / developer / ACCOUNTANT★ only.
+  // ── EMPLOYEES section (mig 189/193/195) — employee master + monthly salary
+  //    batches + PF / ESI records + the HDFC bulk-payment sheet. Own tables;
+  //    owner / developer / both accountants / EMPLOYEE REGISTER role.
   {
     type: "divider",
     label: "EMPLOYEES",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant", "accountant_star", "employee_register"],
     department: "salary",
   },
   {
     href: "/salary",
     label: "Employees",
     icon: "👥",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant", "accountant_star", "employee_register"],
     department: "salary",
   },
   {
     href: "/salary/pay",
     label: "Pay salary",
     icon: "💵",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant", "accountant_star", "employee_register"],
     department: "salary",
   },
   {
     href: "/salary/records",
     label: "Records",
     icon: "📊",
-    roles: ["developer", "owner", "accountant_star"],
+    roles: ["developer", "owner", "accountant", "accountant_star", "employee_register"],
     department: "salary",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──

@@ -71,6 +71,8 @@ const UI_ROLES_ALL = [
   // Mig 058 — display as "ACCOUNTANT ★".
   // Mig 061 — DB enum renamed from `final_auditor` to `accountant_star`.
   { value: "accountant_star",    label: "ACCOUNTANT ★" },
+  // Mig 195 — dedicated Employees-department role.
+  { value: "employee_register",  label: "EMPLOYEE REGISTER" },
   // Mig 054 — CNC operational expense entry. Mig 060 widened to
   // cutter expenses too, so the display label is just "EXPENSES
   // ENTRY" now (DB enum stays `cnc_expense_entry`).
@@ -130,6 +132,8 @@ const ROLE_ACCESS: Record<string, string[]> = {
   // Mig 054 — CNC expense entry role. Single-page portal — only
   // sees the CNC Expenses entry page under the Carving section.
   cnc_expense_entry: ["CNC Expenses"],
+  // Mig 195 — Employee-register role: the whole Employees department.
+  employee_register: ["Employees", "Pay salary", "Records"],
 };
 
 function roleLabel(role: string): string {

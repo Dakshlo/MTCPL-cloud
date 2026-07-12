@@ -31,6 +31,9 @@ export type AppRole =
   | "biller"
   | "accountant"
   | "crosscheck"
+  // Migration 195 — Employee-register role: full access to the Employees
+  // department (salary / PF / ESI / bank sheet), nothing else.
+  | "employee_register"
   // Migration 041 — Inventory module (Scaffolding v1).
   //
   // storekeeper — the yard employee who manages physical stock.

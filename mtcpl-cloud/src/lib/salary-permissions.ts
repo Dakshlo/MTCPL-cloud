@@ -1,11 +1,12 @@
-// Salary / PF department access (Daksh, Jul 2026).
+// Employees department access (Daksh, Jul 2026).
 //
-// Salary data is sensitive — only the owner, the developer and the senior
-// accountant (accountant_star) can enter. Widen here if Daksh adds roles.
+// Salary data is sensitive. Access: owner, developer, BOTH accountants
+// (accountant + accountant_star) and the dedicated Employee-register role
+// (mig 195). Widen here if Daksh adds roles.
 
 export type SalaryProfile = { role: string };
 
-export const SALARY_ROLES = ["owner", "developer", "accountant_star"] as const;
+export const SALARY_ROLES = ["owner", "developer", "accountant", "accountant_star", "employee_register"] as const;
 
 export function canUseSalary(profile: SalaryProfile): boolean {
   return (SALARY_ROLES as readonly string[]).includes(profile.role);

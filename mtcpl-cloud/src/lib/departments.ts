@@ -202,8 +202,13 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     // v2 surfaces — parties / challans / invoices — stay gated to
     // accountant_star via canUseInvoicing; accountant only sees the
     // Work Order Doc inside Invoicing.)
+    // Jul 2026 (Daksh) — plain accountant also runs the Employees department
+    // (salary / PF / ESI), same as accountant★.
     case "accountant":
-      return ["finance", "invoicing"];
+      return ["finance", "invoicing", "salary"];
+    // Mig 195 — Employee-register role: ONLY the Employees department.
+    case "employee_register":
+      return ["salary"];
     // Mig 054 — cnc_expense_entry is a production-cost role.
     // CNC machines are part of production; their operating
     // expenses (tools, electricity, labor) are tracked here so
