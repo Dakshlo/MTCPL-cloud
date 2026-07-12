@@ -693,8 +693,8 @@ function RegisterExportControl({ monthYm, rows }: { monthYm: string; rows: Salar
   const chosen = [...sel];
   const canDownload = mode === "all" || chosen.length > 0;
   const href = mode === "all"
-    ? `/api/salary/wage-register-export?month=${monthYm}`
-    : `/api/salary/wage-register-export?month=${monthYm}&${mode === "organization" ? "organizations" : "designations"}=${encodeURIComponent(chosen.join(","))}`;
+    ? `/salary/register?month=${monthYm}`
+    : `/salary/register?month=${monthYm}&${mode === "organization" ? "organizations" : "designations"}=${encodeURIComponent(chosen.join(","))}`;
   const toggle = (v: string) => setSel((p) => { const n = new Set(p); n.has(v) ? n.delete(v) : n.add(v); return n; });
   const setModeReset = (k: "all" | "organization" | "designation") => { setMode(k); setSel(new Set()); };
 
@@ -727,8 +727,9 @@ function RegisterExportControl({ monthYm, rows }: { monthYm: string; rows: Salar
             )}
             <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => { if (!canDownload) { e.preventDefault(); return; } setOpen(false); }} aria-disabled={!canDownload}
               style={{ ...btnPrimary, background: canDownload ? "#15803d" : "var(--border)", display: "block", textAlign: "center", textDecoration: "none", pointerEvents: canDownload ? "auto" : "none", opacity: canDownload ? 1 : 0.6 }}>
-              ⬇ Download register{mode === "all" ? " (all paid)" : chosen.length ? ` (${chosen.length})` : ""}
+              📋 Open register{mode === "all" ? " (all paid)" : chosen.length ? ` (${chosen.length})` : ""}
             </a>
+            <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center", marginTop: 6 }}>Opens the register — download the Excel from there.</div>
           </div>
         </>
       )}

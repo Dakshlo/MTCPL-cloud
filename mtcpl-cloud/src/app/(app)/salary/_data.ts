@@ -115,6 +115,90 @@ export async function loadBatches(admin: Admin, monthKey: string): Promise<{ bat
   return { batches, needs193: false };
 }
 
+// ── Register of Wages (Form 11) — one shared computation for the Excel route
+// AND the in-app preview page, so they never disagree. ──────────────────
+export const REG_NO_ORG = "(No organization)";
+export const REG_NO_DESIG = "(No designation)";
+const MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export type WageRegRow = {
+  sr: number; name: string; father: string; org: string; desig: string;
+  variable: boolean; rate: number; attendance: number | null;
+  basic: number; allow: number; gross: number;
+  esi: number; pf: number; tds: number; ded: number; net: number;
+  paidAt: string | null;
+};
+export type WageRegister = {
+  ok: true;
+  rows: WageRegRow[];
+  totals: { basic: number; allow: number; gross: number; esi: number; pf: number; tds: number; ded: number; net: number };
+  year: number; mon: number; monthName: string; periodStr: string;
+  scope: string | null;
+} | { ok: false; error: string };
+
+const rn2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+
+/** The month's PAID employees as a Register of Wages, scoped All / by
+ *  organization / by designation. Net = gross(6+7) − (ESI+PF+TDS) — the
+ *  statutory figure (advances aren't on this form). */
+export async function loadWageRegister(
+  admin: Admin,
+  monthYm: string,
+  opts: { organizations?: string[] | null; designations?: string[] | null },
+): Promise<WageRegister> {
+  const m = /^(\d{4})-(\d{2})/.exec(monthYm ?? "");
+  if (!m) return { ok: false, error: "Bad month." };
+  const year = Number(m[1]), mon = Number(m[2]);
+  const monthKey = `${m[1]}-${m[2]}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const periodStr = `01-${m[2]}-${m[1]} to ${String(lastDay).padStart(2, "0")}-${m[2]}-${m[1]}`;
+
+  const wantOrgs = opts.organizations && opts.organizations.length ? new Set(opts.organizations) : null;
+  const wantDesigs = opts.designations && opts.designations.length ? new Set(opts.designations) : null;
+
+  const { data, error } = await admin
+    .from("salary_payments")
+    .select("gross, pf_amount, esi_amount, tds_amount, ot_amount, addition, net, attendance_days, paid_at, salary_employees(*)")
+    .eq("month", monthKey)
+    .eq("status", "paid");
+  if (error) return { ok: false, error: error.message };
+
+  type Emp = Record<string, unknown>;
+  type Src = { gross: number; pf_amount: number; esi_amount: number; tds_amount: number; ot_amount: number; addition: number; net: number; attendance_days: number | null; paid_at: string | null; salary_employees: Emp | Emp[] | null };
+  let raw = ((data ?? []) as unknown as Src[]).map((r) => {
+    const e = (Array.isArray(r.salary_employees) ? r.salary_employees[0] : r.salary_employees) ?? {};
+    const org = ((e.organization as string | null) ?? "").trim();
+    const desig = ((e.designation as string | null) ?? "").trim();
+    const variable = (e.salary_type as string) === "variable";
+    return {
+      name: String(e.name ?? "—"), father: (e.father_name as string | null) ?? "",
+      org, desig, variable,
+      rate: variable ? Number(e.daily_salary) || 0 : Number(e.monthly_salary) || 0,
+      attendance: r.attendance_days,
+      basic: Number(r.gross) || 0, allow: (Number(r.ot_amount) || 0) + (Number(r.addition) || 0),
+      pf: Number(r.pf_amount) || 0, esi: Number(r.esi_amount) || 0, tds: Number(r.tds_amount) || 0,
+      paidAt: r.paid_at,
+    };
+  });
+  if (wantOrgs) raw = raw.filter((r) => wantOrgs.has(r.org || REG_NO_ORG));
+  if (wantDesigs) raw = raw.filter((r) => wantDesigs.has(r.desig || REG_NO_DESIG));
+  raw.sort((a, b) => (a.org || "~").localeCompare(b.org || "~") || (a.desig || "~").localeCompare(b.desig || "~") || a.name.localeCompare(b.name));
+
+  const totals = { basic: 0, allow: 0, gross: 0, esi: 0, pf: 0, tds: 0, ded: 0, net: 0 };
+  const rows: WageRegRow[] = raw.map((r, i) => {
+    const gross = rn2(r.basic + r.allow);
+    const ded = rn2(r.esi + r.pf + r.tds);
+    const net = rn2(gross - ded);
+    totals.basic += r.basic; totals.allow += r.allow; totals.gross += gross;
+    totals.esi += r.esi; totals.pf += r.pf; totals.tds += r.tds; totals.ded += ded; totals.net += net;
+    return { sr: i + 1, ...r, gross, ded, net };
+  });
+  Object.keys(totals).forEach((k) => (totals[k as keyof typeof totals] = rn2(totals[k as keyof typeof totals])));
+
+  const scope = wantOrgs ? `Organization: ${[...wantOrgs].join(", ")}` : wantDesigs ? `Designation: ${[...wantDesigs].join(", ")}` : null;
+  return { ok: true, rows, totals, year, mon, monthName: MONTHS_FULL[mon - 1], periodStr, scope };
+}
+
 /** Every PAID row (all months) — paged past PostgREST's 1000-row cap. */
 export async function loadPaidRows(admin: Admin): Promise<PaidRow[]> {
   const out: PaidRow[] = [];
