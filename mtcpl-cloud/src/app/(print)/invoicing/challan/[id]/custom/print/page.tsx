@@ -209,7 +209,7 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
                   return (
                     <tr key={it.id ?? i}>
                       <td>{i + 1}</td>
-                      <td>{dash(it.particulars)}</td>
+                      <td style={{ textTransform: "uppercase" }}>{dash(it.particulars)}</td>
                       <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
                       <td>{dash(it.unit)}</td>
                       <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
@@ -255,14 +255,14 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
               <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>{docTitle === "TAX INVOICE" ? "Invoice" : "Challan"} Total</th></tr></thead>
               <tbody>
                 {totals.groups.length === 0 ? (
-                  <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(totals.grand)}</td></tr>
+                  <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(disc.payable)}</td></tr>
                 ) : (
                   totals.groups.map((g, i) => (
                     <tr key={i}>
                       <td className="mono">{rupee(g.taxable)}</td>
                       <td>{gstGroupLabel(gstMode, g)}</td>
                       <td className="mono">{rupee(g.taxAmt)}</td>
-                      {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                      {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(disc.payable)}</td>}
                     </tr>
                   ))
                 )}

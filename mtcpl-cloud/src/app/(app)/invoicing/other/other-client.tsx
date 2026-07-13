@@ -178,7 +178,7 @@ export function OtherSalesClient({
             {sections.map((s, si) => (
               <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-                  <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. Marble, Granite)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px" }} />
+                  <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. Marble, Granite)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px", textTransform: "uppercase" }} />
                   {sections.length > 1 && <button type="button" onClick={() => removeTable(si)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800, fontSize: 12 }}>✕ Table</button>}
                 </div>
                 <div style={{ overflowX: "auto" }}>
@@ -197,7 +197,7 @@ export function OtherSalesClient({
                       {s.lines.map((l, li) => (
                         <tr key={li}>
                           <td style={{ ...cell, textAlign: "center", color: "var(--muted)" }}>{li + 1}</td>
-                          <td style={cell}><input value={l.particulars} onChange={(e) => setLine(si, li, "particulars", e.target.value)} style={inp} placeholder="Description of goods" /></td>
+                          <td style={cell}><input value={l.particulars} onChange={(e) => setLine(si, li, "particulars", e.target.value)} style={{ ...inp, textTransform: "uppercase" }} placeholder="Description of goods" /></td>
                           <td style={cell}><input value={l.hsn} onChange={(e) => setLine(si, li, "hsn", e.target.value)} style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></td>
                           <td style={cell}>
                             <select value={l.unit} onChange={(e) => setLine(si, li, "unit", e.target.value)} style={{ ...inp, cursor: "pointer" }}>
@@ -351,14 +351,14 @@ function OtherChallanPreview({ client, date, docCode, sections, onClose }: {
           </div>
           {filled.length === 0 ? <p style={{ color: "#888", fontSize: 11 }}>No line items yet.</p> : filled.map((s, gi) => (
             <div key={gi} style={{ marginBottom: 8 }}>
-              {(filled.length > 1 || s.head.trim()) && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#5b2e0a", background: "#f3efe7", borderLeft: "3px solid #7c4a1e", borderRadius: 3, padding: "4px 9px" }}>{s.head.trim() || `Table ${gi + 1}`}</div>}
+              {(filled.length > 1 || s.head.trim()) && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#5b2e0a", background: "#f3efe7", borderLeft: "3px solid #7c4a1e", borderRadius: 3, padding: "4px 9px", textTransform: "uppercase" }}>{s.head.trim() || `Table ${gi + 1}`}</div>}
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr><th style={ph}>#</th><th style={{ ...ph, textAlign: "left" }}>Item / Particulars</th><th style={ph}>HSN</th><th style={ph}>Unit</th><th style={{ ...ph, textAlign: "right" }}>Qty</th></tr></thead>
                 <tbody>
                   {s.lines.map((l, i) => (
                     <tr key={i}>
                       <td style={pcell}>{i + 1}</td>
-                      <td style={pcell}>{l.particulars || "-"}</td>
+                      <td style={{ ...pcell, textTransform: "uppercase" }}>{l.particulars || "-"}</td>
                       <td style={{ ...pcell, fontFamily: "ui-monospace, monospace" }}>{l.hsn || "-"}</td>
                       <td style={pcell}>{l.unit || "-"}</td>
                       <td style={{ ...pcell, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{l.quantity || "-"}</td>

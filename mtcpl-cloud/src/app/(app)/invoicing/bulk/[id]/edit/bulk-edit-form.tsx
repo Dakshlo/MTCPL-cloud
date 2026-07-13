@@ -107,7 +107,7 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initDisco
         {sections.map((s, si) => (
           <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-              <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. PinkStone)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px" }} />
+              <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. PinkStone)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px", textTransform: "uppercase" }} />
               {mode && (
                 <label title={`This table's GST slab — mandatory. ${mode === "cgst_sgst" ? "Splits half CGST / half SGST." : "Charged as IGST."}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: s.gst.trim() === "" ? "#dc2626" : "var(--muted)", whiteSpace: "nowrap" }}>
                   GST %
@@ -134,7 +134,7 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initDisco
                   {s.lines.map((l, li) => (
                     <tr key={li}>
                       <td style={{ ...cell, textAlign: "center", color: "var(--muted)" }}>{li + 1}</td>
-                      <td style={cell}><input value={l.particulars} onChange={(e) => setLine(si, li, "particulars", e.target.value)} style={inp} /></td>
+                      <td style={cell}><input value={l.particulars} onChange={(e) => setLine(si, li, "particulars", e.target.value)} style={{ ...inp, textTransform: "uppercase" }} /></td>
                       <td style={cell}><input value={l.hsn} onChange={(e) => setLine(si, li, "hsn", e.target.value)} style={{ ...inp, fontFamily: "ui-monospace, monospace" }} /></td>
                       <td style={cell}>
                         <select value={l.unit} onChange={(e) => setLine(si, li, "unit", e.target.value)} style={{ ...inp, cursor: "pointer" }}>

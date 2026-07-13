@@ -590,14 +590,14 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
             <thead><tr><th style={ph}>Taxable Amount</th><th style={ph}>GST</th><th style={ph}>Total Tax</th><th style={ph}>Invoice Total</th></tr></thead>
             <tbody>
               {totals.groups.length === 0 ? (
-                <tr><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(totals.subtotal)}</td><td style={pcell}>—</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(0)}</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(totals.grand)}</td></tr>
+                <tr><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(totals.subtotal)}</td><td style={pcell}>—</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(0)}</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(disc.payable)}</td></tr>
               ) : (
                 totals.groups.map((g, i) => (
                   <tr key={i}>
                     <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(g.taxable)}</td>
                     <td style={pcell}>{gstGroupLabel(mode, g)}</td>
                     <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(g.taxAmt)}</td>
-                    {i === 0 && <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right", fontWeight: 800, verticalAlign: "middle" }} rowSpan={totals.groups.length}>{rupee(totals.grand)}</td>}
+                    {i === 0 && <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right", fontWeight: 800, verticalAlign: "middle" }} rowSpan={totals.groups.length}>{rupee(disc.payable)}</td>}
                   </tr>
                 ))
               )}

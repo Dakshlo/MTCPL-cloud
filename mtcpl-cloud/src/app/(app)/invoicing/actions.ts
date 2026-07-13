@@ -554,14 +554,15 @@ function parseRunningItems(fd: FormData, withRate: boolean): RunItem[] {
     const rate = withRate ? (Number(it?.rate) || 0) : 0;
     const amount = withRate ? (Math.round((Number(it?.amount) || qty * rate) * 100) / 100) : 0;
     out.push({
-      particulars: particulars || null,
+      // Register style — item names + table heads store in CAPITALS (Daksh).
+      particulars: particulars ? particulars.toUpperCase() : null,
       hsn: String(it?.hsn ?? "").trim() || null,
       unit: String(it?.unit ?? "").trim() || null,
       quantity: qty || null,
       rate: withRate ? (rate || null) : null,
       amount: withRate ? (amount || null) : null,
       section_index: Number(it?.section_index) || 0,
-      section_head: String(it?.section_head ?? "").trim() || null,
+      section_head: String(it?.section_head ?? "").trim().toUpperCase() || null,
       // Mig 199 — the table's own GST slab % (null when GST is off / not sent).
       section_gst: it?.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null,
     });
@@ -1839,9 +1840,9 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     bulk_invoice_id: bulkId,
     position: i,
     section_index: Number(it.section_index) || 0,
-    section_head: (it.section_head ?? "").toString().trim() || null,
+    section_head: (it.section_head ?? "").toString().trim().toUpperCase() || null,
     section_gst: gstMode ? secGst(it) : null,
-    particulars: (it.particulars ?? "").toString() || null,
+    particulars: (it.particulars ?? "").toString().toUpperCase() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
     quantity: Number(it.quantity) || null,
@@ -1965,14 +1966,14 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
     challanIds = ((cur ?? []) as Array<{ challan_id: string }>).map((r) => r.challan_id);
   }
   const stagedItems = items.map((it) => ({
-    particulars: (it.particulars ?? "").toString() || null,
+    particulars: (it.particulars ?? "").toString().toUpperCase() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
     quantity: Number(it.quantity) || null,
     rate: Number(it.rate) || null,
     amount: Number(it.amount) || (Number(it.quantity) || 0) * (Number(it.rate) || 0) || null,
     section_index: Number(it.section_index) || 0,
-    section_head: (it.section_head ?? "").toString().trim() || null,
+    section_head: (it.section_head ?? "").toString().trim().toUpperCase() || null,
     section_gst: gstMode ? secGst(it) : null,
   }));
   // Mig 200 — discount on the final amount.

@@ -115,7 +115,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
         .party-meta { font-size: 10.5px; color: #555; margin-top: 2px; font-family: ui-monospace, monospace; }
         .party .muted { color: #999; }
         .sec { margin-top: 8px; }
-        .sec-head { font-size: 10.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; border-radius: 3px; padding: 4px 9px; }
+        .sec-head { text-transform: uppercase; font-size: 10.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; border-radius: 3px; padding: 4px 9px; }
         table.t { width: 100%; border-collapse: collapse; font-size: 10.5px; }
         table.t th { background: #eef2f7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; border: 1px solid #d3dae3; }
         table.t td { padding: 4px 6px; border: 1px solid #e2e7ee; vertical-align: top; font-weight: 700; color: #1a1a1a; }
@@ -212,7 +212,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                       return (
                         <tr key={it.id ?? i}>
                           <td>{i + 1}</td>
-                          <td>{dash(it.particulars)}</td>
+                          <td style={{ textTransform: "uppercase" }}>{dash(it.particulars)}</td>
                           <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
                           <td>{dash(it.unit)}</td>
                           <td className="r q">{it.quantity != null ? fmt(Number(it.quantity)) : "-"}</td>
@@ -260,14 +260,14 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                   <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
                   <tbody>
                     {totals.groups.length === 0 ? (
-                      <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(totals.grand)}</td></tr>
+                      <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(disc.payable)}</td></tr>
                     ) : (
                       totals.groups.map((g, i) => (
                         <tr key={i}>
                           <td className="mono">{rupee(g.taxable)}</td>
                           <td>{gstGroupLabel(gstMode, g)}</td>
                           <td className="mono">{rupee(g.taxAmt)}</td>
-                          {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                          {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(disc.payable)}</td>}
                         </tr>
                       ))
                     )}

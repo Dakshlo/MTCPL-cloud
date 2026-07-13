@@ -53,14 +53,15 @@ function parseItems(fd: FormData): ItemIn[] {
     const amount = rate != null ? Math.round(qty * rate * 100) / 100 : null;
     if (!particulars && !qty && !amount) continue; // skip blank line
     out.push({
-      particulars: particulars || null,
+      // Register style — item names + table heads store in CAPITALS (Daksh).
+      particulars: particulars ? particulars.toUpperCase() : null,
       hsn: String(it?.hsn ?? "").trim() || null,
       unit: String(it?.unit ?? "").trim() || null,
       quantity: qty || null,
       rate,
       amount,
       section_index: Number(it?.section_index) || 0,
-      section_head: String(it?.section_head ?? "").trim() || null,
+      section_head: String(it?.section_head ?? "").trim().toUpperCase() || null,
       // Mig 199 — the table's own GST slab % (null when GST is off / challan step).
       section_gst: it?.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null,
     });

@@ -99,7 +99,7 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
               <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
                 {(sections.length > 1 || s.head.trim() || mode) && (
                   <div style={{ padding: "7px 11px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
-                    <span>{s.head.trim() || `Table ${si + 1}`}</span>
+                    <span style={{ textTransform: "uppercase" }}>{s.head.trim() || `Table ${si + 1}`}</span>
                     {mode && (
                       <label title={`This table's GST slab — mandatory. ${mode === "cgst_sgst" ? "Splits half CGST / half SGST." : "Charged as IGST."}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: s.gst.trim() === "" ? "#dc2626" : "var(--muted)", whiteSpace: "nowrap" }}>
                         GST %
@@ -119,7 +119,7 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
                       {s.lines.map((l, li) => (
                         <tr key={li}>
                           <td style={{ ...ro, textAlign: "center" }}>{li + 1}</td>
-                          <td style={ro}>{l.particulars || "-"}{l.hsn ? <span style={{ fontFamily: "ui-monospace, monospace", opacity: 0.7 }}> · {l.hsn}</span> : null}</td>
+                          <td style={{ ...ro, textTransform: "uppercase" }}>{l.particulars || "-"}{l.hsn ? <span style={{ fontFamily: "ui-monospace, monospace", opacity: 0.7 }}> · {l.hsn}</span> : null}</td>
                           <td style={ro}>{l.unit || "-"}</td>
                           <td style={{ ...ro, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{l.quantity || "-"}</td>
                           <td style={cell}><input value={l.rate} onChange={(e) => setRate(si, li, e.target.value)} inputMode="decimal" placeholder="0" style={rateInp} /></td>

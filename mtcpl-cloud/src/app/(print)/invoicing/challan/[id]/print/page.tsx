@@ -609,7 +609,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                     <td className="mono">{rupee(totals.subtotal)}</td>
                     <td>—</td>
                     <td className="mono">{rupee(0)}</td>
-                    <td className="mono">{rupee(totals.grand)}</td>
+                    <td className="mono">{rupee(disc.payable)}</td>
                   </tr>
                 ) : (
                   totals.groups.map((g, i) => (
@@ -617,7 +617,7 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                       <td className="mono">{rupee(g.taxable)}</td>
                       <td>{gstGroupLabel(gstMode, g)}</td>
                       <td className="mono">{rupee(g.taxAmt)}</td>
-                      {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                      {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(disc.payable)}</td>}
                     </tr>
                   ))
                 )}

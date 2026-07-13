@@ -103,7 +103,7 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
         .transport-grid .tk { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #8a6a45; }
         .transport-grid .tv { font-size: 11px; font-weight: 700; color: #1a1a1a; }
         .transport-grid .tv.mono { font-family: ui-monospace, monospace; }
-        .stone-title { font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
+        .stone-title { text-transform: uppercase; font-size: 11.5px; font-weight: 800; color: #5b2e0a; background: #f3efe7; border-left: 3px solid #7c4a1e; padding: 4px 9px; margin: 12px 0 2px; border-radius: 3px; break-after: avoid; }
         table.slab-table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
         table.slab-table th { background: #f3efe7; padding: 4px 6px; text-align: left; font-size: 8.5px; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 0.03em; border: 1px solid #d8d2c4; white-space: nowrap; }
         table.slab-table td { padding: 3px 6px; border: 1px solid #e6e1d6; vertical-align: top; font-weight: 700; color: #1a1a1a; }
@@ -179,7 +179,7 @@ export default async function RunningChallanPrintPage({ params }: { params: Para
                     {sec.rows.map((it, i) => (
                       <tr key={(it as any).id ?? `${gi}-${i}`}>
                         <td>{i + 1}</td>
-                        <td>{dash(it.particulars)}</td>
+                        <td style={{ textTransform: "uppercase" }}>{dash(it.particulars)}</td>
                         <td className="mono">{dash(it.hsn)}</td>
                         <td>{dash(it.unit)}</td>
                         <td className="r mono cqty">{it.quantity != null ? Number(it.quantity) : "-"}</td>

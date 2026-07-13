@@ -107,7 +107,7 @@ export function BulkInvoicePreview({
         /* Excel-style colour: Qty + Rate = blue, Amount = amber (Daksh). */
         .bip-t th.bip-q { background: #c7ddf6; } .bip-t td.bip-q { background: #e6f0fb; }
         .bip-t th.bip-a { background: #ffe6a8; } .bip-t td.bip-a { background: #fff7e0; }
-        .bip-sec { margin-top: 10px; background: #0f2540; color: #fff; font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 5px 5px 0 0; position: relative; z-index: 6; }
+        .bip-sec { text-transform: uppercase; margin-top: 10px; background: #0f2540; color: #fff; font-size: 11px; font-weight: 800; padding: 5px 10px; border-radius: 5px 5px 0 0; position: relative; z-index: 6; }
         .bip-sec + table.bip-t { margin-top: 0; }
         .bip-totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; position: relative; z-index: 6; }
         .bip-terms { flex: 1 1 auto; max-width: 58%; }
@@ -188,7 +188,7 @@ export function BulkInvoicePreview({
                     {g.rows.map((it, i) => (
                       <tr key={`${gi}-${i}`}>
                         <td>{i + 1}</td>
-                        <td>{dash(it.particulars)}</td>
+                        <td style={{ textTransform: "uppercase" }}>{dash(it.particulars)}</td>
                         <td style={{ fontFamily: "ui-monospace, monospace" }}>{dash(it.hsn)}</td>
                         <td>{dash(it.unit)}</td>
                         <td className="r bip-q">{it.quantity ? fmt(it.quantity) : "-"}</td>
@@ -232,14 +232,14 @@ export function BulkInvoicePreview({
               <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
               <tbody>
                 {totals.groups.length === 0 ? (
-                  <tr><td className="m">{rupee(totals.subtotal)}</td><td>—</td><td className="m">{rupee(0)}</td><td className="m">{rupee(totals.grand)}</td></tr>
+                  <tr><td className="m">{rupee(totals.subtotal)}</td><td>—</td><td className="m">{rupee(0)}</td><td className="m">{rupee(disc.payable)}</td></tr>
                 ) : (
                   totals.groups.map((g, i) => (
                     <tr key={i}>
                       <td className="m">{rupee(g.taxable)}</td>
                       <td>{gstGroupLabel(mode, g)}</td>
                       <td className="m">{rupee(g.taxAmt)}</td>
-                      {i === 0 && <td className="m" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                      {i === 0 && <td className="m" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(disc.payable)}</td>}
                     </tr>
                   ))
                 )}
