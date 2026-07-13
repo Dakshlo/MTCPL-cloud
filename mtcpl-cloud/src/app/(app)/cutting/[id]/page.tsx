@@ -456,6 +456,23 @@ export default async function CuttingDetailPage({
     }
   }
 
+  // Pre-cut slabs (mig 126/127) released EARLY from this block. Planned pre-cut
+  // stay in the pending payload (shown under "Marked cut"), but pre-cut EXTRAS +
+  // TRANSFERS are committed at release and never re-appear in the submission —
+  // so the auditor couldn't see what was really cut. Fetch every slab already
+  // stamped source_block_id = this block + precut_at; the render lists the ones
+  // NOT in the staged payload as their own "pre-cut released early" section.
+  let precutReleasedRows: ChipSlabRow[] = [];
+  if (stagedPayload) {
+    const { data: pcData, error: pcErr } = await supabase
+      .from("slab_requirements")
+      .select("id, label, temple, description, length_ft, width_ft, thickness_ft")
+      .eq("source_block_id", block.block_id)
+      .not("precut_at", "is", null);
+    if (pcErr) console.warn("[cutting/[id]] precut-released slab fetch failed", pcErr);
+    else precutReleasedRows = (pcData ?? []) as ChipSlabRow[];
+  }
+
   // When the cut is already done, fetch the REAL post-cut data so the
   // utilisation bar reflects what actually happened instead of the
   // planner's projection. For pending/in-progress we stick with the
@@ -1108,6 +1125,10 @@ export default async function CuttingDetailPage({
         const extraIds = stagedPayload?.extra_slab_ids ?? [];
         const transferIds = stagedPayload?.transferred_slab_ids ?? [];
         const remainders = stagedPayload?.remainders ?? [];
+        // Pre-cut releases NOT already in the payload (i.e. pre-cut extras /
+        // transfers). Planned pre-cut are inside cut_slab_ids → shown as cut.
+        const stagedIdSet = new Set<string>([...cutIds, ...notCutIds, ...extraIds, ...transferIds]);
+        const precutOnlyIds = precutReleasedRows.map((r) => r.id).filter((id) => !stagedIdSet.has(id));
 
         // Build a unified slab-info lookup for the staged chips.
         // chipSlabRows was loaded at page top-level (DB row per
@@ -1148,6 +1169,19 @@ export default async function CuttingDetailPage({
             sw: s.sw,
             sh: s.sh,
             sd: s.sd,
+          });
+        }
+        // Pre-cut extras / transfers aren't in the payload OR the layout, so
+        // enrich the lookup from their own fetch (dims + label + temple).
+        for (const s of precutReleasedRows) {
+          allSlabsById.set(s.id, {
+            id: s.id,
+            label: s.label,
+            temple: s.temple,
+            description: s.description,
+            sw: Number(s.length_ft),
+            sh: Number(s.width_ft),
+            sd: Number(s.thickness_ft),
           });
         }
         return (
@@ -1275,6 +1309,9 @@ export default async function CuttingDetailPage({
                   <SummaryStat label="Not cut" count={notCutIds.length} color="#b91c1c" />
                   <SummaryStat label="From inventory" count={extraIds.length} color="#b45309" />
                   <SummaryStat label="Transferred" count={transferIds.length} color="#7c3aed" />
+                  {precutOnlyIds.length > 0 && (
+                    <SummaryStat label="Pre-cut (early)" count={precutOnlyIds.length} color="#d97706" />
+                  )}
                   <SummaryStat label="Remainder pieces" count={remainders.length} color="#0f766e" />
                 </div>
 
@@ -1316,6 +1353,18 @@ export default async function CuttingDetailPage({
                     ids={transferIds}
                     allSlabsById={allSlabsById}
                     donorMap={transferDonorMap}
+                  />
+                )}
+                {/* Pre-cut extras / transfers released EARLY to carving — cut
+                    from this block but committed before Cutting Done, so they
+                    never entered the payload above. Shown so the auditor sees
+                    the FULL cut (and the recovery bar counts them). */}
+                {precutOnlyIds.length > 0 && (
+                  <SlabIdList
+                    label="⏳ Pre-cut released early (already in carving)"
+                    color="#d97706"
+                    ids={precutOnlyIds}
+                    allSlabsById={allSlabsById}
                   />
                 )}
                 {/* Remainders */}

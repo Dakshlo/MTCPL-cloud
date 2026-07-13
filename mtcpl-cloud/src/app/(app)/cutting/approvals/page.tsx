@@ -147,6 +147,28 @@ export default async function CuttingApprovalsPage() {
     }
   }
 
+  // Pre-cut slabs (mig 126/127) released EARLY to carving are cut from this block
+  // but only PLANNED ones stay in the pending payload — pre-cut EXTRAS + TRANSFERS
+  // are committed at release and never re-appear in the submission. Load every
+  // slab already stamped source_block_id = this block + precut_at so the audit's
+  // recovery bar (and the detail below) counts what was really cut, not just the
+  // final slabs. (Deduped per row against the payload ids, so planned pre-cut
+  // aren't double-counted.)
+  const precutByBlock = new Map<string, Array<{ id: string; sw: number; sh: number; sd: number }>>();
+  const visibleBlockIds = [...new Set(visible.map((r) => r.block_id).filter(Boolean))];
+  if (visibleBlockIds.length > 0) {
+    const { data: pcRows } = await supabase
+      .from("slab_requirements")
+      .select("id, source_block_id, length_ft, width_ft, thickness_ft")
+      .in("source_block_id", visibleBlockIds)
+      .not("precut_at", "is", null);
+    for (const s of (pcRows ?? []) as Array<{ id: string; source_block_id: string; length_ft: number; width_ft: number; thickness_ft: number }>) {
+      const arr = precutByBlock.get(s.source_block_id) ?? [];
+      arr.push({ id: s.id, sw: Number(s.length_ft), sh: Number(s.width_ft), sd: Number(s.thickness_ft) });
+      precutByBlock.set(s.source_block_id, arr);
+    }
+  }
+
   const rows: ApprovalRow[] = visible.map((r) => {
     const payload = r.pending_approval_payload ?? null;
     // Projected recovery from the submitted payload (becomes actual on
@@ -156,11 +178,19 @@ export default async function CuttingApprovalsPage() {
     // up the moment you approve. (The donor block loses these from its own
     // layout on approval, so there's no double-count.)
     const blk = r.layout?.blk ?? null;
-    const slabsForEff = [
+    const payloadSlabIds = [
       ...(payload?.cut_slab_ids ?? []),
       ...(payload?.extra_slab_ids ?? []),
       ...(payload?.transferred_slab_ids ?? []),
-    ].map((id) => slabDims.get(id)).filter(Boolean) as Array<{ sw: number; sh: number; sd: number }>;
+    ];
+    const payloadIdSet = new Set(payloadSlabIds);
+    // Pre-cut releases from this block NOT already in the payload (i.e. pre-cut
+    // extras / transfers) — planned pre-cut are in cut_slab_ids and skip here.
+    const precutOnly = (precutByBlock.get(r.block_id) ?? []).filter((s) => !payloadIdSet.has(s.id));
+    const slabsForEff = [
+      ...payloadSlabIds.map((id) => slabDims.get(id)).filter(Boolean) as Array<{ sw: number; sh: number; sd: number }>,
+      ...precutOnly.map((s) => ({ sw: s.sw, sh: s.sh, sd: s.sd })),
+    ];
     const remsForEff = (payload?.remainders ?? [])
       .map((rm) => ({ l: Number(rm.l ?? 0), w: Number(rm.w ?? 0), h: Number(rm.h ?? 0) }))
       .filter((rm) => rm.l > 0 && rm.w > 0 && rm.h > 0);
