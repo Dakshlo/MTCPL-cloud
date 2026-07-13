@@ -18,6 +18,7 @@ import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
 import { fetchTempleBilling } from "@/lib/temple-billing";
+import { uniformGstPercent } from "@/lib/challan-pricing";
 
 function txt(fd: FormData, key: string): string {
   const v = fd.get(key);
@@ -34,7 +35,7 @@ function refresh(id?: string) {
   }
 }
 
-type ItemIn = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
+type ItemIn = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null; section_gst: number | null };
 
 /** Parse the JSON line-item array; drop wholly-empty rows; recompute amount.
  *  Carries the table/head grouping (mig 183). `rate` is absent on the challan
@@ -60,19 +61,25 @@ function parseItems(fd: FormData): ItemIn[] {
       amount,
       section_index: Number(it?.section_index) || 0,
       section_head: String(it?.section_head ?? "").trim() || null,
+      // Mig 199 — the table's own GST slab % (null when GST is off / challan step).
+      section_gst: it?.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null,
     });
   }
   return out;
 }
 
-function readGst(fd: FormData) {
+/** Mig 199 — invoice-level GST from the per-table slabs: the shared % when every
+ *  table agrees (legacy readers stay right), NULL when tables differ. */
+function readGst(fd: FormData, items: ItemIn[]) {
   const gm = txt(fd, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  if (!gstMode) items.forEach((it) => { it.section_gst = null; });
+  const uniform = gstMode ? uniformGstPercent(items.map((it) => it.section_gst)) : null;
   return {
     gst_mode: gstMode,
-    igst_percent: gstMode === "igst" ? Number(txt(fd, "igst_percent")) || 0 : null,
-    cgst_percent: gstMode === "cgst_sgst" ? Number(txt(fd, "cgst_percent")) || 0 : null,
-    sgst_percent: gstMode === "cgst_sgst" ? Number(txt(fd, "sgst_percent")) || 0 : null,
+    igst_percent: gstMode === "igst" ? uniform : null,
+    cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
+    sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
   };
 }
 
@@ -103,8 +110,12 @@ async function writeItems(admin: ReturnType<typeof createAdminSupabaseClient>, c
   if (items.length === 0) return;
   const rows = items.map((it, i) => ({ other_challan_id: challanId, position: i, ...it }));
   const { error } = await admin.from("other_challan_items").insert(rows);
-  // Fall back without the section cols if mig 183 isn't applied yet.
-  if (error) await admin.from("other_challan_items").insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+  if (!error) return;
+  // Fall back for older schemas: first without section_gst (mig 199), then
+  // without the mig-183 section cols too.
+  const noGst = rows.map(({ section_gst: _sg, ...rest }) => rest);
+  const { error: error2 } = await admin.from("other_challan_items").insert(noGst);
+  if (error2) await admin.from("other_challan_items").insert(noGst.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
 }
 
 /** STEP 1 — create a new "other" CHALLAN (CH-<fy>-<n>, shared series) with
@@ -206,7 +217,12 @@ export async function convertOtherChallanAction(formData: FormData) {
 
   const items = parseItems(formData);
   if (items.length === 0) redirect(`/invoicing/other/${id}/invoice?toast=Add+at+least+one+line+item`);
-  const gst = readGst(formData);
+  // Mig 199 — per-TABLE GST slab, mandatory when GST is on.
+  const gmRaw = txt(formData, "gst_mode");
+  if ((gmRaw === "igst" || gmRaw === "cgst_sgst") && items.some((it) => it.section_gst == null)) {
+    redirect(`/invoicing/other/${id}/invoice?toast=${encodeURIComponent("Set the GST % on every table")}`);
+  }
+  const gst = readGst(formData, items);
 
   // Mig 184 — editing an EXISTING other-sales invoice is approval-gated: stage
   // the change; owner / accountant★ apply it from the Approval page.

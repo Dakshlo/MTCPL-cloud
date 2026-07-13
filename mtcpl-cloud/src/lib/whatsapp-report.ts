@@ -20,7 +20,7 @@ import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
 import { isMarble, cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
-import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
@@ -553,7 +553,7 @@ async function buildRecoveryByCategory(
 // one document header, so a single combined PDF is the delivery path — no
 // chromium, no extra messages).
 
-export type RecentLine = { name: string; desc: string; unit: string; qty: number; rate: number; amount: number };
+export type RecentLine = { name: string; desc: string; unit: string; qty: number; rate: number; amount: number; gstPercent: number | null };
 export type RecentDoc = {
   kind: "challan" | "invoice";
   code: string; invCode: string | null; party: string; date: string;
@@ -595,6 +595,8 @@ async function fetchLines(
         qty: q,
         rate: Number(it.rate) || 0,
         amount: it.amount != null ? Number(it.amount) || 0 : q * (Number(it.rate) || 0),
+        // Mig 199 — the line's own GST slab (select("*") carries it post-mig).
+        gstPercent: it.section_gst != null && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null,
       });
       m.set(pid, arr);
     }
@@ -607,7 +609,7 @@ function rollup(lines: RecentLine[], gst: ReturnType<typeof gstOfRow>): Pick<Rec
   let cft = 0, sft = 0, nos = 0;
   for (const l of lines) { const b = unitBucket(l.unit); if (b === "cft") cft += l.qty; else if (b === "sft") sft += l.qty; else nos += l.qty; }
   const priced = lines.some((l) => l.amount > 0);
-  const t = computeInvoiceTotals(lines.map((l) => l.amount), gst);
+  const t = computeGroupedGstTotals(lines.map((l) => ({ amount: l.amount, gstPercent: l.gstPercent })), gst);
   return { cft, sft, nos, subtotal: t.subtotal, taxed: t.grand - t.subtotal, total: t.grand, priced };
 }
 

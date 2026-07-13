@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, type GstItem, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { InvoicesView, type InvoiceRow } from "./invoices-collapsible";
@@ -71,24 +71,27 @@ export default async function InvoicingListPage() {
   ]);
 
   // Compute each priced challan's grand total from its items + GST snapshot.
+  // Mig 199 — items carry a per-line slab (section_gst); pre-mig items fall back
+  // to the invoice-level % (the select is retried without the column pre-mig).
   const totalByChallan = new Map<string, number>();
   const challanIds = priced.map((c) => c.id);
   for (let i = 0; i < challanIds.length; i += 300) {
     const chunk = challanIds.slice(i, i + 300);
     if (chunk.length === 0) break;
-    const { data: items } = await supabase
+    let { data: items } = await supabase
       .from("challan_items")
-      .select("challan_id, amount, rate, measure_qty, quantity")
+      .select("challan_id, amount, rate, measure_qty, quantity, section_gst")
       .in("challan_id", chunk);
-    const byCh = new Map<string, number[]>();
-    for (const it of (items ?? []) as Array<{ challan_id: string; amount: number | null; rate: number | null; measure_qty: number | null; quantity: number | null }>) {
+    if (items == null) ({ data: items } = (await supabase.from("challan_items").select("challan_id, amount, rate, measure_qty, quantity").in("challan_id", chunk)) as unknown as { data: typeof items });
+    const byCh = new Map<string, GstItem[]>();
+    for (const it of (items ?? []) as Array<{ challan_id: string; amount: number | null; rate: number | null; measure_qty: number | null; quantity: number | null; section_gst?: number | null }>) {
       const meas = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
       const amt = it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * meas;
-      const arr = byCh.get(it.challan_id) ?? []; arr.push(amt); byCh.set(it.challan_id, arr);
+      const arr = byCh.get(it.challan_id) ?? []; arr.push({ amount: amt, gstPercent: it.section_gst != null ? Number(it.section_gst) : null }); byCh.set(it.challan_id, arr);
     }
     for (const c of priced) {
       if (!chunk.includes(c.id)) continue;
-      const t = computeInvoiceTotals(byCh.get(c.id) ?? [], {
+      const t = computeGroupedGstTotals(byCh.get(c.id) ?? [], {
         mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
         igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0,
       });
@@ -121,15 +124,16 @@ export default async function InvoicingListPage() {
     const ids = bulkApproved.map((b) => b.id);
     for (let i = 0; i < ids.length; i += 300) {
       const chunk = ids.slice(i, i + 300); if (!chunk.length) break;
-      const { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk);
-      const byB = new Map<string, number[]>();
-      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null }>) {
+      let { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate, section_gst").in("bulk_invoice_id", chunk);
+      if (its == null) ({ data: its } = (await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk)) as unknown as { data: typeof its });
+      const byB = new Map<string, GstItem[]>();
+      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null; section_gst?: number | null }>) {
         const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
-        const a = byB.get(it.bulk_invoice_id) ?? []; a.push(amt); byB.set(it.bulk_invoice_id, a);
+        const a = byB.get(it.bulk_invoice_id) ?? []; a.push({ amount: amt, gstPercent: it.section_gst != null ? Number(it.section_gst) : null }); byB.set(it.bulk_invoice_id, a);
       }
       for (const b of bulkApproved) {
         if (!chunk.includes(b.id)) continue;
-        const t = computeInvoiceTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
+        const t = computeGroupedGstTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
         bulkTotal.set(b.id, t.grand);
       }
     }
@@ -191,16 +195,23 @@ export default async function InvoicingListPage() {
   type Row = InvoiceRow & { customer: string };
   const customRows: Row[] = [];
   {
-    const { data, error } = await supabase.from("challans")
-      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
+    let { data, error } = await supabase.from("challans")
+      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate, section_gst)")
       .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
       .order("challan_date", { ascending: false });
+    if (error) {
+      // Pre-mig-199 — retry without the per-line slab column.
+      ({ data, error } = (await supabase.from("challans")
+        .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, challan_custom_items(amount, quantity, rate)")
+        .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
+        .order("challan_date", { ascending: false })) as unknown as { data: typeof data; error: typeof error });
+    }
     if (!error) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const r of (data ?? []) as any[]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const amounts = ((r.challan_custom_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
-        const t = computeInvoiceTotals(amounts, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
+        const gstItems = ((r.challan_custom_items ?? []) as any[]).map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null }));
+        const t = computeGroupedGstTotals(gstItems, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
         customRows.push({
           key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`,
           date: r.challan_date, customer: displayNameFor(billNames, r.temple), total: t.grand,
@@ -253,16 +264,23 @@ export default async function InvoicingListPage() {
   type OtherRow = InvoiceRow & { customer: string };
   let otherRows: OtherRow[] = [];
   {
-    const { data, error } = await supabase.from("other_challans")
-      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
+    let { data, error } = await supabase.from("other_challans")
+      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate, section_gst)")
       .not("converted_at", "is", null).is("cancelled_at", null)
       .order("converted_at", { ascending: false });
+    if (error) {
+      // Pre-mig-199 — retry without the per-line slab column.
+      ({ data, error } = (await supabase.from("other_challans")
+        .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name), other_challan_items(amount, quantity, rate)")
+        .not("converted_at", "is", null).is("cancelled_at", null)
+        .order("converted_at", { ascending: false })) as unknown as { data: typeof data; error: typeof error });
+    }
     if (!error) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       otherRows = ((data ?? []) as any[]).map((o) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const amounts = ((o.other_challan_items ?? []) as any[]).map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
-        const t = computeInvoiceTotals(amounts, { mode: (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
+        const gstItems = ((o.other_challan_items ?? []) as any[]).map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null }));
+        const t = computeGroupedGstTotals(gstItems, { mode: (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
         const party = Array.isArray(o.invoice_parties) ? o.invoice_parties[0] : o.invoice_parties;
         return {
           key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,

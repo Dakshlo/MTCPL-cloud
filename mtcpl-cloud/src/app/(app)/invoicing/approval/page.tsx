@@ -13,7 +13,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing, canApproveInvoice } from "@/lib/invoicing-permissions";
-import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, type GstItem, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc } from "@/lib/doc-code";
 import {
@@ -99,19 +99,21 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   for (let i = 0; i < challanIds.length; i += 300) {
     const chunk = challanIds.slice(i, i + 300);
     if (chunk.length === 0) break;
-    const { data: items } = await supabase
+    // Mig 199 — per-line slab; pre-mig the select retries without the column.
+    let { data: items } = await supabase
       .from("challan_items")
-      .select("challan_id, amount, rate, measure_qty, quantity")
+      .select("challan_id, amount, rate, measure_qty, quantity, section_gst")
       .in("challan_id", chunk);
-    const byCh = new Map<string, number[]>();
-    for (const it of (items ?? []) as Array<{ challan_id: string; amount: number | null; rate: number | null; measure_qty: number | null; quantity: number | null }>) {
+    if (items == null) ({ data: items } = (await supabase.from("challan_items").select("challan_id, amount, rate, measure_qty, quantity").in("challan_id", chunk)) as unknown as { data: typeof items });
+    const byCh = new Map<string, GstItem[]>();
+    for (const it of (items ?? []) as Array<{ challan_id: string; amount: number | null; rate: number | null; measure_qty: number | null; quantity: number | null; section_gst?: number | null }>) {
       const meas = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
       const amt = it.amount != null ? Number(it.amount) : (Number(it.rate) || 0) * meas;
-      const arr = byCh.get(it.challan_id) ?? []; arr.push(amt); byCh.set(it.challan_id, arr);
+      const arr = byCh.get(it.challan_id) ?? []; arr.push({ amount: amt, gstPercent: it.section_gst != null ? Number(it.section_gst) : null }); byCh.set(it.challan_id, arr);
     }
     for (const c of pending) {
       if (!chunk.includes(c.id)) continue;
-      const t = computeInvoiceTotals(byCh.get(c.id) ?? [], {
+      const t = computeGroupedGstTotals(byCh.get(c.id) ?? [], {
         mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
         igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0,
       });
@@ -157,15 +159,16 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
     const ids = bulkPending.map((b) => b.id);
     for (let i = 0; i < ids.length; i += 300) {
       const chunk = ids.slice(i, i + 300); if (!chunk.length) break;
-      const { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk);
-      const byB = new Map<string, number[]>();
-      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null }>) {
+      let { data: its } = await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate, section_gst").in("bulk_invoice_id", chunk);
+      if (its == null) ({ data: its } = (await supabase.from("bulk_invoice_items").select("bulk_invoice_id, amount, quantity, rate").in("bulk_invoice_id", chunk)) as unknown as { data: typeof its });
+      const byB = new Map<string, GstItem[]>();
+      for (const it of (its ?? []) as Array<{ bulk_invoice_id: string; amount: number | null; quantity: number | null; rate: number | null; section_gst?: number | null }>) {
         const amt = it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0);
-        const a = byB.get(it.bulk_invoice_id) ?? []; a.push(amt); byB.set(it.bulk_invoice_id, a);
+        const a = byB.get(it.bulk_invoice_id) ?? []; a.push({ amount: amt, gstPercent: it.section_gst != null ? Number(it.section_gst) : null }); byB.set(it.bulk_invoice_id, a);
       }
       for (const b of bulkPending) {
         if (!chunk.includes(b.id)) continue;
-        const t = computeInvoiceTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
+        const t = computeGroupedGstTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
         bulkTotal.set(b.id, t.grand);
       }
     }

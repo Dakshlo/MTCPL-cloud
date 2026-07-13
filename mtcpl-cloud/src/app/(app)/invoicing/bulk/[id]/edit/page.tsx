@@ -28,19 +28,23 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
   if (b.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is cancelled")}`);
 
   const { data: itemRows } = await admin.from("bulk_invoice_items").select("*").eq("bulk_invoice_id", id).order("position");
+  const gstMode = (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode;
+  // Mig 199 — a legacy (pre-per-table-GST) invoice prefills every table with the
+  // invoice-level slab, so saving unchanged keeps the same numbers.
+  const legacyPct = gstMode === "igst" ? Number(b.igst_percent) || 0 : gstMode === "cgst_sgst" ? (Number(b.cgst_percent) || 0) + (Number(b.sgst_percent) || 0) : 0;
   // Rebuild the tables (mig 179): group by section → each becomes an editable
-  // table with its head. Pre-mig rows fold into one headless table.
+  // table with its head + GST slab. Pre-mig rows fold into one headless table.
   const initSections = groupBulkItems((itemRows ?? []) as any[]).map((g) => ({
     head: g.head ?? "",
+    gst: g.gst != null ? String(g.gst) : legacyPct ? String(legacyPct) : "18",
     lines: g.rows.map((it: any) => ({
       particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "",
       quantity: Number(it.quantity) || 0, rate: Number(it.rate) || 0,
     })),
   }));
-  if (initSections.length === 0) initSections.push({ head: "", lines: [{ particulars: "", hsn: "", unit: "", quantity: 0, rate: 0 }] });
+  if (initSections.length === 0) initSections.push({ head: "", gst: legacyPct ? String(legacyPct) : "18", lines: [{ particulars: "", hsn: "", unit: "", quantity: 0, rate: 0 }] });
 
   const invoiceCode = (b.invoice_no_override?.trim?.() || invoiceCodeFromDoc(b.inv_fy, b.inv_seq) || `INV-${id.slice(0, 6).toUpperCase()}`);
-  const gstMode = (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode;
 
   // Mig 184 slice 3 — challans this invoice can (de)select. Pool = sent-to-bulk
   // challans for this temple not on ANOTHER invoice; plus this invoice's own.

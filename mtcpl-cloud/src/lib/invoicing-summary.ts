@@ -5,7 +5,7 @@
 // party, date, amount (with GST), taxed portion and CFT/SFT/NOS breakdown.
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { computeInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, type GstItem, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { fetchTempleBillNames, displayNameFor } from "@/lib/temple-names";
 
@@ -78,23 +78,27 @@ async function pageAll<T>(make: (from: number, to: number) => PromiseLike<{ data
   return out;
 }
 
-/** Sum item amounts + unit breakdown for a set of parent ids (batched). */
+/** Sum item amounts (+ per-line GST slab, mig 199) + unit breakdown for a set of
+ *  parent ids (batched). Every caller asks for section_gst; on a pre-mig-199
+ *  schema the select is retried without it (slabs just come back null). */
 async function itemsBy(
   admin: Admin, table: string, parentCol: string, ids: string[],
   cols: string, unitCol: "unit" | "measure_unit", qtyCol: "quantity" | "measure_qty",
-): Promise<Map<string, { amounts: number[]; cft: number; sft: number; nos: number }>> {
-  const m = new Map<string, { amounts: number[]; cft: number; sft: number; nos: number }>();
+): Promise<Map<string, { items: GstItem[]; cft: number; sft: number; nos: number }>> {
+  const m = new Map<string, { items: GstItem[]; cft: number; sft: number; nos: number }>();
+  const withGst = `${cols}, section_gst`;
   for (let i = 0; i < ids.length; i += 300) {
     const chunk = ids.slice(i, i + 300);
     if (!chunk.length) break;
-    const { data } = await admin.from(table).select(cols).in(parentCol, chunk);
+    let { data } = await admin.from(table).select(withGst).in(parentCol, chunk);
+    if (data == null) ({ data } = await admin.from(table).select(cols).in(parentCol, chunk));
     for (const it of (data ?? []) as unknown as Array<Record<string, unknown>>) {
       const pid = String(it[parentCol]);
-      const e = m.get(pid) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
+      const e = m.get(pid) ?? { items: [], cft: 0, sft: 0, nos: 0 };
       const qty = Number(it[qtyCol]) || 0;
       const rate = Number(it.rate) || 0;
       const amt = it.amount != null ? Number(it.amount) : qty * rate;
-      e.amounts.push(amt);
+      e.items.push({ amount: amt, gstPercent: it.section_gst != null && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null });
       e[bucket(it[unitCol] as string | null)] += qty;
       m.set(pid, e);
     }
@@ -121,8 +125,8 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
     const purchase = rows.filter((r) => !r.custom_billed_at); // running bills excluded here
     const items = await itemsBy(admin, "challan_items", "challan_id", purchase.map((r) => r.id), "challan_id, amount, rate, quantity, measure_qty, measure_unit", "measure_unit", "measure_qty");
     for (const r of purchase) {
-      const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
-      const t = computeInvoiceTotals(it.amounts, gstOf(r));
+      const it = items.get(r.id) ?? { items: [], cft: 0, sft: 0, nos: 0 };
+      const t = computeGroupedGstTotals(it.items, gstOf(r));
       out.push({
         id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || invoiceCodeFromDoc(r.doc_fy, r.doc_seq) || r.challan_number),
         party: partyOf(r.temple), source: "purchase", date: r.challan_date,
@@ -156,8 +160,8 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
       }
     }
     for (const r of rows) {
-      const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
-      const t = computeInvoiceTotals(it.amounts, gstOf(r));
+      const it = items.get(r.id) ?? { items: [], cft: 0, sft: 0, nos: 0 };
+      const t = computeGroupedGstTotals(it.items, gstOf(r));
       const n = chCount.get(r.id) ?? 0;
       out.push({
         id: r.id, code: (r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${r.id.slice(0, 6).toUpperCase()}`),
@@ -179,8 +183,8 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
       .order("challan_date", { ascending: false }).range(from, to));
     const items = await itemsBy(admin, "challan_custom_items", "challan_id", rows.map((r) => r.id), "challan_id, amount, rate, quantity, unit", "unit", "quantity");
     for (const r of rows) {
-      const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
-      const t = computeInvoiceTotals(it.amounts, gstOf(r));
+      const it = items.get(r.id) ?? { items: [], cft: 0, sft: 0, nos: 0 };
+      const t = computeGroupedGstTotals(it.items, gstOf(r));
       out.push({
         id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || r.challan_number),
         party: partyOf(r.temple), source: "running", date: r.challan_date,
@@ -206,8 +210,8 @@ export async function gatherInvoiced(admin: Admin): Promise<InvoiceSummaryRow[]>
       const rows = (data ?? []) as any[];
       const items = await itemsBy(admin, "other_challan_items", "other_challan_id", rows.map((r) => r.id), "other_challan_id, amount, rate, quantity, unit", "unit", "quantity");
       for (const r of rows) {
-        const it = items.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
-        const t = computeInvoiceTotals(it.amounts, gstOf(r));
+        const it = items.get(r.id) ?? { items: [], cft: 0, sft: 0, nos: 0 };
+        const t = computeGroupedGstTotals(it.items, gstOf(r));
         const party = Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name;
         out.push({
           id: r.id, code: (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`),
@@ -286,10 +290,10 @@ export async function gatherChallans(admin: Admin): Promise<ChallanSummaryRow[]>
       else if (inBulk.has(r.id)) status = "in_bulk";
       else status = "open";
 
-      const it = items.get(r.id) ?? customItems.get(r.id) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
+      const it = items.get(r.id) ?? customItems.get(r.id) ?? { items: [], cft: 0, sft: 0, nos: 0 };
       // Value only exists once priced/billed — an open challan's items carry no
       // rates, so totals come out 0 and the UI/export shows "—".
-      const t = computeInvoiceTotals(it.amounts, gstOf(r));
+      const t = computeGroupedGstTotals(it.items, gstOf(r));
       const invCode =
         isRunning || status === "invoiced"
           ? (bulkCodeByChallan.get(r.id) ?? r.invoice_no_override?.trim() ?? invoiceCodeFromDoc(r.inv_fy, r.inv_seq))
@@ -322,9 +326,9 @@ export async function gatherChallans(admin: Admin): Promise<ChallanSummaryRow[]>
       const rows = (data ?? []) as any[];
       const items = await itemsBy(admin, "other_challan_items", "other_challan_id", rows.map((r) => String(r.id)), "other_challan_id, amount, rate, quantity, unit", "unit", "quantity");
       for (const r of rows) {
-        const it = items.get(String(r.id)) ?? { amounts: [], cft: 0, sft: 0, nos: 0 };
+        const it = items.get(String(r.id)) ?? { items: [], cft: 0, sft: 0, nos: 0 };
         const converted = !!r.converted_at;
-        const t = computeInvoiceTotals(it.amounts, gstOf(r));
+        const t = computeGroupedGstTotals(it.items, gstOf(r));
         const party = Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name;
         out.push({
           id: `other:${String(r.id)}`,

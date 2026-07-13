@@ -27,6 +27,7 @@ import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { financialYear } from "@/lib/doc-code";
 import { freeInvoiceNumber } from "@/lib/invoice-numbers";
+import { uniformGstPercent } from "@/lib/challan-pricing";
 import { applyInvoiceEdit, applyInvoiceCancel, pendingTableOf, type ChangeSource, type EditPayload } from "@/lib/invoice-approvals";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -84,9 +85,31 @@ export async function saveChallanPricingAction(formData: FormData) {
   }
   const gstModeRaw = txt(formData, "gst_mode");
   const gstMode = gstModeRaw === "igst" || gstModeRaw === "cgst_sgst" ? gstModeRaw : null;
-  const igst = Number(txt(formData, "igst_percent")) || 0;
-  const cgst = Number(txt(formData, "cgst_percent")) || 0;
-  const sgst = Number(txt(formData, "sgst_percent")) || 0;
+  // Mig 199 — GST is PER STONE TABLE ({ "<stone>|<unit>" → pct }, mandatory on
+  // the form). The invoice-level % is kept only when every table shares one
+  // slab (legacy readers stay right); NULL when tables differ.
+  let stoneGst: Record<string, number> = {};
+  try {
+    const raw = JSON.parse(txt(formData, "stone_gst") || "{}") as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw)) { const n = Number(v); if (Number.isFinite(n) && n >= 0) stoneGst[k] = n; }
+  } catch { stoneGst = {}; }
+  // Same slabs expanded PER ITEM (challan_items.section_gst) — one uniform read
+  // for every totals consumer across all four invoice types.
+  let itemGst: Record<string, number> = {};
+  try {
+    const raw = JSON.parse(txt(formData, "item_gst") || "{}") as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw)) { const n = Number(v); if (Number.isFinite(n) && n >= 0) itemGst[k] = n; }
+  } catch { itemGst = {}; }
+  const uniformStone = gstMode ? uniformGstPercent(Object.values(stoneGst)) : null;
+  const igst = gstMode === "igst" ? (uniformStone ?? 0) : 0;
+  const cgst = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : 0;
+  const sgst = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : 0;
+  const igstCol = gstMode === "igst" ? uniformStone : null;
+  const cgstCol = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : null;
+  const sgstCol = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : null;
+  if (gstMode && Object.keys(stoneGst).length === 0) {
+    redirect(`/invoicing/challans/${challanId}/review?toast=${encodeURIComponent("Set the GST % on every stone table.")}`);
+  }
 
   // HSN per stone (Daksh) — the review page makes the HSN mandatory per stone
   // table and saves it back onto the stone master so the tax invoice prints it
@@ -144,7 +167,9 @@ export async function saveChallanPricingAction(formData: FormData) {
     const payload = {
       kind: "purchase" as const,
       rates,
-      gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? igst : null, cgst_percent: gstMode === "cgst_sgst" ? cgst : null, sgst_percent: gstMode === "cgst_sgst" ? sgst : null },
+      gst: { gst_mode: gstMode, igst_percent: igstCol, cgst_percent: cgstCol, sgst_percent: sgstCol },
+      stoneGst: gstMode ? stoneGst : null,
+      itemGst: gstMode ? itemGst : null,
       transport: {
         company: txt(formData, "transport_company") || null,
         phone: txt(formData, "transport_phone") || null,
@@ -165,16 +190,19 @@ export async function saveChallanPricingAction(formData: FormData) {
     const rate = Number(rates[it.id]) || 0;
     const qty = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
     const amount = Math.round(rate * qty * 100) / 100;
-    await admin.from("challan_items").update({ rate, amount }).eq("id", it.id);
+    const pct = gstMode && itemGst[it.id] != null ? itemGst[it.id] : null;
+    // section_gst (mig 199) — retry without it so a pre-mig schema still prices.
+    const { error: upErr } = await admin.from("challan_items").update({ rate, amount, section_gst: pct } as never).eq("id", it.id);
+    if (upErr) await admin.from("challan_items").update({ rate, amount }).eq("id", it.id);
   }
 
   await admin
     .from("challans")
     .update({
       gst_mode: gstMode,
-      igst_percent: gstMode === "igst" ? igst : null,
-      cgst_percent: gstMode === "cgst_sgst" ? cgst : null,
-      sgst_percent: gstMode === "cgst_sgst" ? sgst : null,
+      igst_percent: igstCol,
+      cgst_percent: cgstCol,
+      sgst_percent: sgstCol,
       priced_at: new Date().toISOString(),
       priced_by: profile.id,
       // Number now lives in inv_fy/inv_seq (edited as the XX on the review form);
@@ -186,6 +214,12 @@ export async function saveChallanPricingAction(formData: FormData) {
       owner_reject_reason: null,
     })
     .eq("id", challanId);
+
+  // Mig 199 — the per-stone-table slabs themselves. Separate best-effort update
+  // so a pre-migration schema never blocks pricing (it keeps the uniform %).
+  try {
+    await admin.from("challans").update({ stone_gst: gstMode ? stoneGst : null } as never).eq("id", challanId);
+  } catch { /* pre-mig-199 */ }
 
   // Mig 169 — transport details (separate best-effort update so a pre-migration
   // schema never blocks pricing). A new company name is added to the master so
@@ -498,7 +532,7 @@ export async function unarchiveChallanAction(formData: FormData): Promise<void> 
 // sendRunningBackAction undoes it all back to the Challans page.
 // ════════════════════════════════════════════════════════════════
 
-type RunItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
+type RunItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null; section_gst: number | null };
 function parseRunningItems(fd: FormData, withRate: boolean): RunItem[] {
   let raw: unknown = [];
   try { raw = JSON.parse(txt(fd, "items") || "[]"); } catch { raw = []; }
@@ -519,17 +553,22 @@ function parseRunningItems(fd: FormData, withRate: boolean): RunItem[] {
       amount: withRate ? (amount || null) : null,
       section_index: Number(it?.section_index) || 0,
       section_head: String(it?.section_head ?? "").trim() || null,
+      // Mig 199 — the table's own GST slab % (null when GST is off / not sent).
+      section_gst: it?.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null,
     });
   }
   return out;
 }
 
-/** Insert challan_custom_items with section cols, falling back if mig 182 isn't
- *  applied (so a pre-migration deploy still works, just without heads). */
+/** Insert challan_custom_items with section cols, falling back if mig 199 /
+ *  mig 182 isn't applied (so a pre-migration deploy still works). */
 async function insertCustomItems(admin: ReturnType<typeof createAdminSupabaseClient>, challanId: string, items: RunItem[]) {
   const rows = items.map((it, i) => ({ challan_id: challanId, position: i, ...it }));
   const { error } = await admin.from("challan_custom_items").insert(rows);
-  if (error) await admin.from("challan_custom_items").insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+  if (!error) return;
+  const noGst = rows.map(({ section_gst: _sg, ...rest }) => rest);
+  const { error: error2 } = await admin.from("challan_custom_items").insert(noGst);
+  if (error2) await admin.from("challan_custom_items").insert(noGst.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
 }
 
 const RUN_TRANSPORT = (fd: FormData) => ({
@@ -593,11 +632,24 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
   if (items.length === 0) redirect(`/invoicing/dropped?toast=${encodeURIComponent("Add rates for the line items")}`);
   const gm = txt(formData, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  // Mig 199 — per-TABLE GST slab, mandatory when GST is on. Invoice-level %
+  // kept only when every table shares one slab; NULL when they differ.
+  if (gstMode && items.some((it) => it.section_gst == null)) {
+    redirect(`/invoicing/running/${challanId}/invoice?toast=${encodeURIComponent("Set the GST % on every table")}`);
+  }
+  if (!gstMode) items.forEach((it) => { it.section_gst = null; });
+  const uniform = gstMode ? uniformGstPercent(items.map((it) => it.section_gst)) : null;
+  const gstCols = {
+    gst_mode: gstMode,
+    igst_percent: gstMode === "igst" ? uniform : null,
+    cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
+    sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
+  };
   const now = new Date().toISOString();
 
   // Mig 184 — editing an EXISTING running invoice is approval-gated: stage + stop.
   if (editMode) {
-    const payload = { kind: "running" as const, items, gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null, cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null, sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null } };
+    const payload = { kind: "running" as const, items, gst: gstCols };
     await admin.from("challans").update({ pending_edit_payload: payload, pending_edit_at: now, pending_edit_by: profile.id } as never).eq("id", challanId);
     void logAudit(profile.id, "invoice_edit_requested", "challan", challanId, {});
     refreshInvoicingPaths({ challanId });
@@ -608,10 +660,7 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
   await admin.from("challan_custom_items").delete().eq("challan_id", challanId);
   await insertCustomItems(admin, challanId, items);
   await admin.from("challans").update({
-    gst_mode: gstMode,
-    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
-    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
-    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    ...gstCols,
     custom_billed_at: now, custom_billed_by: profile.id,
   }).eq("id", challanId);
   // Assign the locked INV number on first conversion only.
@@ -1718,7 +1767,7 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   if (!temple) redirect("/invoicing/bulk/new?toast=Pick+a+temple");
 
   let challanIds: string[] = [];
-  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null }> = [];
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null; section_gst?: number | string | null }> = [];
   try { challanIds = JSON.parse(txt(formData, "challan_ids") || "[]") as string[]; } catch { challanIds = []; }
   try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
   items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
@@ -1727,6 +1776,15 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
 
   const gm = txt(formData, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  // Mig 199 — per-TABLE GST slab, mandatory when GST is on.
+  const secGst = (it: { section_gst?: number | string | null }): number | null =>
+    it.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null;
+  if (gstMode && items.some((it) => secGst(it) == null)) {
+    redirect(`/invoicing/bulk/new?toast=${encodeURIComponent("Set the GST % on every table")}`);
+  }
+  // Keep the legacy invoice-level % when every table shares one slab (any
+  // pre-mig-199 reader stays correct); NULL when tables differ.
+  const uniform = gstMode ? uniformGstPercent(items.map(secGst)) : null;
   const invoiceDate = txt(formData, "invoice_date") || null;
   const fy = financialYear(invoiceDate || new Date());
   // Invoice number on the SHARED per-FY INV counter — LOCKED (auto only, Daksh
@@ -1743,9 +1801,9 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     inv_seq: invSeq,
     invoice_no_override: null,
     gst_mode: gstMode,
-    igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null,
-    cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null,
-    sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null,
+    igst_percent: gstMode === "igst" ? uniform : null,
+    cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
+    sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
     notes: txt(formData, "notes") || null,
     created_by: profile.id,
   };
@@ -1759,6 +1817,7 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     position: i,
     section_index: Number(it.section_index) || 0,
     section_head: (it.section_head ?? "").toString().trim() || null,
+    section_gst: gstMode ? secGst(it) : null,
     particulars: (it.particulars ?? "").toString() || null,
     hsn: (it.hsn ?? "").toString() || null,
     unit: (it.unit ?? "").toString() || null,
@@ -1766,11 +1825,16 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     rate: Number(it.rate) || null,
     amount: it.amount != null && it.amount !== "" ? Number(it.amount) : ((Number(it.quantity) || 0) * (Number(it.rate) || 0)),
   }));
-  // Best-effort insert with section cols; fall back if mig 179 isn't applied.
+  // Best-effort insert with the section cols; fall back for older schemas
+  // (drop section_gst first — mig 199; then the mig-179 section cols too).
   {
     const { error: insErr } = await admin.from("bulk_invoice_items").insert(itemRows);
     if (insErr) {
-      await admin.from("bulk_invoice_items").insert(itemRows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+      const noGst = itemRows.map(({ section_gst: _sg, ...rest }) => rest);
+      const { error: insErr2 } = await admin.from("bulk_invoice_items").insert(noGst);
+      if (insErr2) {
+        await admin.from("bulk_invoice_items").insert(noGst.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+      }
     }
   }
   if (challanIds.length) {
@@ -1851,13 +1915,20 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
   if (!b) redirect("/invoicing/invoices?toast=Invoice+not+found");
   if ((b as { cancelled_at: string | null }).cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is cancelled")}`);
 
-  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null }> = [];
+  let items: Array<{ particulars?: string; hsn?: string; unit?: string; quantity?: number | string; rate?: number | string; amount?: number | string; section_index?: number; section_head?: string | null; section_gst?: number | string | null }> = [];
   try { items = JSON.parse(txt(formData, "items") || "[]"); } catch { items = []; }
   items = items.filter((it) => (it.particulars ?? "").toString().trim() || Number(it.amount) || Number(it.quantity));
   if (items.length === 0) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Add at least one line item")}`);
 
   const gm = txt(formData, "gst_mode");
   const gstMode = gm === "igst" || gm === "cgst_sgst" ? gm : null;
+  // Mig 199 — per-TABLE GST slab, mandatory when GST is on.
+  const secGst = (it: { section_gst?: number | string | null }): number | null =>
+    it.section_gst != null && `${it.section_gst}`.trim() !== "" && Number.isFinite(Number(it.section_gst)) ? Number(it.section_gst) : null;
+  if (gstMode && items.some((it) => secGst(it) == null)) {
+    redirect(`/invoicing/invoices?toast=${encodeURIComponent("Set the GST % on every table")}`);
+  }
+  const uniform = gstMode ? uniformGstPercent(items.map(secGst)) : null;
 
   // Mig 184 — editing a work-order invoice is approval-gated: stage + stop. The
   // edit form may RE-SELECT the linked challans; if it sends no set, keep the
@@ -1879,11 +1950,12 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
     amount: Number(it.amount) || (Number(it.quantity) || 0) * (Number(it.rate) || 0) || null,
     section_index: Number(it.section_index) || 0,
     section_head: (it.section_head ?? "").toString().trim() || null,
+    section_gst: gstMode ? secGst(it) : null,
   }));
   const payload = {
     kind: "bulk" as const,
     items: stagedItems,
-    gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? (Number(txt(formData, "igst_percent")) || 0) : null, cgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "cgst_percent")) || 0) : null, sgst_percent: gstMode === "cgst_sgst" ? (Number(txt(formData, "sgst_percent")) || 0) : null },
+    gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? uniform : null, cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null, sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null },
     notes: txt(formData, "notes") || null,
     challanIds,
   };

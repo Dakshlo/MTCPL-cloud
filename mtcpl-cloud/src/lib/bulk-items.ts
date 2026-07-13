@@ -8,6 +8,8 @@ export type BulkUnit = (typeof BULK_UNITS)[number];
 export type BulkItemInput = {
   section_index?: number | null;
   section_head?: string | null;
+  /** Mig 199 — the table's own GST slab % (null on pre-mig-199 invoices). */
+  section_gst?: number | string | null;
   position?: number | null;
   particulars?: string | null;
   hsn?: string | null;
@@ -17,7 +19,7 @@ export type BulkItemInput = {
   amount?: number | string | null;
 };
 
-export type BulkSectionGroup<T> = { index: number; head: string | null; rows: T[] };
+export type BulkSectionGroup<T> = { index: number; head: string | null; gst: number | null; rows: T[] };
 
 /** Group flat item rows into ordered tables (by section_index) for rendering. */
 export function groupBulkItems<T extends BulkItemInput>(items: T[]): BulkSectionGroup<T>[] {
@@ -30,9 +32,13 @@ export function groupBulkItems<T extends BulkItemInput>(items: T[]): BulkSection
   }
   return [...byIdx.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([index, rows]) => ({
-      index,
-      head: ((rows.find((r) => (r.section_head ?? "").toString().trim())?.section_head ?? null) || null) as string | null,
-      rows: rows.slice().sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0)),
-    }));
+    .map(([index, rows]) => {
+      const gstRaw = rows.find((r) => r.section_gst != null && `${r.section_gst}`.trim() !== "")?.section_gst;
+      return {
+        index,
+        head: ((rows.find((r) => (r.section_head ?? "").toString().trim())?.section_head ?? null) || null) as string | null,
+        gst: gstRaw != null && Number.isFinite(Number(gstRaw)) ? Number(gstRaw) : null,
+        rows: rows.slice().sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0)),
+      };
+    });
 }

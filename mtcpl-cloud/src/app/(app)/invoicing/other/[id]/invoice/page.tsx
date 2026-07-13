@@ -41,9 +41,27 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
   const { data: pty } = await admin.from("invoice_parties").select("*").eq("id", o.party_id).maybeSingle();
   const p = (pty ?? {}) as any;
 
+  // section_gst (mig 199) fetched separately best-effort so a pre-mig schema
+  // doesn't 404 the page.
   const rawItems = ((o.other_challan_items ?? []) as any[]).slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  {
+    const { data: sg, error } = await admin.from("other_challan_items").select("position, section_gst").eq("other_challan_id", id);
+    if (!error && sg) {
+      const byPos = new Map<number, number | null>();
+      for (const r of sg as any[]) byPos.set(Number(r.position) || 0, r.section_gst != null ? Number(r.section_gst) : null);
+      for (const it of rawItems) it.section_gst = byPos.get(Number(it.position) || 0) ?? null;
+    }
+  }
+  // Legacy per-table prefill: the invoice's stored slab (edit) / the party
+  // default (first convert) when no per-table slab is stored yet.
+  const ownMode0 = (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode;
+  const partyMode0 = (p.gst_mode === "igst" || p.gst_mode === "cgst_sgst" ? p.gst_mode : null) as GstMode;
+  const legacyPct = o.inv_seq != null
+    ? (ownMode0 === "igst" ? Number(o.igst_percent) || 0 : ownMode0 === "cgst_sgst" ? (Number(o.cgst_percent) || 0) + (Number(o.sgst_percent) || 0) : 0)
+    : (partyMode0 === "igst" ? Number(p.igst_percent) || 0 : partyMode0 === "cgst_sgst" ? (Number(p.cgst_percent) || 0) + (Number(p.sgst_percent) || 0) : 0);
   const initSections = groupBulkItems(rawItems).map((g) => ({
     head: g.head ?? "",
+    gst: g.gst != null ? String(g.gst) : legacyPct ? String(legacyPct) : "18",
     lines: g.rows.map((it: any) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: it.quantity != null ? String(it.quantity) : "", rate: it.rate != null ? String(it.rate) : "" })),
   }));
 

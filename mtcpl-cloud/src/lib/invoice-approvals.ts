@@ -16,10 +16,10 @@ type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
 export type ChangeSource = "purchase" | "running" | "bulk" | "other";
 export type StagedGst = { gst_mode: "igst" | "cgst_sgst" | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
-export type StagedItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null };
+export type StagedItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null; section_gst?: number | null };
 
 export type EditPayload =
-  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport: Record<string, string | null> }
+  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport: Record<string, string | null>; stoneGst?: Record<string, number> | null; itemGst?: Record<string, number> | null }
   | { kind: "running"; items: StagedItem[]; gst: StagedGst }
   | { kind: "bulk"; items: StagedItem[]; gst: StagedGst; notes: string | null; challanIds: string[] }
   | { kind: "other"; items: StagedItem[]; gst: StagedGst };
@@ -35,14 +35,19 @@ function itemRows(parentCol: string, parentId: string, items: StagedItem[]) {
     particulars: it.particulars, hsn: it.hsn, unit: it.unit,
     quantity: it.quantity, rate: it.rate, amount: it.amount,
     section_index: it.section_index, section_head: it.section_head,
+    section_gst: it.section_gst ?? null,
   }));
 }
 
 async function insertItems(admin: Admin, table: "challan_custom_items" | "other_challan_items" | "bulk_invoice_items", rows: Array<Record<string, unknown>>) {
   if (!rows.length) return;
   const { error } = await (admin.from(table) as any).insert(rows);
-  // Fall back without the section cols if mig 179/183 isn't applied yet.
-  if (error) await (admin.from(table) as any).insert(rows.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
+  if (!error) return;
+  // Fall back for older schemas: first without section_gst (mig 199), then
+  // without the mig-179/182/183 section cols too.
+  const noGst = rows.map(({ section_gst: _sg, ...rest }) => rest);
+  const { error: error2 } = await (admin.from(table) as any).insert(noGst);
+  if (error2) await (admin.from(table) as any).insert(noGst.map(({ section_index: _si, section_head: _sh, ...rest }) => rest));
 }
 
 function transportUpdate(t: Record<string, string | null>) {
@@ -75,9 +80,18 @@ export async function applyInvoiceEdit(admin: Admin, source: ChangeSource, id: s
     for (const it of (items ?? []) as Array<{ id: string; quantity: number | null; measure_qty: number | null }>) {
       const rate = Number(payload.rates[it.id]) || 0;
       const qty = it.measure_qty != null && Number(it.measure_qty) > 0 ? Number(it.measure_qty) : Number(it.quantity) || 0;
-      await admin.from("challan_items").update({ rate, amount: Math.round(rate * qty * 100) / 100 }).eq("id", it.id);
+      const amount = Math.round(rate * qty * 100) / 100;
+      // Mig 199 — per-line slab; retry without it so a pre-mig schema still applies.
+      const pct = payload.itemGst != null && payload.itemGst[it.id] != null ? Number(payload.itemGst[it.id]) : null;
+      const { error: upErr } = await admin.from("challan_items").update({ rate, amount, section_gst: pct } as any).eq("id", it.id);
+      if (upErr) await admin.from("challan_items").update({ rate, amount }).eq("id", it.id);
     }
     await admin.from("challans").update({ ...payload.gst, ...transportUpdate(payload.transport) } as any).eq("id", id);
+    // Mig 199 — per-stone-table GST slabs (best-effort; pre-mig schema keeps the
+    // invoice-level % applied above).
+    if (payload.stoneGst !== undefined) {
+      try { await admin.from("challans").update({ stone_gst: payload.stoneGst } as any).eq("id", id); } catch { /* pre-mig-199 */ }
+    }
     return;
   }
   if (source === "running" && payload.kind === "running") {

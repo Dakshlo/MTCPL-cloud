@@ -8,7 +8,7 @@
  * the "NOT VALID INVOICE" watermark (it's a draft until the owner approves).
  */
 
-import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { groupBulkItems } from "@/lib/bulk-items";
 
@@ -16,7 +16,7 @@ export type PreviewParty = {
   name: string | null; address: string | null; city: string | null; state: string | null;
   state_code: string | null; gstin: string | null; pan: string | null; phone: string | null; email: string | null;
 };
-export type PreviewItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number; section_index?: number; section_head?: string | null };
+export type PreviewItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number; section_index?: number; section_head?: string | null; section_gst?: number | null };
 
 const dash = (s: string | null | undefined) => (s && String(s).trim() ? String(s) : "-");
 const fmt = (n: number, dp = 2) => n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -61,9 +61,8 @@ export function BulkInvoicePreview({
 }) {
   const billName = bill?.name ?? "—";
   const shipName = (ship?.name ?? "").trim() || billName;
-  const totals = computeInvoiceTotals(items.map((i) => i.amount), { mode, igst, cgst, sgst });
-  const totalTax = mode === "igst" ? totals.igstAmt : mode === "cgst_sgst" ? totals.cgstAmt + totals.sgstAmt : 0;
-  const gstLabel = mode === "igst" ? `IGST @ ${igst || 0}%` : mode === "cgst_sgst" ? `CGST + SGST @ ${cgst || 0}% + ${sgst || 0}%` : "—";
+  // Mig 199 — per-table slabs; items without one fall back to the invoice-level %.
+  const totals = computeGroupedGstTotals(items.map((i) => ({ amount: i.amount, gstPercent: i.section_gst ?? null })), { mode, igst, cgst, sgst });
   const code = invoiceNo.trim() || "INV — assigned on approval";
   const groups = groupBulkItems(items);
   const multiSection = groups.length > 1 || groups.some((g) => (g.head ?? "").trim());
@@ -163,7 +162,12 @@ export function BulkInvoicePreview({
           <>
             {groups.map((g, gi) => (
               <div key={g.index}>
-                {multiSection && <div className="bip-sec">{dash(g.head) === "-" ? `Table ${gi + 1}` : g.head}</div>}
+                {multiSection && (
+                  <div className="bip-sec" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span>{dash(g.head) === "-" ? `Table ${gi + 1}` : g.head}</span>
+                    {mode && g.gst != null && <span style={{ opacity: 0.85 }}>GST {g.gst}%</span>}
+                  </div>
+                )}
                 <table className="bip-t">
                   <thead>
                     <tr>
@@ -205,15 +209,29 @@ export function BulkInvoicePreview({
               </div>
               <div className="bip-totals">
                 <div className="bip-row"><span>Subtotal</span><span className="bip-mono">{rupee(totals.subtotal)}</span></div>
-                {mode === "igst" && <div className="bip-row alt"><span>IGST @ {igst || 0}%</span><span className="bip-mono">{rupee(totals.igstAmt)}</span></div>}
-                {mode === "cgst_sgst" && (<><div className="bip-row alt"><span>CGST @ {cgst || 0}%</span><span className="bip-mono">{rupee(totals.cgstAmt)}</span></div><div className="bip-row alt"><span>SGST @ {sgst || 0}%</span><span className="bip-mono">{rupee(totals.sgstAmt)}</span></div></>)}
+                {totals.groups.map((g, i) => (
+                  <div key={i} className="bip-row alt"><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="bip-mono">{rupee(g.taxAmt)}</span></div>
+                ))}
                 <div className="bip-row grand"><span>Grand Total</span><span className="bip-mono">{rupee(totals.grand)}</span></div>
               </div>
             </div>
 
             <table className="bip-taxsum">
               <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
-              <tbody><tr><td className="m">{rupee(totals.subtotal)}</td><td>{gstLabel}</td><td className="m">{rupee(totalTax)}</td><td className="m">{rupee(totals.grand)}</td></tr></tbody>
+              <tbody>
+                {totals.groups.length === 0 ? (
+                  <tr><td className="m">{rupee(totals.subtotal)}</td><td>—</td><td className="m">{rupee(0)}</td><td className="m">{rupee(totals.grand)}</td></tr>
+                ) : (
+                  totals.groups.map((g, i) => (
+                    <tr key={i}>
+                      <td className="m">{rupee(g.taxable)}</td>
+                      <td>{gstGroupLabel(mode, g)}</td>
+                      <td className="m">{rupee(g.taxAmt)}</td>
+                      {i === 0 && <td className="m" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                    </tr>
+                  ))
+                )}
+              </tbody>
             </table>
             <div className="bip-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
           </>

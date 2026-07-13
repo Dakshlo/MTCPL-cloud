@@ -16,7 +16,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { groupBulkItems } from "@/lib/bulk-items";
-import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
@@ -58,7 +58,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
   const o = oc as any;
   const { data: itemRows } = await admin.from("other_challan_items").select("*").eq("other_challan_id", id).order("position");
   const items = (itemRows ?? []) as any[];
-  const groups = groupBulkItems(items).map((g) => ({ head: (g.head ?? "").trim(), rows: g.rows as any[] }));
+  const groups = groupBulkItems(items).map((g) => ({ head: (g.head ?? "").trim(), gst: g.gst, rows: g.rows as any[] }));
   const { data: pty } = await admin.from("invoice_parties").select("*").eq("id", o.party_id).maybeSingle();
   const p = pty as any;
 
@@ -77,10 +77,12 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
     : chCode;
 
   const gstMode = (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode;
-  const amounts = items.map((it) => (it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0)));
-  const totals = computeInvoiceTotals(amounts, { mode: gstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
-  const totalTax = gstMode === "igst" ? totals.igstAmt : gstMode === "cgst_sgst" ? totals.cgstAmt + totals.sgstAmt : 0;
-  const gstLabel = gstMode === "igst" ? `IGST @ ${Number(o.igst_percent) || 0}%` : gstMode === "cgst_sgst" ? `CGST + SGST @ ${Number(o.cgst_percent) || 0}% + ${Number(o.sgst_percent) || 0}%` : "—";
+  // Mig 199 — per-table slabs; pre-mig items (null section_gst) fall back to
+  // the invoice-level %, so old invoices print exactly as before.
+  const totals = computeGroupedGstTotals(
+    items.map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null })),
+    { mode: gstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 },
+  );
 
   return (
     <>
@@ -184,7 +186,12 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
           <>
             {groups.map((g, gi) => (
               <div className="sec" key={gi}>
-                {(groups.length > 1 || g.head) && <div className="sec-head">{g.head || `Table ${gi + 1}`}</div>}
+                {(groups.length > 1 || g.head) && (
+                  <div className="sec-head" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span>{g.head || `Table ${gi + 1}`}</span>
+                    {converted && gstMode && g.gst != null && <span style={{ opacity: 0.85 }}>GST {g.gst}%</span>}
+                  </div>
+                )}
                 <table className="t">
                   <thead>
                     <tr>
@@ -232,15 +239,29 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                   </div>
                   <div className="totals">
                     <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
-                    {gstMode === "igst" && <div className="row alt"><span>IGST @ {Number(o.igst_percent) || 0}%</span><span className="mono">{rupee(totals.igstAmt)}</span></div>}
-                    {gstMode === "cgst_sgst" && (<><div className="row alt"><span>CGST @ {Number(o.cgst_percent) || 0}%</span><span className="mono">{rupee(totals.cgstAmt)}</span></div><div className="row alt"><span>SGST @ {Number(o.sgst_percent) || 0}%</span><span className="mono">{rupee(totals.sgstAmt)}</span></div></>)}
+                    {totals.groups.map((g, i) => (
+                      <div key={i} className="row alt"><span>{gstGroupLabel(gstMode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="mono">{rupee(g.taxAmt)}</span></div>
+                    ))}
                     <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
                   </div>
                 </div>
 
                 <table className="taxsum">
                   <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
-                  <tbody><tr><td className="mono">{rupee(totals.subtotal)}</td><td>{gstLabel}</td><td className="mono">{rupee(totalTax)}</td><td className="mono">{rupee(totals.grand)}</td></tr></tbody>
+                  <tbody>
+                    {totals.groups.length === 0 ? (
+                      <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(totals.grand)}</td></tr>
+                    ) : (
+                      totals.groups.map((g, i) => (
+                        <tr key={i}>
+                          <td className="mono">{rupee(g.taxable)}</td>
+                          <td>{gstGroupLabel(gstMode, g)}</td>
+                          <td className="mono">{rupee(g.taxAmt)}</td>
+                          {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
                 </table>
                 <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
               </>

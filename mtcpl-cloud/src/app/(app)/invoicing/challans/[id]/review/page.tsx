@@ -170,6 +170,18 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
       for (const [k, v] of Object.entries(sh.stone_heads)) initHeads[k] = String(v ?? "");
     }
   }
+  // Mig 199 — this invoice's per-stone-table GST slabs ({ "<stone>|<unit>" →
+  // pct }). Best-effort like stone_heads; when absent (pre-mig / legacy invoice)
+  // the tables prefill from the legacy single %.
+  const initTableGst: Record<string, number> = {};
+  {
+    const { data: sg, error } = await (admin.from("challans") as unknown as {
+      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { stone_gst: Record<string, number> | null } | null; error: unknown }> } };
+    }).select("stone_gst").eq("id", id).maybeSingle();
+    if (!error && sg?.stone_gst && typeof sg.stone_gst === "object") {
+      for (const [k, v] of Object.entries(sg.stone_gst)) { const n = Number(v); if (Number.isFinite(n)) initTableGst[k] = n; }
+    }
+  }
   const priced = !!c.priced_at;
   const challanHasGst = c.gst_mode === "igst" || c.gst_mode === "cgst_sgst";
   const templeHasGst = templeGst.mode === "igst" || templeGst.mode === "cgst_sgst";
@@ -299,6 +311,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             initTransport={initTransport}
             initHsn={initHsn}
             initHeads={initHeads}
+            initTableGst={initTableGst}
             hsnUseVendor={hsnUseVendor}
           />
         </div>

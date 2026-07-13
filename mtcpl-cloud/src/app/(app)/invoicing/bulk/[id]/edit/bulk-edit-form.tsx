@@ -5,28 +5,28 @@
 
 import { useMemo, useState } from "react";
 import { updateBulkInvoiceAction } from "../../../actions";
-import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { BULK_UNITS } from "@/lib/bulk-items";
 
 type Line = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
-type Section = { head: string; lines: Line[] };
+// Mig 199 — every table carries ITS OWN GST slab % (mandatory when GST is on).
+type Section = { head: string; gst: string; lines: Line[] };
 
 export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes, challans, linkedIds }: {
   id: string;
   invoiceCode: string;
-  initSections: Array<{ head: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }> }>;
+  initSections: Array<{ head: string; gst: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
   initNotes: string;
   challans: Array<{ id: string; code: string; date: string }>;
   linkedIds: string[];
 }) {
   const [sections, setSections] = useState<Section[]>(() =>
-    initSections.map((s) => ({ head: s.head, lines: s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: l.quantity ? String(l.quantity) : "", rate: l.rate ? String(l.rate) : "" })) })),
+    initSections.map((s) => ({ head: s.head, gst: s.gst, lines: s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: l.quantity ? String(l.quantity) : "", rate: l.rate ? String(l.rate) : "" })) })),
   );
   const [mode, setMode] = useState<GstMode>(initGst.mode);
-  const [igst, setIgst] = useState(String(initGst.igst || 18));
-  const [cgst, setCgst] = useState(String(initGst.cgst || 9));
-  const [sgst, setSgst] = useState(String(initGst.sgst || 9));
+  // Seed for NEW tables — the invoice's own slab (or 18 when it had none).
+  const defaultPct = String((initGst.mode === "igst" ? initGst.igst : initGst.mode === "cgst_sgst" ? initGst.cgst + initGst.sgst : 0) || 18);
   const [notes, setNotes] = useState(initNotes);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(linkedIds));
   const toggleChallan = (cid: string) => setSelected((p) => { const n = new Set(p); if (n.has(cid)) n.delete(cid); else n.add(cid); return n; });
@@ -34,22 +34,27 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
   const amountOf = (l: Line) => (Number(l.quantity) || 0) * (Number(l.rate) || 0);
   const setLine = (si: number, li: number, k: keyof Line, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, [k]: v } : l)) } : s)));
   const setHead = (si: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, head: v } : s)));
+  const setGst = (si: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, gst: v.replace(/[^0-9.]/g, "") } : s)));
   const addLine = (si: number) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: [...s.lines, { particulars: "", hsn: "", unit: "", quantity: "", rate: "" }] } : s)));
   const removeLine = (si: number, li: number) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.filter((_, j) => j !== li) } : s)));
-  const addTable = () => setSections((p) => [...p, { head: "", lines: [{ particulars: "", hsn: "", unit: "", quantity: "", rate: "" }] }]);
+  const addTable = () => setSections((p) => [...p, { head: "", gst: defaultPct, lines: [{ particulars: "", hsn: "", unit: "", quantity: "", rate: "" }] }]);
   const removeTable = (si: number) => setSections((p) => (p.length <= 1 ? p : p.filter((_, i) => i !== si)));
 
   const serialItems = useMemo(
     () => sections.flatMap((s, si) =>
       s.lines
         .filter((l) => l.particulars.trim() || Number(l.quantity) || Number(l.rate))
-        .map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, amount: amountOf(l), section_index: si, section_head: s.head.trim() || null })),
+        .map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, amount: amountOf(l), section_index: si, section_head: s.head.trim() || null, section_gst: mode ? (s.gst.trim() === "" ? null : Number(s.gst) || 0) : null })),
     ),
-    [sections],
+    [sections, mode],
   );
-  const totals = computeInvoiceTotals(serialItems.map((i) => i.amount), { mode, igst: Number(igst) || 0, cgst: Number(cgst) || 0, sgst: Number(sgst) || 0 });
+  const totals = computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 });
   const itemsJson = JSON.stringify(serialItems);
   const hasItems = serialItems.length > 0;
+  // GST slab is MANDATORY per table when GST is on (mig 199).
+  const sectionStarted = (s: Section) => s.lines.some((l) => l.particulars.trim() || l.quantity || l.rate || l.unit);
+  const missingGstTables = mode ? sections.filter((s) => sectionStarted(s) && s.gst.trim() === "").length : 0;
+  const canSave = hasItems && missingGstTables === 0;
 
   const cell: React.CSSProperties = { padding: "5px 7px", border: "1px solid var(--border)" };
   const inp: React.CSSProperties = { width: "100%", border: "none", background: "transparent", color: "var(--text)", fontSize: 12.5, padding: "3px 4px" };
@@ -60,9 +65,6 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="items" value={itemsJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
-      <input type="hidden" name="igst_percent" value={igst} />
-      <input type="hidden" name="cgst_percent" value={cgst} />
-      <input type="hidden" name="sgst_percent" value={sgst} />
       <input type="hidden" name="notes" value={notes} />
       <input type="hidden" name="challan_ids" value={JSON.stringify([...selected])} />
 
@@ -97,6 +99,12 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
           <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
               <input value={s.head} onChange={(e) => setHead(si, e.target.value)} placeholder="Table head (e.g. PinkStone)" style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", color: "var(--text)", fontSize: 13.5, fontWeight: 800, padding: "3px 4px" }} />
+              {mode && (
+                <label title={`This table's GST slab — mandatory. ${mode === "cgst_sgst" ? "Splits half CGST / half SGST." : "Charged as IGST."}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: s.gst.trim() === "" ? "#dc2626" : "var(--muted)", whiteSpace: "nowrap" }}>
+                  GST %
+                  <input value={s.gst} onChange={(e) => setGst(si, e.target.value)} inputMode="decimal" placeholder="req." style={{ width: 58, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, fontWeight: 800, padding: "4px 7px", borderRadius: 7, border: `1.5px solid ${s.gst.trim() === "" ? "#dc2626" : "var(--gold-dark)"}`, background: "var(--surface)", color: "var(--text)" }} />
+                </label>
+              )}
               {sections.length > 1 && <button type="button" onClick={() => removeTable(si)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontWeight: 800, fontSize: 12 }}>✕ Table</button>}
             </div>
             <div style={{ overflowX: "auto" }}>
@@ -154,27 +162,27 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
               return <button key={val} type="button" onClick={() => setMode(val === "none" ? null : (val as GstMode))} style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 800, borderRadius: 8, cursor: "pointer", border: `1px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "var(--gold)" : "var(--bg)", color: on ? "#fff" : "var(--text)" }}>{label}</button>;
             })}
           </div>
-          {mode === "igst" && <label className="stack" style={{ maxWidth: 140 }}><span>IGST %</span><input value={igst} onChange={(e) => setIgst(e.target.value)} inputMode="decimal" /></label>}
-          {mode === "cgst_sgst" && (
-            <div style={{ display: "flex", gap: 10 }}>
-              <label className="stack" style={{ maxWidth: 120 }}><span>CGST %</span><input value={cgst} onChange={(e) => setCgst(e.target.value)} inputMode="decimal" /></label>
-              <label className="stack" style={{ maxWidth: 120 }}><span>SGST %</span><input value={sgst} onChange={(e) => setSgst(e.target.value)} inputMode="decimal" /></label>
+          {mode && (
+            <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5, maxWidth: 420 }}>
+              Each table has its own <strong>GST %</strong> box in its header — mandatory. Tables can carry different slabs on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
             </div>
           )}
           <label className="stack" style={{ marginTop: 12, maxWidth: 460 }}><span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Notes (optional)</span><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></label>
         </div>
         <div style={{ flex: "0 0 260px", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
-          {mode === "igst" && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>IGST @ {igst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.igstAmt)}</span></div>}
-          {mode === "cgst_sgst" && <><div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>CGST @ {cgst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.cgstAmt)}</span></div><div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>SGST @ {sgst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.sgstAmt)}</span></div></>}
+          {totals.groups.map((g, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "3px 0" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
+          ))}
           <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="submit" disabled={!hasItems} style={{ fontSize: 14, padding: "11px 22px", fontWeight: 800, color: "#fff", background: hasItems ? "#0f172a" : "var(--border)", border: "none", borderRadius: 11, cursor: hasItems ? "pointer" : "default" }}>
+        <button type="submit" disabled={!canSave} style={{ fontSize: 14, padding: "11px 22px", fontWeight: 800, color: "#fff", background: canSave ? "#0f172a" : "var(--border)", border: "none", borderRadius: 11, cursor: canSave ? "pointer" : "default" }}>
           💾 Save invoice changes (number unchanged)
         </button>
+        {!canSave && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>{!hasItems ? "Add at least one line item." : "⚠ Set the GST % on every table."}</span>}
       </div>
     </form>
   );

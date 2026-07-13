@@ -28,6 +28,8 @@ export default async function RunningInvoicePage({ params }: { params: Params })
   const { id } = await params;
   const admin = createAdminSupabaseClient();
 
+  // section_gst (mig 199) fetched separately best-effort so a pre-mig schema
+  // doesn't 404 the whole page.
   const { data: chRow } = await admin
     .from("challans")
     .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, running_challan_at, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, source_dispatch_id, challan_custom_items(position, particulars, hsn, unit, quantity, rate, section_index, section_head)")
@@ -36,9 +38,22 @@ export default async function RunningInvoicePage({ params }: { params: Params })
   const c = chRow as any;
   if (!c || !c.running_challan_at) notFound();
   const editMode = c.inv_seq != null;
+  {
+    const { data: sg, error } = await admin.from("challan_custom_items").select("position, section_index, section_gst").eq("challan_id", id);
+    if (!error && sg) {
+      const byPos = new Map<number, number | null>();
+      for (const r of sg as any[]) byPos.set(Number(r.position) || 0, r.section_gst != null ? Number(r.section_gst) : null);
+      for (const it of (c.challan_custom_items ?? []) as any[]) it.section_gst = byPos.get(Number(it.position) || 0) ?? null;
+    }
+  }
 
+  // Legacy per-table prefill: the invoice's stored slab (edit) / the temple
+  // default (first convert) when no per-table slab is stored yet.
+  const challanMode0 = (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode;
+  const legacyPct = challanMode0 === "igst" ? Number(c.igst_percent) || 0 : challanMode0 === "cgst_sgst" ? (Number(c.cgst_percent) || 0) + (Number(c.sgst_percent) || 0) : 0;
   const initSections = groupBulkItems((c.challan_custom_items ?? []) as any[]).map((g) => ({
     head: g.head ?? "",
+    gst: g.gst != null ? String(g.gst) : legacyPct ? String(legacyPct) : "18",
     lines: g.rows.map((it: any) => ({ particulars: it.particulars ?? "", hsn: it.hsn ?? "", unit: it.unit ?? "", quantity: it.quantity != null ? String(it.quantity) : "", rate: it.rate != null ? String(it.rate) : "" })),
   }));
 

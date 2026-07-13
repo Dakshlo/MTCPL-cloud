@@ -13,7 +13,7 @@ import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { fetchTempleBilling } from "@/lib/temple-billing";
 import { stonePrintLabel, type StoneCategory } from "@/lib/stone-categories";
-import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCode } from "@/lib/invoice-code";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
@@ -225,6 +225,20 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   }
   const headFor = (stone: string): string => stoneHead.get(stone) ?? "";
 
+  // Mig 199 — this invoice's per-stone-table GST slabs ({ "<stone>|<unit>" →
+  // pct }). Separate best-effort fetch: a pre-mig-199 schema (or a pre-199
+  // invoice, where the map is simply absent) keeps the invoice-level %.
+  const stoneGst = new Map<string, number>();
+  {
+    const { data: sg, error } = await (admin.from("challans") as unknown as {
+      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { stone_gst: Record<string, number> | null } | null; error: unknown }> } };
+    }).select("stone_gst").eq("id", id).maybeSingle();
+    if (!error && sg?.stone_gst && typeof sg.stone_gst === "object") {
+      for (const [k, v] of Object.entries(sg.stone_gst)) { const n = Number(v); if (Number.isFinite(n)) stoneGst.set(k, n); }
+    }
+  }
+  const gstFor = (stone: string, unit: "cft" | "sft"): number | null => stoneGst.get(`${stone}|${unit}`) ?? null;
+
   const items = (itemRows ?? []) as Item[];
 
   const unitOf = (it: Item): "cft" | "sft" => ((it.measure_unit || it.unit) === "sft" ? "sft" : "cft");
@@ -273,12 +287,13 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   })();
 
-  const totals = computeInvoiceTotals(items.map(amountOf), {
-    mode: (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode,
-    igst: Number(c.igst_percent) || 0,
-    cgst: Number(c.cgst_percent) || 0,
-    sgst: Number(c.sgst_percent) || 0,
-  });
+  const gstMode = (c.gst_mode === "igst" || c.gst_mode === "cgst_sgst" ? c.gst_mode : null) as GstMode;
+  // Mig 199 — per-stone-table slabs; items without one (all pre-199 invoices)
+  // fall back to the invoice-level %, so old invoices print exactly as before.
+  const totals = computeGroupedGstTotals(
+    items.map((it) => ({ amount: amountOf(it), gstPercent: gstFor(stoneOf(it), unitOf(it)) })),
+    { mode: gstMode, igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0 },
+  );
 
   const printDate = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -288,14 +303,17 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
   // the owner approves, owner_approved_at is set and the watermark disappears.
   const underApproval = !!c.priced_at && !c.owner_approved_at;
 
-  const Section = ({ rows, unit }: { rows: Item[]; unit: "cft" | "sft" }) => {
+  const Section = ({ rows, unit, gst }: { rows: Item[]; unit: "cft" | "sft"; gst?: number | null }) => {
     if (rows.length === 0) return null;
     const sub = rows.reduce((a, it) => a + amountOf(it), 0);
     const measTotal = rows.reduce((a, it) => a + measureOf(it), 0);
     const qtyTotal = rows.reduce((a, it) => a + (Number(it.quantity) || 0), 0);
     return (
       <>
-        <div className="grp-title">{unit === "cft" ? "CFT · volume billed" : "SFT · area billed"}</div>
+        <div className="grp-title" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+          <span>{unit === "cft" ? "CFT · volume billed" : "SFT · area billed"}</span>
+          {gstMode && gst != null && <span>GST {gst}%</span>}
+        </div>
         <table className="t">
           <thead>
             <tr>
@@ -538,8 +556,8 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
                     <span className="st-hsn">{hsn ? <>HSN&nbsp;<b>{hsn}</b></> : ""}</span>
                     <span className="st-stone">{head ? label : ""}</span>
                   </div>
-                  <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" />
-                  <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" />
+                  <Section rows={rows.filter((it) => unitOf(it) === "cft")} unit="cft" gst={gstFor(stone, "cft")} />
+                  <Section rows={rows.filter((it) => unitOf(it) === "sft")} unit="sft" gst={gstFor(stone, "sft")} />
                 </div>
               );
             })}
@@ -556,30 +574,37 @@ export default async function InvoicePrintPage({ params }: { params: Params }) {
               </div>
               <div className="totals">
                 <div className="row"><span>Subtotal</span><span className="mono">{rupee(totals.subtotal)}</span></div>
-                {c.gst_mode === "igst" && <div className="row alt"><span>IGST @ {Number(c.igst_percent) || 0}%</span><span className="mono">{rupee(totals.igstAmt)}</span></div>}
-                {c.gst_mode === "cgst_sgst" && (
-                  <>
-                    <div className="row alt"><span>CGST @ {Number(c.cgst_percent) || 0}%</span><span className="mono">{rupee(totals.cgstAmt)}</span></div>
-                    <div className="row alt"><span>SGST @ {Number(c.sgst_percent) || 0}%</span><span className="mono">{rupee(totals.sgstAmt)}</span></div>
-                  </>
-                )}
+                {totals.groups.map((g, i) => (
+                  <div key={i} className="row alt"><span>{gstGroupLabel(gstMode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="mono">{rupee(g.taxAmt)}</span></div>
+                ))}
                 <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
               </div>
             </div>
 
-            {/* Tax summary + amount in words (Daksh). Total tax shown combined,
-                with the GST type noted (IGST or CGST+SGST). */}
+            {/* Tax summary + amount in words (Daksh). One row per GST slab
+                (mig 199) — a single-slab invoice reads exactly as before. */}
             <table className="taxsum">
               <thead>
                 <tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr>
               </thead>
               <tbody>
-                <tr>
-                  <td className="mono">{rupee(totals.subtotal)}</td>
-                  <td>{c.gst_mode === "igst" ? `IGST @ ${Number(c.igst_percent) || 0}%` : c.gst_mode === "cgst_sgst" ? `CGST + SGST @ ${Number(c.cgst_percent) || 0}% + ${Number(c.sgst_percent) || 0}%` : "—"}</td>
-                  <td className="mono">{rupee(c.gst_mode === "igst" ? totals.igstAmt : c.gst_mode === "cgst_sgst" ? totals.cgstAmt + totals.sgstAmt : 0)}</td>
-                  <td className="mono">{rupee(totals.grand)}</td>
-                </tr>
+                {totals.groups.length === 0 ? (
+                  <tr>
+                    <td className="mono">{rupee(totals.subtotal)}</td>
+                    <td>—</td>
+                    <td className="mono">{rupee(0)}</td>
+                    <td className="mono">{rupee(totals.grand)}</td>
+                  </tr>
+                ) : (
+                  totals.groups.map((g, i) => (
+                    <tr key={i}>
+                      <td className="mono">{rupee(g.taxable)}</td>
+                      <td>{gstGroupLabel(gstMode, g)}</td>
+                      <td className="mono">{rupee(g.taxAmt)}</td>
+                      {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(totals.grand)}</td>}
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
             <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>

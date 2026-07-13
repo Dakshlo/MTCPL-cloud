@@ -9,12 +9,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
-import { computeInvoiceTotals, rupee, type GstMode } from "@/lib/challan-pricing";
+import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { convertRunningToInvoiceAction } from "../../../actions";
 import { BulkInvoicePreview, type PreviewParty } from "../../../bulk/new/bulk-invoice-preview";
 
 type Line = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
-type Section = { head: string; lines: Line[] };
+// Mig 199 — every table carries ITS OWN GST slab % (mandatory when GST is on).
+type Section = { head: string; gst: string; lines: Line[] };
 
 function ConvertBtn({ edit }: { edit: boolean }) {
   const { pending } = useFormStatus();
@@ -30,28 +31,28 @@ function ConvertBtn({ edit }: { edit: boolean }) {
 
 export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchId, initSections, initGst, bill, ship, invLabel }: {
   id: string; code: string; temple: string; editMode: boolean; sourceDispatchId: string | null;
-  initSections: Array<{ head: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: string; rate: string }> }>;
+  initSections: Array<{ head: string; gst: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: string; rate: string }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
   bill: PreviewParty | null; ship: PreviewParty | null; invLabel: string;
 }) {
   void sourceDispatchId;
-  const [sections, setSections] = useState<Section[]>(() => (initSections.length ? initSections.map((s) => ({ head: s.head, lines: s.lines.map((l) => ({ ...l })) })) : []));
+  const [sections, setSections] = useState<Section[]>(() => (initSections.length ? initSections.map((s) => ({ head: s.head, gst: s.gst, lines: s.lines.map((l) => ({ ...l })) })) : []));
   const [mode, setMode] = useState<GstMode>(initGst.mode);
-  const [igst, setIgst] = useState(String(initGst.igst || 18));
-  const [cgst, setCgst] = useState(String(initGst.cgst || 9));
-  const [sgst, setSgst] = useState(String(initGst.sgst || 9));
   const [showPreview, setShowPreview] = useState(false);
 
   const setRate = (si: number, li: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, rate: v.replace(/[^0-9.]/g, "") } : l)) } : s)));
+  const setGst = (si: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, gst: v.replace(/[^0-9.]/g, "") } : s)));
   const amountOf = (l: Line) => (Number(l.quantity) || 0) * (Number(l.rate) || 0);
 
   const serialItems = useMemo(
-    () => sections.flatMap((s, si) => s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, amount: amountOf(l), section_index: si, section_head: s.head.trim() || null }))),
-    [sections],
+    () => sections.flatMap((s, si) => s.lines.map((l) => ({ particulars: l.particulars, hsn: l.hsn, unit: l.unit, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, amount: amountOf(l), section_index: si, section_head: s.head.trim() || null, section_gst: mode ? (s.gst.trim() === "" ? null : Number(s.gst) || 0) : null }))),
+    [sections, mode],
   );
-  const totals = computeInvoiceTotals(serialItems.map((i) => i.amount), { mode, igst: Number(igst) || 0, cgst: Number(cgst) || 0, sgst: Number(sgst) || 0 });
+  const totals = computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 });
   const itemsJson = JSON.stringify(serialItems);
   const allRated = serialItems.length > 0 && serialItems.every((i) => i.rate > 0);
+  // GST slab is MANDATORY per table when GST is on (mig 199).
+  const missingGst = mode ? sections.filter((s) => s.gst.trim() === "").length : 0;
 
   const cell: React.CSSProperties = { padding: "5px 7px", border: "1px solid var(--border)", fontSize: 12.5 };
   const ro: React.CSSProperties = { ...cell, color: "var(--muted)" };
@@ -83,14 +84,21 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
           <input type="hidden" name="edit_mode" value={editMode ? "1" : ""} />
           <input type="hidden" name="items" value={itemsJson} />
           <input type="hidden" name="gst_mode" value={mode ?? ""} />
-          <input type="hidden" name="igst_percent" value={igst} />
-          <input type="hidden" name="cgst_percent" value={cgst} />
-          <input type="hidden" name="sgst_percent" value={sgst} />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {sections.map((s, si) => (
               <div key={si} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                {(sections.length > 1 || s.head.trim()) && <div style={{ padding: "7px 11px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: 13, fontWeight: 800 }}>{s.head.trim() || `Table ${si + 1}`}</div>}
+                {(sections.length > 1 || s.head.trim() || mode) && (
+                  <div style={{ padding: "7px 11px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+                    <span>{s.head.trim() || `Table ${si + 1}`}</span>
+                    {mode && (
+                      <label title={`This table's GST slab — mandatory. ${mode === "cgst_sgst" ? "Splits half CGST / half SGST." : "Charged as IGST."}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: s.gst.trim() === "" ? "#dc2626" : "var(--muted)", whiteSpace: "nowrap" }}>
+                        GST %
+                        <input value={s.gst} onChange={(e) => setGst(si, e.target.value)} inputMode="decimal" placeholder="req." style={{ width: 58, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12.5, fontWeight: 800, padding: "4px 7px", borderRadius: 7, border: `1.5px solid ${s.gst.trim() === "" ? "#dc2626" : "var(--gold-dark)"}`, background: "var(--surface)", color: "var(--text)" }} />
+                      </label>
+                    )}
+                  </div>
+                )}
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 520 }}>
                     <thead>
@@ -125,18 +133,17 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
                   return <button key={val} type="button" onClick={() => setMode(val === "none" ? null : (val as GstMode))} style={{ padding: "7px 13px", fontSize: 12.5, fontWeight: 800, borderRadius: 8, cursor: "pointer", border: `1px solid ${on ? "var(--gold-dark)" : "var(--border)"}`, background: on ? "var(--gold)" : "var(--bg)", color: on ? "#fff" : "var(--text)" }}>{label}</button>;
                 })}
               </div>
-              {mode === "igst" && <label className="stack" style={{ maxWidth: 140 }}><span>IGST %</span><input value={igst} onChange={(e) => setIgst(e.target.value)} inputMode="decimal" /></label>}
-              {mode === "cgst_sgst" && (
-                <div style={{ display: "flex", gap: 10 }}>
-                  <label className="stack" style={{ maxWidth: 120 }}><span>CGST %</span><input value={cgst} onChange={(e) => setCgst(e.target.value)} inputMode="decimal" /></label>
-                  <label className="stack" style={{ maxWidth: 120 }}><span>SGST %</span><input value={sgst} onChange={(e) => setSgst(e.target.value)} inputMode="decimal" /></label>
+              {mode && (
+                <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>
+                  Each table has its own <strong>GST %</strong> box in its header — mandatory. Tables can carry different slabs on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
                 </div>
               )}
             </div>
             <div style={{ flex: "0 0 260px", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
-              {mode === "igst" && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>IGST @ {igst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.igstAmt)}</span></div>}
-              {mode === "cgst_sgst" && <><div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>CGST @ {cgst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.cgstAmt)}</span></div><div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>SGST @ {sgst || 0}%</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.sgstAmt)}</span></div></>}
+              {totals.groups.map((g, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "3px 0" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
+              ))}
               <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
             </div>
           </div>
@@ -145,6 +152,7 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
             <ConvertBtn edit={editMode} />
             <button type="button" onClick={() => setShowPreview(true)} style={{ fontSize: 13.5, fontWeight: 800, padding: "12px 18px", borderRadius: 11, border: "1.5px solid #0f2540", background: "var(--surface, #fff)", color: "#0f2540", cursor: "pointer" }}>👁 Preview invoice</button>
             {!allRated && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>⚠ Add a rate for every line.</span>}
+            {allRated && missingGst > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>⚠ Set the GST % on every table.</span>}
           </div>
         </form>
       </div>
@@ -158,9 +166,9 @@ export function RunningInvoiceForm({ id, code, temple, editMode, sourceDispatchI
           coveredCodes={[code]}
           items={serialItems}
           mode={mode}
-          igst={Number(igst) || 0}
-          cgst={Number(cgst) || 0}
-          sgst={Number(sgst) || 0}
+          igst={0}
+          cgst={0}
+          sgst={0}
           invoiceNo={invLabel}
           invoiceDate={new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })}
           onClose={() => setShowPreview(false)}
