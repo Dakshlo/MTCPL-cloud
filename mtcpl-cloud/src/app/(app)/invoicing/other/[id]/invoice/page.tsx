@@ -78,6 +78,13 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
     ? { mode: ownMode, igst: Number(o.igst_percent) || 18, cgst: Number(o.cgst_percent) || 9, sgst: Number(o.sgst_percent) || 9 }
     : { mode: partyMode, igst: Number(p.igst_percent) || 18, cgst: Number(p.cgst_percent) || 9, sgst: Number(p.sgst_percent) || 9 };
 
+  // Mig 200 — the invoice's saved discount (best-effort; pre-mig = off).
+  let initDiscount: { mode: "amount" | "percent" | null; value: number } = { mode: null, value: 0 };
+  {
+    const { data: dc, error } = await admin.from("other_challans").select("discount_mode, discount_value").eq("id", id).maybeSingle();
+    const d = dc as { discount_mode?: string | null; discount_value?: number | null } | null;
+    if (!error && d) initDiscount = { mode: d.discount_mode === "amount" || d.discount_mode === "percent" ? d.discount_mode : null, value: Number(d.discount_value) || 0 };
+  }
   const chCode = challanCode(o.doc_fy, o.doc_seq) ?? `CH-${id.slice(0, 6).toUpperCase()}`;
   const invFy = (o.inv_fy ?? "").trim() || financialYear(o.challan_date);
   const invPrefix = `INV-${invFy}-`;
@@ -98,6 +105,7 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
         editMode={editMode}
         initSections={initSections}
         initGst={initGst}
+        initDiscount={initDiscount}
         bill={bill}
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}

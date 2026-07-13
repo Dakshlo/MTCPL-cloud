@@ -223,11 +223,15 @@ export async function convertOtherChallanAction(formData: FormData) {
     redirect(`/invoicing/other/${id}/invoice?toast=${encodeURIComponent("Set the GST % on every table")}`);
   }
   const gst = readGst(formData, items);
+  // Mig 200 — discount on the final amount (default off).
+  const dmRaw2 = txt(formData, "discount_mode");
+  const discountMode = dmRaw2 === "amount" || dmRaw2 === "percent" ? dmRaw2 : null;
+  const discountValue = discountMode ? Math.max(0, Number(txt(formData, "discount_value")) || 0) : null;
 
   // Mig 184 — editing an EXISTING other-sales invoice is approval-gated: stage
   // the change; owner / accountant★ apply it from the Approval page.
   if (editMode) {
-    const payload = { kind: "other" as const, items, gst };
+    const payload = { kind: "other" as const, items, gst, discount: { discount_mode: discountMode, discount_value: discountValue } };
     await admin.from("other_challans").update({ pending_edit_payload: payload, pending_edit_at: new Date().toISOString(), pending_edit_by: profile.id } as never).eq("id", id);
     await logAudit(profile.id, "invoice_edit_requested", "other_challan", id, {});
     refresh(id);
@@ -238,6 +242,10 @@ export async function convertOtherChallanAction(formData: FormData) {
   await admin.from("other_challan_items").delete().eq("other_challan_id", id);
   await writeItems(admin, id, items);
   await admin.from("other_challans").update({ ...gst }).eq("id", id);
+  // Mig 200 — discount (best-effort so a pre-mig schema still converts).
+  try {
+    await admin.from("other_challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", id);
+  } catch { /* pre-mig-200 */ }
 
   const fy = financialYear(row.challan_date || new Date());
   // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.

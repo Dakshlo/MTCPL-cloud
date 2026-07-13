@@ -20,7 +20,7 @@ import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
 import { isMarble, cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
-import { computeGroupedGstTotals, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
@@ -604,13 +604,15 @@ async function fetchLines(
   return m;
 }
 
-/** One doc's rolled-up qty buckets + totals from its lines. */
-function rollup(lines: RecentLine[], gst: ReturnType<typeof gstOfRow>): Pick<RecentDoc, "cft" | "sft" | "nos" | "subtotal" | "taxed" | "total" | "priced"> {
+/** One doc's rolled-up qty buckets + totals from its lines. Mig 200 — `total`
+ *  is the PAYABLE (grand − discount). */
+function rollup(lines: RecentLine[], gst: ReturnType<typeof gstOfRow>, disc?: { discount_mode?: string | null; discount_value?: number | null }): Pick<RecentDoc, "cft" | "sft" | "nos" | "subtotal" | "taxed" | "total" | "priced"> {
   let cft = 0, sft = 0, nos = 0;
   for (const l of lines) { const b = unitBucket(l.unit); if (b === "cft") cft += l.qty; else if (b === "sft") sft += l.qty; else nos += l.qty; }
   const priced = lines.some((l) => l.amount > 0);
   const t = computeGroupedGstTotals(lines.map((l) => ({ amount: l.amount, gstPercent: l.gstPercent })), gst);
-  return { cft, sft, nos, subtotal: t.subtotal, taxed: t.grand - t.subtotal, total: t.grand, priced };
+  const payable = applyDiscount(t.grand, disc?.discount_mode ?? null, Number(disc?.discount_value) || 0).payable;
+  return { cft, sft, nos, subtotal: t.subtotal, taxed: t.grand - t.subtotal, total: payable, priced };
 }
 
 /** Every challan raised + every invoice issued inside [startUTC, endUTC). */
@@ -620,8 +622,8 @@ async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: st
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const win = (q: any, col: string): any => q.gte(col, startUTC).lt(col, endUTC);
 
-  type ChRow = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string | null; owner_approved_at: string | null; custom_billed_at: string | null; converted_invoice_id: string | null; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
-  const CH_COLS = "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, owner_approved_at, custom_billed_at, converted_invoice_id, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent";
+  type ChRow = { id: string; challan_number: string; doc_fy: string | null; doc_seq: number | null; challan_date: string; temple: string | null; priced_at: string | null; owner_approved_at: string | null; custom_billed_at: string | null; converted_invoice_id: string | null; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null };
+  const CH_COLS = "id, challan_number, doc_fy, doc_seq, challan_date, temple, priced_at, owner_approved_at, custom_billed_at, converted_invoice_id, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value";
   const chCode = (r: ChRow) => challanCode(r.doc_fy, r.doc_seq) ?? r.challan_number;
   const chInv = (r: ChRow) => r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || null;
 
@@ -637,7 +639,7 @@ async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: st
     const cust = await chCustom(rows.filter((r) => !std.has(r.id)).map((r) => r.id));
     for (const r of rows) {
       const lines = std.get(r.id) ?? cust.get(r.id) ?? [];
-      challans.push({ kind: "challan", code: chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+      challans.push({ kind: "challan", code: chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r), r) });
     }
   } catch { /* never block the report */ }
 
@@ -650,20 +652,20 @@ async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: st
     const cust = await chCustom(rows.filter((r) => r.custom_billed_at).map((r) => r.id));
     for (const r of rows) {
       const lines = (r.custom_billed_at ? cust.get(r.id) : std.get(r.id)) ?? [];
-      invoices.push({ kind: "invoice", code: chInv(r) ?? chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+      invoices.push({ kind: "invoice", code: chInv(r) ?? chCode(r), invCode: chInv(r), party: r.temple ?? "-", date: r.challan_date, items: lines, ...rollup(lines, gstOfRow(r), r) });
     }
   } catch { /* skip */ }
 
   // 3 — WORK-ORDER invoices approved in the window (bulk_invoices).
   try {
-    type BRow = { id: string; temple: string | null; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
-    const { data } = await win(admin.from("bulk_invoices").select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent").is("cancelled_at", null).not("owner_approved_at", "is", null).order("owner_approved_at", { ascending: false }) as never, "owner_approved_at") as { data: BRow[] | null };
+    type BRow = { id: string; temple: string | null; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null };
+    const { data } = await win(admin.from("bulk_invoices").select("id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value").is("cancelled_at", null).not("owner_approved_at", "is", null).order("owner_approved_at", { ascending: false }) as never, "owner_approved_at") as { data: BRow[] | null };
     const rows = (data ?? []) as BRow[];
     const items = await fetchLines(admin, "bulk_invoice_items", "bulk_invoice_id", rows.map((r) => r.id), "unit", "quantity");
     for (const r of rows) {
       const lines = items.get(r.id) ?? [];
       const code = r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${r.id.slice(0, 6).toUpperCase()}`;
-      invoices.push({ kind: "invoice", code, invCode: code, party: r.temple ?? "-", date: r.invoice_date, items: lines, ...rollup(lines, gstOfRow(r)) });
+      invoices.push({ kind: "invoice", code, invCode: code, party: r.temple ?? "-", date: r.invoice_date, items: lines, ...rollup(lines, gstOfRow(r), r) });
     }
   } catch { /* skip */ }
 
@@ -671,7 +673,7 @@ async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: st
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parse = (rows: any[]): { row: any; party: string }[] => rows.map((r) => ({ row: r, party: (Array.isArray(r.invoice_parties) ? r.invoice_parties[0]?.name : r.invoice_parties?.name) ?? "Other Sales" }));
-    const OC = "id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, gst_mode, igst_percent, cgst_percent, sgst_percent, invoice_parties(name)";
+    const OC = "id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, invoice_parties(name)";
     const { data: raised } = await win(admin.from("other_challans").select(OC).is("cancelled_at", null).order("created_at", { ascending: false }) as never, "created_at") as { data: unknown[] | null };
     const { data: conv } = await win(admin.from("other_challans").select(OC).is("cancelled_at", null).not("converted_at", "is", null).order("converted_at", { ascending: false }) as never, "converted_at") as { data: unknown[] | null };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -680,7 +682,7 @@ async function gatherRecentDocs(admin: AdminClient, startUTC: string, endUTC: st
     for (const x of all) {
       const r = x.row;
       const lines = items.get(String(r.id)) ?? [];
-      const roll = rollup(lines, gstOfRow(r));
+      const roll = rollup(lines, gstOfRow(r), r);
       const code = x.kind === "invoice" ? (invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`) : (challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`);
       const doc: RecentDoc = { kind: x.kind, code, invCode: x.kind === "invoice" ? code : (r.converted_at ? invoiceCodeFromDoc(r.inv_fy, r.inv_seq) : null), party: x.party, date: String(r.challan_date), items: lines, ...roll };
       (x.kind === "invoice" ? invoices : challans).push(doc);

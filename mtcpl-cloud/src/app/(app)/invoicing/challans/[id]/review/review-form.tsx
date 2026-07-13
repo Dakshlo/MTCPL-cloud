@@ -12,7 +12,8 @@ import { useMemo, useState } from "react";
 import { saveChallanPricingAction, returnDispatchToWaitingAction } from "../../../actions";
 import { ReturnToDispatchButton } from "../../../_ui/return-to-dispatch-button";
 import { dash } from "@/lib/dispatch-grouping";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GroupedInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type DiscountMode, type GroupedInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { DiscountControl, type DiscountModeUi } from "../../../_ui/discount-control";
 import { amountInWordsIN } from "@/lib/amount-words";
 
 export type PriceItem = {
@@ -55,6 +56,7 @@ export function ReviewForm({
   initHsn = {},
   initHeads = {},
   initTableGst = {},
+  initDiscount,
   hsnUseVendor = false,
 }: {
   challanId: string;
@@ -80,6 +82,8 @@ export function ReviewForm({
   initHeads?: Record<string, string>;
   /** Mig 199 — per-stone-TABLE GST slab % ({ "<stone>|<unit>" → pct }). */
   initTableGst?: Record<string, number>;
+  /** Mig 200 — the invoice's saved discount (mode null = off). */
+  initDiscount?: { mode: "amount" | "percent" | null; value: number };
   hsnUseVendor?: boolean;
 }) {
   // One rate per stone+unit group (key = `${stone}|${unit}`).
@@ -121,6 +125,9 @@ export function ReviewForm({
   }, [company, transportCompanies]);
   const [mode, setMode] = useState<GstMode>(initGst.mode);
   const [showPreview, setShowPreview] = useState(false);
+  // Mig 200 — discount on the final amount (default off; prefilled in edit).
+  const [discMode, setDiscMode] = useState<DiscountModeUi>(initDiscount?.mode ?? "off");
+  const [discValue, setDiscValue] = useState(initDiscount?.mode && initDiscount.value ? String(initDiscount.value) : "");
   // Mig 199 — GST slab PER STONE TABLE (key = `${stone}|${unit}`), mandatory.
   // Prefill: the invoice's stored per-table slab, else its legacy single %.
   const legacyPct = initGst.mode === "cgst_sgst" ? (Number(initGst.cgst) || 0) + (Number(initGst.sgst) || 0) : Number(initGst.igst) || 0;
@@ -176,6 +183,7 @@ export function ReviewForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableGst, items]);
   const canSubmit = allRated && allHsn && allGst;
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
 
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
@@ -305,6 +313,8 @@ export function ReviewForm({
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
       <input type="hidden" name="stone_gst" value={tableGstJson} />
       <input type="hidden" name="item_gst" value={itemGstJson} />
+      <input type="hidden" name="discount_mode" value={discMode === "off" ? "" : discMode} />
+      <input type="hidden" name="discount_value" value={discMode === "off" ? "" : discValue} />
 
       {/* Called inline (not <GroupSection/>) so editing a Rate doesn't remount. */}
       {groups.map((g) => GroupSection(g))}
@@ -379,6 +389,7 @@ export function ReviewForm({
               Each stone table has its own <strong>GST %</strong> box (next to its Rate) — mandatory. Tables can carry different slabs on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
             </div>
           )}
+          <DiscountControl mode={discMode} value={discValue} onMode={setDiscMode} onValue={setDiscValue} />
           {/* Invoice number — LOCKED (auto-assigned, never hand-edited). */}
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-light)" }}>
             <span style={{ display: "block", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
@@ -402,8 +413,20 @@ export function ReviewForm({
           {totals.groups.map((g, i) => (
             <Row key={i} label={`${gstGroupLabel(mode, g)}${totals.multi ? ` on ${rupee(g.taxable)}` : ""}`} value={rupee(g.taxAmt)} />
           ))}
-          <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
-          <Row label="Grand total" value={rupee(totals.grand)} big />
+          {disc.amt > 0 ? (
+            <>
+              <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
+              <Row label="Grand total" value={rupee(totals.grand)} />
+              <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />
+              <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
+              <Row label="Amount payable" value={rupee(disc.payable)} big />
+            </>
+          ) : (
+            <>
+              <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
+              <Row label="Grand total" value={rupee(totals.grand)} big />
+            </>
+          )}
         </div>
       </div>
 
@@ -429,6 +452,8 @@ export function ReviewForm({
           groups={groups.map((g) => ({ key: g.key, stone: g.stone, head: (heads[g.stone] ?? "").trim(), hsn: (hsn[g.stone] ?? "").trim(), unit: g.unit, meas: g.items.reduce((a, it) => a + it.measureQty, 0), qty: g.items.reduce((a, it) => a + it.qty, 0), rate: Number(rates[g.key]) || 0, gst: gstOf(g.key), items: g.items.map((it) => ({ codes: it.codes, label: it.label, description: it.description, section: it.component_section, element: it.component_element, l: it.length_ft, w: it.width_ft, h: it.thickness_ft, qty: it.qty, meas: it.measureQty })) }))}
           totals={totals}
           mode={mode}
+          discountMode={discMode === "off" ? null : discMode}
+          discountValue={Number(discValue) || 0}
           onClose={() => setShowPreview(false)}
         />
       )}
@@ -439,7 +464,7 @@ export function ReviewForm({
 /** Full tax-invoice preview (NOT VALID watermark) — renders how the FINAL invoice
  *  will read once priced + owner-approved (Bill/Ship To, covered challan, GST, tax
  *  summary, amount in words, signatures). Daksh Jul 2026. */
-function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mode, onClose }: {
+function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mode, discountMode = null, discountValue = 0, onClose }: {
   bill: { name: string; address: string | null; gstin: string | null } | null;
   ship: { name: string; address: string | null } | null;
   challanCode: string;
@@ -447,6 +472,8 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   groups: Array<{ key: string; stone: string; head: string; hsn: string; unit: "cft" | "sft"; meas: number; qty: number; rate: number; gst: number | null; items: Array<{ codes: string | null; label: string | null; description: string | null; section: string | null; element: string | null; l: number | null; w: number | null; h: number | null; qty: number; meas: number }> }>;
   totals: GroupedInvoiceTotals;
   mode: GstMode;
+  discountMode?: DiscountMode;
+  discountValue?: number;
   onClose: () => void;
 }) {
   const pcell: React.CSSProperties = { padding: "4px 6px", border: "1px solid #e2e7ee", fontWeight: 700, color: "#1a1a1a", fontSize: 10.5 };
@@ -455,6 +482,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   const party: React.CSSProperties = { flex: 1, border: "1px solid #ccc", borderRadius: 6, padding: "7px 9px", background: "#f7fafc" };
   const kk: React.CSSProperties = { fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "#888" };
   const shipName = (ship?.name ?? "").trim() || bill?.name || "—";
+  const disc = applyDiscount(totals.grand, discountMode, discountValue);
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", display: "grid", placeItems: "start center", padding: 16, overflowY: "auto" }}>
       <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(820px, 100%)", background: "#fff", color: "#1a1a1a", borderRadius: 12, padding: "18px 22px 22px", boxShadow: "0 24px 60px rgba(0,0,0,0.35)", position: "relative", overflow: "hidden" }}>
@@ -547,7 +575,15 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
               {totals.groups.map((g, i) => (
                 <div key={i} style={{ ...ptot, background: "#f7fafc" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
               ))}
-              <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+              {disc.amt > 0 ? (
+                <>
+                  <div style={ptot}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+                  <div style={{ ...ptot, background: "#f7fafc" }}><span>{discountLabel(disc)}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>−{rupee(disc.amt)}</span></div>
+                  <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Amount Payable</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(disc.payable)}</span></div>
+                </>
+              ) : (
+                <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+              )}
             </div>
           </div>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}>
@@ -567,7 +603,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
               )}
             </tbody>
           </table>
-          <div style={{ marginTop: 7, fontSize: 11, border: "1px solid #d3dae3", borderRadius: 6, padding: "6px 10px", background: "#f7fafc" }}><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+          <div style={{ marginTop: 7, fontSize: 11, border: "1px solid #d3dae3", borderRadius: 6, padding: "6px 10px", background: "#f7fafc" }}><strong>Amount in words:</strong> {amountInWordsIN(disc.payable)}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 20 }}>
             <div style={{ borderTop: "1.5px solid #888", paddingTop: 4, fontSize: 8.5, color: "#888", fontWeight: 700, textTransform: "uppercase" }}>Customer Signature<div style={{ fontSize: 9.5, color: "#444", textTransform: "none", fontWeight: 600, marginTop: 2 }}>{bill?.name ?? "—"}</div></div>
             <div style={{ borderTop: "1.5px solid #888", paddingTop: 4, fontSize: 8.5, color: "#888", fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>For MTCPL · Authorised Signatory<div style={{ fontSize: 9.5, marginTop: 2 }}>&nbsp;</div></div>

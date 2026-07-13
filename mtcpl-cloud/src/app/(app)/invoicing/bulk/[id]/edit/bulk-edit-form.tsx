@@ -5,18 +5,21 @@
 
 import { useMemo, useState } from "react";
 import { updateBulkInvoiceAction } from "../../../actions";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { DiscountControl, type DiscountModeUi } from "../../../_ui/discount-control";
 import { BULK_UNITS } from "@/lib/bulk-items";
 
 type Line = { particulars: string; hsn: string; unit: string; quantity: string; rate: string };
 // Mig 199 — every table carries ITS OWN GST slab % (mandatory when GST is on).
 type Section = { head: string; gst: string; lines: Line[] };
 
-export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes, challans, linkedIds }: {
+export function BulkEditForm({ id, invoiceCode, initSections, initGst, initDiscount, initNotes, challans, linkedIds }: {
   id: string;
   invoiceCode: string;
   initSections: Array<{ head: string; gst: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: number; rate: number }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
+  /** Mig 200 — the invoice's saved discount (mode null = off). */
+  initDiscount?: { mode: "amount" | "percent" | null; value: number };
   initNotes: string;
   challans: Array<{ id: string; code: string; date: string }>;
   linkedIds: string[];
@@ -28,6 +31,9 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
   // Seed for NEW tables — the invoice's own slab (or 18 when it had none).
   const defaultPct = String((initGst.mode === "igst" ? initGst.igst : initGst.mode === "cgst_sgst" ? initGst.cgst + initGst.sgst : 0) || 18);
   const [notes, setNotes] = useState(initNotes);
+  // Mig 200 — discount on the final amount (prefilled from the invoice).
+  const [discMode, setDiscMode] = useState<DiscountModeUi>(initDiscount?.mode ?? "off");
+  const [discValue, setDiscValue] = useState(initDiscount?.mode && initDiscount.value ? String(initDiscount.value) : "");
   const [selected, setSelected] = useState<Set<string>>(() => new Set(linkedIds));
   const toggleChallan = (cid: string) => setSelected((p) => { const n = new Set(p); if (n.has(cid)) n.delete(cid); else n.add(cid); return n; });
 
@@ -49,6 +55,7 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
     [sections, mode],
   );
   const totals = computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 });
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
   const itemsJson = JSON.stringify(serialItems);
   const hasItems = serialItems.length > 0;
   // GST slab is MANDATORY per table when GST is on (mig 199).
@@ -65,6 +72,8 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="items" value={itemsJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
+      <input type="hidden" name="discount_mode" value={discMode === "off" ? "" : discMode} />
+      <input type="hidden" name="discount_value" value={discMode === "off" ? "" : discValue} />
       <input type="hidden" name="notes" value={notes} />
       <input type="hidden" name="challan_ids" value={JSON.stringify([...selected])} />
 
@@ -167,6 +176,7 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
               Each table has its own <strong>GST %</strong> box in its header — mandatory. Tables can carry different slabs on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
             </div>
           )}
+          <DiscountControl mode={discMode} value={discValue} onMode={setDiscMode} onValue={setDiscValue} />
           <label className="stack" style={{ marginTop: 12, maxWidth: 460 }}><span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Notes (optional)</span><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 13 }} /></label>
         </div>
         <div style={{ flex: "0 0 260px", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
@@ -174,7 +184,15 @@ export function BulkEditForm({ id, invoiceCode, initSections, initGst, initNotes
           {totals.groups.map((g, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "3px 0" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
           ))}
-          <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+          {disc.amt > 0 ? (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0", color: "#b45309", fontWeight: 700 }}><span>{discountLabel(disc)}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>−{rupee(disc.amt)}</span></div>
+              <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Amount Payable</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(disc.payable)}</span></div>
+            </>
+          ) : (
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+          )}
         </div>
       </div>
 

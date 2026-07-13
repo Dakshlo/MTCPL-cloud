@@ -9,7 +9,8 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { DiscountControl, type DiscountModeUi } from "../../../_ui/discount-control";
 import { convertOtherChallanAction } from "../../actions";
 import { BulkInvoicePreview, type PreviewParty } from "../../../bulk/new/bulk-invoice-preview";
 
@@ -29,14 +30,19 @@ function ConvertBtn({ edit }: { edit: boolean }) {
   );
 }
 
-export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, initGst, bill, ship, invLabel }: {
+export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, initGst, initDiscount, bill, ship, invLabel }: {
   id: string; chCode: string; party: string; editMode: boolean;
   initSections: Array<{ head: string; gst: string; lines: Array<{ particulars: string; hsn: string; unit: string; quantity: string; rate: string }> }>;
   initGst: { mode: GstMode; igst: number; cgst: number; sgst: number };
+  /** Mig 200 — the invoice's saved discount (mode null = off). */
+  initDiscount?: { mode: "amount" | "percent" | null; value: number };
   bill: PreviewParty | null; ship: PreviewParty | null; invLabel: string;
 }) {
   const [sections, setSections] = useState<Section[]>(() => (initSections.length ? initSections.map((s) => ({ head: s.head, gst: s.gst, lines: s.lines.map((l) => ({ ...l })) })) : []));
   const [mode, setMode] = useState<GstMode>(initGst.mode);
+  // Mig 200 — discount on the final amount (default off; prefilled in edit).
+  const [discMode, setDiscMode] = useState<DiscountModeUi>(initDiscount?.mode ?? "off");
+  const [discValue, setDiscValue] = useState(initDiscount?.mode && initDiscount.value ? String(initDiscount.value) : "");
   const [showPreview, setShowPreview] = useState(false);
 
   const setRate = (si: number, li: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, rate: v.replace(/[^0-9.]/g, "") } : l)) } : s)));
@@ -48,6 +54,7 @@ export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, in
     [sections, mode],
   );
   const totals = computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 });
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
   const itemsJson = JSON.stringify(serialItems);
   const allRated = serialItems.length > 0 && serialItems.every((i) => i.rate > 0);
   // GST slab is MANDATORY per table when GST is on (mig 199).
@@ -83,6 +90,8 @@ export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, in
           <input type="hidden" name="edit_mode" value={editMode ? "1" : ""} />
           <input type="hidden" name="items" value={itemsJson} />
           <input type="hidden" name="gst_mode" value={mode ?? ""} />
+          <input type="hidden" name="discount_mode" value={discMode === "off" ? "" : discMode} />
+          <input type="hidden" name="discount_value" value={discMode === "off" ? "" : discValue} />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {sections.map((s, si) => (
@@ -137,13 +146,22 @@ export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, in
                   Each table has its own <strong>GST %</strong> box in its header — mandatory. Tables can carry different slabs on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
                 </div>
               )}
+              <DiscountControl mode={discMode} value={discValue} onMode={setDiscMode} onValue={setDiscValue} />
             </div>
             <div style={{ flex: "0 0 260px", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>Subtotal</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.subtotal)}</span></div>
               {totals.groups.map((g, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "3px 0" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
               ))}
-              <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+              {disc.amt > 0 ? (
+                <>
+                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0", color: "#b45309", fontWeight: 700 }}><span>{discountLabel(disc)}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>−{rupee(disc.amt)}</span></div>
+                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Amount Payable</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(disc.payable)}</span></div>
+                </>
+              ) : (
+                <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+              )}
             </div>
           </div>
 
@@ -168,6 +186,8 @@ export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, in
           igst={0}
           cgst={0}
           sgst={0}
+          discountMode={discMode === "off" ? null : discMode}
+          discountValue={Number(discValue) || 0}
           invoiceNo={invLabel}
           invoiceDate={new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })}
           onClose={() => setShowPreview(false)}

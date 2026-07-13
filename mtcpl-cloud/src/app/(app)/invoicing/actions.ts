@@ -101,6 +101,10 @@ export async function saveChallanPricingAction(formData: FormData) {
     for (const [k, v] of Object.entries(raw)) { const n = Number(v); if (Number.isFinite(n) && n >= 0) itemGst[k] = n; }
   } catch { itemGst = {}; }
   const uniformStone = gstMode ? uniformGstPercent(Object.values(stoneGst)) : null;
+  // Mig 200 — discount on the final amount (default off).
+  const dmRaw = txt(formData, "discount_mode");
+  const discountMode = dmRaw === "amount" || dmRaw === "percent" ? dmRaw : null;
+  const discountValue = discountMode ? Math.max(0, Number(txt(formData, "discount_value")) || 0) : null;
   const igst = gstMode === "igst" ? (uniformStone ?? 0) : 0;
   const cgst = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : 0;
   const sgst = gstMode === "cgst_sgst" && uniformStone != null ? uniformStone / 2 : 0;
@@ -170,6 +174,7 @@ export async function saveChallanPricingAction(formData: FormData) {
       gst: { gst_mode: gstMode, igst_percent: igstCol, cgst_percent: cgstCol, sgst_percent: sgstCol },
       stoneGst: gstMode ? stoneGst : null,
       itemGst: gstMode ? itemGst : null,
+      discount: { discount_mode: discountMode, discount_value: discountValue },
       transport: {
         company: txt(formData, "transport_company") || null,
         phone: txt(formData, "transport_phone") || null,
@@ -220,6 +225,10 @@ export async function saveChallanPricingAction(formData: FormData) {
   try {
     await admin.from("challans").update({ stone_gst: gstMode ? stoneGst : null } as never).eq("id", challanId);
   } catch { /* pre-mig-199 */ }
+  // Mig 200 — discount on the final amount (best-effort for the same reason).
+  try {
+    await admin.from("challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", challanId);
+  } catch { /* pre-mig-200 */ }
 
   // Mig 169 — transport details (separate best-effort update so a pre-migration
   // schema never blocks pricing). A new company name is added to the master so
@@ -645,11 +654,15 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
     cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
     sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null,
   };
+  // Mig 200 — discount on the final amount (default off).
+  const dmRaw = txt(formData, "discount_mode");
+  const discountMode = dmRaw === "amount" || dmRaw === "percent" ? dmRaw : null;
+  const discountValue = discountMode ? Math.max(0, Number(txt(formData, "discount_value")) || 0) : null;
   const now = new Date().toISOString();
 
   // Mig 184 — editing an EXISTING running invoice is approval-gated: stage + stop.
   if (editMode) {
-    const payload = { kind: "running" as const, items, gst: gstCols };
+    const payload = { kind: "running" as const, items, gst: gstCols, discount: { discount_mode: discountMode, discount_value: discountValue } };
     await admin.from("challans").update({ pending_edit_payload: payload, pending_edit_at: now, pending_edit_by: profile.id } as never).eq("id", challanId);
     void logAudit(profile.id, "invoice_edit_requested", "challan", challanId, {});
     refreshInvoicingPaths({ challanId });
@@ -663,6 +676,10 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
     ...gstCols,
     custom_billed_at: now, custom_billed_by: profile.id,
   }).eq("id", challanId);
+  // Mig 200 — discount (best-effort so a pre-mig schema still converts).
+  try {
+    await admin.from("challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", challanId);
+  } catch { /* pre-mig-200 */ }
   // Assign the locked INV number on first conversion only.
   if (!editMode) {
     const fy = financialYear(ch!.challan_date || new Date());
@@ -1785,6 +1802,10 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   // Keep the legacy invoice-level % when every table shares one slab (any
   // pre-mig-199 reader stays correct); NULL when tables differ.
   const uniform = gstMode ? uniformGstPercent(items.map(secGst)) : null;
+  // Mig 200 — discount on the final amount (default off).
+  const dmRaw = txt(formData, "discount_mode");
+  const discountMode = dmRaw === "amount" || dmRaw === "percent" ? dmRaw : null;
+  const discountValue = discountMode ? Math.max(0, Number(txt(formData, "discount_value")) || 0) : null;
   const invoiceDate = txt(formData, "invoice_date") || null;
   const fy = financialYear(invoiceDate || new Date());
   // Invoice number on the SHARED per-FY INV counter — LOCKED (auto only, Daksh
@@ -1808,7 +1829,9 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
     created_by: profile.id,
   };
   if (invoiceDate) insert.invoice_date = invoiceDate;
-  const { data: bi, error } = await admin.from("bulk_invoices").insert(insert).select("id").single();
+  // Discount cols (mig 200) — retried without so a pre-mig schema still creates.
+  let { data: bi, error } = await admin.from("bulk_invoices").insert({ ...insert, discount_mode: discountMode, discount_value: discountValue }).select("id").single();
+  if (error) ({ data: bi, error } = await admin.from("bulk_invoices").insert(insert).select("id").single());
   if (error || !bi) redirect(`/invoicing/bulk/new?toast=${encodeURIComponent(error?.message || "Failed to create invoice")}`);
   const bulkId = (bi as { id: string }).id;
 
@@ -1952,10 +1975,14 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
     section_head: (it.section_head ?? "").toString().trim() || null,
     section_gst: gstMode ? secGst(it) : null,
   }));
+  // Mig 200 — discount on the final amount.
+  const dmRaw = txt(formData, "discount_mode");
+  const discountMode = dmRaw === "amount" || dmRaw === "percent" ? dmRaw : null;
   const payload = {
     kind: "bulk" as const,
     items: stagedItems,
     gst: { gst_mode: gstMode, igst_percent: gstMode === "igst" ? uniform : null, cgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null, sgst_percent: gstMode === "cgst_sgst" && uniform != null ? uniform / 2 : null },
+    discount: { discount_mode: discountMode, discount_value: discountMode ? Math.max(0, Number(txt(formData, "discount_value")) || 0) : null },
     notes: txt(formData, "notes") || null,
     challanIds,
   };

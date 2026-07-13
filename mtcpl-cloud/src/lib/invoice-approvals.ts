@@ -16,13 +16,24 @@ type Admin = ReturnType<typeof createAdminSupabaseClient>;
 
 export type ChangeSource = "purchase" | "running" | "bulk" | "other";
 export type StagedGst = { gst_mode: "igst" | "cgst_sgst" | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null };
+/** Mig 200 — discount on the final amount ('amount' | 'percent' | null = off). */
+export type StagedDiscount = { discount_mode: "amount" | "percent" | null; discount_value: number | null };
 export type StagedItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null; section_gst?: number | null };
 
 export type EditPayload =
-  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport: Record<string, string | null>; stoneGst?: Record<string, number> | null; itemGst?: Record<string, number> | null }
-  | { kind: "running"; items: StagedItem[]; gst: StagedGst }
-  | { kind: "bulk"; items: StagedItem[]; gst: StagedGst; notes: string | null; challanIds: string[] }
-  | { kind: "other"; items: StagedItem[]; gst: StagedGst };
+  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport: Record<string, string | null>; stoneGst?: Record<string, number> | null; itemGst?: Record<string, number> | null; discount?: StagedDiscount }
+  | { kind: "running"; items: StagedItem[]; gst: StagedGst; discount?: StagedDiscount }
+  | { kind: "bulk"; items: StagedItem[]; gst: StagedGst; notes: string | null; challanIds: string[]; discount?: StagedDiscount }
+  | { kind: "other"; items: StagedItem[]; gst: StagedGst; discount?: StagedDiscount };
+
+/** Apply a staged discount to the parent row — best-effort so a pre-mig-200
+ *  schema never blocks the rest of the edit. */
+async function applyDiscountCols(admin: Admin, table: "challans" | "bulk_invoices" | "other_challans", id: string, d?: StagedDiscount) {
+  if (d === undefined) return; // payload staged before mig 200 — leave as-is
+  try {
+    await (admin.from(table) as any).update({ discount_mode: d.discount_mode, discount_value: d.discount_value }).eq("id", id);
+  } catch { /* pre-mig-200 */ }
+}
 
 /** Which table carries the pending_* columns for a source. */
 export function pendingTableOf(source: ChangeSource): "challans" | "bulk_invoices" | "other_challans" {
@@ -92,16 +103,19 @@ export async function applyInvoiceEdit(admin: Admin, source: ChangeSource, id: s
     if (payload.stoneGst !== undefined) {
       try { await admin.from("challans").update({ stone_gst: payload.stoneGst } as any).eq("id", id); } catch { /* pre-mig-199 */ }
     }
+    await applyDiscountCols(admin, "challans", id, payload.discount);
     return;
   }
   if (source === "running" && payload.kind === "running") {
     await admin.from("challan_custom_items").delete().eq("challan_id", id);
     await insertItems(admin, "challan_custom_items", itemRows("challan_id", id, payload.items));
     await admin.from("challans").update({ ...payload.gst } as any).eq("id", id);
+    await applyDiscountCols(admin, "challans", id, payload.discount);
     return;
   }
   if (source === "bulk" && payload.kind === "bulk") {
     await admin.from("bulk_invoices").update({ ...payload.gst, notes: payload.notes } as any).eq("id", id);
+    await applyDiscountCols(admin, "bulk_invoices", id, payload.discount);
     await admin.from("bulk_invoice_items").delete().eq("bulk_invoice_id", id);
     await insertItems(admin, "bulk_invoice_items", itemRows("bulk_invoice_id", id, payload.items));
     await reconcileBulkChallans(admin, id, payload.challanIds);
@@ -111,6 +125,7 @@ export async function applyInvoiceEdit(admin: Admin, source: ChangeSource, id: s
     await admin.from("other_challan_items").delete().eq("other_challan_id", id);
     await insertItems(admin, "other_challan_items", itemRows("other_challan_id", id, payload.items));
     await admin.from("other_challans").update({ ...payload.gst } as any).eq("id", id);
+    await applyDiscountCols(admin, "other_challans", id, payload.discount);
     return;
   }
 }

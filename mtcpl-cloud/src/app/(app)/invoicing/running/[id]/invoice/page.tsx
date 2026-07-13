@@ -72,6 +72,13 @@ export default async function RunningInvoicePage({ params }: { params: Params })
     ? { mode: challanMode, igst: Number(c.igst_percent) || 18, cgst: Number(c.cgst_percent) || 9, sgst: Number(c.sgst_percent) || 9 }
     : { mode: tGst.mode as GstMode, igst: tGst.igst ?? 18, cgst: tGst.cgst ?? 9, sgst: tGst.sgst ?? 9 };
 
+  // Mig 200 — the invoice's saved discount (best-effort; pre-mig = off).
+  let initDiscount: { mode: "amount" | "percent" | null; value: number } = { mode: null, value: 0 };
+  {
+    const { data: dc, error } = await admin.from("challans").select("discount_mode, discount_value").eq("id", id).maybeSingle();
+    const d = dc as { discount_mode?: string | null; discount_value?: number | null } | null;
+    if (!error && d) initDiscount = { mode: d.discount_mode === "amount" || d.discount_mode === "percent" ? d.discount_mode : null, value: Number(d.discount_value) || 0 };
+  }
   const invFy = (c.inv_fy ?? "").trim() || financialYear(c.challan_date);
   const invPrefix = `INV-${invFy}-`;
   let autoNum = "01";
@@ -92,6 +99,7 @@ export default async function RunningInvoicePage({ params }: { params: Params })
         sourceDispatchId={c.source_dispatch_id}
         initSections={initSections}
         initGst={initGst}
+        initDiscount={initDiscount}
         bill={bill}
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}

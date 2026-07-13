@@ -12,8 +12,9 @@
 
 import { useMemo, useState } from "react";
 import { createBulkInvoiceAction } from "../../actions";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { BULK_UNITS } from "@/lib/bulk-items";
+import { DiscountControl, type DiscountModeUi } from "../../_ui/discount-control";
 import { BulkInvoicePreview, type PreviewParty } from "./bulk-invoice-preview";
 
 export type TempleData = {
@@ -40,6 +41,9 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
   const [mode, setMode] = useState<GstMode>(null);
   // The temple's default slab — seeds each NEW table's GST %.
   const [defaultPct, setDefaultPct] = useState("18");
+  // Mig 200 — discount on the final amount. Default OFF.
+  const [discMode, setDiscMode] = useState<DiscountModeUi>("off");
+  const [discValue, setDiscValue] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   const cur = temples.find((t) => t.temple === temple) ?? null;
@@ -81,6 +85,7 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
     () => computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 }),
     [serialItems, mode],
   );
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
 
   const challanIds = Object.keys(checked).filter((k) => checked[k]);
   const selectedChallans = (cur?.challans ?? []).filter((c) => checked[c.id]);
@@ -107,6 +112,8 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
       <input type="hidden" name="challan_ids" value={JSON.stringify(challanIds)} />
       <input type="hidden" name="items" value={itemsJson} />
       <input type="hidden" name="gst_mode" value={mode ?? ""} />
+      <input type="hidden" name="discount_mode" value={discMode === "off" ? "" : discMode} />
+      <input type="hidden" name="discount_value" value={discMode === "off" ? "" : discValue} />
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         {/* LEFT — the ticked challans, to verify while billing. */}
@@ -260,6 +267,7 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
                     Each table has its own <strong>GST %</strong> box in its header — mandatory. Tables can carry different slabs (e.g. 18% + 5%) on one bill{mode === "cgst_sgst" ? "; a slab splits half CGST / half SGST" : ""}.
                   </div>
                 )}
+                <DiscountControl mode={discMode} value={discValue} onMode={setDiscMode} onValue={setDiscValue} />
                 <div style={{ marginTop: 14 }}>
                   <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 5 }}>Invoice no.</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 8, border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", padding: "7px 12px", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>
@@ -276,7 +284,15 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
                 {totals.groups.map((g, i) => (
                   <Row key={i} label={`${gstGroupLabel(mode, g)}${totals.multi ? ` on ${rupee(g.taxable)}` : ""}`} value={rupee(g.taxAmt)} />
                 ))}
-                <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupee(totals.grand)} bold /></div>
+                {disc.amt > 0 ? (
+                  <>
+                    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupee(totals.grand)} /></div>
+                    <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />
+                    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Amount Payable" value={rupee(disc.payable)} bold /></div>
+                  </>
+                ) : (
+                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupee(totals.grand)} bold /></div>
+                )}
               </div>
             </div>
           </div>
@@ -306,6 +322,8 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
           igst={0}
           cgst={0}
           sgst={0}
+          discountMode={discMode === "off" ? null : discMode}
+          discountValue={Number(discValue) || 0}
           invoiceNo={`${invPrefix}${autoNum}`}
           invoiceDate={todayIST()}
           onClose={() => setShowPreview(false)}

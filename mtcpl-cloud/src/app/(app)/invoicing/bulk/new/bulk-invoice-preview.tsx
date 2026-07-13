@@ -8,7 +8,7 @@
  * the "NOT VALID INVOICE" watermark (it's a draft until the owner approves).
  */
 
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type DiscountMode, type GstMode } from "@/lib/challan-pricing";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { groupBulkItems } from "@/lib/bulk-items";
 
@@ -46,7 +46,7 @@ function Party({ label, name, p, vendorCode, workOrderNo, fallback }: { label: s
 
 export function BulkInvoicePreview({
   bill, ship, vendorCode, workOrderNo, coveredCodes, items,
-  mode, igst, cgst, sgst, invoiceNo, invoiceDate, onClose,
+  mode, igst, cgst, sgst, discountMode = null, discountValue = 0, invoiceNo, invoiceDate, onClose,
 }: {
   bill: PreviewParty | null;
   ship: PreviewParty | null;
@@ -55,6 +55,9 @@ export function BulkInvoicePreview({
   coveredCodes: string[];
   items: PreviewItem[];
   mode: GstMode; igst: number; cgst: number; sgst: number;
+  /** Mig 200 — discount on the final amount (null = off). */
+  discountMode?: DiscountMode;
+  discountValue?: number;
   invoiceNo: string;
   invoiceDate: string;
   onClose: () => void;
@@ -63,6 +66,7 @@ export function BulkInvoicePreview({
   const shipName = (ship?.name ?? "").trim() || billName;
   // Mig 199 — per-table slabs; items without one fall back to the invoice-level %.
   const totals = computeGroupedGstTotals(items.map((i) => ({ amount: i.amount, gstPercent: i.section_gst ?? null })), { mode, igst, cgst, sgst });
+  const disc = applyDiscount(totals.grand, discountMode, discountValue);
   const code = invoiceNo.trim() || "INV — assigned on approval";
   const groups = groupBulkItems(items);
   const multiSection = groups.length > 1 || groups.some((g) => (g.head ?? "").trim());
@@ -212,7 +216,15 @@ export function BulkInvoicePreview({
                 {totals.groups.map((g, i) => (
                   <div key={i} className="bip-row alt"><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="bip-mono">{rupee(g.taxAmt)}</span></div>
                 ))}
-                <div className="bip-row grand"><span>Grand Total</span><span className="bip-mono">{rupee(totals.grand)}</span></div>
+                {disc.amt > 0 ? (
+                  <>
+                    <div className="bip-row"><span>Grand Total</span><span className="bip-mono">{rupee(totals.grand)}</span></div>
+                    <div className="bip-row alt"><span>{discountLabel(disc)}</span><span className="bip-mono">−{rupee(disc.amt)}</span></div>
+                    <div className="bip-row grand"><span>Amount Payable</span><span className="bip-mono">{rupee(disc.payable)}</span></div>
+                  </>
+                ) : (
+                  <div className="bip-row grand"><span>Grand Total</span><span className="bip-mono">{rupee(totals.grand)}</span></div>
+                )}
               </div>
             </div>
 
@@ -233,7 +245,7 @@ export function BulkInvoicePreview({
                 )}
               </tbody>
             </table>
-            <div className="bip-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+            <div className="bip-words"><strong>Amount in words:</strong> {amountInWordsIN(disc.payable)}</div>
           </>
         )}
 

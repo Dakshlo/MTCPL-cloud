@@ -142,3 +142,37 @@ export function uniformGstPercent(pcts: Array<number | null | undefined>): numbe
   if (!Number.isFinite(first)) return null;
   return pcts.every((p) => Number(p) === first) ? first : null;
 }
+
+// ── Mig 200 — discount on the FINAL amount ──────────────────────────────────
+// Applied AFTER GST, on the grand total (subtotal + tax): either a flat ₹
+// amount or a % of the total. Default OFF. e.g. 100 taxable + 18 GST = 118;
+// discount ₹18 → payable 100.
+
+export type DiscountMode = "amount" | "percent" | null;
+
+export type DiscountResult = {
+  mode: DiscountMode;
+  value: number;
+  /** The ₹ knocked off (0 when off). */
+  amt: number;
+  /** grand − amt — what the customer actually pays. */
+  payable: number;
+};
+
+export function applyDiscount(
+  grand: number,
+  mode: string | null | undefined,
+  value: number | null | undefined,
+): DiscountResult {
+  const m: DiscountMode = mode === "amount" || mode === "percent" ? mode : null;
+  const v = Math.max(0, Number(value) || 0);
+  const g = round2(Number(grand) || 0);
+  if (!m || v <= 0) return { mode: null, value: 0, amt: 0, payable: g };
+  const amt = m === "percent" ? round2((g * v) / 100) : round2(Math.min(v, g));
+  return { mode: m, value: v, amt, payable: round2(g - amt) };
+}
+
+/** "Less: Discount @ 10%" / "Less: Discount" for the totals rows. */
+export function discountLabel(d: DiscountResult): string {
+  return d.mode === "percent" ? `Less: Discount @ ${d.value}%` : "Less: Discount";
+}

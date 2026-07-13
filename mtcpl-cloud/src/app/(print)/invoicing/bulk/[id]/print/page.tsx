@@ -12,7 +12,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { fetchTempleBilling } from "@/lib/temple-billing";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { groupBulkItems } from "@/lib/bulk-items";
@@ -91,6 +91,8 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
     items.map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null })),
     { mode: gstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 },
   );
+  // Mig 200 — discount on the final amount (select("*") carries it post-mig).
+  const disc = applyDiscount(totals.grand, b.discount_mode, Number(b.discount_value) || 0);
   const underApproval = !b.owner_approved_at && !b.cancelled_at;
 
   return (
@@ -258,7 +260,15 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
                 {totals.groups.map((g, i) => (
                   <div key={i} className="row alt"><span>{gstGroupLabel(gstMode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="mono">{rupee(g.taxAmt)}</span></div>
                 ))}
-                <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                {disc.amt > 0 ? (
+                  <>
+                    <div className="row"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                    <div className="row alt"><span>{discountLabel(disc)}</span><span className="mono">−{rupee(disc.amt)}</span></div>
+                    <div className="row grand"><span>Amount Payable</span><span className="mono">{rupee(disc.payable)}</span></div>
+                  </>
+                ) : (
+                  <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                )}
               </div>
             </div>
 
@@ -279,7 +289,7 @@ export default async function BulkInvoicePrintPage({ params }: { params: Params 
                 )}
               </tbody>
             </table>
-            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(disc.payable)}</div>
           </>
         )}
 

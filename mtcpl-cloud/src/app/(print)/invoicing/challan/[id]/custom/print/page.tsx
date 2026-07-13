@@ -12,7 +12,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { fetchTempleBilling } from "@/lib/temple-billing";
-import { computeGroupedGstTotals, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
@@ -81,6 +81,13 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
     items.map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null })),
     { mode: gstMode, igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0 },
   );
+  // Mig 200 — discount on the final amount (best-effort; pre-mig = off).
+  let disc = applyDiscount(totals.grand, null, 0);
+  {
+    const { data: dc, error } = await admin.from("challans").select("discount_mode, discount_value").eq("id", id).maybeSingle();
+    const d = dc as { discount_mode?: string | null; discount_value?: number | null } | null;
+    if (!error && d) disc = applyDiscount(totals.grand, d.discount_mode ?? null, Number(d.discount_value) || 0);
+  }
 
   return (
     <>
@@ -232,7 +239,15 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
                 {totals.groups.map((g, i) => (
                   <div key={i} className="row alt"><span>{gstGroupLabel(gstMode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="mono">{rupee(g.taxAmt)}</span></div>
                 ))}
-                <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                {disc.amt > 0 ? (
+                  <>
+                    <div className="row"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                    <div className="row alt"><span>{discountLabel(disc)}</span><span className="mono">−{rupee(disc.amt)}</span></div>
+                    <div className="row grand"><span>Amount Payable</span><span className="mono">{rupee(disc.payable)}</span></div>
+                  </>
+                ) : (
+                  <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                )}
               </div>
             </div>
 
@@ -253,7 +268,7 @@ export default async function CustomBillPrintPage({ params }: { params: Params }
                 )}
               </tbody>
             </table>
-            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(totals.grand)}</div>
+            <div className="amt-words"><strong>Amount in words:</strong> {amountInWordsIN(disc.payable)}</div>
           </>
         )}
 
