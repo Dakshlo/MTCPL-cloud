@@ -1,5 +1,0 @@
-;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="6c20ed23-1c4e-e516-ee1a-07de00018a9f")}catch(e){}}();
-module.exports=[928901,a=>{"use strict";let b=[{bg:"rgba(37,99,235,0.10)",border:"rgba(37,99,235,0.55)",fg:"#1d4ed8"},{bg:"rgba(22,163,74,0.10)",border:"rgba(22,163,74,0.55)",fg:"#15803d"},{bg:"rgba(217,119,6,0.10)",border:"rgba(217,119,6,0.55)",fg:"#b45309"},{bg:"rgba(124,58,237,0.10)",border:"rgba(124,58,237,0.55)",fg:"#7c3aed"},{bg:"rgba(190,18,60,0.10)",border:"rgba(190,18,60,0.55)",fg:"#be123c"},{bg:"rgba(14,165,233,0.10)",border:"rgba(14,165,233,0.55)",fg:"#0284c7"},{bg:"rgba(234,88,12,0.10)",border:"rgba(234,88,12,0.55)",fg:"#c2410c"},{bg:"rgba(20,184,166,0.10)",border:"rgba(20,184,166,0.55)",fg:"#0d9488"}];a.s(["batchTint",0,function(a){if(!a)return null;let c=0;for(let b=0;b<Math.min(12,a.length);b++)c+=a.charCodeAt(b);return b[c%b.length]??null}])}];
-
-//# debugId=6c20ed23-1c4e-e516-ee1a-07de00018a9f
-//# sourceMappingURL=src_lib_batch-colours_ts_05lk8i5._.js.map

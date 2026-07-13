@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "debugId": "46a9b463-7d23-5db4-f020-fa8cf76ae348",
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/app/%28app%29/invoicing/invoices/%5Bid%5D/print-button.tsx"],"sourcesContent":["\"use client\";\n\n// Print trigger for the invoice detail page. window.print() needs a\n// client component because Server Components don't run in the browser.\n// Extracted so the rest of the page can stay a Server Component +\n// stream data from Supabase directly.\n\nexport function PrintButton() {\n  return (\n    <button\n      type=\"button\"\n      onClick={() => {\n        if (typeof window !== \"undefined\") window.print();\n      }}\n      style={{\n        padding: \"8px 16px\",\n        fontSize: 12,\n        fontWeight: 700,\n        background: \"var(--gold)\",\n        color: \"#fff\",\n        border: \"1px solid var(--gold-dark)\",\n        borderRadius: 6,\n        cursor: \"pointer\",\n      }}\n    >\n      🖨 Print invoice\n    </button>\n  );\n}\n"],"names":["PrintButton","type","onClick","style","padding","fontSize","fontWeight","background","color","border","borderRadius","cursor"],"mappings":"+EAOO,SAASA,EACd,MACE,CAAA,EAAA,EAAA,GAAA,EAAC,SAAA,CACCC,KAAK,SACLC,QAAS,KAET,EACAC,MAAO,CACLC,QAAS,WACTC,SAAU,GACVC,WAAY,IACZC,WAAY,cACZC,MAAO,OACPC,OAAQ,6BACRC,aAAc,EACdC,OAAQ,SACV,WACD,oBAIL"}}]
-}

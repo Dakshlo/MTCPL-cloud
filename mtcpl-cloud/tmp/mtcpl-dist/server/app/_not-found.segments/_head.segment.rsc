@@ -1,6 +1,0 @@
-1:"$Sreact.fragment"
-2:I[897367,["/_next/static/chunks/0nprg_.s4luox.js","/_next/static/chunks/0o2fkeykpb~_~.js"],"ViewportBoundary"]
-3:I[897367,["/_next/static/chunks/0nprg_.s4luox.js","/_next/static/chunks/0o2fkeykpb~_~.js"],"MetadataBoundary"]
-4:"$Sreact.suspense"
-5:I[27201,["/_next/static/chunks/0nprg_.s4luox.js","/_next/static/chunks/0o2fkeykpb~_~.js"],"IconMark"]
-0:{"rsc":["$","$1","h",{"children":[["$","meta",null,{"name":"robots","content":"noindex"}],["$","$L2",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]}],["$","div",null,{"hidden":true,"children":["$","$L3",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"MTCPL Cloud"}],["$","meta","1",{"name":"description","content":"Cloud workflow for blocks, slabs, cutting, carving and dispatch"}],["$","link","2",{"rel":"icon","href":"/icon.png?icon.0wj421ot_5pyb.png","sizes":"512x512","type":"image/png"}],["$","link","3",{"rel":"apple-touch-icon","href":"/apple-icon.png?apple-icon.0wm865rwiu5ix.png","sizes":"180x180","type":"image/png"}],["$","$L5","4",{}]]}]}]}],null]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"0LTqc3LHkN-K4DJvBrcB9"}

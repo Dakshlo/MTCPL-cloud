@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "debugId": "fc7fa561-8543-53f9-d9e5-ec1c07b133c7",
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/components/confirm-button.tsx"],"sourcesContent":["\"use client\";\n\nexport function ConfirmButton({\n  message,\n  className,\n  style,\n  children,\n}: {\n  message: string;\n  className?: string;\n  style?: React.CSSProperties;\n  children: React.ReactNode;\n}) {\n  return (\n    <button\n      type=\"submit\"\n      className={className}\n      style={style}\n      onClick={(e) => {\n        if (!confirm(message)) e.preventDefault();\n      }}\n    >\n      {children}\n    </button>\n  );\n}\n"],"names":["ConfirmButton","message","className","style","children","type","onClick","e","confirm","preventDefault"],"mappings":"iFAEO,SAASA,AAAc,SAC5BC,CAAO,WACPC,CAAS,OACTC,CAAK,UACLC,CAAQ,CAMT,EACC,MACE,CAAA,EAAA,EAAA,GAAA,EAAC,SAAA,CACCC,KAAK,SACLH,UAAWA,EACXC,MAAOA,EACPG,QAAS,AAACC,IACJ,AAACC,QAAQP,IAAUM,EAAEE,cAAc,EACzC,WAECL,GAGP"}}]
-}
