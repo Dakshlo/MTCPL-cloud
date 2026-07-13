@@ -80,10 +80,11 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
       a.push({ id: r.profile_id, name: nameOf(r.profile_id) });
       partsByEntry.set(r.entry_id, a);
     }
-    const { data: rs } = await admin.from("work_diary_remarks").select("id, entry_id, author, body, kind, created_at").in("entry_id", part).order("created_at", { ascending: true });
-    for (const r of (rs ?? []) as Array<{ id: string; entry_id: string; author: string; body: string; kind: string; created_at: string }>) {
+    // select("*") keeps this best-effort across migs — mig 201 adds `mentions`.
+    const { data: rs } = await admin.from("work_diary_remarks").select("*").in("entry_id", part).order("created_at", { ascending: true });
+    for (const r of (rs ?? []) as Array<{ id: string; entry_id: string; author: string; body: string; kind: string; created_at: string; mentions?: string[] | null }>) {
       const a = remarksByEntry.get(r.entry_id) ?? [];
-      a.push({ id: r.id, authorId: r.author, author: nameOf(r.author), body: r.body, kind: (r.kind === "closed" || r.kind === "reopened" ? r.kind : "remark"), at: r.created_at });
+      a.push({ id: r.id, authorId: r.author, author: nameOf(r.author), body: r.body, kind: (r.kind === "closed" || r.kind === "reopened" ? r.kind : "remark"), at: r.created_at, mentions: Array.isArray(r.mentions) ? r.mentions : [] });
       remarksByEntry.set(r.entry_id, a);
     }
   }

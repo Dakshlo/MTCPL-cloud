@@ -17,6 +17,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
+import { sendDiaryMentionPings } from "@/lib/wa-diary-mention";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 type Admin = ReturnType<typeof createAdminSupabaseClient>;
@@ -194,7 +195,9 @@ export async function updateDiaryParticipantsAction(formData: FormData): Promise
   return { ok: true };
 }
 
-/** Status remark on an entry — creator / included / owner / developer. */
+/** Status remark on an entry — creator / included / owner / developer.
+ *  Mig 201 — may carry @MENTIONS (ids), restricted to people INCLUDED in this
+ *  entry; each mentioned person gets a WhatsApp ping with a guest reply link. */
 export async function addDiaryRemarkAction(formData: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
   const admin = createAdminSupabaseClient();
@@ -208,9 +211,67 @@ export async function addDiaryRemarkAction(formData: FormData): Promise<ActionRe
   if (!entry) return { ok: false, error: "Entry not found." };
   if (!allowed) return { ok: false, error: "You're not included in this entry." };
 
-  const { data: r, error } = await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body, kind: "remark" }).select("id").single();
+  // Mentions may only point at people actually ON this entry (its included
+  // list + the creator) — anything else posted is silently dropped.
+  let mentions = [...new Set(ids(formData, "mentions"))];
+  if (mentions.length > 0) {
+    const { data: ps } = await admin.from("work_diary_participants").select("profile_id").eq("entry_id", entryId);
+    const onEntry = new Set(((ps ?? []) as Array<{ profile_id: string }>).map((p) => p.profile_id));
+    onEntry.add(entry.created_by);
+    mentions = mentions.filter((id) => onEntry.has(id));
+  }
+
+  // mentions col is mig 201 — retry without it on a pre-migration schema.
+  let ins = await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body, kind: "remark", mentions } as never).select("id").single();
+  if (ins.error) ins = await admin.from("work_diary_remarks").insert({ entry_id: entryId, author: profile.id, body, kind: "remark" }).select("id").single();
+  const { data: r, error } = ins;
   if (error || !r) return { ok: false, error: error?.message || "Failed to add the remark." };
   await insertDiaryFiles(admin, entryId, (r as { id: string }).id, files, profile.id);
+
+  // WhatsApp ping per mentioned person — fire-and-forget, never blocks the send.
+  if (mentions.length > 0) {
+    void sendDiaryMentionPings({
+      admin, entryId, activity: entry.activity,
+      senderId: profile.id, senderName: (profile.full_name ?? "").trim() || "Someone",
+      body, mentionIds: mentions,
+    }).catch(() => {});
+  }
+
+  revalidatePath("/diary");
+  return { ok: true };
+}
+
+/** UNSEND — the author can delete their OWN message within 10 minutes of
+ *  sending it (like WhatsApp's delete-for-everyone window). After that, no. */
+export async function unsendDiaryRemarkAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  const admin = createAdminSupabaseClient();
+  const remarkId = txt(formData, "remark_id");
+  if (!remarkId) return { ok: false, error: "Missing message." };
+
+  const { data: rRow } = await admin
+    .from("work_diary_remarks")
+    .select("id, entry_id, author, kind, created_at")
+    .eq("id", remarkId)
+    .maybeSingle();
+  const r = rRow as { id: string; entry_id: string; author: string; kind: string; created_at: string } | null;
+  if (!r) return { ok: false, error: "Message not found." };
+  if (r.kind !== "remark") return { ok: false, error: "System lines can't be unsent." };
+  if (r.author !== profile.id) return { ok: false, error: "You can only unsend your own message." };
+  const ageMs = Date.now() - new Date(r.created_at).getTime();
+  if (ageMs > 10 * 60 * 1000) return { ok: false, error: "The 10-minute unsend window is over." };
+
+  // Best-effort: remove the message's attachments from storage too.
+  try {
+    const { data: fs } = await admin.from("work_diary_files").select("path").eq("remark_id", remarkId);
+    const paths = ((fs ?? []) as Array<{ path: string }>).map((f) => f.path);
+    if (paths.length) await admin.storage.from(DIARY_BUCKET).remove(paths);
+  } catch { /* orphaned storage objects are acceptable */ }
+
+  const { error } = await admin.from("work_diary_remarks").delete().eq("id", remarkId).eq("author", profile.id);
+  if (error) return { ok: false, error: error.message };
+
+  void logAudit(profile.id, "diary_remark_unsent", "work_diary_entry", r.entry_id, {});
   revalidatePath("/diary");
   return { ok: true };
 }

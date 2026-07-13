@@ -21,12 +21,13 @@ import {
   createDiaryEntryAction, addDiaryRemarkAction, closeDiaryEntryAction,
   reopenDiaryEntryAction, deleteDiaryEntryAction, deleteDiaryGroupAction,
   updateDiaryParticipantsAction, setDiaryUrgentAction, prepareDiaryUploadsAction,
+  unsendDiaryRemarkAction,
 } from "./actions";
 
 export type DiaryPerson = { id: string; name: string; role: string };
 export type DiaryGroup = { id: string; name: string; createdBy: string; members: string[] };
 export type DiaryFile = { id: string; name: string; url: string; size: number | null };
-export type DiaryRemark = { id: string; authorId: string; author: string; body: string; kind: "remark" | "closed" | "reopened"; at: string; files?: DiaryFile[] };
+export type DiaryRemark = { id: string; authorId: string; author: string; body: string; kind: "remark" | "closed" | "reopened"; at: string; files?: DiaryFile[]; mentions?: string[] };
 export type DiaryEntry = {
   id: string;
   activity: string;
@@ -50,6 +51,26 @@ const fmtStamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZo
 const fmtDay = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }) : "—");
 const fmtSize = (n: number | null) => (n == null ? "" : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 const hueOf = (s: string) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; };
+const escRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** WhatsApp-style mention rendering — any "@Name" matching a person on the
+ *  entry becomes a gold pill. Works on plain text (mig 201). */
+export function MentionText({ body, participants }: { body: string; participants: Array<{ id: string; name: string }> }) {
+  const names = participants.map((p) => p.name.trim()).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (names.length === 0 || !body.includes("@")) return <>{body}</>;
+  const re = new RegExp(`@(${names.map(escRe).join("|")})`, "gi");
+  const parts: React.ReactNode[] = [];
+  let last = 0; let m: RegExpExecArray | null; let k = 0;
+  while ((m = re.exec(body)) !== null) {
+    if (m.index > last) parts.push(body.slice(last, m.index));
+    parts.push(
+      <span key={k++} style={{ color: "#0b5cad", fontWeight: 800, background: "rgba(37,99,235,0.1)", borderRadius: 5, padding: "0 3px" }}>@{m[1]}</span>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) parts.push(body.slice(last));
+  return <>{parts}</>;
+}
 
 type Tab = "mine" | "assigned" | "all" | "closed";
 type ServerAction = (fd: FormData) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -341,6 +362,12 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
   const [error, setError] = useState<string | null>(null);
   const [remark, setRemark] = useState("");
   const [remarkFiles, setRemarkFiles] = useState<File[]>([]);
+  // Mig 201 — @mention dropdown state (people ON THIS ENTRY only).
+  const [mentionQ, setMentionQ] = useState<string | null>(null); // text after "@", null = closed
+  const remarkRef = useRef<HTMLTextAreaElement | null>(null);
+  // Ticks every 30 s so the 10-minute Unsend window hides itself on time.
+  const [, setClock] = useState(0);
+  useEffect(() => { const t = setInterval(() => setClock((c) => c + 1), 30_000); return () => clearInterval(t); }, []);
   const [confirm, setConfirm] = useState<null | "close" | "delete">(null);
   const [closeNote, setCloseNote] = useState("");
   const [editPeople, setEditPeople] = useState(false);
@@ -378,10 +405,19 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
   const now = () => new Date().toISOString();
   const tmpId = () => `tmp-${Math.random().toString(36).slice(2)}`;
 
+  // A person on this entry counts as MENTIONED when "@Their Name" appears in
+  // the text (the picker inserts exactly that; typing it by hand works too).
+  const mentionsIn = (body: string): string[] => {
+    const low = body.toLowerCase();
+    return e.participants.filter((p) => p.name.trim() && low.includes(`@${p.name.trim().toLowerCase()}`)).map((p) => p.id);
+  };
+
   function sendRemark() {
     const body = remark.trim();
     const files = [...remarkFiles];
     if (!body && files.length === 0) return;
+    const mentions = mentionsIn(body);
+    setMentionQ(null);
     setBusy("remark");
     startT(async () => {
       setError(null);
@@ -389,17 +425,51 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
       const up = await uploadDiaryFiles(files);
       if (!up.ok) { setError(up.error); setBusy(null); return; }
       // 2) …then optimistic bubble + record on the server.
-      patch(e.id, (x) => ({ ...x, remarks: [...x.remarks, { id: tmpId(), authorId: me.id, author: me.name, body, kind: "remark", at: now(), files: files.map((f) => ({ id: tmpId(), name: f.name, url: "#", size: f.size })) }] }));
+      patch(e.id, (x) => ({ ...x, remarks: [...x.remarks, { id: tmpId(), authorId: me.id, author: me.name, body, kind: "remark", at: now(), mentions, files: files.map((f) => ({ id: tmpId(), name: f.name, url: "#", size: f.size })) }] }));
       setRemark(""); setRemarkFiles([]);
       const fd = new FormData();
       fd.set("entry_id", e.id);
       fd.set("body", body);
       fd.set("files", JSON.stringify(up.metas));
+      fd.set("mentions", JSON.stringify(mentions));
       const r = await addDiaryRemarkAction(fd);
       if (!r.ok) { setError(r.error); refresh(); setBusy(null); return; }
       refresh();
       setBusy(null);
     });
+  }
+
+  /** WhatsApp-style unsend — author only, within 10 minutes. Optimistic. */
+  function unsendRemark(id: string) {
+    patch(e.id, (x) => ({ ...x, remarks: x.remarks.filter((r) => r.id !== id) }));
+    startT(async () => {
+      const fd = new FormData();
+      fd.set("remark_id", id);
+      const r = await unsendDiaryRemarkAction(fd);
+      if (!r.ok) { setError(r.error); }
+      refresh();
+    });
+  }
+
+  // ── @mention dropdown plumbing ─────────────────────────────────────
+  const mentionMatches = mentionQ == null ? [] :
+    e.participants.filter((p) => p.id !== me.id && (!mentionQ || p.name.toLowerCase().includes(mentionQ.toLowerCase()))).slice(0, 8);
+  function onRemarkChange(v: string, caret: number) {
+    setRemark(v);
+    const before = v.slice(0, caret);
+    const m = /(^|\s)@([^\s@]{0,24})$/.exec(before);
+    setMentionQ(m ? m[2] : null);
+  }
+  function pickMention(p: { id: string; name: string }) {
+    const el = remarkRef.current;
+    const v = remark;
+    const caret = el ? el.selectionStart ?? v.length : v.length;
+    const before = v.slice(0, caret);
+    const after = v.slice(caret);
+    const replaced = before.replace(/(^|\s)@([^\s@]{0,24})$/, (_all, pre) => `${pre}@${p.name} `);
+    setRemark(replaced + after);
+    setMentionQ(null);
+    requestAnimationFrame(() => { el?.focus(); const pos = replaced.length; el?.setSelectionRange(pos, pos); });
   }
 
   const btn: React.CSSProperties = { fontSize: 12.5, fontWeight: 800, padding: "9px 15px", borderRadius: 9, cursor: "pointer", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" };
@@ -497,13 +567,21 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
             r.kind === "remark" ? (
               <div key={r.id} className="wd-pop" style={{ alignSelf: r.authorId === me.id ? "flex-end" : "flex-start", maxWidth: "88%", background: r.authorId === me.id ? "rgba(201,161,74,0.13)" : "var(--bg)", border: "1px solid var(--border)", borderRadius: 11, padding: "8px 12px" }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold-dark)" }}>{r.author}</div>
-                {r.body && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{r.body}</div>}
+                {r.body && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}><MentionText body={r.body} participants={e.participants} /></div>}
                 {(r.files ?? []).length > 0 && (
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>
                     {(r.files ?? []).map((f) => <FileChip key={f.id} f={f} />)}
                   </div>
                 )}
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, textAlign: "right" }}>{fmtStamp(r.at)}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3, textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                  {r.authorId === me.id && !r.id.startsWith("tmp-") && Date.now() - new Date(r.at).getTime() < 10 * 60 * 1000 && (
+                    <button type="button" disabled={pending} onClick={() => unsendRemark(r.id)} title="Delete this message for everyone (within 10 minutes of sending)"
+                      style={{ border: "none", background: "transparent", color: "#b91c1c", fontWeight: 800, fontSize: 10, cursor: "pointer", padding: 0 }}>
+                      ↩ Unsend
+                    </button>
+                  )}
+                  <span>{fmtStamp(r.at)}</span>
+                </div>
               </div>
             ) : (
               <div key={r.id} style={{ alignSelf: "center", textAlign: "center", fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
@@ -532,13 +610,30 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
               <div style={{ display: "flex", gap: 8 }}>
                 <input ref={fileInput} type="file" multiple style={{ display: "none" }} onChange={(ev) => { const fs = [...(ev.target.files ?? [])]; if (fs.length) setRemarkFiles((p) => [...p, ...fs]); ev.target.value = ""; }} />
                 <button type="button" disabled={pending} title="Attach files" onClick={() => fileInput.current?.click()} style={{ ...btn, alignSelf: "flex-end", padding: "9px 12px" }}>📎</button>
-                <textarea
-                  value={remark}
-                  onChange={(ev) => setRemark(ev.target.value)}
-                  rows={2}
-                  placeholder="Current status / remark…"
-                  style={{ flex: 1, resize: "none", fontSize: 13, padding: "9px 11px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontFamily: "inherit" }}
-                />
+                <span style={{ flex: 1, position: "relative" }}>
+                  {mentionQ != null && mentionMatches.length > 0 && (
+                    <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, zIndex: 40, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 -8px 26px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", padding: "6px 11px 3px" }}>Tag someone on this entry</div>
+                      {mentionMatches.map((p) => (
+                        <button key={p.id} type="button" onMouseDown={(ev) => { ev.preventDefault(); pickMention(p); }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "8px 11px", fontSize: 12.5, fontWeight: 700, border: "none", borderTop: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer" }}>
+                          <span aria-hidden style={{ width: 22, height: 22, borderRadius: 999, background: `hsl(${hueOf(p.id)} 60% 45%)`, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 800, flexShrink: 0 }}>{p.name.slice(0, 1).toUpperCase()}</span>
+                          @{p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    ref={remarkRef}
+                    value={remark}
+                    onChange={(ev) => onRemarkChange(ev.target.value, ev.target.selectionStart ?? ev.target.value.length)}
+                    onKeyDown={(ev) => { if (ev.key === "Escape") setMentionQ(null); }}
+                    onBlur={() => setTimeout(() => setMentionQ(null), 150)}
+                    rows={2}
+                    placeholder="Current status / remark… (@ to tag someone on this entry)"
+                    style={{ width: "100%", resize: "none", fontSize: 13, padding: "9px 11px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontFamily: "inherit" }}
+                  />
+                </span>
                 <button type="button" disabled={pending || (!remark.trim() && remarkFiles.length === 0)} onClick={sendRemark} style={{ ...btn, alignSelf: "flex-end", minWidth: 86, background: "#0f172a", color: "#fff", border: "none", opacity: pending || (!remark.trim() && remarkFiles.length === 0) ? 0.6 : 1 }}>
                   {busy === "remark" ? (remarkFiles.length ? "Uploading…" : "Sending…") : "Send"}
                 </button>
