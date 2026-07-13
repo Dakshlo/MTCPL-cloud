@@ -495,7 +495,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#0f2540" }}>MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
               <div style={{ fontSize: 10, color: "#666" }}>G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
-              <div style={{ fontSize: 10, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 80941 56965 · temple@mtcpl.co</div>
+              <div style={{ fontSize: 10, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 75975 91188 · temple@mtcpl.co</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "#fff", background: "#0f2540", borderRadius: 5, padding: "2px 10px" }}>PREVIEW</span>

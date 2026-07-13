@@ -182,7 +182,7 @@ function SummaryView({ rows, noun }: { rows: ViewRow[]; noun: "challan" | "invoi
       {filtered.length === 0 ? (
         <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12, padding: "30px 22px", textAlign: "center", color: "var(--muted)" }}>No {noun}s{(from || to) ? " in this date range" : " yet"}.</div>
       ) : view === "recent" ? (
-        <DocTable rows={filtered} noun={noun} showParty />
+        <DocTable rows={filtered} noun={noun} showParty totalRow={{ label: "", count: filtered.length, cft: tot.cft, sft: tot.sft, nos: tot.nos, taxable: tot.taxable, taxed: tot.taxed, amount: tot.amount }} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
           {parties.map((p) => {
@@ -301,16 +301,22 @@ function DocTable({ rows, noun, showParty, totalRow }: {
           </tbody>
           {totalRow && (
             <tfoot>
-              <tr style={{ background: "var(--bg)", fontWeight: 800 }}>
-                <td style={{ ...tdL, fontWeight: 800 }} colSpan={noun === "invoice" ? 2 : 1}>TOTAL — {totalRow.label}</td>
-                <td style={tdL}>{totalRow.count} {noun}{totalRow.count !== 1 ? "s" : ""}</td>
-                <td style={tdL}></td>
+              {/* Grand-total row under the table — spans the label columns
+                  (Invoice/Challan no · Challan · Party) then sums CFT/SFT/NOS
+                  + money. colSpan tracks which of those columns are shown so it
+                  aligns in BOTH the flat (Recent, showParty) and party-wise views. */}
+              <tr style={{ background: "var(--bg)", fontWeight: 800, borderTop: "2px solid var(--border)" }}>
+                <td style={{ ...tdL, fontWeight: 800 }} colSpan={1 + (noun === "invoice" ? 1 : 0) + (showParty ? 1 : 0)}>
+                  {totalRow.label ? `TOTAL — ${totalRow.label}` : "TOTAL"} · {totalRow.count} {noun}{totalRow.count !== 1 ? "s" : ""}
+                </td>
+                <td style={tdL}></td>{/* Status / Type */}
+                <td style={tdL}></td>{/* Date */}
                 <td style={{ ...td, fontWeight: 800 }}>{qty(totalRow.cft)}</td>
                 <td style={{ ...td, fontWeight: 800 }}>{qty(totalRow.sft)}</td>
                 <td style={{ ...td, fontWeight: 800 }}>{qty(totalRow.nos)}</td>
                 {showMoney && <td style={{ ...td, fontWeight: 800 }}>{moneyDash(totalRow.taxable)}</td>}
                 {showMoney && <td style={{ ...td, fontWeight: 800 }}>{moneyDash(totalRow.taxed)}</td>}
-                {showMoney && <td style={{ ...td, fontWeight: 800 }}>{moneyDash(totalRow.amount)}</td>}
+                {showMoney && <td style={{ ...td, fontWeight: 800, color: "#15803d" }}>{moneyDash(totalRow.amount)}</td>}
               </tr>
             </tfoot>
           )}
