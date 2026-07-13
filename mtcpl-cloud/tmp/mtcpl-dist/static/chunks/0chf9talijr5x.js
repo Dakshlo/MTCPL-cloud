@@ -1,0 +1,4 @@
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="64014ef2-5490-fe4a-eb3a-ed08fd682196")}catch(e){}}();
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,285891,t=>{"use strict";var e=t.i(843476);function r(t){let e=Date.now()-new Date(t).getTime();if(!Number.isFinite(e)||e<0)return"now";let r=Math.floor(e/6e4);if(r<60)return`${Math.max(1,r)} min`;let o=Math.floor(r/60);if(o<24)return`${o} h`;let i=Math.floor(o/24);if(i<31){let t=o%24;return t>0&&i<7?`${i} d ${t} h`:`${i} d`}let n=Math.floor(i/30);return`${n} mo`}t.s(["TimeAgo",0,function({iso:t}){return(0,e.jsx)(e.Fragment,{children:r(t)})},"timeAgoLabel",0,r])}]);
+
+//# debugId=64014ef2-5490-fe4a-eb3a-ed08fd682196

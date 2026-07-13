@@ -146,7 +146,7 @@ export function BulkInvoicePreview({
           <div>
             <div className="bip-cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
             <div className="bip-cl">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
-            <div className="bip-cl">GSTIN: 08AAFCM15Q1ZA · ☎ 75975 91188 · temple@mtcpl.co</div>
+            <div className="bip-cl">GSTIN: 08AAFCM15Q1ZA · ☎ 759 759 1188 · temple@mtcpl.co</div>
           </div>
           <div>
             <div className="bip-num">{code}</div>

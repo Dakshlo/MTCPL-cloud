@@ -1,0 +1,3159 @@
+/* =========================================================
+   MTCPL Company Profile · Edition 2026 (40-page)
+   Self-contained stylesheet for the new edition.
+   ========================================================= */
+
+/* ---------- Stage & shell ---------- */
+.ed-stage {
+  min-height: 100vh;
+  padding: 120px 0 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  background: var(--brown-2);
+}
+
+.ed-toolbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 32px;
+  background: rgba(13, 10, 7, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(201, 151, 58, 0.25);
+}
+.ed-toolbar .brand {
+  font-family: var(--f-sans);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--gold);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.ed-toolbar .brand small {
+  display: block;
+  color: #e9dfcd;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  margin-top: 2px;
+  font-weight: 300;
+}
+.ed-toolbar .print-btn {
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+  color: #1a1510;
+  border: none;
+  padding: 11px 22px;
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  box-shadow: 0 6px 22px rgba(201, 151, 58, 0.35);
+  transition: transform .15s ease;
+}
+.ed-toolbar .print-btn:hover { transform: translateY(-1px); }
+
+/* View toggle (Single / Spread) */
+.ed-view-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(201,151,58,0.4);
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(13,10,7,0.6);
+}
+.ed-view-toggle button {
+  background: transparent;
+  border: none;
+  color: #c9bea7;
+  padding: 8px 14px;
+  font-family: var(--f-sans);
+  font-size: 10pt;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.ed-view-toggle button:not(:last-child) {
+  border-right: 1px solid rgba(201,151,58,0.3);
+}
+.ed-view-toggle button:hover {
+  background: rgba(201,151,58,0.12);
+  color: var(--gold-light);
+}
+.ed-view-toggle button.active {
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+  color: #1a1510;
+  font-weight: 700;
+}
+
+.ed-page-wrap {
+  position: relative;
+}
+.ed-page-num-badge {
+  position: absolute;
+  top: 8px;
+  right: -52px;
+  font-family: var(--f-sans);
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  color: #8a7a62;
+  text-transform: uppercase;
+}
+
+/* ---------- The A4 page ---------- */
+.ed-page {
+  width: 210mm;
+  height: 297mm;
+  background: #f5eedd;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3);
+  color: var(--brown-1);
+  font-family: var(--f-sans);
+  font-size: 10pt;
+  line-height: 1.55;
+  page-break-after: always;
+  break-after: page;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.ed-page:last-child { page-break-after: auto; }
+
+.ed-page-foot {
+  position: absolute;
+  bottom: 10mm;
+  right: 14mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.22em;
+  color: rgba(26, 21, 16, 0.7);
+  text-transform: uppercase;
+  font-weight: 500;
+  z-index: 30;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ed-page-foot.on-dark { color: rgba(241, 231, 210, 0.75); }
+.ed-page-foot .dot { color: var(--gold); margin: 0 5px; }
+
+/* =========================================================
+   PAGE 01 — COVER
+   Full-bleed shikhara photograph · embossed gold logo
+   ========================================================= */
+.ed-p1 {
+  background: #0d0a07;
+  padding: 0;
+}
+.ed-p1 .bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: url('/images/ed-shikhara-hero.jpg');
+  background-size: cover;
+  background-position: center 30%;
+  filter: contrast(1.05) saturate(0.96);
+}
+.ed-p1 .bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg,
+      rgba(13,10,7,0.78) 0%,
+      rgba(13,10,7,0.55) 18%,
+      rgba(13,10,7,0.45) 45%,
+      rgba(13,10,7,0.55) 65%,
+      rgba(13,10,7,0.88) 82%,
+      rgba(13,10,7,0.98) 100%),
+    radial-gradient(ellipse at 50% 50%, rgba(13,10,7,0.25) 0%, transparent 60%);
+}
+
+/* gold corner brackets */
+.ed-p1 .frame {
+  position: absolute;
+  top: 12mm; left: 12mm; right: 12mm; bottom: 12mm;
+  border: 1px solid rgba(201,151,58,0.65);
+  z-index: 2;
+  pointer-events: none;
+}
+.ed-p1 .frame::after {
+  content: '';
+  position: absolute;
+  inset: 2mm;
+  border: 0.5px solid rgba(201,151,58,0.35);
+}
+
+/* top mark */
+.ed-p1 .top-mark {
+  position: absolute;
+  top: 22mm;
+  left: 0; right: 0;
+  z-index: 3;
+  text-align: center;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: rgba(241,231,210,0.78);
+  font-weight: 500;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+}
+
+/* logo center — full lockup (mandala + MTCPL wordmark baked in) */
+.ed-p1 .logo-stack {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.ed-p1 .logo-stack .full-logo {
+  width: 110mm;
+  height: auto;
+  /* MTCPL text is already white in this file.
+     Boost saturation + brightness so the gold mandala pops. */
+  filter:
+    brightness(1.18)
+    saturate(1.35)
+    contrast(1.08)
+    drop-shadow(0 4px 14px rgba(0,0,0,0.65))
+    drop-shadow(0 0 24px rgba(201,151,58,0.28));
+}
+.ed-p1 .logo-stack .est {
+  margin-top: 14mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.48em;
+  text-transform: uppercase;
+  color: var(--gold-light);
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+}
+
+/* taglines bottom */
+.ed-p1 .taglines {
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  bottom: 28mm;
+  z-index: 3;
+  text-align: center;
+  color: #fff;
+}
+.ed-p1 .taglines .english {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 18pt;
+  line-height: 1.2;
+  letter-spacing: 0.005em;
+  margin: 0 0 6mm;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.55);
+}
+.ed-p1 .taglines .english em {
+  color: var(--gold-light);
+  font-style: italic;
+}
+.ed-p1 .taglines .rule {
+  display: block;
+  width: 30mm;
+  height: 1px;
+  background: var(--gold);
+  margin: 0 auto 6mm;
+  opacity: 0.85;
+}
+.ed-p1 .taglines .hindi {
+  font-family: var(--f-hindi);
+  font-size: 16pt;
+  font-weight: 500;
+  color: var(--gold-light);
+  letter-spacing: 0;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+}
+
+/* =========================================================
+   PAGE 02 — INSIDE COVER (minimal · cream)
+   Just the tagline. The breath before the book begins.
+   ========================================================= */
+/* Tiro Devanagari Hindi — calligraphic, epigraphic Devanagari display face */
+@import url('https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Hindi&display=swap');
+
+.ed-p2 {
+  --f-hindi-display: 'Tiro Devanagari Hindi', 'Noto Serif Devanagari', serif;
+  background: #f7f4f0;
+  padding: 30mm 28mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brown-2);
+  position: relative;
+}
+/* Two faint horizontal hairlines top/bottom — paper frame */
+.ed-p2::before,
+.ed-p2::after {
+  content: '';
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  height: 0.5pt;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(168,122,40,0.5) 25%,
+    rgba(168,122,40,0.5) 75%,
+    transparent 100%);
+}
+.ed-p2::before { top: 20mm; }
+.ed-p2::after  { bottom: 20mm; }
+
+.ed-p2 .content {
+  text-align: center;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+/* top sanskrit invocation — flat ink, no shadow */
+.ed-p2 .invocation {
+  font-family: var(--f-hindi);
+  font-size: 13pt;
+  font-weight: 500;
+  color: var(--gold-deep);
+  letter-spacing: 0.03em;
+  margin-bottom: 24mm;
+}
+/* Single restrained flourish above the hero */
+.ed-p2 .flourish {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6mm;
+  margin-bottom: 22mm;
+  width: 70mm;
+}
+.ed-p2 .flourish .rule {
+  flex: 1;
+  height: 0.5pt;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.ed-p2 .flourish .diamond {
+  width: 2mm;
+  height: 2mm;
+  background: var(--gold);
+  transform: rotate(45deg);
+}
+
+/* HERO HINDI — single line, lapidary, flat ink */
+.ed-p2 .hindi-tag {
+  font-family: var(--f-hindi-display);
+  font-size: 38pt;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--gold-deep);
+  margin: 0 0 10mm;
+  white-space: nowrap;
+}
+/* Architrave rule beneath hero — single hairline */
+.ed-p2 .hero-rule {
+  display: block;
+  width: 60mm;
+  height: 0.5pt;
+  margin: 0 0 6mm;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.ed-p2 .subtitle {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--brown-2);
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+.ed-p2 .signature {
+  position: absolute;
+  bottom: 26mm;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  font-weight: 600;
+  color: var(--gold-deep);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   PAGE 03 — OPENING ATMOSPHERIC (B&W full-bleed)
+   ========================================================= */
+.ed-p3 {
+  background: #0d0a07;
+  padding: 0;
+}
+.ed-p3 .bg {
+  position: absolute;
+  inset: 0;
+  background-image: url('/images/page-3-ram-mandir.jpg');
+  background-size: cover;
+  background-position: center 40%;
+  filter: grayscale(1) contrast(1.12) brightness(0.86);
+}
+.ed-p3 .bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 30%, rgba(13,10,7,0.55) 100%),
+    linear-gradient(180deg, rgba(13,10,7,0.3) 0%, transparent 25%, transparent 75%, rgba(13,10,7,0.5) 100%);
+}
+/* very subtle gold corner marks */
+.ed-p3 .corner-tl,
+.ed-p3 .corner-tr,
+.ed-p3 .corner-bl,
+.ed-p3 .corner-br {
+  position: absolute;
+  width: 8mm; height: 8mm;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.45;
+}
+.ed-p3 .corner-tl { top: 14mm; left: 14mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p3 .corner-tr { top: 14mm; right: 14mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.ed-p3 .corner-bl { bottom: 14mm; left: 14mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p3 .corner-br { bottom: 14mm; right: 14mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* =========================================================
+   PAGE 04 — OPENING SHLOKA
+   (Vishvakarma invocation · cream · matches Page 2 font style)
+   ========================================================= */
+.ed-p4 {
+  background: #f7f4f0;
+  padding: 30mm 28mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+}
+.ed-p4::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.ed-p4 .content {
+  max-width: 145mm;
+  position: relative;
+  z-index: 2;
+}
+.ed-p4 .omkar {
+  font-family: var(--f-hindi);
+  font-size: 56pt;
+  color: var(--gold);
+  line-height: 1;
+  letter-spacing: 0.08em;
+  margin: 0;
+  font-weight: 400;
+}
+.ed-p4 .kicker {
+  margin-top: 14mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.48em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+.ed-p4 .rule {
+  display: block;
+  width: 40mm;
+  height: 2px;
+  background: var(--gold);
+  margin: 10mm auto 12mm;
+}
+.ed-p4 .shloka {
+  font-family: var(--f-hindi);
+  font-size: 18pt;
+  color: var(--brown-1);
+  line-height: 1.7;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+.ed-p4 .shloka .gold { color: var(--gold-deep); }
+.ed-p4 .translation {
+  margin-top: 12mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--brown-2);
+  line-height: 1.55;
+  max-width: 120mm;
+  margin-left: auto;
+  margin-right: auto;
+}
+.ed-p4 .translation em {
+  color: var(--gold-deep);
+  font-style: italic;
+}
+.ed-p4 .attribution {
+  margin-top: 10mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.ed-p4 .attribution em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 10pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  display: block;
+  margin-top: 3mm;
+}
+
+/* =========================================================
+   PAGE 05 — FOREWORD FROM THE MDs
+   ========================================================= */
+.ed-p5 {
+  background: #f7f4f0;  /* lighter cream — matches Page 4 */
+  padding: 20mm 22mm 18mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ed-p5::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ed-p5 > * { position: relative; z-index: 1; }
+
+.ed-p5 .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.45);
+}
+.ed-p5 .running-head .center { color: var(--gold-deep); font-weight: 600; }
+.ed-p5 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.ed-p5 h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 30pt;
+  line-height: 1.05;
+  letter-spacing: -0.005em;
+  color: var(--brown-1);
+  margin: 0 0 8mm;
+}
+.ed-p5 h1 em { color: var(--gold); font-style: italic; font-weight: 400; }
+
+/* Two separate MD portraits side by side */
+.ed-p5 .mds-portraits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8mm;
+  margin-bottom: 7mm;
+}
+.ed-p5 .md-portrait {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ed-p5 .md-portrait .photo {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background-size: cover;
+  background-position: center 22%;
+  background-color: #e8d8b8;
+  border: 0.5px solid rgba(201,151,58,0.4);
+  box-shadow: 0 5px 16px rgba(60,40,20,0.18);
+}
+.ed-p5 .md-portrait figcaption {
+  padding-top: 3mm;
+  text-align: center;
+}
+.ed-p5 .md-portrait figcaption strong {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 15pt;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  margin-bottom: 1mm;
+}
+.ed-p5 .md-portrait figcaption span {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+
+.ed-p5 .letter {
+  font-family: var(--f-serif);
+  font-size: 10.5pt;
+  line-height: 1.6;
+  color: var(--brown-2);
+  margin: 0 0 5mm;
+  letter-spacing: 0.005em;
+}
+.ed-p5 .letter em { color: var(--gold-deep); font-style: italic; }
+
+/* Single centred sign-off line — replaces duplicate name signatures */
+.ed-p5 .signoff-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6mm;
+  margin-top: auto;
+  padding-top: 8mm;
+}
+.ed-p5 .signoff-line .rule {
+  width: 30mm;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-deep) 50%, transparent);
+  flex-shrink: 0;
+}
+.ed-p5 .signoff-line em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--brown-1);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   PAGE 11 — CONTENTS (rebuilt clean, fixed-position blocks)
+   With a left-to-middle grey gradient that blends from
+   page 10's greyscale carving into the cream of page 11
+   when viewed as a spread.
+   ========================================================= */
+.ed-contents-page {
+  background:
+    linear-gradient(90deg,
+      rgba(58,52,46,0.45) 0%,
+      rgba(85,75,65,0.30) 3%,
+      rgba(135,120,105,0.16) 6%,
+      rgba(190,175,155,0.06) 10%,
+      transparent 14%
+    ),
+    #f7f4f0;
+  position: relative;
+  overflow: hidden;
+}
+.ed-contents-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.022) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.018) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Header — sits at top */
+.ed-contents-page .ctn-head {
+  position: absolute;
+  top: 22mm;
+  left: 22mm;
+  right: 22mm;
+  text-align: center;
+  z-index: 2;
+}
+.ed-contents-page .ctn-head .om {
+  font-family: var(--f-hindi);
+  font-size: 13pt;
+  color: var(--gold);
+  letter-spacing: 0.14em;
+  line-height: 1;
+  margin-bottom: 6mm;
+}
+.ed-contents-page .ctn-head h1 {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 44pt;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+}
+.ed-contents-page .ctn-head .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  color: var(--muted);
+  margin: 0;
+}
+.ed-contents-page .ctn-head .gold-bar {
+  display: block;
+  width: 60mm;
+  height: 2px;
+  background: var(--gold);
+  margin: 8mm auto 0;
+}
+
+/* Two card columns — absolutely positioned for stability */
+.ed-contents-page .ctn-col {
+  position: absolute;
+  top: 105mm;
+  width: 76mm;
+  z-index: 2;
+}
+.ed-contents-page .ctn-col.left  { left: 22mm; }
+.ed-contents-page .ctn-col.right { right: 22mm; }
+
+.ed-contents-page .ctn-col .card-head {
+  border-bottom: 1px solid var(--gold);
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+}
+.ed-contents-page .ctn-col .card-head .marker {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: -0.005em;
+  line-height: 1;
+}
+.ed-contents-page .ctn-col .card-head .name {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 17pt;
+  color: var(--brown-1);
+  line-height: 1.1;
+  margin-top: 2mm;
+}
+.ed-contents-page .ctn-col .card-head .meta {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-top: 3mm;
+}
+
+.ed-contents-page .ctn-row {
+  display: grid;
+  grid-template-columns: 12mm 1fr;
+  gap: 4mm;
+  align-items: baseline;
+  padding: 3mm 0;
+  border-bottom: 0.5px dotted rgba(168,122,40,0.4);
+}
+.ed-contents-page .ctn-row:last-child { border-bottom: none; }
+.ed-contents-page .ctn-row .num {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 13pt;
+  color: var(--gold);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.ed-contents-page .ctn-row .label {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.01em;
+  color: var(--brown-1);
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+/* Bottom footer — pinned to bottom */
+.ed-contents-page .ctn-foot {
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  bottom: 18mm;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 5mm;
+  border-top: 0.5px solid rgba(168,122,40,0.5);
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.ed-contents-page .ctn-foot em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 9pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 400;
+}
+
+/* =========================================================
+   PAGE 07 — MEMORIAL PORTRAIT (full-bleed)
+   ========================================================= */
+.ed-p7 {
+  background:
+    radial-gradient(ellipse at 50% 40%, #f9f3e3 0%, transparent 65%),
+    #f3ead6;
+  padding: 0;
+}
+.ed-p7::before {
+  /* subtle paper grain */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.ed-p7 .portrait {
+  position: absolute;
+  top: 36mm;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 122mm;
+  height: auto;
+  max-height: 178mm;
+  z-index: 2;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 10px 28px rgba(60,40,20,0.32))
+    drop-shadow(0 0 18px rgba(201,151,58,0.18));
+}
+.ed-p7 .shri {
+  position: absolute;
+  top: 18mm;
+  left: 0; right: 0;
+  text-align: center;
+  z-index: 3;
+  font-family: var(--f-hindi);
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: 0.12em;
+}
+.ed-p7 .memorial {
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  bottom: 28mm;
+  text-align: center;
+  z-index: 3;
+  color: var(--brown-1);
+}
+.ed-p7 .memorial .lbl {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 5mm;
+}
+.ed-p7 .memorial h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 30pt;
+  line-height: 1.05;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+  letter-spacing: -0.005em;
+}
+.ed-p7 .memorial .years {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  margin-bottom: 6mm;
+}
+.ed-p7 .memorial .rule {
+  display: block;
+  width: 26mm;
+  height: 1px;
+  background: var(--gold);
+  margin: 0 auto;
+}
+
+/* =========================================================
+   PAGE 08 — TRIBUTE ESSAY
+   ========================================================= */
+.ed-p8 {
+  background: #f5eedd;
+  padding: 20mm 26mm 18mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ed-p8 .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 8mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.45);
+}
+.ed-p8 .running-head .center { color: var(--gold-deep); font-weight: 600; }
+.ed-p8 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 4mm;
+}
+.ed-p8 h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 44pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 12mm;
+}
+.ed-p8 h1 em { color: var(--gold); font-style: italic; font-weight: 400; }
+
+.ed-p8 .essay {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--f-serif);
+  color: var(--brown-2);
+}
+.ed-p8 .essay .lede {
+  font-size: 12.5pt;
+  line-height: 1.6;
+  margin: 0 0 10mm;
+  max-width: 150mm;
+  color: var(--brown-1);
+}
+.ed-p8 .essay .lede em { color: var(--gold-deep); font-style: italic; }
+
+/* Two-cell fact strip — restrained, memorial-appropriate */
+.ed-p8 .fact-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: end;
+  padding: 8mm 0 9mm;
+  margin: 0 0 9mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.55);
+  border-bottom: 0.5pt solid rgba(168,122,40,0.55);
+}
+.ed-p8 .fact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+  padding: 0 6mm;
+  border-right: 0.5pt solid rgba(168,122,40,0.35);
+}
+.ed-p8 .fact:last-child { border-right: none; }
+.ed-p8 .fact .fig {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 38pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  letter-spacing: 0;
+}
+.ed-p8 .fact .lbl {
+  margin-top: 5mm;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ed-p8 .essay .pull {
+  margin: 0 8mm 9mm;
+  padding: 5mm 8mm;
+  border-left: 1.5pt solid var(--gold);
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 13pt;
+  line-height: 1.5;
+  color: var(--brown-1);
+}
+.ed-p8 .essay .close {
+  font-size: 11pt;
+  line-height: 1.65;
+  margin: 0 0 4mm;
+  max-width: 150mm;
+  color: var(--brown-2);
+}
+.ed-p8 .essay .close em { color: var(--gold-deep); font-style: italic; }
+
+.ed-p8 .signoff {
+  margin-top: auto;
+  padding-top: 6mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.45);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.ed-p8 .signoff em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 400;
+}
+
+/* =========================================================
+   PAGES 08 — 09 — Timeline Spread (55 Years in Stone)
+   One continuous gold spine flows across both pages through
+   the gutter. Years hug the line, events alternate above and
+   below it, and page 9 closes with the story in four numbers.
+   ========================================================= */
+.ed-p9, .ed-p10 {
+  background: #f5eedd;
+  padding: 18mm 22mm 16mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden; /* spine bleeds clip cleanly at the trim */
+}
+.ed-p9::before, .ed-p10::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ed-p9 > *, .ed-p10 > * { position: relative; z-index: 1; }
+
+.ed-timeline .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.45);
+}
+.ed-timeline .running-head .center { color: var(--gold-deep); font-weight: 600; }
+.ed-timeline .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.ed-timeline h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 32pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+}
+.ed-timeline h1 em { color: var(--gold); font-style: italic; font-weight: 400; }
+
+/* Part strap — tracked caps with a leading gold rule */
+.ed-timeline .strap {
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.ed-timeline .strap::before {
+  content: '';
+  width: 14mm;
+  height: 0.5pt;
+  background: var(--gold);
+}
+
+/* ---- timeline zone: 4 columns × [above | spine | below] rows ----
+   Row 1 is a FIXED 86mm on both pages so the spine sits at the same
+   absolute height across the spread. */
+.ed-timeline .tl-zone {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 86mm 10mm 1fr;
+  column-gap: 5mm;
+  position: relative;
+  min-height: 0;
+}
+
+/* The spine itself. Page 8's runs off the right edge; page 9's enters
+   from the left and ends in a filled diamond — one line, one story. */
+.ed-timeline .spine {
+  position: absolute;
+  top: calc(86mm + 5mm - 0.4pt);
+  height: 0.8pt;
+  background: rgba(168,122,40,0.85);
+  z-index: 0;
+}
+.ed-p9 .spine  { left: 0;     right: -22mm; }  /* bleeds into the gutter */
+.ed-p10 .spine { left: -22mm; right: 2.5mm; }  /* arrives from the gutter */
+.ed-p10 .spine-end {
+  position: absolute;
+  top: calc(86mm + 5mm);
+  right: 0;
+  width: 2.8mm;
+  height: 2.8mm;
+  background: var(--gold-deep);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* Node diamonds on the line — hollow by default, filled on milestones */
+.ed-timeline .node {
+  grid-row: 2;
+  justify-self: center;
+  align-self: center;
+  width: 2.6mm;
+  height: 2.6mm;
+  background: #f5eedd;
+  border: 0.7pt solid var(--gold-deep);
+  transform: rotate(45deg);
+  z-index: 2;
+}
+.ed-timeline .node.filled { background: var(--gold); }
+
+/* Event stacks — years kiss the line from both sides */
+.ed-timeline .ev {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ed-timeline .ev.above { grid-row: 1; justify-content: flex-end; }
+.ed-timeline .ev.below { grid-row: 3; justify-content: flex-start; }
+
+.ed-timeline .ev .photo {
+  height: 34mm;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5pt solid rgba(201,151,58,0.45);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.16);
+}
+.ed-timeline .ev.hl .photo {
+  border: 1pt solid var(--gold);
+  box-shadow: 0 4px 12px rgba(201,151,58,0.3);
+}
+.ed-timeline .ev .era {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.ed-timeline .ev .desc {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  line-height: 1.45;
+  color: var(--brown-2);
+  margin: 0;
+}
+.ed-timeline .ev .year {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 25pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  letter-spacing: -0.005em;
+}
+
+/* above: photo → stage → desc → year (year sits on the line) */
+.ed-timeline .ev.above .photo { margin-bottom: 3mm; }
+.ed-timeline .ev.above .era { margin-bottom: 1.2mm; }
+.ed-timeline .ev.above .desc  { margin-bottom: 2.6mm; }
+.ed-timeline .ev.above .year  { margin-bottom: 1mm; }
+
+/* below: year → stage → desc → photo */
+.ed-timeline .ev.below .year  { margin-top: 1mm; margin-bottom: 2.2mm; }
+.ed-timeline .ev.below .era { margin-bottom: 1.2mm; }
+.ed-timeline .ev.below .desc  { margin-bottom: 3mm; }
+
+/* Page-8 bottom colophon — balances page 9's stat band */
+.ed-timeline .tl-foot {
+  margin-top: auto;
+  padding-top: 3mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.35);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Page-9 closing stat band — the story in four numbers */
+.ed-timeline .tl-stats {
+  margin-top: 6mm;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 0.5pt solid rgba(168,122,40,0.55);
+  border-bottom: 0.5pt solid rgba(168,122,40,0.55);
+  padding: 5mm 0;
+}
+.ed-timeline .tl-stats .cell {
+  text-align: center;
+  border-right: 0.5pt solid rgba(168,122,40,0.3);
+  padding: 0 2mm;
+}
+.ed-timeline .tl-stats .cell:last-child { border-right: none; }
+.ed-timeline .tl-stats .num {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 26pt;
+  line-height: 1;
+  color: var(--gold-deep);
+}
+.ed-timeline .tl-stats .num small {
+  font-size: 13pt;
+  font-style: italic;
+  margin-left: 0.4mm;
+}
+.ed-timeline .tl-stats .lbl {
+  display: block;
+  margin-top: 2.4mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* =========================================================
+   PAGE 10 — Full-bleed Atmospheric Interlude
+   ========================================================= */
+.ed-p10-interlude {
+  background: #0d0a07;
+  padding: 0;
+  position: relative;
+}
+.ed-p10-interlude .bg {
+  position: absolute;
+  inset: 0;
+  background-image: url('/images/carving-detail.png');
+  background-size: cover;
+  background-position: center;
+  background-color: #0d0a07;
+  /* greyscale + slight contrast lift for sculptural depth */
+  filter: grayscale(1) contrast(1.12) brightness(0.96);
+}
+.ed-p10-interlude .bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 50%, rgba(13,10,7,0.32) 100%),
+    linear-gradient(180deg, rgba(13,10,7,0.22) 0%, transparent 18%, transparent 82%, rgba(13,10,7,0.3) 100%);
+  pointer-events: none;
+}
+/* very subtle gold corner marks */
+.ed-p10-interlude .corner {
+  position: absolute;
+  width: 8mm; height: 8mm;
+  z-index: 2;
+  opacity: 0.4;
+  pointer-events: none;
+}
+.ed-p10-interlude .corner.tl { top: 14mm; left: 14mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p10-interlude .corner.tr { top: 14mm; right: 14mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.ed-p10-interlude .corner.bl { bottom: 14mm; left: 14mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p10-interlude .corner.br { bottom: 14mm; right: 14mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* =========================================================
+   PAGE 11 — The Yard (LEGACY — no longer in route)
+   ========================================================= */
+.ed-p11 {
+  background: #f5eedd;
+  padding: 18mm 22mm 16mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ed-p11::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ed-p11 > * { position: relative; z-index: 1; }
+
+.ed-p11 .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.45);
+}
+.ed-p11 .running-head .center { color: var(--gold-deep); font-weight: 600; }
+
+.ed-p11 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.ed-p11 h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 36pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+}
+.ed-p11 h1 em { color: var(--gold); font-style: italic; font-weight: 400; }
+.ed-p11 .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 140mm;
+  margin: 0 0 6mm;
+}
+.ed-p11 .gold-line {
+  display: block;
+  width: 50pt; height: 2pt;
+  background: var(--gold);
+  margin-bottom: 6mm;
+}
+
+/* Hero photo — large */
+.ed-p11 .hero {
+  height: 100mm;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5px solid rgba(201,151,58,0.4);
+  box-shadow: 0 6px 20px rgba(60,40,20,0.2);
+  position: relative;
+  margin-bottom: 4mm;
+}
+.ed-p11 .hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 65%, rgba(26,21,16,0.55) 100%);
+}
+.ed-p11 .hero .cap {
+  position: absolute;
+  left: 6mm; bottom: 5mm;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+.ed-p11 .hero .cap em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: #fff;
+  letter-spacing: 0.02em;
+  margin-top: 2mm;
+  text-transform: none;
+}
+
+/* 4-photo strip */
+.ed-p11 .strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3mm;
+  margin-bottom: 5mm;
+  height: 36mm;
+}
+.ed-p11 .strip .ph {
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5px solid rgba(201,151,58,0.35);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.15);
+  position: relative;
+}
+.ed-p11 .strip .ph::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 55%, rgba(26,21,16,0.5) 100%);
+}
+.ed-p11 .strip .ph .lbl {
+  position: absolute;
+  left: 3mm; bottom: 2mm;
+  z-index: 2;
+  font-family: var(--f-sans);
+  font-size: 5.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+
+.ed-p11 .closing {
+  padding-top: 4mm;
+  border-top: 0.5px solid rgba(168,122,40,0.45);
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--brown-1);
+  text-align: center;
+}
+.ed-p11 .closing em { color: var(--gold-deep); font-style: italic; }
+
+/* =========================================================
+   Spread view (CSS-only toggle on .ed-stage.spread-mode)
+   Pairs even on LEFT, odd on RIGHT (per print convention).
+   Page 1 (cover) sits alone on the right.
+   ========================================================= */
+.ed-stage.spread-mode {
+  display: grid;
+  grid-template-columns: 210mm 210mm;
+  column-gap: 0;
+  row-gap: 28px;
+  justify-content: center;
+  align-items: start;
+  padding: 120px 0 80px;
+  max-width: none;
+}
+.ed-stage.spread-mode .ed-page-wrap {
+  display: flex;
+}
+/* Page 1 (cover) — alone, sits on the right column of its row */
+.ed-stage.spread-mode .ed-page-wrap:nth-child(1) {
+  grid-column: 2;
+  justify-content: flex-start;
+}
+/* Even-numbered pages (2, 4, 6...) — LEFT column */
+.ed-stage.spread-mode .ed-page-wrap:nth-child(2n):not(:nth-child(1)) {
+  grid-column: 1;
+  justify-content: flex-end;
+}
+/* Odd-numbered pages after page 1 (3, 5, 7...) — RIGHT column */
+.ed-stage.spread-mode .ed-page-wrap:nth-child(2n+1):not(:nth-child(1)) {
+  grid-column: 2;
+  justify-content: flex-start;
+}
+/* In spread mode, drop the floating badge so spreads look like real pages */
+.ed-stage.spread-mode .ed-page-num-badge {
+  display: none;
+}
+/* Print rules (Edition) — unchanged
+   ========================================================= */
+@media print {
+  html, body { background: #fff; }
+  .ed-toolbar, .ed-page-num-badge { display: none !important; }
+  .ed-stage { padding: 0; gap: 0; background: #fff; }
+  .ed-page { box-shadow: none; margin: 0; }
+  .ed-page-wrap { page-break-after: always; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+/* === PAGE 12 - Sirohi === */
+.ed-p12 {
+  background: #f5eedd;
+  padding: 18mm 22mm 16mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ed-p12::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ed-p12 > * { position: relative; z-index: 1; }
+
+.ed-p12 .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.45);
+}
+.ed-p12 .running-head .center { color: var(--gold-deep); font-weight: 600; }
+
+.ed-p12 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+
+.ed-p12 h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 34pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 1.5mm;
+}
+
+.ed-p12 .subtitle {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 18pt;
+  line-height: 1.1;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  letter-spacing: 0.005em;
+}
+.ed-p12 .subtitle em {
+  color: var(--gold);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.ed-p12 .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 150mm;
+  margin: 0 0 5mm;
+}
+
+.ed-p12 .gold-line {
+  display: block;
+  width: 50pt;
+  height: 2pt;
+  background: var(--gold);
+  margin-bottom: 5mm;
+}
+
+/* Hero — ~95mm tall */
+.ed-p12 .hero {
+  height: 95mm;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5px solid rgba(201,151,58,0.4);
+  box-shadow: 0 6px 20px rgba(60,40,20,0.2);
+  position: relative;
+  margin-bottom: 6mm;
+}
+.ed-p12 .hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 70%, rgba(26,21,16,0.6) 100%);
+}
+.ed-p12 .hero .cap {
+  position: absolute;
+  left: 6mm;
+  bottom: 4mm;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+}
+
+/* Body grid — prose left, 2x2 data block right */
+.ed-p12 .body-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 9mm;
+  align-items: start;
+}
+
+.ed-p12 .prose {
+  font-family: var(--f-serif);
+  font-size: 10pt;
+  line-height: 1.55;
+  color: var(--brown-2);
+  letter-spacing: 0.005em;
+}
+.ed-p12 .prose p { margin: 0 0 3.5mm; }
+.ed-p12 .prose p em {
+  color: var(--gold-deep);
+  font-style: italic;
+}
+
+/* 2x2 data block */
+.ed-p12 .data-block {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid rgba(168,122,40,0.55);
+  border-left: 1px solid rgba(168,122,40,0.55);
+  background: rgba(201,151,58,0.04);
+}
+.ed-p12 .data-block .cell {
+  padding: 4mm 4.5mm;
+  border-right: 1px solid rgba(168,122,40,0.55);
+  border-bottom: 1px solid rgba(168,122,40,0.55);
+  min-height: 22mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.ed-p12 .data-block .cell .k {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 2.5mm;
+}
+.ed-p12 .data-block .cell .v {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  line-height: 1.35;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+}
+/* === PAGE 13 - Ayodhya Sub-divider === */
+.ed-p13 {
+  background: #1a1208;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+.ed-p13 .bg {
+  position: absolute;
+  inset: 0;
+  background-image: url('/images/temple-twilight.jpg');
+  background-size: cover;
+  background-position: center 45%;
+  background-color: #1a1208;
+  /* sepia + slight darken — temple at dusk */
+  filter: sepia(0.55) saturate(1.05) contrast(1.08) brightness(0.74) hue-rotate(-6deg);
+}
+.ed-p13 .bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    /* heavy dark band where the central text block sits (60-82% of height) */
+    linear-gradient(180deg,
+      rgba(8,5,2,0.55) 0%,
+      rgba(8,5,2,0.30) 16%,
+      rgba(8,5,2,0.18) 35%,
+      rgba(8,5,2,0.40) 58%,
+      rgba(8,5,2,0.78) 70%,
+      rgba(8,5,2,0.86) 80%,
+      rgba(8,5,2,0.72) 92%,
+      rgba(8,5,2,0.55) 100%
+    );
+  pointer-events: none;
+}
+
+/* Section number — tiny mark, top-left */
+.ed-p13 .section-mark {
+  position: absolute;
+  top: 14mm;
+  left: 14mm;
+  z-index: 3;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  font-weight: 500;
+  color: var(--gold-light);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* Reverent Devanagari mark at top center */
+.ed-p13 .shri-ram {
+  position: absolute;
+  top: 20mm;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-family: var(--f-hindi);
+  font-size: 12pt;
+  font-weight: 400;
+  color: var(--gold-light);
+  letter-spacing: 0.06em;
+  text-align: center;
+  opacity: 0.92;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.55);
+}
+
+/* Center block low on page */
+.ed-p13 .center-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 70mm;
+  z-index: 3;
+  text-align: center;
+  padding: 0 24mm;
+}
+.ed-p13 .kicker {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: #f1c86b;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  margin-bottom: 7mm;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.85),
+    0 2px 8px rgba(0,0,0,0.75);
+}
+.ed-p13 .rule {
+  width: 50pt;
+  height: 2px;
+  background: #e8c374;
+  margin: 0 auto 9mm;
+  box-shadow: 0 0 8px rgba(0,0,0,0.5);
+}
+.ed-p13 .line {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 23pt;
+  line-height: 1.3;
+  color: #ffffff;
+  letter-spacing: 0.005em;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.9),
+    0 2px 4px rgba(0,0,0,0.85),
+    0 4px 16px rgba(0,0,0,0.8);
+  margin: 0 auto 7mm;
+  max-width: 140mm;
+}
+.ed-p13 .line em {
+  color: #f1c86b;
+  font-style: italic;
+}
+.ed-p13 .dates {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: #f1c86b;
+  letter-spacing: 0.14em;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.85),
+    0 2px 6px rgba(0,0,0,0.75);
+}
+
+/* Four faint gold corner brackets at 35% opacity */
+.ed-p13 .corner {
+  position: absolute;
+  width: 8mm;
+  height: 8mm;
+  z-index: 2;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.ed-p13 .corner.tl { top: 14mm; left: 14mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p13 .corner.tr { top: 14mm; right: 14mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.ed-p13 .corner.bl { bottom: 14mm; left: 14mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p13 .corner.br { bottom: 14mm; right: 14mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+/* =========================================================
+   PAGE 14 — Ayodhya · In Frames (5-image editorial gallery)
+   ========================================================= */
+.ed-p14 {
+  background: #1a1208;
+  padding: 12mm 14mm;
+  position: relative;
+  overflow: hidden;
+  color: #e8d9b8;
+  display: flex;
+  flex-direction: column;
+}
+.ed-p14 .vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(120% 90% at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.45) 100%);
+}
+
+.ed-p14 .running-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: rgba(224,168,64,0.6);
+  padding-bottom: 3mm;
+  margin-bottom: 5mm;
+  border-bottom: 0.5pt solid rgba(201,151,58,0.32);
+}
+.ed-p14 .running-head .center { color: rgba(224,168,64,0.9); font-weight: 600; }
+
+.ed-p14 .ed-head {
+  position: relative;
+  z-index: 2;
+  margin-bottom: 6mm;
+}
+.ed-p14 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.ed-p14 .ed-title {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 32pt;
+  line-height: 1;
+  color: #efe2c2;
+  margin: 0;
+}
+.ed-p14 .ed-title em {
+  font-style: italic;
+  color: var(--gold-light);
+  font-weight: 300;
+}
+.ed-p14 .ed-title .dot {
+  color: var(--gold-deep);
+  font-style: normal;
+  margin: 0 0.18em;
+}
+
+/* Five-frame asymmetric grid — no dead zones */
+.ed-p14 .gallery {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(12, 1fr);
+  gap: 3.5mm;
+  margin-bottom: 5mm;
+}
+.ed-p14 .g {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  background: #0d0904;
+  box-shadow:
+    0 0 0 0.5pt rgba(201,151,58,0.32),
+    0 4px 14px rgba(0,0,0,0.55);
+}
+.ed-p14 .g-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: saturate(1.04) contrast(1.04) brightness(0.98);
+}
+/* Solid dark caption band — reliable in print (no text-shadow dependency) */
+.ed-p14 .g::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 12mm;
+  background: linear-gradient(180deg,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.55) 40%,
+    rgba(0,0,0,0.82) 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Frame placements — 12×12 grid, no dead cells */
+.ed-p14 .g-hero  { grid-column: 1 / span 7;  grid-row: 1 / span 7;  }
+.ed-p14 .g-tall  { grid-column: 8 / span 5;  grid-row: 1 / span 9;  }
+.ed-p14 .g-small { grid-column: 1 / span 3;  grid-row: 8 / span 2;  }
+.ed-p14 .g-mid   { grid-column: 4 / span 4;  grid-row: 8 / span 2;  }
+.ed-p14 .g-wide  { grid-column: 1 / span 12; grid-row: 10 / span 3; }
+
+.ed-p14 .g-hero  .g-img { background-position: center 35%; }
+.ed-p14 .g-tall  .g-img { background-position: center 30%; }
+.ed-p14 .g-small .g-img { background-position: center 50%; }
+.ed-p14 .g-mid   .g-img { background-position: center 50%; }
+.ed-p14 .g-wide  .g-img { background-position: center 55%; }
+
+/* Caption — 6.5pt tracked caps, gold italic numeral, on solid gradient band */
+.ed-p14 .g-cap {
+  position: absolute;
+  left: 3mm;
+  right: 3mm;
+  bottom: 2.8mm;
+  z-index: 4;
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #f0d590;
+  font-weight: 500;
+}
+.ed-p14 .g-num {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 10pt;
+  letter-spacing: 0;
+  color: var(--gold-light);
+}
+.ed-p14 .g-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Tighter for the two small accent frames */
+.ed-p14 .g-small .g-cap,
+.ed-p14 .g-mid   .g-cap { font-size: 6pt; gap: 2mm; }
+.ed-p14 .g-small .g-num,
+.ed-p14 .g-mid   .g-num { font-size: 8.5pt; }
+
+.ed-p14 .ed-foot {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 3mm;
+  border-top: 0.5pt solid rgba(201,151,58,0.28);
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: rgba(224,168,64,0.7);
+}
+/* === PAGE 15 - Ram Mandir Scope === */
+.ed-p15 {
+  background: #f5eedd;
+  padding: 18mm 22mm 16mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.ed-p15::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.ed-p15 > * { position: relative; z-index: 1; }
+
+/* Running head */
+.ed-p15 .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.45);
+}
+.ed-p15 .running-head .center {
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+
+/* Section mark */
+.ed-p15 .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+
+/* Titles */
+.ed-p15 h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 34pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 1.5mm;
+}
+.ed-p15 h1 em {
+  color: var(--gold);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.ed-p15 .subtitle {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 18pt;
+  line-height: 1.1;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  letter-spacing: 0.005em;
+}
+.ed-p15 .subtitle em {
+  color: var(--gold);
+  font-style: italic;
+  font-weight: 400;
+}
+.ed-p15 .subtitle .dot-sep {
+  color: var(--gold-deep);
+  margin: 0 2pt;
+  font-style: normal;
+}
+
+/* Lead paragraph */
+.ed-p15 .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 150mm;
+  margin: 0 0 5mm;
+}
+
+/* Gold line */
+.ed-p15 .gold-line {
+  display: block;
+  width: 50pt;
+  height: 2pt;
+  background: var(--gold);
+  margin-bottom: 7mm;
+}
+
+/* Body grid — scope-block left, quote panel right */
+.ed-p15 .body-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: 10mm;
+  align-items: start;
+}
+
+/* ----- LEFT: 5-row scope data block ----- */
+.ed-p15 .scope-block {
+  border-top: 1px solid rgba(168,122,40,0.55);
+  background: rgba(201,151,58,0.04);
+}
+.ed-p15 .scope-block .row {
+  display: grid;
+  grid-template-columns: 1fr;
+  padding: 4mm 4mm 4mm 0;
+  border-bottom: 1px solid rgba(168,122,40,0.35);
+}
+.ed-p15 .scope-block .row.last {
+  border-bottom: 1px solid rgba(168,122,40,0.55);
+}
+.ed-p15 .scope-block .k {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.ed-p15 .scope-block .v {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.35;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+}
+
+/* Hero row — the 7 Lakh+ headline numeral */
+.ed-p15 .scope-block .hero-row {
+  padding-top: 5mm;
+  padding-bottom: 6mm;
+}
+.ed-p15 .scope-block .v-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+  flex-wrap: wrap;
+}
+.ed-p15 .scope-block .v-hero .num {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 38pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--gold);
+}
+.ed-p15 .scope-block .v-hero .unit {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 12pt;
+  color: var(--brown-2);
+  letter-spacing: 0.01em;
+}
+
+/* ----- RIGHT: Champat Rai Ji pull-quote panel ----- */
+.ed-p15 .quote-panel {
+  position: relative;
+  padding: 6mm 4mm 4mm 6mm;
+  border-left: 1px solid rgba(168,122,40,0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+.ed-p15 .quote-panel .portrait {
+  width: 40mm;
+  height: 40mm;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center top;
+  background-color: #c9a878;
+  border: 0.75px solid rgba(168,122,40,0.6);
+  box-shadow: 0 4px 14px rgba(60,40,20,0.18);
+  margin: 0 0 5mm;
+  align-self: flex-start;
+  position: relative;
+}
+.ed-p15 .quote-panel .portrait::after {
+  content: '';
+  position: absolute;
+  inset: -2.5mm;
+  border-radius: 50%;
+  border: 0.5px solid rgba(201,151,58,0.45);
+  pointer-events: none;
+}
+
+.ed-p15 .quote-panel .quotemark {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 48pt;
+  line-height: 0.6;
+  color: var(--gold);
+  margin: 0 0 2mm;
+  letter-spacing: 0;
+}
+
+.ed-p15 .quote-panel .quote {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  line-height: 1.55;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  margin: 0 0 6mm;
+  padding: 0;
+  max-width: 78mm;
+}
+.ed-p15 .quote-panel .quote em {
+  color: var(--gold-deep);
+  font-style: italic;
+}
+
+.ed-p15 .quote-panel .attribution {
+  margin-top: auto;
+  border-top: 0.5px solid rgba(168,122,40,0.4);
+  padding-top: 3mm;
+}
+.ed-p15 .quote-panel .attribution .name {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  margin-bottom: 1.2mm;
+}
+.ed-p15 .quote-panel .attribution .role {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* Bottom location stamp */
+.ed-p15 .location-stamp {
+  margin-top: 8mm;
+  padding-top: 4mm;
+  border-top: 0.5px solid rgba(168,122,40,0.45);
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* =========================================================
+   PAGES 16 — 17 — The Making (§ 06 · From Stone to Deity)
+   Six-stage ledger across the spread: 01–03 left, 04–06 right.
+   Shared editorial header anatomy with the timeline pages.
+   ========================================================= */
+:is(.ed-making, .ed-works) {
+  background: #f5eedd;
+  padding: 18mm 22mm 16mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+:is(.ed-making, .ed-works)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02)  0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+:is(.ed-making, .ed-works) > * { position: relative; z-index: 1; }
+
+:is(.ed-making, .ed-works) .running-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.45);
+}
+:is(.ed-making, .ed-works) .running-head .center { color: var(--gold-deep); font-weight: 600; }
+:is(.ed-making, .ed-works) .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+:is(.ed-making, .ed-works) h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 32pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+}
+:is(.ed-making, .ed-works) h1 em { color: var(--gold); font-style: italic; font-weight: 400; }
+:is(.ed-making, .ed-works) .strap {
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 7mm;
+}
+:is(.ed-making, .ed-works) .strap::before {
+  content: '';
+  width: 14mm;
+  height: 0.5pt;
+  background: var(--gold);
+}
+
+/* --- the ledger --- */
+.ed-making .ledger {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  border-top: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-making .lrow {
+  display: grid;
+  grid-template-columns: 18mm 1fr 30mm 52mm;
+  gap: 6mm;
+  align-items: center;
+  padding: 5.5mm 0;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-making .lnum {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 30pt;
+  line-height: 1;
+  color: rgba(201,151,58,0.45);
+}
+.ed-making .lbody { min-width: 0; }
+.ed-making .lname {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+  margin-bottom: 1.8mm;
+}
+.ed-making .ldesc {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  line-height: 1.4;
+  color: var(--brown-2);
+  margin: 0;
+}
+.ed-making .lstat { text-align: right; }
+.ed-making .lstat .v {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 23pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  white-space: nowrap;
+}
+.ed-making .lstat .u {
+  display: block;
+  margin-top: 1.8mm;
+  font-family: var(--f-sans);
+  font-size: 6pt;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.ed-making .lphoto {
+  height: 40mm;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5pt solid rgba(201,151,58,0.45);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.16);
+}
+
+/* p16 colophon / p17 record band */
+.ed-making .mk-foot {
+  margin-top: 5mm;
+  padding-top: 3mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.35);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.ed-making .mk-record {
+  margin-top: 5mm;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 0.5pt solid rgba(168,122,40,0.55);
+  border-bottom: 0.5pt solid rgba(168,122,40,0.55);
+  padding: 4.5mm 0;
+}
+.ed-making .mk-record .cell {
+  text-align: center;
+  border-right: 0.5pt solid rgba(168,122,40,0.3);
+  padding: 0 2mm;
+}
+.ed-making .mk-record .cell:last-child { border-right: none; }
+.ed-making .mk-record .v {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 22pt;
+  line-height: 1;
+  color: var(--gold-deep);
+}
+.ed-making .mk-record .l {
+  display: block;
+  margin-top: 2.2mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* =========================================================
+   PAGE 18 — § 07 Divider (The Works) — full-bleed dusk
+   ========================================================= */
+.ed-p18 {
+  background: #171009;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+.ed-p18 .bg {
+  position: absolute;
+  inset: 0;
+  background-image: url('/images/installation-site.jpg');
+  background-size: cover;
+  background-position: center 45%;
+  background-color: #171009;
+  filter: saturate(1.02) contrast(1.05) brightness(0.98);
+}
+.ed-p18 .bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    rgba(14,9,4,0.30) 0%,
+    rgba(14,9,4,0.08) 16%,
+    rgba(14,9,4,0.10) 46%,
+    rgba(14,9,4,0.74) 62%,
+    rgba(14,9,4,0.86) 80%,
+    rgba(14,9,4,0.92) 100%);
+  pointer-events: none;
+}
+.ed-p18 .content {
+  position: absolute;
+  left: 16mm;
+  right: 16mm;
+  bottom: 34mm;
+  z-index: 3;
+  text-align: center;
+}
+.ed-p18 .caps {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: #e8c374;
+  font-weight: 600;
+  margin-bottom: 7mm;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.85), 0 2px 8px rgba(0,0,0,0.75);
+}
+.ed-p18 .rule {
+  display: block;
+  width: 50pt;
+  height: 2px;
+  background: #e8c374;
+  margin: 0 auto 8mm;
+  box-shadow: 0 0 8px rgba(0,0,0,0.5);
+}
+.ed-p18 .line {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 25pt;
+  line-height: 1.28;
+  color: #ffffff;
+  letter-spacing: 0.005em;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.9),
+    0 2px 4px rgba(0,0,0,0.85),
+    0 4px 16px rgba(0,0,0,0.8);
+  margin: 0 auto 6mm;
+  max-width: 150mm;
+}
+.ed-p18 .line em { color: #f1c86b; font-style: italic; }
+.ed-p18 .dates {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11.5pt;
+  color: #f1c86b;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.85), 0 2px 6px rgba(0,0,0,0.75);
+}
+.ed-p18 .corner {
+  position: absolute;
+  width: 8mm;
+  height: 8mm;
+  z-index: 2;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.ed-p18 .corner.tl { top: 14mm; left: 14mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p18 .corner.tr { top: 14mm; right: 14mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.ed-p18 .corner.bl { bottom: 14mm; left: 14mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.ed-p18 .corner.br { bottom: 14mm; right: 14mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* =========================================================
+   PAGE 19 — Flagship works (2 × 3 plate grid)
+   ========================================================= */
+.ed-p19 .works-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 5mm 6mm;
+  min-height: 0;
+}
+.ed-p19 .wcard {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ed-p19 .wcard .img {
+  flex: 1;
+  min-height: 0;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5pt solid rgba(201,151,58,0.45);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.16);
+}
+.ed-p19 .wcard.featured .img {
+  border: 1pt solid var(--gold);
+  box-shadow: 0 4px 12px rgba(201,151,58,0.3);
+}
+.ed-p19 .wcard figcaption {
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+  margin-top: 2.4mm;
+  min-height: 9mm;
+}
+.ed-p19 .wnum {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: var(--gold);
+  min-width: 5mm;
+}
+.ed-p19 .winfo { min-width: 0; }
+.ed-p19 .winfo strong {
+  display: block;
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 10.5pt;
+  line-height: 1.15;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-p19 .wloc {
+  display: block;
+  margin-top: 0.8mm;
+  font-family: var(--f-sans);
+  font-size: 6pt;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* =========================================================
+   PAGE 20 — Selected works register (ledger rows)
+   ========================================================= */
+.ed-p20 .register {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  border-top: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p20 .rrow {
+  display: grid;
+  grid-template-columns: 16mm 1fr auto;
+  gap: 6mm;
+  align-items: baseline;
+  padding: 6.5mm 0;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p20 .rnum {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--gold);
+}
+.ed-p20 .rinfo { min-width: 0; }
+.ed-p20 .rinfo strong {
+  display: block;
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 17pt;
+  line-height: 1.05;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+}
+.ed-p20 .rloc {
+  display: block;
+  margin-top: 2mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.ed-p20 .rtag {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  text-align: right;
+}
+.ed-p20 .reg-note {
+  margin: 5mm 0 0;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* =========================================================
+   PAGE 21 — By the numbers + Mission 2033
+   ========================================================= */
+.ed-p21 .num-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.ed-p21 .ncell {
+  padding: 9mm 8mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.ed-p21 .ncell:nth-child(even) { border-left: 0.5pt solid rgba(168,122,40,0.4); }
+.ed-p21 .ncell:nth-child(n+3)  { border-top: 0.5pt solid rgba(168,122,40,0.4); }
+.ed-p21 .nv {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 44pt;
+  line-height: 1;
+  color: var(--gold-deep);
+}
+.ed-p21 .nv small {
+  font-size: 21pt;
+  font-style: italic;
+  margin-left: 1mm;
+}
+.ed-p21 .nl {
+  margin-top: 3.4mm;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+}
+.ed-p21 .ns {
+  margin-top: 1.6mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 62mm;
+}
+.ed-p21 .mission {
+  margin-top: 6mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7mm;
+  padding: 5.5mm 4mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.55);
+  border-bottom: 0.5pt solid rgba(168,122,40,0.55);
+}
+.ed-p21 .m-tag {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ed-p21 .m-num {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 30pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  white-space: nowrap;
+}
+.ed-p21 .m-num small { font-size: 15pt; margin-left: 0.6mm; }
+.ed-p21 .m-line {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  color: var(--brown-2);
+  line-height: 1.35;
+}
+.ed-p21 .nm-foot {
+  margin-top: 5mm;
+  padding-top: 3mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.35);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* =========================================================
+   PAGE 22 — § 08 The Craft — six services, hairline grid
+   ========================================================= */
+.ed-p22 .svc-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(3, 1fr);
+}
+.ed-p22 .scell {
+  padding: 8mm 8mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.ed-p22 .scell:nth-child(even) { border-left: 0.5pt solid rgba(168,122,40,0.4); }
+.ed-p22 .scell:nth-child(n+3)  { border-top: 0.5pt solid rgba(168,122,40,0.4); }
+.ed-p22 .sn {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--gold);
+  margin-bottom: 3mm;
+}
+.ed-p22 .st {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+  margin-bottom: 2mm;
+}
+.ed-p22 .sl {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: var(--brown-2);
+  max-width: 62mm;
+}
+.ed-p22 .svc-foot {
+  margin-top: 5mm;
+  padding-top: 3mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.35);
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* =========================================================
+   PAGE 23 — § 08 machine floor — plates + machinery register
+   ========================================================= */
+.ed-p23 .plant-plates {
+  margin-bottom: 7mm;
+}
+.ed-p23 .plate { margin: 0; }
+.ed-p23 .plate .img {
+  height: 54mm;
+  background-position: center 55%;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  border: 0.5pt solid rgba(201,151,58,0.45);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.16);
+}
+.ed-p23 .plate figcaption {
+  margin-top: 2.2mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.ed-p23 .plant-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  column-gap: 10mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p23 .mcell {
+  display: flex;
+  align-items: center;
+  gap: 5mm;
+  padding: 4mm 0;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.45);
+}
+.ed-p23 .mc {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 21pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  min-width: 13mm;
+}
+.ed-p23 .mn {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.ed-p23 .mn em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 9.5pt;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 0.8mm;
+}
+.ed-p23 .mcell.total .mc { color: var(--gold); font-size: 24pt; }
+.ed-p23 .mcell.total .mn { color: var(--gold-deep); }
+
+/* =========================================================
+   PAGE 24 — § 08 people — workforce ledger + 350+ band
+   ========================================================= */
+.ed-p24 .crew {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  border-top: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p24 .crow {
+  display: grid;
+  grid-template-columns: 30mm 1fr;
+  gap: 8mm;
+  align-items: baseline;
+  padding: 5.5mm 0;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p24 .cc {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 25pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  text-align: right;
+  white-space: nowrap;
+}
+.ed-p24 .ci strong {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+}
+.ed-p24 .ci em {
+  display: block;
+  margin-top: 1.4mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10pt;
+  color: var(--muted);
+}
+.ed-p24 .crew-band {
+  margin-top: 6mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7mm;
+  padding: 5.5mm 4mm;
+  border-top: 0.5pt solid rgba(168,122,40,0.55);
+  border-bottom: 0.5pt solid rgba(168,122,40,0.55);
+}
+.ed-p24 .b-tag {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ed-p24 .b-num {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 30pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  white-space: nowrap;
+}
+.ed-p24 .b-num small { font-size: 15pt; margin-left: 0.6mm; }
+.ed-p24 .b-line {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  color: var(--brown-2);
+  line-height: 1.35;
+}
+
+/* =========================================================
+   PAGE 25 — § 09 The Reach — India map + state register
+   ========================================================= */
+.ed-p25 .reach-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 8mm;
+  min-height: 0;
+  align-items: center;
+}
+.ed-p25 .map-wrap { min-width: 0; }
+.ed-p25 .map-wrap svg {
+  width: 124%;
+  margin-left: -16%;
+  height: auto;
+}
+.ed-p25 .map-wrap .india-outline path {
+  fill: #f9f3e6;
+  stroke: rgba(168,122,40,0.85);
+  stroke-width: 3;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 3px 6px rgba(60,40,20,0.1));
+}
+.ed-p25 .map-wrap .pin {
+  fill: var(--gold);
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.3));
+}
+.ed-p25 .map-wrap .pin.ongoing { fill: #7b8f5b; }
+.ed-p25 .map-wrap .pin-inner { fill: rgba(26,21,16,0.35); }
+.ed-p25 .map-wrap .label {
+  font-family: var(--f-sans);
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  fill: var(--brown-1);
+  font-weight: 600;
+}
+.ed-p25 .map-wrap .ring {
+  fill: none;
+  stroke: rgba(201,151,58,0.4);
+}
+
+.ed-p25 .state-reg {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-top: 0.5pt solid rgba(168,122,40,0.5);
+}
+.ed-p25 .srow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4mm;
+  padding: 3.2mm 0;
+  border-bottom: 0.5pt solid rgba(168,122,40,0.45);
+}
+.ed-p25 .si { min-width: 0; }
+.ed-p25 .si strong {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 700;
+}
+.ed-p25 .si em {
+  display: block;
+  margin-top: 1mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 8.5pt;
+  color: var(--muted);
+}
+.ed-p25 .sc {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 16pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  white-space: nowrap;
+}
+.ed-p25 .reach-note {
+  margin: 4mm 0 0;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 9.5pt;
+  color: var(--muted);
+  text-align: right;
+}

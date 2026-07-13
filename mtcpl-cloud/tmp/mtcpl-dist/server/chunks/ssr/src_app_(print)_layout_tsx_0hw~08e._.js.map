@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "debugId": "43c1723c-6684-1e88-22cf-906fdc2b33d0",
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/app/%28print%29/layout.tsx"],"sourcesContent":["import type { ReactNode } from \"react\";\n\n/**\n * Minimal layout for print pages — no sidebar, no topbar, no app chrome.\n * Auth is checked inside each print page directly.\n */\nexport default function PrintLayout({ children }: { children: ReactNode }) {\n  return <>{children}</>;\n}\n"],"names":["PrintLayout","children"],"mappings":"2EAMe,SAASA,AAAY,UAAEC,CAAQ,CAA2B,EACvE,MAAO,CAAA,EAAA,EAAA,GAAA,EAAA,EAAA,QAAA,CAAA,UAAGA,GACZ"}}]
+}

@@ -1,0 +1,4584 @@
+/* =========================================================
+   MTCPL Company Profile — Print-ready A4 stylesheet
+   ========================================================= */
+
+:root {
+  --gold: #C9973A;
+  --gold-light: #e0a840;
+  --gold-deep: #a87a28;
+  --black: #0d0a07;
+  --brown-1: #1a1510;
+  --brown-2: #2a2018;
+  --brown-3: #3a2e22;
+  --cream: #f5ede0;
+  --cream-soft: #f7f4f0;
+  --stone-tan: #d7b494;
+  --stone-deep: #b8906a;
+  --ink: #1a1510;
+  --muted: #6b5d4b;
+
+  --page-w: 210mm;
+  --page-h: 297mm;
+
+  --f-serif: "Cormorant Garamond", "Cormorant", Georgia, serif;
+  --f-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --f-hindi: "Noto Serif Devanagari", Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--f-sans);
+  color: var(--ink);
+  background: var(--brown-2);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------------ Screen preview shell ------------- */
+.stage {
+  min-height: 100vh;
+  padding: 120px 0 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  background: var(--brown-2);
+}
+
+.toolbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 32px;
+  background: rgba(13, 10, 7, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(201, 151, 58, 0.25);
+}
+.toolbar .brand {
+  font-family: var(--f-sans);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--gold);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.toolbar .brand small {
+  display: block;
+  color: #e9dfcd;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  margin-top: 2px;
+  font-weight: 300;
+}
+.toolbar .print-btn {
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+  color: #1a1510;
+  border: none;
+  padding: 11px 22px;
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  box-shadow: 0 6px 22px rgba(201, 151, 58, 0.35);
+  transition: transform .15s ease;
+}
+.toolbar .print-btn:hover { transform: translateY(-1px); }
+
+.page-wrap {
+  position: relative;
+}
+.page-num-badge {
+  position: absolute;
+  top: 8px;
+  right: -52px;
+  font-family: var(--f-sans);
+  font-size: 10px;
+  letter-spacing: 0.25em;
+  color: #8a7a62;
+  text-transform: uppercase;
+}
+
+/* ------------ The A4 page ------------- */
+.page {
+  width: var(--page-w);
+  height: var(--page-h);
+  background: #fff;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3);
+  color: var(--ink);
+  font-family: var(--f-sans);
+  font-size: 10pt;
+  line-height: 1.55;
+  page-break-after: always;
+  break-after: page;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.page:last-child { page-break-after: auto; }
+
+.page.dark { background: var(--black); color: #f1e7d2; }
+.page.cream { background: var(--cream); color: var(--brown-2); }
+.page.ivory { background: var(--cream-soft); color: var(--brown-2); }
+
+/* ------------ Typography primitives ------------- */
+.chapter-label {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 500;
+}
+.serif-display {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+.h1 { font-size: 44pt; font-family: var(--f-serif); font-weight: 300; line-height: 1.05; letter-spacing: -0.01em; }
+.h2 { font-size: 26pt; font-family: var(--f-serif); font-weight: 300; line-height: 1.1; }
+.h3 { font-size: 18pt; font-family: var(--f-serif); font-weight: 400; }
+.body-serif { font-family: var(--f-serif); font-size: 12pt; line-height: 1.55; font-weight: 400; }
+.body { font-size: 10pt; line-height: 1.65; color: #3a2e22; }
+.body.on-dark { color: #d9cdb5; }
+.muted { color: var(--muted); }
+
+.gold { color: var(--gold); }
+.gold-line {
+  width: 50pt;
+  height: 2pt;
+  background: var(--gold);
+  display: block;
+}
+.gold-line.thin { height: 1px; }
+.gold-line.wide { width: 120pt; }
+
+.hindi {
+  font-family: var(--f-hindi);
+  font-weight: 400;
+}
+
+/* ------------ Page number footer ------------- */
+.page-foot {
+  position: absolute;
+  bottom: 10mm;
+  right: 14mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.22em;
+  color: rgba(26, 21, 16, 0.7);
+  text-transform: uppercase;
+  font-weight: 500;
+  z-index: 30;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.page.dark .page-foot { color: rgba(241, 231, 210, 0.65); }
+.page-foot .dot { color: var(--gold); margin: 0 5px; font-weight: 500; }
+
+/* =====================================================================
+   Cover — Pure typography (no photos, no temple)
+   ===================================================================== */
+.cover {
+  background:
+    radial-gradient(ellipse at 50% 42%, #fcf7ec 0%, transparent 60%),
+    radial-gradient(ellipse at 0% 100%, #ecdbb8 0%, transparent 55%),
+    radial-gradient(ellipse at 100% 0%, #f4e7cc 0%, transparent 55%),
+    #f5eedd;
+  color: var(--brown-1);
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.03) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.02) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* thin gold corner brackets */
+.cover-silver-brackets span {
+  position: absolute;
+  width: 24mm;
+  height: 24mm;
+  z-index: 4;
+  pointer-events: none;
+}
+.cover-silver-brackets span.tl { top: 10mm; left: 10mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.cover-silver-brackets span.tr { top: 10mm; right: 10mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.cover-silver-brackets span.bl { bottom: 10mm; left: 10mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.cover-silver-brackets span.br { bottom: 10mm; right: 10mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* Inner cover stack — pure typography */
+.cover-stage {
+  position: relative;
+  z-index: 3;
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22mm 24mm 18mm;
+}
+
+/* Top strip */
+.cover-top-strip {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.44em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.cover-top-strip .right {
+  text-align: right;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+.cover-top-strip .right small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.44em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 2mm;
+}
+
+/* Ornament row — ॥ श्री ॥ */
+.cover-shree {
+  font-family: var(--f-hindi);
+  font-size: 44pt;
+  color: var(--gold);
+  letter-spacing: 0.18em;
+  line-height: 1;
+  margin-top: 0;
+  margin-bottom: 4mm;
+}
+
+/* Central stacked type */
+.cover-center {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.cover-center .kicker {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.52em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 10mm;
+}
+.cover-center .wordmark {
+  width: 105mm;
+  height: auto;
+  margin: 0 auto 8mm;
+  display: block;
+  filter:
+    contrast(1.08)
+    drop-shadow(0 1px 2px rgba(120,80,20,0.22))
+    drop-shadow(0 0 14px rgba(201,151,58,0.16));
+}
+.cover-center .sub {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  letter-spacing: 0.44em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 16mm;
+}
+.cover-center .hr-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5mm;
+  margin-bottom: 16mm;
+}
+.cover-center .hr-row .rule {
+  width: 36mm;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.cover-center .hr-row .dot {
+  width: 4mm;
+  height: 4mm;
+  transform: rotate(45deg);
+  border: 0.6px solid var(--gold-deep);
+  background: rgba(201,151,58,0.12);
+}
+.cover-center .display {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 34pt;
+  line-height: 1.1;
+  letter-spacing: -0.005em;
+  color: var(--brown-1);
+  max-width: 155mm;
+  margin: 0 auto 8mm;
+}
+.cover-center .display em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.cover-center .hindi-big {
+  font-family: var(--f-hindi);
+  font-size: 19pt;
+  line-height: 1;
+  color: var(--gold-deep);
+  font-weight: 500;
+  margin-top: 2mm;
+}
+
+/* Bottom bar */
+.cover-bottom-bar {
+  width: 100%;
+  padding-top: 8mm;
+  border-top: 1px solid rgba(168,122,40,0.45);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.cover-bottom-bar b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  margin-top: 2mm;
+  text-transform: none;
+}
+.cover-bottom-bar .center {
+  text-align: center;
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 11pt;
+  letter-spacing: 0.22em;
+  color: var(--gold-deep);
+  text-transform: uppercase;
+}
+
+/* Gold foil helper */
+.silver-text {
+  background: linear-gradient(180deg, #e0b456 0%, #C9973A 55%, #a87a28 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0.5px 0 rgba(120,80,20,0.4))
+    drop-shadow(0 -0.3px 0 rgba(255,240,200,0.4));
+}
+
+/* Logo — gold foil, subtle emboss on cream */
+.cover-silver-logo {
+  width: 58mm;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  filter:
+    contrast(1.08)
+    drop-shadow(0 1px 2px rgba(120,80,20,0.22))
+    drop-shadow(0 0 10px rgba(201,151,58,0.14));
+}
+
+/* Mid hairline — gold */
+.cover-hairline {
+  width: 32mm;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+  margin: 3mm auto;
+  position: relative;
+}
+.cover-hairline::before,
+.cover-hairline::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 2.2mm; height: 2.2mm;
+  border: 0.6px solid var(--gold-deep);
+  background: rgba(201,151,58,0.08);
+  transform: translateY(-50%) rotate(45deg);
+}
+.cover-hairline::before { left: -4mm; }
+.cover-hairline::after { right: -4mm; }
+
+/* Hindi tagline — classy cream cover */
+.cover-hindi {
+  font-family: var(--f-hindi);
+  font-size: 20pt;
+  line-height: 1.15;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--gold-deep);
+  margin: 0;
+}
+
+/* Bottom — Since 1971 */
+.cover-bottom-block {
+  margin-top: auto;
+  text-align: center;
+}
+.cover-bottom-block .since {
+  margin-top: 4mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  letter-spacing: 0.18em;
+  color: var(--gold-deep);
+}
+.cover-bottom-block .company {
+  margin-top: 4mm;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Top stack — logo + Hindi tagline above the temple */
+.cover-topstack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5mm;
+}
+.cover-topstack .cover-silver-logo {
+  width: 52mm;
+}
+
+/* ——— Cover hero photograph (left half, full-bleed top to bottom-bar) ——— */
+.cover-hero {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 110mm;
+  height: 100%;
+  z-index: 1;
+  overflow: hidden;
+}
+.cover-hero .photo {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-image: url("/images/project-ram-mandir.jpg");
+  filter: saturate(1.02) contrast(1.03);
+}
+.cover-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(26,21,16,0.0) 60%, rgba(247,241,227,0.55) 88%, rgba(247,241,227,0.95) 100%),
+    linear-gradient(180deg, rgba(26,21,16,0.35) 0%, rgba(26,21,16,0) 30%, rgba(26,21,16,0) 70%, rgba(26,21,16,0.6) 100%);
+  pointer-events: none;
+}
+.cover-hero .caption {
+  position: absolute;
+  left: 14mm;
+  bottom: 32mm;
+  z-index: 2;
+  color: #f4e9d0;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.cover-hero .caption em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 14pt;
+  letter-spacing: 0.03em;
+  color: #fff;
+  margin-top: 4px;
+  text-transform: none;
+}
+
+/* small vertical mark over the hero — thin gold rule */
+.cover-hero .rule {
+  position: absolute;
+  left: 14mm;
+  bottom: 26mm;
+  width: 30mm;
+  height: 1px;
+  background: var(--gold);
+  z-index: 2;
+}
+
+/* ——— Temple silhouette watermark (bottom-right, very faint) ——— */
+.cover-temple-silhouette {
+  position: absolute;
+  right: -20mm;
+  bottom: 40mm;
+  width: 110mm;
+  height: 110mm;
+  opacity: 0.08;
+  z-index: 0;
+  pointer-events: none;
+}
+.cover-temple-silhouette svg { width: 100%; height: 100%; }
+
+/* ——— MTCPL real logo (top-right) ——— */
+.cover-logo {
+  position: absolute;
+  top: 16mm;
+  right: 18mm;
+  z-index: 5;
+  text-align: right;
+}
+.cover-logo img {
+  display: block;
+  height: 22mm;
+  width: auto;
+  margin-left: auto;
+}
+.cover-logo .tag {
+  margin-top: 4mm;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.36em;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+/* subtle temple silhouette watermark (low-opacity) */
+.cover .watermark {
+  position: absolute;
+  right: -20mm;
+  bottom: -10mm;
+  width: 180mm;
+  height: 180mm;
+  opacity: 0.08;
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: right bottom;
+  z-index: 0;
+  pointer-events: none;
+  filter: sepia(1) hue-rotate(-10deg) saturate(1.2);
+}
+/* Title block — right column (right of hero photo) */
+.cover-title {
+  position: absolute;
+  right: 18mm;
+  top: 72mm;
+  width: 80mm;
+  z-index: 5;
+  text-align: left;
+}
+.cover-title .sub {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.4em;
+  color: var(--gold-deep);
+  text-transform: uppercase;
+  margin-bottom: 8mm;
+  font-weight: 500;
+}
+.cover-title h1 {
+  margin: 0;
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 42pt;
+  line-height: 1.0;
+  letter-spacing: -0.01em;
+  color: var(--brown-1);
+}
+.cover-title h1 em {
+  color: var(--gold);
+  font-style: italic;
+  font-weight: 400;
+}
+.cover-title .divider {
+  width: 40mm;
+  height: 2px;
+  background: var(--gold);
+  margin: 10mm 0 10mm;
+}
+.cover-title .mega {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 20pt;
+  line-height: 1.3;
+  letter-spacing: 0.005em;
+  color: var(--brown-2);
+  font-style: italic;
+}
+.cover-title .caption {
+  margin-top: 12mm;
+  font-family: var(--f-hindi);
+  font-size: 13pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+}
+.cover-title .caption small {
+  display: block;
+  font-family: var(--f-sans);
+  font-style: normal;
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  margin-top: 5px;
+  text-transform: uppercase;
+}
+
+/* Bottom bar — sits on right cream half only, doesn't cross hero */
+.cover-bottom {
+  position: absolute;
+  left: 118mm;
+  right: 18mm;
+  bottom: 18mm;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-top: 7mm;
+  border-top: 1px solid rgba(168,122,40,0.45);
+  z-index: 5;
+}
+.cover-bottom .left {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.cover-bottom .left b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+  text-transform: none;
+}
+.cover-bottom .right {
+  text-align: right;
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  color: var(--brown-1);
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.cover-bottom .right small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.4em;
+  color: var(--muted);
+  margin-top: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* corner ornaments — thin gold brackets */
+.cover .corner-tl, .cover .corner-tr, .cover .corner-bl, .cover .corner-br {
+  position: absolute;
+  width: 18mm;
+  height: 18mm;
+  z-index: 6;
+  pointer-events: none;
+}
+.cover .corner-tl { top: 8mm; left: 8mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.cover .corner-tr { top: 8mm; right: 8mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.cover .corner-bl { bottom: 8mm; left: 8mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.cover .corner-br { bottom: 8mm; right: 8mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* =========================================================
+   Page 2 — Inside cover / Invocation
+   ========================================================= */
+.page-inside-cover {
+  background: var(--cream-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  color: var(--brown-2);
+  padding: 30mm 28mm;
+}
+.page-inside-cover .content {
+  text-align: center;
+  max-width: 140mm;
+}
+.page-inside-cover .omkar {
+  font-family: var(--f-hindi);
+  font-size: 56pt;
+  color: var(--gold);
+  line-height: 1;
+  letter-spacing: 0.08em;
+  margin: 0;
+  font-weight: 400;
+}
+.page-inside-cover .kicker {
+  margin-top: 14mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.48em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+.page-inside-cover .rule {
+  width: 40mm;
+  height: 2px;
+  background: var(--gold);
+  margin: 10mm auto 12mm;
+}
+.page-inside-cover .shloka {
+  font-family: var(--f-hindi);
+  font-size: 18pt;
+  color: var(--brown-1);
+  line-height: 1.7;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+.page-inside-cover .translation {
+  margin-top: 12mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--brown-2);
+  line-height: 1.55;
+  max-width: 120mm;
+  margin-left: auto;
+  margin-right: auto;
+}
+.page-inside-cover .attribution {
+  margin-top: 10mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.page-inside-cover .dedication {
+  margin-top: 28mm;
+  padding-top: 10mm;
+  border-top: 1px solid rgba(168,122,40,0.35);
+  font-family: var(--f-serif);
+  font-size: 11pt;
+  color: var(--brown-2);
+  line-height: 1.7;
+  max-width: 130mm;
+  margin-left: auto;
+  margin-right: auto;
+}
+.page-inside-cover .dedication b {
+  display: block;
+  font-family: var(--f-sans);
+  font-weight: 500;
+  font-size: 8pt;
+  letter-spacing: 0.38em;
+  color: var(--gold-deep);
+  text-transform: uppercase;
+  margin-bottom: 6mm;
+}
+.page-inside-cover .signature {
+  margin-top: 6mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10pt;
+  color: var(--gold-deep);
+}
+
+/* =========================================================
+   Page 3 — Opening quote (The MTCPL Philosophy)
+   ========================================================= */
+.page-quote {
+  background: var(--cream);
+  color: var(--brown-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30mm 28mm;
+  position: relative;
+}
+.page-quote .chapter-label {
+  position: absolute;
+  top: 22mm;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.page-quote .content {
+  max-width: 155mm;
+  text-align: center;
+  position: relative;
+}
+.page-quote .quote-mark {
+  font-family: var(--f-serif);
+  font-size: 240pt;
+  line-height: 0.6;
+  color: var(--gold);
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: -0.08em;
+  margin-bottom: -4mm;
+  user-select: none;
+}
+.page-quote blockquote {
+  margin: 0;
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 32pt;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  color: var(--brown-1);
+}
+.page-quote blockquote em {
+  color: var(--gold-deep);
+  font-style: italic;
+  font-weight: 400;
+}
+.page-quote .rule {
+  width: 40mm;
+  height: 2px;
+  background: var(--gold);
+  margin: 18mm auto 10mm;
+}
+.page-quote .attribution {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+.page-quote .attribution small {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin-top: 5px;
+  text-transform: none;
+  font-weight: 400;
+}
+.page-quote .corner-ornament {
+  position: absolute;
+  font-family: var(--f-hindi);
+  font-size: 14pt;
+  color: var(--gold);
+  opacity: 0.7;
+}
+.page-quote .corner-ornament.tl { top: 20mm; left: 25mm; }
+.page-quote .corner-ornament.br { bottom: 24mm; right: 25mm; }
+
+/* =========================================================
+   Page 4 — Legacy Timeline (Five Decades of Stone)
+   ========================================================= */
+.page-timeline {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.page-timeline .header {
+  margin-bottom: 6mm;
+}
+.page-timeline .header .chapter-label { margin-bottom: 5mm; display: block; }
+.page-timeline h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 32pt;
+  line-height: 1.02;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 5mm;
+  max-width: 140mm;
+}
+.page-timeline h2 em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.page-timeline .intro {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 130mm;
+  margin: 0 0 3mm;
+}
+.page-timeline .gold-line {
+  width: 50pt; height: 2pt; background: var(--gold); display: block;
+  margin-top: 4mm;
+}
+
+/* timeline */
+.timeline {
+  position: relative;
+  margin-top: 3mm;
+  padding-left: 18mm;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 7mm;
+  top: 2mm;
+  bottom: 2mm;
+  width: 1px;
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold) 85%, rgba(201,151,58,0.2) 100%);
+}
+.t-event {
+  position: relative;
+  padding-bottom: 5.5mm;
+  display: grid;
+  grid-template-columns: 28mm 1fr;
+  gap: 8mm;
+  align-items: start;
+}
+.t-event:last-child { padding-bottom: 0; }
+.t-event::before {
+  content: "";
+  position: absolute;
+  left: -11.5mm;
+  top: 2.5mm;
+  width: 2.6mm;
+  height: 2.6mm;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #fff;
+}
+.t-event .year {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 17pt;
+  color: var(--gold-deep);
+  line-height: 1;
+  letter-spacing: -0.005em;
+}
+.t-event .year small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.26em;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-top: 3px;
+}
+.t-event .title {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 12pt;
+  color: var(--brown-1);
+  line-height: 1.22;
+  margin: 0 0 1.5mm;
+}
+.t-event .desc {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  max-width: 115mm;
+}
+
+/* =========================================================
+   Page 5 — Founder (editorial split)
+   ========================================================= */
+.page-founder {
+  background: #fff;
+  color: var(--brown-1);
+  position: relative;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 100mm 110mm;
+}
+.page-founder .photo {
+  position: relative;
+  background-size: cover;
+  background-position: center top;
+  background-image: url("/images/mancharam-chairman.jpg"), url("/images/founder.jpg");
+  background-color: #2a2018;
+}
+.page-founder .photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(26,21,16,0.15) 0%, transparent 40%, transparent 70%, rgba(26,21,16,0.45) 100%);
+}
+.page-founder .photo .badge {
+  position: absolute;
+  bottom: 18mm;
+  left: 14mm;
+  color: #f4e9d0;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.page-founder .photo .badge em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  color: #fff;
+  margin-top: 3px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.page-founder .content {
+  padding: 26mm 18mm 26mm 16mm;
+  display: flex;
+  flex-direction: column;
+  background: var(--cream-soft);
+}
+.page-founder .chapter-label { margin-bottom: 12mm; }
+.page-founder h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 32pt;
+  line-height: 1.0;
+  letter-spacing: -0.01em;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+}
+.page-founder h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-founder .role {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+.page-founder .gold-line {
+  margin-top: 12mm;
+  margin-bottom: 10mm;
+}
+.page-founder .bio {
+  font-family: var(--f-serif);
+  font-size: 11pt;
+  line-height: 1.65;
+  color: var(--brown-2);
+  margin: 0 0 8mm;
+}
+.page-founder .pull {
+  border-left: 2px solid var(--gold);
+  padding: 2mm 0 2mm 8mm;
+  margin: 4mm 0 6mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 13pt;
+  line-height: 1.45;
+  color: var(--brown-1);
+}
+.page-founder .pull small {
+  display: block;
+  font-family: var(--f-sans);
+  font-style: normal;
+  font-size: 7.5pt;
+  letter-spacing: 0.32em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 5mm;
+  font-weight: 500;
+}
+.page-founder .meta {
+  margin-top: auto;
+  padding-top: 10mm;
+  border-top: 1px solid rgba(168,122,40,0.4);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.page-founder .meta b {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+/* =========================================================
+   Pages 6–7 — Ram Mandir Showcase (2-page spread)
+   ========================================================= */
+.page-ram-a {
+  background: #fff;
+  padding: 0;
+  color: var(--brown-1);
+  display: grid;
+  grid-template-rows: 170mm 1fr;
+  position: relative;
+}
+.page-ram-a .hero {
+  position: relative;
+  background-image: url("/images/project-ram-mandir.jpg");
+  background-size: cover;
+  background-position: center 40%;
+}
+.page-ram-a .hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(13,10,7,0.35) 0%, rgba(13,10,7,0.0) 28%, rgba(13,10,7,0.0) 50%, rgba(13,10,7,0.85) 100%);
+}
+.page-ram-a .hero .overlay {
+  position: absolute;
+  left: 18mm;
+  right: 18mm;
+  bottom: 14mm;
+  color: #fff;
+  z-index: 3;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.55);
+}
+.page-ram-a .hero .kicker {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  margin-bottom: 4mm;
+  font-weight: 600;
+}
+.page-ram-a .hero h2 {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 32pt;
+  line-height: 1.05;
+  color: #fff;
+  margin: 0;
+  letter-spacing: -0.005em;
+  max-width: 170mm;
+}
+.page-ram-a .hero h2 em { color: #f1c86b; font-style: italic; font-weight: 400; }
+
+.page-ram-a .lower {
+  padding: 14mm 22mm 22mm;
+  display: grid;
+  grid-template-columns: 2fr 1.4fr;
+  gap: 14mm;
+  align-items: start;
+}
+.page-ram-a .lower .chapter-label { display: block; margin-bottom: 4mm; }
+.page-ram-a .lower .lead {
+  font-family: var(--f-serif);
+  font-size: 14pt;
+  line-height: 1.45;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  font-weight: 400;
+}
+.page-ram-a .lower .lead em { font-style: italic; color: var(--gold-deep); }
+.page-ram-a .lower .body {
+  font-family: var(--f-sans);
+  font-size: 9.5pt;
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 0 0 4mm;
+  max-width: 110mm;
+}
+.page-ram-a .lower .meta {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+  padding-top: 6mm;
+  border-top: 1px solid rgba(168,122,40,0.35);
+}
+.page-ram-a .lower .meta-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6mm;
+  margin-top: 4mm;
+}
+.page-ram-a .lower .meta-row div b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 14pt;
+  color: var(--brown-1);
+  letter-spacing: 0.01em;
+  margin-top: 2px;
+  text-transform: none;
+  font-weight: 400;
+}
+
+/* -------- Page 7 (right) -------- */
+.page-ram-b {
+  background: var(--cream-soft);
+  padding: 22mm 22mm 26mm;
+  color: var(--brown-1);
+  position: relative;
+}
+.page-ram-b .stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8mm;
+  margin-bottom: 14mm;
+  padding-bottom: 12mm;
+  border-bottom: 1px solid rgba(168,122,40,0.35);
+}
+.page-ram-b .stats .s {
+  text-align: left;
+}
+.page-ram-b .stats .s .num {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 52pt;
+  line-height: 1;
+  color: var(--gold);
+  letter-spacing: -0.02em;
+}
+.page-ram-b .stats .s .num sup {
+  font-size: 22pt;
+  vertical-align: super;
+  color: var(--gold-deep);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.page-ram-b .stats .s .lbl {
+  margin-top: 5mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.page-ram-b .stats .s .sub {
+  margin-top: 3mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  color: var(--brown-2);
+  line-height: 1.4;
+}
+
+.page-ram-b .body-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14mm;
+  align-items: start;
+}
+.page-ram-b .body-grid h3 {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 18pt;
+  line-height: 1.15;
+  margin: 0 0 4mm;
+  color: var(--brown-1);
+}
+.page-ram-b .body-grid h3 em { color: var(--gold-deep); font-style: italic; }
+.page-ram-b .body-grid p {
+  font-family: var(--f-sans);
+  font-size: 9.5pt;
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 0 0 3mm;
+}
+.page-ram-b .body-grid .aside {
+  border-left: 2px solid var(--gold);
+  padding: 1mm 0 1mm 7mm;
+}
+.page-ram-b .body-grid .aside .label {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+  margin-bottom: 3mm;
+}
+.page-ram-b .body-grid .aside .line {
+  font-family: var(--f-serif);
+  font-size: 10pt;
+  line-height: 1.5;
+  color: var(--brown-2);
+  margin: 0 0 3mm;
+}
+.page-ram-b .body-grid .aside .line b {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 1mm;
+}
+
+.page-ram-b .photo-strip {
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  bottom: 30mm;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4mm;
+  height: 38mm;
+}
+.page-ram-b .photo-strip .ph {
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 6px 18px rgba(60,40,20,0.18);
+  border: 1px solid rgba(201,151,58,0.25);
+}
+
+/* =========================================================
+   Page 8 — What We Do (2×3 capability grid)
+   ========================================================= */
+.page-services {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-services .header { margin-bottom: 5mm; }
+.page-services .header .chapter-label { display: block; margin-bottom: 4mm; }
+.page-services h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  max-width: 150mm;
+}
+.page-services h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-services .intro {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 135mm;
+  margin: 0 0 4mm;
+}
+.page-services .gold-line { margin-top: 4mm; display: block; width: 50pt; height: 2pt; background: var(--gold); }
+
+.svc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6mm 7mm;
+  margin-top: 3mm;
+}
+.svc {
+  display: flex;
+  flex-direction: column;
+}
+.svc .thumb {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  margin-bottom: 4mm;
+  position: relative;
+  filter: saturate(1.02);
+}
+.svc .thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 70%, rgba(26,21,16,0.25) 100%);
+  pointer-events: none;
+}
+.svc .thumb .sym {
+  position: absolute;
+  top: 3mm;
+  right: 4mm;
+  font-family: var(--f-serif);
+  font-size: 18pt;
+  color: #fff;
+  line-height: 1;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.45);
+}
+.svc .num {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.svc .title {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 13pt;
+  color: var(--brown-1);
+  line-height: 1.2;
+  margin: 0 0 2.5mm;
+  letter-spacing: -0.005em;
+}
+.svc .title em { font-style: italic; color: var(--gold-deep); }
+.svc .desc {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Closing workflow strip */
+.svc-workflow {
+  margin-top: 5mm;
+  padding: 5mm 7mm;
+  background: linear-gradient(180deg, var(--cream-soft), var(--cream));
+  border: 1px solid rgba(168,122,40,0.3);
+  border-left: 3px solid var(--gold);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8mm;
+}
+.svc-workflow .copy {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10.5pt;
+  line-height: 1.4;
+  color: var(--brown-1);
+  margin: 0;
+  max-width: 115mm;
+}
+.svc-workflow .copy em { font-style: normal; color: var(--gold-deep); font-weight: 400; }
+.svc-workflow .flow {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.svc-workflow .flow span { color: var(--gold); margin: 0 5px; }
+
+/* =========================================================
+   Page 9 — By The Numbers (cream, giant gold numerals)
+   ========================================================= */
+.page-numbers {
+  background: var(--cream);
+  color: var(--brown-1);
+  padding: 18mm 22mm 20mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-numbers .header { margin-bottom: 4mm; text-align: center; }
+.page-numbers .header .chapter-label { display: block; margin-bottom: 4mm; }
+.page-numbers h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.02;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 auto 3mm;
+  max-width: 150mm;
+}
+.page-numbers h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-numbers .intro {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 120mm;
+  margin: 0 auto;
+}
+.page-numbers .gold-line {
+  display: block;
+  width: 50pt; height: 2pt; background: var(--gold);
+  margin: 6mm auto 0;
+}
+
+.num-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 65mm 65mm;
+  gap: 0;
+  margin-top: 4mm;
+  position: relative;
+}
+.num-grid::before,
+.num-grid::after {
+  content: "";
+  position: absolute;
+  background: rgba(168,122,40,0.4);
+}
+.num-grid::before {
+  top: 0; bottom: 0; left: 50%;
+  width: 1px;
+}
+.num-grid::after {
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+}
+.num-cell {
+  padding: 7mm 9mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.num-cell .num {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 62pt;
+  line-height: 1;
+  color: var(--gold);
+  letter-spacing: -0.03em;
+}
+.num-cell .num sup {
+  font-size: 26pt;
+  vertical-align: super;
+  color: var(--gold-deep);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.num-cell .num em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 22pt;
+  color: var(--gold-deep);
+  vertical-align: middle;
+  margin-left: 3px;
+  font-weight: 400;
+}
+.num-cell .lbl {
+  margin-top: 4mm;
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-1);
+  font-weight: 500;
+}
+.num-cell .sub {
+  margin-top: 2mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 9.5pt;
+  line-height: 1.4;
+  color: var(--muted);
+  max-width: 70mm;
+}
+
+/* Mission 2033 banner */
+.mission-2033 {
+  margin-top: 6mm;
+  margin-right: 24mm;
+  padding: 6mm 8mm;
+  background: linear-gradient(180deg, rgba(201,151,58,0.06), rgba(201,151,58,0.14));
+  border: 1px solid var(--gold);
+  border-left-width: 3px;
+  display: grid;
+  grid-template-columns: 54mm 1fr;
+  align-items: center;
+  gap: 8mm;
+  position: relative;
+}
+.mission-2033 .tag {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.mission-2033 .big {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 36pt;
+  line-height: 1;
+  color: var(--gold);
+  letter-spacing: -0.02em;
+}
+.mission-2033 .big sup {
+  font-size: 14pt;
+  vertical-align: super;
+  color: var(--gold-deep);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.mission-2033 .big em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 16pt;
+  color: var(--gold-deep);
+  vertical-align: middle;
+  margin-left: 3px;
+  font-weight: 400;
+}
+.mission-2033 .copy {
+  font-family: var(--f-serif);
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: var(--brown-1);
+  margin: 0;
+}
+.mission-2033 .copy b {
+  font-family: var(--f-sans);
+  font-weight: 500;
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  color: var(--gold-deep);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 2mm;
+}
+.mission-2033 .copy em {
+  font-style: italic;
+  color: var(--gold-deep);
+}
+
+/* =========================================================
+   Page 10 — Facility Mosaic
+   ========================================================= */
+.page-facility {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-facility .header { margin-bottom: 8mm; }
+.page-facility .header .chapter-label { display: block; margin-bottom: 4mm; }
+.page-facility h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 34pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  max-width: 150mm;
+}
+.page-facility h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-facility .lead {
+  font-family: var(--f-serif);
+  font-size: 12pt;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 140mm;
+  margin: 0 0 4mm;
+}
+.page-facility .lead em { font-style: italic; color: var(--gold-deep); }
+.page-facility .gold-line { display: block; width: 50pt; height: 2pt; background: var(--gold); margin-top: 2mm; }
+
+.mosaic {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  grid-template-rows: 56mm 56mm;
+  gap: 4mm;
+  margin-top: 8mm;
+}
+.mosaic .tile {
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  box-shadow: 0 8px 22px rgba(60,40,20,0.15);
+  border: 1px solid rgba(201,151,58,0.25);
+}
+.mosaic .tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 65%, rgba(26,21,16,0.5) 100%);
+  pointer-events: none;
+}
+.mosaic .tile .cap {
+  position: absolute;
+  left: 5mm;
+  bottom: 4mm;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.mosaic .tile .cap em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: #fff;
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+  text-transform: none;
+}
+.mosaic .tile.large { grid-row: span 2; }
+
+.facility-footer {
+  margin-top: 8mm;
+  padding-top: 6mm;
+  border-top: 1px solid rgba(168,122,40,0.4);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6mm;
+}
+.facility-footer .stat {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.facility-footer .stat b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 16pt;
+  color: var(--gold-deep);
+  letter-spacing: -0.005em;
+  margin-top: 3mm;
+  text-transform: none;
+}
+
+/* =========================================================
+   Page 11 — Plant & People (cream)
+   ========================================================= */
+.page-plant {
+  background: var(--cream);
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-plant .header { margin-bottom: 8mm; }
+.page-plant .header .chapter-label { display: block; margin-bottom: 4mm; }
+.page-plant h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 34pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  max-width: 150mm;
+}
+.page-plant h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-plant .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11.5pt;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 140mm;
+  margin: 0;
+}
+.page-plant .gold-line { display: block; width: 50pt; height: 2pt; background: var(--gold); margin-top: 5mm; }
+
+.plant-grid {
+  margin-top: 10mm;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14mm;
+}
+.plant-col h3 {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin: 0 0 3mm;
+}
+.plant-col .subtitle {
+  font-family: var(--f-serif);
+  font-size: 18pt;
+  font-weight: 400;
+  color: var(--brown-1);
+  line-height: 1.15;
+  margin: 0 0 7mm;
+  letter-spacing: -0.005em;
+}
+.plant-col .subtitle em { color: var(--gold-deep); font-style: italic; }
+
+.plant-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8mm;
+  align-items: baseline;
+  padding: 3.2mm 0;
+  border-bottom: 1px dotted rgba(168,122,40,0.45);
+}
+.plant-row:first-of-type { border-top: 1px solid rgba(168,122,40,0.55); padding-top: 4mm; }
+.plant-row:last-of-type { border-bottom: 1px solid rgba(168,122,40,0.55); }
+.plant-row .name {
+  font-family: var(--f-serif);
+  font-size: 11.5pt;
+  color: var(--brown-1);
+  font-weight: 400;
+  line-height: 1.25;
+}
+.plant-row .name small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 1mm;
+}
+.plant-row .count {
+  font-family: var(--f-serif);
+  font-size: 16pt;
+  color: var(--gold);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.plant-row .count sup {
+  font-size: 10pt;
+  color: var(--gold-deep);
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+.plant-total {
+  margin-top: 7mm;
+  padding: 4mm 6mm;
+  background: rgba(201,151,58,0.1);
+  border-left: 3px solid var(--gold);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6mm;
+}
+.plant-total .lbl {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.plant-total .val {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: -0.01em;
+}
+.plant-total .val sup {
+  font-size: 12pt;
+  color: var(--gold-deep);
+  vertical-align: super;
+  margin-left: 2px;
+}
+
+/* =========================================================
+   Page 24 — Back Cover (cream, matches the front)
+   ========================================================= */
+.page-back {
+  background:
+    radial-gradient(ellipse at 50% 62%, #fbf6eb 0%, transparent 60%),
+    radial-gradient(ellipse at 0% 0%, #f5e9cf 0%, transparent 55%),
+    radial-gradient(ellipse at 100% 100%, #efe0c0 0%, transparent 55%),
+    #f6efdf;
+  color: var(--brown-1);
+  padding: 22mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.page-back::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(120,80,30,0.025) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px),
+    repeating-linear-gradient(0deg,  rgba(120,80,30,0.018) 0, rgba(0,0,0,0) 1.5px, rgba(0,0,0,0) 3px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 1;
+}
+.page-back > * { position: relative; z-index: 2; }
+.page-back .corner-tl, .page-back .corner-tr,
+.page-back .corner-bl, .page-back .corner-br {
+  position: absolute;
+  width: 22mm;
+  height: 22mm;
+  z-index: 3;
+  pointer-events: none;
+}
+.page-back .corner-tl { top: 10mm; left: 10mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.page-back .corner-tr { top: 10mm; right: 10mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.page-back .corner-bl { bottom: 10mm; left: 10mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.page-back .corner-br { bottom: 10mm; right: 10mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* ——— New back cover: full-bleed Ram Mandir + dark overlay + double gold frame ——— */
+.page-back.hero {
+  background: #0d0a07;
+  color: #fff;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+.page-back.hero::before { display: none; }  /* kill the paper-grain from cream variant */
+
+.page-back.hero .bg-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: url('/images/ram-mandir-hero.jpg');
+  background-size: cover;
+  background-position: center 35%;
+  filter: contrast(1.05) saturate(0.95) brightness(0.88);
+}
+.page-back.hero .bg-photo::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg,
+      rgba(13,10,7,0.3) 0%,
+      rgba(13,10,7,0.25) 35%,
+      rgba(13,10,7,0.55) 75%,
+      rgba(13,10,7,0.92) 100%);
+}
+
+/* Double gold frame inset */
+.page-back.hero .frame {
+  position: absolute;
+  top: 8mm; left: 8mm; right: 8mm; bottom: 8mm;
+  border: 1px solid rgba(201,151,58,0.65);
+  z-index: 2;
+  pointer-events: none;
+}
+.page-back.hero .frame::after {
+  content: '';
+  position: absolute;
+  inset: 2.5mm;
+  border: 0.5px solid rgba(201,151,58,0.35);
+}
+
+.page-back.hero .stack {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 38mm 22mm 22mm;
+}
+
+/* MTCPL logo — single mark, filtered to white for dark photo background */
+.page-back.hero .logo-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.page-back.hero .mandala {
+  width: 95mm;
+  height: auto;
+  filter:
+    brightness(0) invert(1)
+    drop-shadow(0 3px 12px rgba(0,0,0,0.6))
+    drop-shadow(0 0 24px rgba(255,255,255,0.12));
+}
+
+/* Footer block — pinned to bottom */
+.page-back.hero .foot-block {
+  margin-top: auto;
+  text-align: center;
+  width: 100%;
+  color: #fff;
+}
+
+.page-back.hero .ornament {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4mm;
+  margin-bottom: 7mm;
+}
+.page-back.hero .ornament .rule {
+  width: 26mm;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.page-back.hero .ornament .gem {
+  display: inline-flex;
+  align-items: center;
+  gap: 3mm;
+  font-family: var(--f-hindi);
+  font-size: 12pt;
+  color: var(--gold);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+.page-back.hero .ornament .gem::before,
+.page-back.hero .ornament .gem::after {
+  content: '◆';
+  color: var(--gold);
+  font-size: 8pt;
+}
+
+.page-back.hero .company-name {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 14pt;
+  color: #fff;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  margin: 0 0 6mm;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+}
+
+.page-back.hero .address {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 11.5pt;
+  color: rgba(255,255,255,0.94);
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+  margin-bottom: 6mm;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+
+.page-back.hero .contact {
+  font-family: var(--f-sans);
+  font-size: 9pt;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: 0.04em;
+  margin-bottom: 6mm;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+.page-back.hero .contact .sep {
+  color: var(--gold);
+  margin: 0 5px;
+  font-weight: 600;
+}
+
+.page-back.hero .website {
+  font-family: var(--f-sans);
+  font-weight: 700;
+  font-size: 11pt;
+  color: var(--gold);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.45);
+}
+.page-back .upper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding-top: 4mm;
+  gap: 6mm;
+}
+.page-back .logo {
+  width: 72mm;
+  height: auto;
+  margin: 0 auto;
+  filter:
+    contrast(1.08)
+    drop-shadow(0 1px 2px rgba(120,80,20,0.22))
+    drop-shadow(0 0 12px rgba(201,151,58,0.14));
+}
+.page-back .ornament-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5mm;
+}
+.page-back .ornament-bar .line {
+  width: 30mm;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.page-back .ornament-bar .diamond {
+  width: 3.5mm;
+  height: 3.5mm;
+  transform: rotate(45deg);
+  border: 0.6px solid var(--gold-deep);
+  background: rgba(201,151,58,0.08);
+}
+.page-back .tagline {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 22pt;
+  color: var(--brown-1);
+  line-height: 1.3;
+  letter-spacing: 0.005em;
+  margin: 0;
+  max-width: 150mm;
+}
+.page-back .tagline em { color: var(--gold); font-style: italic; font-weight: 400; }
+.page-back .hindi {
+  font-family: var(--f-hindi);
+  font-size: 17pt;
+  font-weight: 500;
+  color: var(--gold-deep);
+  letter-spacing: 0;
+  margin: 0;
+}
+.page-back .since {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.46em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.page-back .contact-card {
+  margin-top: 6mm;
+  padding: 8mm 10mm;
+  border: 1px solid rgba(168,122,40,0.4);
+  background: rgba(255,255,255,0.5);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8mm;
+  width: 100%;
+  max-width: 162mm;
+  text-align: left;
+}
+.page-back .contact-card .item {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.page-back .contact-card .item b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  letter-spacing: 0.01em;
+  color: var(--brown-1);
+  margin-top: 3mm;
+  text-transform: none;
+  line-height: 1.45;
+}
+
+.page-back .lower {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  padding-top: 8mm;
+  border-top: 1px solid rgba(168,122,40,0.4);
+  margin-top: 8mm;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.page-back .lower b {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.page-back .lower .website {
+  color: var(--gold);
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13pt;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* =========================================================
+   Pages 12–13 — India Map + State List (spread)
+   ========================================================= */
+.page-map {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-map .header { margin-bottom: 4mm; }
+.page-map .chapter-label { display: block; margin-bottom: 4mm; }
+.page-map h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+  max-width: 140mm;
+}
+.page-map h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-map .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 135mm;
+  margin: 0;
+}
+.page-map .gold-line { display: block; width: 50pt; height: 2pt; background: var(--gold); margin-top: 4mm; }
+
+.india-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+  max-height: 175mm;
+  margin: 2mm 0 4mm;
+}
+.india-wrap svg {
+  width: 100%;
+  height: 100%;
+  max-height: 175mm;
+  max-width: 150mm;
+}
+.india-wrap .india-outline path {
+  fill: #f5ede0;
+  stroke: rgba(168,122,40,0.85);
+  stroke-width: 3;
+  paint-order: stroke fill;
+  filter: drop-shadow(0 3px 6px rgba(60,40,20,0.1));
+}
+.india-wrap .pin {
+  fill: var(--gold);
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
+}
+.india-wrap .pin.ongoing { fill: #7b8f5b; }
+.india-wrap .pin-inner {
+  fill: rgba(26,21,16,0.35);
+}
+.india-wrap .label {
+  font-family: var(--f-sans);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  fill: var(--brown-1);
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(247,241,227,0.85);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.map-legend {
+  display: flex;
+  justify-content: center;
+  gap: 16mm;
+  padding-top: 6mm;
+  margin-top: 2mm;
+  border-top: 1px solid rgba(168,122,40,0.35);
+}
+.map-legend .item {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+}
+.map-legend .item .dot {
+  display: inline-block;
+  width: 3mm; height: 3mm;
+  border-radius: 50%;
+  background: var(--gold);
+}
+.map-legend .item.ongoing .dot { background: #7b8f5b; }
+.map-legend .count {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  margin-left: 3mm;
+}
+
+/* ---------- Page 13 — state list (cream) ---------- */
+.page-states {
+  background: var(--cream);
+  color: var(--brown-1);
+  padding: 18mm 22mm 28mm 24mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+/* ghost India bleed from the left edge — the transition effect */
+.page-states .ghost-india {
+  position: absolute;
+  left: -80mm;
+  top: 25mm;
+  width: 160mm;
+  height: 220mm;
+  opacity: 0.22;
+  pointer-events: none;
+  z-index: 0;
+}
+.page-states .ghost-india svg { width: 100%; height: 100%; }
+.page-states .ghost-india .india-outline path {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 5;
+  stroke-dasharray: 12 10;
+}
+.page-states .ghost-india .pin {
+  fill: var(--gold);
+}
+.page-states .ghost-india .pin-inner { fill: rgba(26,21,16,0.3); }
+.page-states > * { position: relative; z-index: 1; }
+
+.page-states .header { margin-bottom: 8mm; }
+.page-states .chapter-label { display: block; margin-bottom: 4mm; }
+.page-states h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+}
+.page-states h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-states .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 135mm;
+  margin: 0;
+}
+.page-states .gold-line { display: block; width: 50pt; height: 2pt; background: var(--gold); margin-top: 4mm; }
+
+.state-list {
+  margin-top: 4mm;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12mm;
+}
+.state-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  padding: 2.8mm 0;
+  gap: 5mm;
+  border-bottom: 1px dotted rgba(168,122,40,0.4);
+  position: relative;
+}
+.state-row:first-of-type,
+.state-row:nth-of-type(8) {
+  border-top: 1px solid rgba(168,122,40,0.55);
+  padding-top: 3.5mm;
+}
+.state-row .rank {
+  position: absolute;
+  left: -7mm;
+  top: 3.8mm;
+  font-family: var(--f-sans);
+  font-size: 6pt;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  font-weight: 500;
+}
+.state-row .name {
+  font-family: var(--f-serif);
+  font-size: 11.5pt;
+  color: var(--brown-1);
+  font-weight: 400;
+  line-height: 1.2;
+}
+.state-row .name small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 0.8mm;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.state-row .count {
+  font-family: var(--f-serif);
+  font-size: 15pt;
+  color: var(--gold);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.state-row .count sup {
+  font-size: 10pt;
+  color: var(--gold-deep);
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+.state-summary {
+  margin-top: 6mm;
+  margin-right: 24mm;  /* small buffer for the page-number badge */
+  padding: 4mm 7mm;
+  background: rgba(201,151,58,0.1);
+  border-left: 3px solid var(--gold);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8mm;
+}
+.state-summary .lbl {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.state-summary .val {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: -0.01em;
+}
+.state-summary .val sup {
+  font-size: 12pt;
+  color: var(--gold-deep);
+  vertical-align: super;
+  margin-left: 2px;
+}
+
+/* =========================================================
+   Pages 14–15 — Project Showcase spread
+   ========================================================= */
+.page-projects {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-projects.ivory { background: var(--cream-soft); }
+
+/* continuous gold thread running across the top of both pages */
+.page-projects .thread {
+  position: absolute;
+  top: 10mm;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--gold);
+  z-index: 1;
+}
+.page-projects .thread.left-end  { left: 22mm; right: 0; }
+.page-projects .thread.right-end { left: 0; right: 22mm; }
+
+.page-projects .header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 6mm;
+}
+.page-projects .header .left { flex: 1; }
+.page-projects .chapter-label { display: block; margin-bottom: 4mm; }
+.page-projects h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 28pt;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  color: var(--brown-1);
+  margin: 0;
+  max-width: 150mm;
+}
+.page-projects h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-projects .header .side {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+.page-projects .header .side b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  margin-top: 2mm;
+  text-transform: none;
+}
+.page-projects .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 150mm;
+  margin: 0 0 6mm;
+}
+.page-projects .gold-line { display: block; width: 50pt; height: 2pt; background: var(--gold); margin-bottom: 4mm; }
+
+.proj-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 5mm 6mm;
+  margin-top: 2mm;
+}
+.proj-card {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.proj-card .img {
+  flex: 1;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  position: relative;
+  min-height: 42mm;
+  box-shadow: 0 6px 18px rgba(60,40,20,0.14);
+  border: 1px solid rgba(201,151,58,0.3);
+}
+.proj-card .img::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 60%, rgba(26,21,16,0.55) 100%);
+}
+.proj-card .img .num {
+  position: absolute;
+  top: 3mm;
+  left: 4mm;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  z-index: 2;
+}
+.proj-card .caption {
+  padding-top: 4mm;
+}
+.proj-card .name {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 12pt;
+  color: var(--brown-1);
+  line-height: 1.2;
+  margin: 0 0 1.5mm;
+  letter-spacing: -0.005em;
+}
+.proj-card .loc {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+.proj-card.featured .name { font-style: italic; }
+.proj-card.featured .name::before {
+  content: "✦ ";
+  color: var(--gold);
+  font-style: normal;
+}
+
+/* =========================================================
+   Pages 16–17 — Portfolio thumbnail grid (4×5 per page)
+   ========================================================= */
+.page-portfolio {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 24mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-portfolio.ivory { background: var(--cream-soft); }
+
+/* gold thread continuing the spread-line from pages 14-15 style */
+.page-portfolio .thread {
+  position: absolute;
+  top: 10mm;
+  height: 1px;
+  background: var(--gold);
+  z-index: 1;
+}
+.page-portfolio .thread.left-end { left: 22mm; right: 0; }
+.page-portfolio .thread.right-end { left: 0; right: 22mm; }
+
+.page-portfolio .header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 5mm;
+}
+.page-portfolio .chapter-label { display: block; margin-bottom: 4mm; }
+.page-portfolio h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 26pt;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  color: var(--brown-1);
+  margin: 0;
+}
+.page-portfolio h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-portfolio .header .side {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+.page-portfolio .header .side b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 12pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  margin-top: 2mm;
+  text-transform: none;
+}
+.page-portfolio .sub {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 10pt;
+  line-height: 1.4;
+  color: var(--muted);
+  max-width: 155mm;
+  margin: 0 0 3mm;
+}
+.page-portfolio .gold-line {
+  display: block;
+  width: 40pt; height: 2pt; background: var(--gold);
+  margin-bottom: 5mm;
+}
+
+.portfolio-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 5mm 4mm;
+  min-height: 0;
+}
+.thumb-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.thumb-card .img {
+  flex: 1;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  position: relative;
+  min-height: 20mm;
+  box-shadow: 0 3px 8px rgba(60,40,20,0.14);
+  border: 0.6px solid rgba(201,151,58,0.3);
+}
+.thumb-card .img::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 65%, rgba(26,21,16,0.4) 100%);
+}
+.thumb-card .cap {
+  padding-top: 2mm;
+}
+.thumb-card .name {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 8.5pt;
+  color: var(--brown-1);
+  line-height: 1.15;
+  margin: 0 0 0.8mm;
+  letter-spacing: -0.005em;
+}
+.thumb-card .loc {
+  font-family: var(--f-sans);
+  font-size: 5.5pt;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.thumb-card .idx {
+  font-family: var(--f-sans);
+  font-size: 5.5pt;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 0.5mm;
+}
+
+/* =========================================================
+   Page 18 — Hand Craftsmanship (full-bleed photograph)
+   ========================================================= */
+.page-hands {
+  background: #0b0a0d;
+  padding: 0;
+  position: relative;
+  color: #f4e9d0;
+  overflow: hidden;
+}
+.page-hands .bg {
+  position: absolute;
+  inset: 0;
+  background-image: url("/images/craft-detail.jpg");
+  background-size: cover;
+  background-position: center 35%;
+  filter: contrast(1.08) saturate(0.92) brightness(0.96);
+}
+.page-hands .bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(11,10,13,0.55) 0%, rgba(11,10,13,0.0) 28%, rgba(11,10,13,0.0) 45%, rgba(11,10,13,0.85) 82%, rgba(11,10,13,0.96) 100%);
+}
+.page-hands .top-caption {
+  position: absolute;
+  top: 22mm;
+  left: 22mm;
+  right: 22mm;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.page-hands .top-caption .label {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: #e9d6a1;
+  font-weight: 500;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+}
+.page-hands .top-caption .side {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  color: #e9d6a1;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.6);
+  max-width: 60mm;
+  text-align: right;
+  line-height: 1.4;
+}
+.page-hands .content {
+  position: absolute;
+  left: 22mm;
+  right: 22mm;
+  bottom: 22mm;
+  z-index: 3;
+  max-width: 170mm;
+}
+.page-hands .content .kicker {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  letter-spacing: 0.44em;
+  text-transform: uppercase;
+  color: #e9d6a1;
+  font-weight: 500;
+  margin-bottom: 6mm;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.7);
+}
+.page-hands h1 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 42pt;
+  line-height: 1.04;
+  letter-spacing: -0.01em;
+  color: #fff;
+  margin: 0 0 8mm;
+  max-width: 145mm;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.55);
+}
+.page-hands h1 em { font-style: italic; color: #f1c86b; font-weight: 400; }
+.page-hands .gold-line {
+  display: block;
+  width: 50pt;
+  height: 2pt;
+  background: #f1c86b;
+  margin-bottom: 7mm;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.4);
+}
+.page-hands .body {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 12mm;
+  align-items: start;
+}
+.page-hands .body p {
+  font-family: var(--f-serif);
+  font-size: 11pt;
+  line-height: 1.55;
+  color: #e7dcc3;
+  margin: 0 0 2mm;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+}
+.page-hands .body p em { font-style: italic; color: #f1c86b; }
+.page-hands .body .pull {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 14pt;
+  line-height: 1.4;
+  color: #fff;
+  border-left: 2px solid #f1c86b;
+  padding-left: 6mm;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.7);
+  margin: 0;
+}
+.page-hands .body .pull small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  font-style: normal;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #e9d6a1;
+  margin-top: 5mm;
+  font-weight: 500;
+}
+.page-hands .page-foot { color: rgba(241, 231, 210, 0.65); }
+
+/* =========================================================
+   Page 19 — CNC Precision (photo-led editorial)
+   ========================================================= */
+.page-cnc {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-cnc .header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 6mm;
+}
+.page-cnc .chapter-label { display: block; margin-bottom: 4mm; }
+.page-cnc h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  color: var(--brown-1);
+  margin: 0;
+}
+.page-cnc h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-cnc .header .side {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+}
+.page-cnc .header .side b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  margin-top: 2mm;
+  text-transform: none;
+}
+.page-cnc .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 155mm;
+  margin: 0 0 4mm;
+}
+.page-cnc .gold-line {
+  display: block;
+  width: 50pt; height: 2pt; background: var(--gold);
+  margin-bottom: 6mm;
+}
+
+/* Top photo strip — 2 photos */
+.cnc-top-mosaic {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 4mm;
+  height: 80mm;
+  margin-bottom: 7mm;
+}
+.cnc-top-mosaic .tile {
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  box-shadow: 0 6px 18px rgba(60,40,20,0.15);
+  border: 1px solid rgba(201,151,58,0.3);
+}
+.cnc-top-mosaic .tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 60%, rgba(26,21,16,0.55) 100%);
+}
+.cnc-top-mosaic .tile .cap {
+  position: absolute;
+  left: 5mm;
+  bottom: 4mm;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.cnc-top-mosaic .tile .cap em {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: #fff;
+  letter-spacing: 0.02em;
+  margin-top: 2px;
+  text-transform: none;
+}
+
+/* Middle editorial band */
+.cnc-band {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 12mm;
+  margin-bottom: 7mm;
+}
+.cnc-band p {
+  font-family: var(--f-serif);
+  font-size: 10.5pt;
+  line-height: 1.55;
+  color: var(--brown-2);
+  margin: 0 0 3mm;
+}
+.cnc-band p em { font-style: italic; color: var(--gold-deep); }
+.cnc-band .aside {
+  border-left: 2px solid var(--gold);
+  padding: 1mm 0 1mm 7mm;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 13pt;
+  line-height: 1.4;
+  color: var(--brown-1);
+}
+.cnc-band .aside small {
+  display: block;
+  font-family: var(--f-sans);
+  font-style: normal;
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 5mm;
+  font-weight: 500;
+}
+
+/* Bottom photo strip — 3 photos */
+.cnc-bottom-strip {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4mm;
+  margin-top: auto;
+  max-height: 46mm;
+}
+.cnc-bottom-strip .tile {
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 4px 14px rgba(60,40,20,0.12);
+  border: 0.8px solid rgba(201,151,58,0.25);
+  position: relative;
+}
+.cnc-bottom-strip .tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 60%, rgba(26,21,16,0.45) 100%);
+}
+.cnc-bottom-strip .tile .lbl {
+  position: absolute;
+  left: 4mm;
+  bottom: 3mm;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--f-sans);
+  font-size: 6pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* =========================================================
+   Page 20 — Leadership (3 generations)
+   ========================================================= */
+.page-leadership {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 22mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-leadership .header { margin-bottom: 8mm; }
+.page-leadership .chapter-label { display: block; margin-bottom: 4mm; }
+.page-leadership h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 32pt;
+  line-height: 1.02;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+}
+.page-leadership h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-leadership .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 140mm;
+  margin: 0;
+}
+.page-leadership .gold-line {
+  display: block;
+  width: 50pt; height: 2pt; background: var(--gold);
+  margin-top: 4mm;
+}
+
+.leaders-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8mm;
+  margin-top: 10mm;
+}
+.leader {
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--gold);
+  padding-top: 5mm;
+}
+.leader .photo {
+  aspect-ratio: 3 / 4;
+  background-size: cover;
+  background-position: center top;
+  background-color: #d7b494;
+  box-shadow: 0 6px 18px rgba(60,40,20,0.16);
+  margin-bottom: 5mm;
+  border: 1px solid rgba(201,151,58,0.25);
+}
+.leader .generation {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.leader .name {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 17pt;
+  color: var(--brown-1);
+  line-height: 1.1;
+  margin: 0 0 1.5mm;
+  letter-spacing: -0.005em;
+}
+.leader .role {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 5mm;
+}
+.leader .bio {
+  font-family: var(--f-serif);
+  font-size: 10pt;
+  line-height: 1.55;
+  color: var(--brown-2);
+  margin: 0 0 5mm;
+}
+.leader .bio em { font-style: italic; color: var(--gold-deep); }
+.leader .meta {
+  margin-top: auto;
+  padding-top: 5mm;
+  border-top: 1px dotted rgba(168,122,40,0.5);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.leader .meta b {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* =========================================================
+   Page 21 — Full Team (3×3 grid, cream)
+   ========================================================= */
+.page-team {
+  background: var(--cream);
+  color: var(--brown-1);
+  padding: 16mm 22mm 28mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-team .header { margin-bottom: 4mm; }
+.page-team .chapter-label { display: block; margin-bottom: 4mm; }
+.page-team h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 30pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+}
+.page-team h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-team .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 145mm;
+  margin: 0;
+}
+.page-team .gold-line {
+  display: block;
+  width: 50pt; height: 2pt; background: var(--gold);
+  margin-top: 4mm;
+}
+
+.team-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6mm 6mm;
+  margin-top: 6mm;
+}
+.team-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 2mm;
+}
+.team-card .avatar {
+  width: 24mm;
+  height: 24mm;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center top;
+  background-color: #e8d8b8;
+  border: 1.2px solid var(--gold);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.12);
+  margin-bottom: 3mm;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.team-card .avatar::after {
+  content: "";
+  position: absolute;
+  inset: -2mm;
+  border: 0.5px solid rgba(168,122,40,0.35);
+  border-radius: 50%;
+}
+.team-card .initial {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 20pt;
+  color: var(--gold-deep);
+  line-height: 1;
+  font-style: italic;
+  user-select: none;
+}
+.team-card .name {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 11pt;
+  color: var(--brown-1);
+  line-height: 1.15;
+  margin: 0 0 1.5mm;
+  letter-spacing: -0.005em;
+}
+.team-card .role {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.team-card .role small {
+  display: block;
+  font-family: var(--f-sans);
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 6pt;
+  letter-spacing: 0.2em;
+  margin-top: 1.5mm;
+  text-transform: uppercase;
+}
+
+.team-footer {
+  margin-top: 6mm;
+  margin-right: 24mm;
+  padding: 4mm 6mm;
+  background: rgba(201,151,58,0.1);
+  border-left: 3px solid var(--gold);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8mm;
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.team-footer b {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold);
+  letter-spacing: -0.01em;
+  text-transform: none;
+  white-space: nowrap;
+}
+.team-footer b sup {
+  font-size: 10pt;
+  color: var(--gold-deep);
+  vertical-align: super;
+  margin-left: 1px;
+}
+
+/* =========================================================
+   Page 22 — Voices (Endorsements grid)
+   ========================================================= */
+.page-testimonials {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 18mm;
+  display: flex;
+  flex-direction: column;
+}
+.page-testimonials .running-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 5mm;
+  margin-bottom: 8mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.5);
+}
+.page-testimonials .running-head .center {
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.page-testimonials .running-head .dot {
+  color: var(--gold);
+  margin: 0 4px;
+}
+
+.page-testimonials .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+.page-testimonials h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 36pt;
+  line-height: 1.0;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 4mm;
+  max-width: 165mm;
+}
+.page-testimonials h2 em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.page-testimonials .lead {
+  font-family: var(--f-sans);
+  font-size: 9.5pt;
+  line-height: 1.55;
+  color: var(--brown-2);
+  max-width: 140mm;
+  margin: 0 0 6mm;
+}
+.page-testimonials .header-rule {
+  display: block;
+  width: 100%;
+  height: 0.5px;
+  background: rgba(168,122,40,0.6);
+  margin-bottom: 6mm;
+}
+
+/* 2x2 grid of leader cards */
+.voices-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 8mm 6mm;
+  min-height: 0;
+}
+.voice-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.voice-card .photo {
+  flex: 1;
+  background-size: cover;
+  background-position: center;
+  background-color: #d7b494;
+  min-height: 50mm;
+  box-shadow: 0 3px 12px rgba(60,40,20,0.14);
+  border: 0.5px solid rgba(201,151,58,0.25);
+}
+.voice-card .cap {
+  padding-top: 4mm;
+  padding-bottom: 3mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.35);
+  background: var(--cream-soft);
+  padding: 4mm 5mm 5mm;
+}
+.voice-card .name {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 16pt;
+  color: var(--brown-1);
+  letter-spacing: -0.005em;
+  line-height: 1.1;
+  margin: 0 0 2mm;
+}
+.voice-card .role {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.voice-card .desc {
+  font-family: var(--f-sans);
+  font-size: 8pt;
+  line-height: 1.45;
+  color: var(--brown-2);
+  letter-spacing: 0.005em;
+}
+
+/* Bottom caption + footer bar */
+.page-testimonials .bottom {
+  margin-top: 7mm;
+  padding-top: 4mm;
+  border-top: 0.5px solid rgba(168,122,40,0.5);
+}
+.page-testimonials .bottom .caption {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: center;
+  margin-bottom: 4mm;
+}
+.page-testimonials .bottom .footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 500;
+}
+.page-testimonials .bottom .footer-row .ed {
+  color: var(--muted);
+}
+
+/* =========================================================
+   Page 23 — Contact (editorial split: light + dark)
+   ========================================================= */
+.page-contact {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 18mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-contact .running-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 5mm;
+  margin-bottom: 8mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.5);
+}
+.page-contact .running-head .center {
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+.page-contact .running-head .dot {
+  color: var(--gold);
+  margin: 0 4px;
+}
+
+.page-contact .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 4mm;
+}
+.page-contact h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 56pt;
+  line-height: 1.0;
+  letter-spacing: -0.015em;
+  color: var(--brown-1);
+  margin: 0 0 5mm;
+}
+.page-contact h2 em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.page-contact .header-rule {
+  display: block;
+  width: 100%;
+  height: 0.5px;
+  background: rgba(168,122,40,0.6);
+  margin-bottom: 7mm;
+}
+
+/* Two-column body */
+.contact-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  min-height: 0;
+}
+
+/* LEFT — light column */
+.contact-left {
+  padding-right: 8mm;
+}
+.contact-left .intro {
+  font-family: var(--f-sans);
+  font-size: 9.5pt;
+  line-height: 1.55;
+  color: var(--brown-2);
+  margin: 0 0 8mm;
+  max-width: 80mm;
+}
+.contact-left .lbl {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 600;
+  margin-bottom: 2mm;
+}
+.contact-left .web {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: 0.005em;
+  margin-bottom: 8mm;
+  line-height: 1;
+}
+
+.contact-left .enq-section .enq-head {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 600;
+  padding-bottom: 2mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.5);
+  margin-bottom: 4mm;
+}
+.enq-row {
+  padding: 3mm 0;
+  border-bottom: 0.4px solid rgba(168,122,40,0.25);
+}
+.enq-row:last-child { border-bottom: none; }
+.enq-row .title {
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: 9pt;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  line-height: 1.25;
+  margin: 0 0 1mm;
+}
+.enq-row .sub {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  color: var(--muted);
+  letter-spacing: 0.005em;
+  line-height: 1.3;
+}
+
+/* RIGHT — dark column */
+.contact-right {
+  background: #0d0a07;
+  color: #fff;
+  padding: 9mm 9mm 9mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+.contact-right .lbl {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 600;
+  margin-bottom: 5mm;
+}
+.contact-right h3 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 22pt;
+  line-height: 1.18;
+  letter-spacing: -0.005em;
+  color: #fff;
+  margin: 0 0 6mm;
+  font-style: italic;
+}
+.contact-right .gold-rule {
+  display: block;
+  width: 30mm;
+  height: 0.6px;
+  background: var(--gold);
+  margin-bottom: 6mm;
+}
+.contact-right .body {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  line-height: 1.55;
+  color: #d9cdb5;
+  margin: 0 0 6mm;
+  letter-spacing: 0.005em;
+}
+.contact-right .quote {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.4;
+  color: #f4e9d0;
+  margin: 0 0 4mm;
+}
+.contact-right .attribution {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 600;
+}
+.contact-right .ornament {
+  position: absolute;
+  bottom: 6mm;
+  right: 6mm;
+  width: 36mm;
+  height: auto;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+/* Bottom — Welcome bar + footer row */
+.page-contact .bottom {
+  margin-top: 7mm;
+  padding-top: 5mm;
+  border-top: 0.5px solid rgba(168,122,40,0.5);
+}
+.page-contact .bottom .welcome {
+  text-align: center;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 14pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  margin-bottom: 4mm;
+}
+.page-contact .bottom .welcome .hi {
+  font-family: var(--f-hindi);
+  font-style: normal;
+  font-weight: 500;
+}
+.page-contact .bottom .welcome .sep {
+  color: var(--gold);
+  margin: 0 6px;
+}
+.page-contact .bottom .footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 500;
+  padding-top: 3mm;
+  border-top: 0.3px solid rgba(168,122,40,0.35);
+}
+.page-contact .bottom .footer-row .ed { color: var(--muted); }
+
+/* =========================================================
+   Page 3 — Contents (editorial, ornamental)
+   ========================================================= */
+.page-contents {
+  background: var(--cream-soft);
+  color: var(--brown-1);
+  padding: 20mm 24mm 22mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-contents .toc-ornament {
+  position: absolute;
+  top: 14mm;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--f-hindi);
+  font-size: 16pt;
+  color: var(--gold);
+  letter-spacing: 0.12em;
+}
+.page-contents .header {
+  margin-bottom: 8mm;
+  margin-top: 10mm;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 14mm;
+}
+.page-contents .chapter-label { display: block; margin-bottom: 3mm; }
+.page-contents h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 38pt;
+  line-height: 0.98;
+  letter-spacing: -0.012em;
+  color: var(--brown-1);
+  margin: 0 0 3mm;
+}
+.page-contents h2 em { font-style: italic; color: var(--gold); font-weight: 400; }
+.page-contents .lead {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 120mm;
+  margin: 0;
+}
+.page-contents .header-stats {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  min-width: 42mm;
+}
+.page-contents .header-stats b {
+  display: block;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22pt;
+  color: var(--gold);
+  letter-spacing: -0.005em;
+  margin: 2mm 0 1mm;
+  text-transform: none;
+  line-height: 1;
+}
+.page-contents .header-stats small {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.32em;
+  color: var(--gold-deep);
+  font-weight: 500;
+}
+
+.page-contents .gold-line {
+  display: block;
+  width: 100%; height: 1px;
+  background: linear-gradient(90deg, var(--gold), rgba(168,122,40,0.2) 50%, transparent);
+  margin: 4mm 0 6mm;
+  position: relative;
+}
+.page-contents .gold-line::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  width: 3mm; height: 3mm;
+  transform: translateY(-50%) rotate(45deg);
+  background: var(--gold);
+}
+
+.toc-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16mm;
+  align-content: start;
+}
+
+.toc-section {
+  margin-bottom: 7mm;
+}
+.toc-section:last-child { margin-bottom: 0; }
+.toc-section h4 {
+  font-family: var(--f-sans);
+  font-size: 6.8pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 700;
+  margin: 0 0 3.5mm;
+  padding-bottom: 2.5mm;
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+}
+.toc-section h4::before {
+  content: "";
+  width: 5mm;
+  height: 1px;
+  background: var(--gold);
+  flex-shrink: 0;
+}
+.toc-section h4::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(168,122,40,0.5), transparent);
+}
+
+.toc-row {
+  display: grid;
+  grid-template-columns: 9mm 1fr auto;
+  gap: 3mm;
+  align-items: baseline;
+  padding: 1.8mm 0;
+  position: relative;
+}
+.toc-row .pg {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 13pt;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  font-style: italic;
+  text-align: left;
+}
+.toc-row .ttl {
+  font-family: var(--f-serif);
+  font-size: 11pt;
+  color: var(--brown-1);
+  line-height: 1.15;
+  font-weight: 400;
+  padding-right: 2mm;
+}
+.toc-row .ttl small {
+  display: block;
+  font-family: var(--f-sans);
+  font-size: 6.3pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 1mm;
+}
+.toc-row .dots {
+  flex: 1;
+  border-bottom: 0.5px dotted rgba(168,122,40,0.5);
+  height: 0.7em;
+  align-self: end;
+  margin: 0 1mm 0 0;
+}
+.toc-row.spread .pg::after {
+  content: " —";
+  color: rgba(168,122,40,0.6);
+}
+
+.toc-footer {
+  margin-top: 8mm;
+  padding-top: 6mm;
+  border-top: 1px solid rgba(168,122,40,0.35);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+.toc-footer em {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: var(--gold-deep);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* =========================================================
+   VHP Back Cover Advertisement — 4.5 × 7.5 inch portrait
+   ========================================================= */
+.vhp-stage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0 60px;
+  background: var(--brown-2);
+}
+.vhp-ad {
+  width: 114.3mm;
+  height: 190.5mm;
+  background:
+    radial-gradient(ellipse at 50% 30%, #fcf7ec 0%, transparent 55%),
+    radial-gradient(ellipse at 0% 100%, #ecdbb8 0%, transparent 55%),
+    #f5eedd;
+  color: var(--brown-1);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 14px 36px rgba(0,0,0,0.45);
+  font-family: var(--f-sans);
+  display: flex;
+  flex-direction: column;
+  page-break-after: always;
+}
+
+/* Gold corner brackets */
+.vhp-ad .c-tl, .vhp-ad .c-tr, .vhp-ad .c-bl, .vhp-ad .c-br {
+  position: absolute;
+  width: 12mm; height: 12mm;
+  z-index: 5;
+  pointer-events: none;
+}
+.vhp-ad .c-tl { top: 5mm; left: 5mm; border-top: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.vhp-ad .c-tr { top: 5mm; right: 5mm; border-top: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+.vhp-ad .c-bl { bottom: 5mm; left: 5mm; border-bottom: 1px solid var(--gold); border-left: 1px solid var(--gold); }
+.vhp-ad .c-br { bottom: 5mm; right: 5mm; border-bottom: 1px solid var(--gold); border-right: 1px solid var(--gold); }
+
+/* Top mark */
+.vhp-top {
+  padding: 10mm 10mm 4mm;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+.vhp-top .om {
+  font-family: var(--f-hindi);
+  font-size: 24pt;
+  color: var(--gold);
+  line-height: 1;
+  margin-bottom: 2mm;
+}
+.vhp-top .kicker {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+
+/* Hero Ram Mandir image */
+.vhp-hero {
+  height: 60mm;
+  margin: 4mm 8mm 6mm;
+  background-image: url("/images/project-ram-mandir.jpg");
+  background-size: cover;
+  background-position: center 40%;
+  border: 1px solid rgba(201,151,58,0.4);
+  box-shadow: 0 6px 18px rgba(60,40,20,0.2);
+  position: relative;
+}
+.vhp-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 55%, rgba(26,21,16,0.55) 100%);
+}
+.vhp-hero .cap {
+  position: absolute;
+  left: 4mm;
+  bottom: 3mm;
+  color: #fff;
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 10pt;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  z-index: 2;
+}
+.vhp-hero .cap small {
+  display: block;
+  font-family: var(--f-sans);
+  font-style: normal;
+  font-size: 6pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  font-weight: 600;
+  margin-bottom: 1mm;
+}
+
+/* Portraits */
+.vhp-portraits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5mm;
+  padding: 0 10mm;
+  margin-bottom: 5mm;
+}
+.vhp-portrait {
+  text-align: center;
+}
+.vhp-portrait .photo {
+  width: 28mm;
+  height: 28mm;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center top;
+  background-color: #e8d8b8;
+  border: 1.2px solid var(--gold);
+  box-shadow: 0 3px 10px rgba(60,40,20,0.15);
+  margin: 0 auto 3mm;
+  position: relative;
+}
+.vhp-portrait .photo::after {
+  content: "";
+  position: absolute;
+  inset: -1.5mm;
+  border: 0.4px solid rgba(168,122,40,0.4);
+  border-radius: 50%;
+}
+.vhp-portrait .name {
+  font-family: var(--f-serif);
+  font-weight: 500;
+  font-size: 11pt;
+  color: var(--brown-1);
+  line-height: 1.15;
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+
+/* Gold ornament row */
+.vhp-ornament {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 3mm;
+  margin: 4mm 0 4mm;
+}
+.vhp-ornament .rule {
+  width: 18mm;
+  height: 0.6px;
+  background: linear-gradient(90deg, transparent, var(--gold) 50%, transparent);
+}
+.vhp-ornament .dot {
+  width: 2mm;
+  height: 2mm;
+  transform: rotate(45deg);
+  border: 0.5px solid var(--gold-deep);
+  background: rgba(201,151,58,0.15);
+}
+
+/* Bottom — logo + company block */
+.vhp-bottom {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8mm 10mm;
+  text-align: center;
+}
+.vhp-bottom .logo {
+  width: 42mm;
+  height: auto;
+  display: block;
+  margin: 0 auto 3mm;
+  filter:
+    contrast(1.08)
+    drop-shadow(0 1px 2px rgba(120,80,20,0.22))
+    drop-shadow(0 0 10px rgba(201,151,58,0.14));
+}
+.vhp-bottom .brand {
+  font-family: var(--f-serif);
+  font-weight: 400;
+  font-size: 12.5pt;
+  line-height: 1.2;
+  color: var(--brown-1);
+  letter-spacing: 0.01em;
+  margin-bottom: 3mm;
+}
+.vhp-bottom .brand em {
+  font-style: italic;
+  color: var(--gold-deep);
+}
+.vhp-bottom .addr {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  line-height: 1.5;
+  color: var(--brown-2);
+  letter-spacing: 0.02em;
+  margin-bottom: 3mm;
+  max-width: 80mm;
+}
+.vhp-bottom .web {
+  font-family: var(--f-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 11pt;
+  color: var(--gold);
+  letter-spacing: 0.04em;
+}
+.vhp-bottom .since {
+  margin-top: 3mm;
+  font-family: var(--f-sans);
+  font-size: 6pt;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Print: lock to 4.5 × 7.5in */
+@media print {
+  body { background: #fff; }
+  .vhp-stage { padding: 0; background: #fff; }
+  .vhp-toolbar { display: none !important; }
+  .vhp-ad { box-shadow: none; }
+  @page {
+    size: 4.5in 7.5in;
+    margin: 0;
+  }
+}
+
+.vhp-toolbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: 14px 24px;
+  background: rgba(13,10,7,0.94);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+  border-bottom: 1px solid rgba(201,151,58,0.25);
+}
+.vhp-toolbar .brand {
+  font-family: var(--f-sans);
+  font-size: 10pt;
+  letter-spacing: 0.28em;
+  color: var(--gold);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.vhp-toolbar .brand small {
+  display: block;
+  color: #c9bea7;
+  font-size: 8pt;
+  letter-spacing: 0.2em;
+  margin-top: 2px;
+  font-weight: 300;
+}
+.vhp-toolbar .print-btn {
+  background: linear-gradient(180deg, #e0a840, #C9973A);
+  color: #1a1510;
+  border: none;
+  padding: 9px 20px;
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: 11pt;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  box-shadow: 0 4px 16px rgba(201,151,58,0.3);
+}
+
+/* =========================================================
+   Page 4 — At a Glance (executive ledger)
+   ========================================================= */
+.page-glance {
+  background: #fff;
+  color: var(--brown-1);
+  padding: 18mm 22mm 18mm;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.page-glance .running-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  padding-bottom: 5mm;
+  margin-bottom: 7mm;
+  border-bottom: 0.5px solid rgba(168,122,40,0.5);
+}
+.page-glance .running-head .center { color: var(--gold-deep); font-weight: 600; }
+.page-glance .running-head .dot { color: var(--gold); margin: 0 4px; }
+
+.page-glance .section-num {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 3mm;
+}
+
+.page-glance .header-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14mm;
+  align-items: end;
+  margin-bottom: 5mm;
+}
+.page-glance .header-row h2 {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 56pt;
+  line-height: 1.0;
+  letter-spacing: -0.015em;
+  color: var(--brown-1);
+  margin: 0;
+}
+.page-glance .header-row h2 em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.page-glance .header-row .intro {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  line-height: 1.5;
+  color: var(--brown-2);
+  margin: 0;
+  text-align: right;
+}
+
+.page-glance .h-rule {
+  display: block;
+  width: 100%;
+  height: 0.5px;
+  background: rgba(168,122,40,0.6);
+  margin-bottom: 8mm;
+}
+
+/* Stats — 3 × 2 grid */
+.glance-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 8mm 10mm;
+  margin-bottom: 12mm;
+}
+.glance-stat {
+  padding-top: 4mm;
+  border-top: 0.5px solid rgba(168,122,40,0.45);
+}
+.glance-stat .num {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-size: 44pt;
+  line-height: 1;
+  color: var(--brown-1);
+  letter-spacing: -0.02em;
+  margin-bottom: 4mm;
+}
+.glance-stat .num sup {
+  font-size: 16pt;
+  vertical-align: super;
+  color: var(--gold);
+  font-weight: 400;
+  margin-left: 2px;
+  font-style: italic;
+}
+.glance-stat .label {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* Capability section */
+.glance-cap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.glance-cap-label {
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--gold-deep);
+  font-weight: 600;
+  margin-bottom: 5mm;
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+}
+.glance-cap-label::before {
+  content: "";
+  width: 8mm;
+  height: 1px;
+  background: var(--gold);
+}
+
+.glance-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 10mm;
+  min-height: 0;
+}
+
+/* Left column */
+.glance-left .paragraph {
+  font-family: var(--f-sans);
+  font-size: 9.5pt;
+  line-height: 1.6;
+  color: var(--brown-2);
+  margin: 0 0 7mm;
+  letter-spacing: 0.005em;
+}
+.glance-left .paragraph em {
+  font-style: italic;
+  color: var(--brown-1);
+  font-weight: 600;
+}
+.glance-left .paragraph code {
+  font-family: 'Courier New', monospace;
+  font-size: 9pt;
+  font-weight: 500;
+  background: transparent;
+  color: var(--brown-1);
+  letter-spacing: 0.01em;
+  padding: 0;
+}
+
+.glance-caps-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4mm 6mm;
+}
+.glance-cap-cell {
+  padding-left: 4mm;
+  border-left: 1.5px solid var(--gold);
+}
+.glance-cap-cell .t {
+  font-family: var(--f-sans);
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: var(--brown-1);
+  letter-spacing: 0.005em;
+  line-height: 1.2;
+  margin-bottom: 1mm;
+}
+.glance-cap-cell .s {
+  font-family: var(--f-sans);
+  font-size: 7.5pt;
+  color: var(--muted);
+  letter-spacing: 0.005em;
+  line-height: 1.3;
+}
+
+/* Right column — photo */
+.glance-photo {
+  background-color: #f0e4ce;
+  background-image: url('/images/craft-detail.jpg');
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  border: 0.5px solid rgba(201,151,58,0.3);
+  box-shadow: 0 4px 18px rgba(60,40,20,0.14);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 5mm;
+  min-height: 92mm;
+}
+.glance-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(26,21,16,0.2) 0%, transparent 30%, transparent 50%, rgba(26,21,16,0.7) 100%);
+  pointer-events: none;
+}
+.glance-photo .photo-tag {
+  position: relative;
+  z-index: 2;
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+}
+.glance-photo .photo-cap {
+  position: relative;
+  z-index: 2;
+  color: #fff;
+}
+.glance-photo .photo-cap .lbl {
+  font-family: var(--f-sans);
+  font-size: 6.5pt;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: #f1c86b;
+  font-weight: 600;
+  margin-bottom: 2mm;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+.glance-photo .photo-cap p {
+  font-family: var(--f-serif);
+  font-size: 9.5pt;
+  line-height: 1.4;
+  color: #fff;
+  margin: 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+}
+
+/* Bottom footer row */
+.page-glance .bottom {
+  margin-top: 7mm;
+  padding-top: 4mm;
+  border-top: 0.5px solid rgba(168,122,40,0.5);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-sans);
+  font-size: 7pt;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brown-2);
+  font-weight: 500;
+}
+.page-glance .bottom .ed { color: var(--muted); }
+
+/* =========================================================
+   Print rules
+   ========================================================= */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  html, body { background: #fff; }
+  .toolbar, .page-num-badge { display: none !important; }
+  .stage { padding: 0; gap: 0; background: #fff; }
+  .page {
+    box-shadow: none;
+    margin: 0;
+  }
+  .page-wrap { page-break-after: always; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}

@@ -1,0 +1,5 @@
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="b5dfa3af-5c32-2adc-6ff5-fe156980f16d")}catch(e){}}();
+module.exports=[2731,a=>{"use strict";var b=a.i(187924);function c(a){let b=Date.now()-new Date(a).getTime();if(!Number.isFinite(b)||b<0)return"now";let c=Math.floor(b/6e4);if(c<60)return`${Math.max(1,c)} min`;let d=Math.floor(c/60);if(d<24)return`${d} h`;let e=Math.floor(d/24);if(e<31){let a=d%24;return a>0&&e<7?`${e} d ${a} h`:`${e} d`}let f=Math.floor(e/30);return`${f} mo`}a.s(["TimeAgo",0,function({iso:a}){return(0,b.jsx)(b.Fragment,{children:c(a)})},"timeAgoLabel",0,c])}];
+
+//# debugId=b5dfa3af-5c32-2adc-6ff5-fe156980f16d
+//# sourceMappingURL=src_app_%28app%29_dispatch_time-ago_tsx_0twnh1f._.js.map

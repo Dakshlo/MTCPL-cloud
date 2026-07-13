@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "debugId": "4b8a2f89-4428-0b88-aa97-ef603dc5a6f3",
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/components/print-button.tsx"],"sourcesContent":["\"use client\";\n\nimport type { CSSProperties, ReactNode } from \"react\";\n\n/**\n * Tiny client component for triggering window.print().\n *\n * Lives as its own file so server-rendered pages (which can't have\n * inline onClick handlers) can drop in a print trigger without\n * needing to convert the whole page to \"use client\". We hit a real\n * production breakage from inline handlers on server components, so\n * the rule is: any onClick goes through a small client component\n * like this one.\n */\nexport function PrintButton({\n  children = \"🖨 Print\",\n  className = \"ghost-button\",\n  style,\n}: {\n  children?: ReactNode;\n  className?: string;\n  style?: CSSProperties;\n}) {\n  return (\n    <button\n      type=\"button\"\n      className={className}\n      style={style}\n      onClick={() => window.print()}\n    >\n      {children}\n    </button>\n  );\n}\n"],"names":["PrintButton","children","className","style","type","onClick","window","print"],"mappings":"+EAcO,SAASA,AAAY,UAC1BC,EAAW,UAAU,WACrBC,EAAY,cAAc,OAC1BC,CAAK,CAKN,EACC,MACE,CAAA,EAAA,EAAA,GAAA,EAAC,SAAA,CACCC,KAAK,SACLF,UAAWA,EACXC,MAAOA,EACPE,QAAS,IAAMC,OAAOC,KAAK,YAE1BN,GAGP"}}]
+}

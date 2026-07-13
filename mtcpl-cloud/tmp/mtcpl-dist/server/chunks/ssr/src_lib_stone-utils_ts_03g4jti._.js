@@ -1,0 +1,5 @@
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="6ba84087-474d-c3df-47f7-47fa09076b59")}catch(e){}}();
+module.exports=[697263,a=>{"use strict";let b={PinkStone:{top:"#EDCFC2",front:"#C87A60",side:"#DDA88A"},WhiteStone:{top:"#E8E6DC",front:"#B8B6AC",side:"#D0CEC4"}};a.s(["getStonePalette",0,function(a,c){let d=c?.find(b=>b.name===a);if(d)return{top:d.color_top,front:d.color_front,side:d.color_side};let e=b[a];return e||{top:"#D8D4CC",front:"#A09C94",side:"#B8B4AC"}},"stoneDisplayName",0,function(a){return a.replace(/Stone$/i,"").trim()||a}])}];
+
+//# debugId=6ba84087-474d-c3df-47f7-47fa09076b59
+//# sourceMappingURL=src_lib_stone-utils_ts_03g4jti._.js.map

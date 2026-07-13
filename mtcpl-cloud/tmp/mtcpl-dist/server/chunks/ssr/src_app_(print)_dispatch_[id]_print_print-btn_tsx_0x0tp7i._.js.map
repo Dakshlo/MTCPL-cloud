@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "debugId": "784fdc6a-d3ba-75ea-ae8b-0360dcbdf782",
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/app/%28print%29/dispatch/%5Bid%5D/print/print-btn.tsx"],"sourcesContent":["\"use client\";\n\nexport function PrintBtn() {\n  return (\n    <button\n      className=\"print-action-btn\"\n      onClick={() => window.print()}\n      type=\"button\"\n    >\n      🖨 Print\n    </button>\n  );\n}\n"],"names":["PrintBtn","className","onClick","window","print","type"],"mappings":"4EAEO,SAASA,EACd,MACE,CAAA,EAAA,EAAA,GAAA,EAAC,SAAA,CACCC,UAAU,mBACVC,QAAS,IAAMC,OAAOC,KAAK,GAC3BC,KAAK,kBACN,YAIL"}}]
+}

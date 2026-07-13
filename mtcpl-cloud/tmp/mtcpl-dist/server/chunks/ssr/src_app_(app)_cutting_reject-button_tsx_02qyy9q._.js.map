@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "debugId": "b210ff3d-937c-3c8a-659e-6bb677fbb924",
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["../../../../../src/app/%28app%29/cutting/reject-button.tsx"],"sourcesContent":["\"use client\";\n\nexport function RejectButton() {\n  return (\n    <button\n      className=\"ghost-button\"\n      type=\"submit\"\n      onClick={(e) => {\n        if (!confirm(\"Are you sure?\")) e.preventDefault();\n      }}\n    >\n      Reject\n    </button>\n  );\n}\n"],"names":["RejectButton","className","type","onClick","e","confirm","preventDefault"],"mappings":"gFAEO,SAASA,EACd,MACE,CAAA,EAAA,EAAA,GAAA,EAAC,SAAA,CACCC,UAAU,eACVC,KAAK,SACLC,QAAS,AAACC,IACJ,AAACC,QAAQ,kBAAkBD,EAAEE,cAAc,EACjD,WACD,UAIL"}}]
+}

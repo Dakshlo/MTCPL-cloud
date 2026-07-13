@@ -1,0 +1,5 @@
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="2d0ad6aa-a71c-5fa2-7180-35303e30fe74")}catch(e){}}();
+module.exports=[46680,a=>{"use strict";var b=a.i(187924),c=a.i(572131),d=a.i(295445);a.s(["PendingSignOutButton",0,function(){let[a,e]=(0,c.useState)(!1);return(0,b.jsx)("button",{type:"button",className:"secondary-button",disabled:a,onClick:async()=>{e(!0);try{await (0,d.createBrowserSupabaseClient)().auth.signOut()}catch{}window.location.href="/login"},children:a?"Signing out…":"Sign out / use another number"})}])}];
+
+//# debugId=2d0ad6aa-a71c-5fa2-7180-35303e30fe74
+//# sourceMappingURL=src_app_pending_pending-signout-button_tsx_0a1k07q._.js.map

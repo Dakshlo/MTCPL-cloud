@@ -328,7 +328,7 @@ function OtherChallanPreview({ client, date, docCode, sections, onClose }: {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, borderBottom: "2.5px double #1e3a5f", paddingBottom: 6, marginBottom: 8 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#0f2540" }}>MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
-              <div style={{ fontSize: 10, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 75975 91188 · temple@mtcpl.co</div>
+              <div style={{ fontSize: 10, color: "#666" }}>GSTIN: 08AAFCM15Q1ZA · ☎ 759 759 1188 · temple@mtcpl.co</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>{docCode}</div>

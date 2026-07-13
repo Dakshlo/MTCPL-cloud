@@ -1,0 +1,3 @@
+{
+  "/api/carving/work-order-pdf/[id]/route": "app/api/carving/work-order-pdf/[id]/route.js"
+}

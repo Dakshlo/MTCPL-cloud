@@ -1,0 +1,3 @@
+{
+  "/(app)/activity-register/[siteId]/page": "app/(app)/activity-register/[siteId]/page.js"
+}

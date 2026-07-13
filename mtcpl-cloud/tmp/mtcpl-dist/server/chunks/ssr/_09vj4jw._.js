@@ -1,0 +1,5 @@
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="5117c3d4-f0d5-001a-735b-1fb13431d41e")}catch(e){}}();
+module.exports=[950640,(a,b,c)=>{"use strict";Object.defineProperty(c,"__esModule",{value:!0}),Object.defineProperty(c,"InvariantError",{enumerable:!0,get:function(){return d}});class d extends Error{constructor(a,b){super(`Invariant: ${a.endsWith(".")?a:a+"."} This is a bug in Next.js.`,b),this.name="InvariantError"}}},468967,a=>{"use strict";var b=a.i(907997),c=a.i(109307);async function d({children:a}){return await (0,c.requireAuth)(),(0,b.jsx)("div",{className:"embed-shell",style:{minHeight:"100vh",background:"var(--bg)",padding:"20px 24px 40px"},children:a})}a.s(["default",0,d])},669125,a=>{a.n(a.i(468967))}];
+
+//# debugId=5117c3d4-f0d5-001a-735b-1fb13431d41e
+//# sourceMappingURL=_09vj4jw._.js.map

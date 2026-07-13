@@ -1,0 +1,11 @@
+var R=require("../../../chunks/[turbopack]_runtime.js")("server/app/api/ask-ai/route.js")
+R.c("server/chunks/[root-of-the-server]__0o5smby._.js")
+R.c("server/chunks/node_modules_@anthropic-ai_sdk_index_mjs_0vbeb4q._.js")
+R.c("server/chunks/_13kr4bd._.js")
+R.c("server/chunks/[root-of-the-server]__051qy54._.js")
+R.c("server/chunks/node_modules_next_dist_esm_build_templates_app-route_0h6yle7.js")
+R.c("server/chunks/node_modules_@supabase_supabase-js_dist_index_mjs_0hp37pu._.js")
+R.c("server/chunks/node_modules_11_hse.._.js")
+R.c("server/chunks/_next-internal_server_app_api_ask-ai_route_actions_0-ggbi8.js")
+R.m(197277)
+module.exports=R.m(197277).exports
