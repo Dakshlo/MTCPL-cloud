@@ -128,7 +128,7 @@ function Avatars({ people, max = 4 }: { people: Array<{ id: string; name: string
 }
 
 export function DiaryClient({ me, entries: serverEntries, people, groups, initialOpenId, initialNew }: {
-  me: { id: string; name: string; isBoss: boolean };
+  me: { id: string; name: string; isBoss: boolean; isDev: boolean };
   entries: DiaryEntry[];
   people: DiaryPerson[];
   groups: DiaryGroup[];
@@ -352,7 +352,7 @@ type Busy = null | "remark" | "close" | "reopen" | "delete" | "people" | "urgent
 
 /* ── Entry drawer — optimistic remarks / urgent / people / close / delete ── */
 function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
-  e: DiaryEntry; me: { id: string; name: string; isBoss: boolean }; people: DiaryPerson[];
+  e: DiaryEntry; me: { id: string; name: string; isBoss: boolean; isDev: boolean }; people: DiaryPerson[];
   onClose: () => void; refresh: () => void;
   patch: (id: string, fn: (e: DiaryEntry) => DiaryEntry) => void;
   drop: (id: string) => void;
@@ -453,7 +453,8 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
 
   // ── @mention dropdown plumbing ─────────────────────────────────────
   const mentionMatches = mentionQ == null ? [] :
-    e.participants.filter((p) => p.id !== me.id && (!mentionQ || p.name.toLowerCase().includes(mentionQ.toLowerCase()))).slice(0, 8);
+    // Normally you can't tag yourself; the DEVELOPER may (to test the WA ping).
+    e.participants.filter((p) => (me.isDev || p.id !== me.id) && (!mentionQ || p.name.toLowerCase().includes(mentionQ.toLowerCase()))).slice(0, 8);
   function onRemarkChange(v: string, caret: number) {
     setRemark(v);
     const before = v.slice(0, caret);
@@ -618,7 +619,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
                         <button key={p.id} type="button" onMouseDown={(ev) => { ev.preventDefault(); pickMention(p); }}
                           style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "8px 11px", fontSize: 12.5, fontWeight: 700, border: "none", borderTop: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer" }}>
                           <span aria-hidden style={{ width: 22, height: 22, borderRadius: 999, background: `hsl(${hueOf(p.id)} 60% 45%)`, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontWeight: 800, flexShrink: 0 }}>{p.name.slice(0, 1).toUpperCase()}</span>
-                          @{p.name}
+                          @{p.name}{p.id === me.id ? " (you)" : ""}
                         </button>
                       ))}
                     </div>
@@ -693,7 +694,7 @@ function EntryDrawer({ e, me, people, onClose, refresh, patch, drop }: {
 
 /* ── New entry modal — wide, all users visible, CAPS activity, urgent, files ── */
 function NewEntryModal({ me, people, groups, onClose, refresh }: {
-  me: { id: string; name: string; isBoss: boolean }; people: DiaryPerson[]; groups: DiaryGroup[]; onClose: () => void; refresh: () => void;
+  me: { id: string; name: string; isBoss: boolean; isDev: boolean }; people: DiaryPerson[]; groups: DiaryGroup[]; onClose: () => void; refresh: () => void;
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);

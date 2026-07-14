@@ -3,9 +3,10 @@
  *
  * One entry = one register row: activity · from whom · who's included · date to
  * complete. Open entries stay pinned until someone included closes them; a
- * remarks thread carries the running status of multi-day work. Owner +
- * developer see every entry; everyone else only entries they created or are
- * included in. Reached from the topbar "Work Diary" pill (next to Tasks).
+ * remarks thread carries the running status of multi-day work. Only the
+ * DEVELOPER sees every entry; everyone else (including the owner) sees only
+ * entries they created or are included in. Reached from the topbar "Work
+ * Diary" pill (next to Tasks).
  */
 
 import { requireAuth } from "@/lib/auth";
@@ -27,6 +28,10 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
   const sp = await searchParams;
   const admin = createAdminSupabaseClient();
   const isBoss = profile.role === "owner" || profile.role === "developer";
+  // Visibility: only the DEVELOPER sees every entry. The owner (and everyone
+  // else) sees only entries they created or are included in. isBoss still
+  // governs MANAGEMENT (close / urgent / delete) on the entries they can see.
+  const isDev = profile.role === "developer";
 
   type EntryRow = {
     id: string; activity: string; details: string | null; created_by: string;
@@ -39,7 +44,7 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
   // ── Visible entries. Best-effort: a pre-mig-185 deploy shows the banner.
   let needsMigration = false;
   const entryById = new Map<string, EntryRow>();
-  if (isBoss) {
+  if (isDev) {
     const { data, error } = await admin.from("work_diary_entries").select(COLS).order("created_at", { ascending: false }).limit(1000);
     if (error) needsMigration = true;
     else for (const r of (data ?? []) as EntryRow[]) entryById.set(r.id, r);
@@ -151,7 +156,7 @@ export default async function WorkDiaryPage({ searchParams }: { searchParams: Se
       ) : (
         <div style={{ marginTop: 14 }}>
           <DiaryClient
-            me={{ id: profile.id, name: (profile.full_name ?? "").trim() || "me", isBoss }}
+            me={{ id: profile.id, name: (profile.full_name ?? "").trim() || "me", isBoss, isDev }}
             entries={entries}
             people={people}
             groups={groups}

@@ -234,6 +234,7 @@ export async function addDiaryRemarkAction(formData: FormData): Promise<ActionRe
       admin, entryId, activity: entry.activity,
       senderId: profile.id, senderName: (profile.full_name ?? "").trim() || "Someone",
       body, mentionIds: mentions,
+      allowSelf: profile.role === "developer", // dev may self-tag to test the WA ping
     }).catch(() => {});
   }
 

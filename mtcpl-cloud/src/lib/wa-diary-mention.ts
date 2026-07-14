@@ -53,10 +53,13 @@ export async function sendDiaryMentionPings(opts: {
   senderName: string;
   body: string;
   mentionIds: string[];
+  /** Normally the sender is never pinged (you can't tag yourself). The
+   *  developer may self-tag to test the flow — pass true to allow it. */
+  allowSelf?: boolean;
 }): Promise<void> {
   const template = (process.env.MSG91_WA_WORK_DIARY_TEMPLATE ?? "").trim();
   if (!template) return; // dormant until the template is approved + set
-  const targets = [...new Set(opts.mentionIds)].filter((id) => id && id !== opts.senderId);
+  const targets = [...new Set(opts.mentionIds)].filter((id) => id && (opts.allowSelf || id !== opts.senderId));
   if (targets.length === 0) return;
 
   const { data: profRows } = await opts.admin
