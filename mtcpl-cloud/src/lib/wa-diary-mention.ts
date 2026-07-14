@@ -75,6 +75,7 @@ export async function sendDiaryMentionPings(opts: {
     if (!to) continue;
     try {
       const link = await createGuestLink(opts.admin, opts.entryId, p.id, opts.senderId);
+      const linkUrl = link ?? `${appBaseUrl()}/diary`;
       await sendWhatsAppTemplate({
         to: [to],
         templateName: template,
@@ -82,7 +83,12 @@ export async function sendDiaryMentionPings(opts: {
           body_1: { type: "text", value: opts.senderName },
           body_2: { type: "text", value: opts.activity.slice(0, 120) },
           body_3: { type: "text", value: message },
-          body_4: { type: "text", value: link ?? appBaseUrl() + "/diary" },
+          // Leading space is deliberate: the approved template glues the URL to
+          // the text ("…and reply{{4}}"), and WhatsApp only turns a URL into a
+          // tappable link when a space/newline precedes "https://". A single
+          // mid-line space is allowed in WA params (only newlines, tabs, and
+          // 4+ consecutive spaces are barred), so this renders "…reply https://…".
+          body_4: { type: "text", value: ` ${linkUrl}` },
         },
       });
       void logAudit(opts.senderId, "diary_mention_wa_sent", "work_diary_entry", opts.entryId, { to: p.id, name: p.full_name }).catch(() => {});
