@@ -5,7 +5,7 @@
 // TEMPORARY no-login link (/guest/diary/<token>, 48 h) where they can read the
 // thread and reply straight into the chat from their phone.
 //
-// DORMANT until env MSG91_WA_DIARY_MENTION_TEMPLATE is set (same pattern as the
+// DORMANT until env MSG91_WA_WORK_DIARY_TEMPLATE is set (same pattern as the
 // other WA features). Template body vars:
 //   {{1}} who mentioned (sender name)
 //   {{2}} activity title
@@ -54,7 +54,7 @@ export async function sendDiaryMentionPings(opts: {
   body: string;
   mentionIds: string[];
 }): Promise<void> {
-  const template = (process.env.MSG91_WA_DIARY_MENTION_TEMPLATE ?? "").trim();
+  const template = (process.env.MSG91_WA_WORK_DIARY_TEMPLATE ?? "").trim();
   if (!template) return; // dormant until the template is approved + set
   const targets = [...new Set(opts.mentionIds)].filter((id) => id && id !== opts.senderId);
   if (targets.length === 0) return;
