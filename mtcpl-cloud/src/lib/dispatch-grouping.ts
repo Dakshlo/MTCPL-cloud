@@ -10,8 +10,10 @@
  * + Category 2 + L + W + H. The row's `codes` lists every collapsed slab code.
  *
  * Measure: dimensions are stored in INCHES (the columns are misleadingly named
- * *_ft). CFT = L·W·T / 1728 (cubic feet). SFT = L·W / 144 (square feet, the
- * face area). Each row is billed in cft (default) or sft.
+ * *_ft). CFT = L·W·T / 1728 (cubic feet). SFT = (two largest dims) / 144 — the
+ * face area; the smallest dim is the thickness, and it can sit in ANY of the
+ * three columns (jali slabs are entered 38×3×22). Each row is billed in cft
+ * (default) or sft.
  */
 
 export type DispatchSlabInput = {
@@ -69,8 +71,17 @@ export function cftOf(lengthIn: number, widthIn: number, thicknessIn: number): n
   return (lengthIn * widthIn * thicknessIn) / 1728;
 }
 
-export function sftOf(lengthIn: number, widthIn: number): number {
-  return (lengthIn * widthIn) / 144;
+/** Face area in square feet. The three dim columns are display order (L·W·H),
+ *  not physical roles — on jali/khadasal slabs the 3" THICKNESS often sits in
+ *  the middle (38×3×22). The thickness is always the SMALLEST of the three, so
+ *  the face = product of the two LARGEST dims. (Jul 2026 fix: this used L·W,
+ *  which multiplied by the thickness → 38×3 = 0.79 sft instead of the real
+ *  face 38×22 = 5.81 sft — every SFT row was ~10× too small.) */
+export function sftOf(lengthIn: number, widthIn: number, thicknessIn: number): number {
+  const smallest = Math.min(lengthIn, widthIn, thicknessIn);
+  const product = lengthIn * widthIn * thicknessIn;
+  if (smallest <= 0) return 0; // degenerate/missing dim — no face to measure
+  return product / smallest / 144;
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
@@ -113,7 +124,7 @@ export function groupDispatchSlabs(slabs: DispatchSlabInput[]): DispatchGroupRow
       existing.weightTonnes += num(s.weight_tonnes);
     } else {
       const cftEach = cftOf(l, w, t);
-      const sftEach = sftOf(l, w);
+      const sftEach = sftOf(l, w, t);
       map.set(key, {
         key,
         codes: [s.id],
