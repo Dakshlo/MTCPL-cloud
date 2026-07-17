@@ -86,7 +86,7 @@ export default async function WorkOrderDocPage({ searchParams }: { searchParams:
     vendor: r.vendor,
     jobDescription: r.job_description ?? "",
     jobWorkNo: r.job_work_no ?? "",
-    unit: r.unit === "sft" ? "sft" : "cft",
+    unit: r.unit === "sft" || r.unit === "nos" || r.unit === "tonnes" ? r.unit : "cft",
     quantity: Number(r.quantity),
     rate: Number(r.rate),
     total: Number(r.total),

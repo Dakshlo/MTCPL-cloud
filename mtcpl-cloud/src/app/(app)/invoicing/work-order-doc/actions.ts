@@ -48,9 +48,12 @@ export async function createWorkOrderDocAction(formData: FormData) {
     rawItems = [];
   }
 
-  const lineItems: Array<{ description: string | null; unit: "cft" | "sft"; quantity: number; rate: number; total: number }> = [];
+  // Mig 202 — cft/sft/nos/tonnes. Anything unrecognised falls back to cft.
+  type WoUnit = "cft" | "sft" | "nos" | "tonnes";
+  const asUnit = (v: unknown): WoUnit => (v === "sft" || v === "nos" || v === "tonnes" ? v : "cft");
+  const lineItems: Array<{ description: string | null; unit: WoUnit; quantity: number; rate: number; total: number }> = [];
   for (const it of rawItems) {
-    const unit: "cft" | "sft" = it.unit === "sft" ? "sft" : "cft";
+    const unit: WoUnit = asUnit(it.unit);
     const quantity = Number(it.quantity);
     const rate = Number(it.rate);
     const description = typeof it.description === "string" && it.description.trim() ? it.description.trim() : null;

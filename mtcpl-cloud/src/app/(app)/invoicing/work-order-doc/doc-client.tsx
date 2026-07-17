@@ -4,13 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkOrderDocAction, deleteWorkOrderDocAction, updateFinanceVendorFieldsAction } from "./actions";
 import { VendorPicker, type VendorPickerOption } from "../../accounts/bills/new/vendor-picker";
 
+// Billing units on a work-order line (mig 202 added nos + tonnes).
+export type WoUnit = "cft" | "sft" | "nos" | "tonnes";
+
 export type DocRecord = {
   id: string;
   date: string;
   vendor: string;
   jobDescription: string;
   jobWorkNo: string;
-  unit: "cft" | "sft";
+  unit: WoUnit;
   quantity: number;
   rate: number;
   total: number;
@@ -34,7 +37,7 @@ export type FinanceVendor = {
 
 // A single line-item group (mig 114). Up to 4 per document; each prints
 // its own description + unit/quantity/rate/total on the PDF.
-type Group = { description: string; unit: "cft" | "sft"; qty: string; rate: string };
+type Group = { description: string; unit: WoUnit; qty: string; rate: string };
 const MAX_GROUPS = 4;
 const emptyGroup = (): Group => ({ description: "", unit: "cft", qty: "", rate: "" });
 
@@ -316,9 +319,11 @@ export function WorkOrderDocClient({
                 <div style={{ display: "flex", gap: 14, alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
                     <Field label="Unit">
-                      <select value={g.unit} onChange={(e) => updateGroup(i, { unit: e.target.value as "cft" | "sft" })} className="wod-in" style={{ width: 96 }}>
+                      <select value={g.unit} onChange={(e) => updateGroup(i, { unit: e.target.value as WoUnit })} className="wod-in" style={{ width: 96 }}>
                         <option value="cft">CFT</option>
                         <option value="sft">SFT</option>
+                        <option value="nos">NOS</option>
+                        <option value="tonnes">TONNES</option>
                       </select>
                     </Field>
                     <Field label="Quantity">

@@ -17,7 +17,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB }
 
 export type WorkOrderLineItem = {
   description: string | null;
-  unit: "cft" | "sft";
+  unit: "cft" | "sft" | "nos" | "tonnes"; // mig 202
   quantity: number;
   rate: number;
   total: number;

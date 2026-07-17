@@ -44,6 +44,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   // otherwise fall back to a single item from the legacy columns (older
   // rows created before multi-line support).
   type RawItem = { description?: string | null; unit?: string; quantity?: number | string; rate?: number | string; total?: number | string };
+  // Mig 202 — cft/sft/nos/tonnes; anything else prints as cft.
+  const asUnit = (v: unknown): "cft" | "sft" | "nos" | "tonnes" =>
+    v === "sft" || v === "nos" || v === "tonnes" ? v : "cft";
   let lineItems: WorkOrderLineItem[] = [];
   if (Array.isArray(d.line_items) && d.line_items.length > 0) {
     lineItems = (d.line_items as RawItem[]).map((it) => {
@@ -52,7 +55,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       const total = it.total != null ? Number(it.total) : Math.round(quantity * rate * 100) / 100;
       return {
         description: typeof it.description === "string" ? it.description : null,
-        unit: it.unit === "sft" ? "sft" : "cft",
+        unit: asUnit(it.unit),
         quantity,
         rate,
         total,
@@ -62,7 +65,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     lineItems = [
       {
         description: d.job_description,
-        unit: d.unit === "sft" ? "sft" : "cft",
+        unit: asUnit(d.unit),
         quantity: Number(d.quantity),
         rate: Number(d.rate),
         total: Number(d.total),
