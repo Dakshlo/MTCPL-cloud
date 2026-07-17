@@ -819,7 +819,13 @@ export async function convertCustomBillToInvoiceAction(formData: FormData) {
 /** Cancel a PRICED-CHALLAN invoice: free its number, wipe pricing/approval —
  *  the challan returns to the Challans page (open) for a fresh cycle. */
 export async function cancelPricedInvoiceAction(formData: FormData): Promise<void> {
-  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  // Mig 184 gate: STAGING a cancel is open to anyone who can use invoicing
+  // (incl. plain accountant) — only APPROVING it stays owner/dev/acct★. This
+  // matches cancelBulkInvoiceAction; the challan-path gate was wrongly strict,
+  // so a plain accountant pressing Cancel got bounced to their home page
+  // instead of filing the approval request.
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
   const admin = createAdminSupabaseClient();
   const challanId = txt(formData, "challan_id");
   if (!challanId) redirect("/invoicing/invoices");
@@ -843,7 +849,10 @@ export async function cancelPricedInvoiceAction(formData: FormData): Promise<voi
 /** Cancel a RUNNING-BILL invoice: free the number; the custom bill stays and
  *  the challan returns to the Running bills page (re-invoiceable). */
 export async function cancelRunningInvoiceAction(formData: FormData): Promise<void> {
-  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  // Staging a cancel is open to any invoicing user (incl. plain accountant);
+  // only approving stays owner/dev/acct★. See cancelPricedInvoiceAction.
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
   const admin = createAdminSupabaseClient();
   const challanId = txt(formData, "challan_id");
   if (!challanId) redirect("/invoicing/invoices");

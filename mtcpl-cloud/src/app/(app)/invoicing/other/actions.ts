@@ -269,7 +269,10 @@ export async function convertOtherChallanAction(formData: FormData) {
 /** Cancel an OTHER-SALES invoice: free its number; the challan reverts to its
  *  unconverted state on the Other Sales page (mig 178). */
 export async function cancelOtherInvoiceAction(formData: FormData) {
-  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  // Staging a cancel is open to any invoicing user (incl. plain accountant);
+  // only approving stays owner/dev/acct★. See cancelPricedInvoiceAction.
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "other_challan_id");
   if (!id) redirect("/invoicing/invoices");
