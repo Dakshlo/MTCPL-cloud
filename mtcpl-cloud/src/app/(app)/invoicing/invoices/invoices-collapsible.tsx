@@ -9,7 +9,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
-import { cancelPricedInvoiceAction, cancelRunningInvoiceAction, cancelBulkInvoiceAction } from "../actions";
+import { cancelPricedInvoiceAction, cancelRunningInvoiceAction, cancelBulkInvoiceAction, requestInvoiceVoidAction } from "../actions";
 import { cancelOtherInvoiceAction } from "../other/actions";
 
 export type InvoiceRow = {
@@ -40,6 +40,12 @@ export type InvoiceRow = {
    *  the owner / accountant★ approves or rejects it. */
   pendingEdit?: boolean;
   pendingCancel?: boolean;
+  /** Mig 203 — a VOID (cancel-on-record) request is waiting on approval. */
+  pendingVoid?: boolean;
+  /** Mig 203 — a voided register entry: shown as CANCELLED, number burned,
+   *  no actions, excluded from every total. */
+  voided?: boolean;
+  voidReason?: string | null;
 };
 
 const SOURCE_META: Record<NonNullable<InvoiceRow["sourceType"]>, { label: string; color: string; bg: string }> = {
@@ -80,14 +86,22 @@ const CANCEL_META = {
   other: { action: cancelOtherInvoiceAction, field: "other_challan_id", back: "the challan returns to Other Sales" },
 } as const;
 
+/** Mig 203 — which pending-void source the row posts (mirrors CANCEL_META). */
+const VOID_SOURCE: Record<NonNullable<InvoiceRow["cancelKind"]>, string> = {
+  priced: "purchase", running: "running", bulk: "bulk", other: "other",
+};
+
 /** Row-level action strip — shared by the temple cards and the Other table. */
 export function InvoiceActions({ r }: { r: InvoiceRow }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [editConfirm, setEditConfirm] = useState(false);
+  const [voiding, setVoiding] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
   const [pending, setPending] = useState(false);
   const meta = r.cancelKind ? CANCEL_META[r.cancelKind] : null;
-  const hasPending = r.pendingEdit || r.pendingCancel;
+  const hasPending = r.pendingEdit || r.pendingCancel || r.pendingVoid;
+  if (r.voided) return null; // register entries carry no actions
   return (
     <span style={{ display: "inline-flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
       {r.challanHref && (
@@ -96,7 +110,7 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
       <Link href={r.href} target={r.external ? "_blank" : undefined} rel={r.external ? "noopener noreferrer" : undefined} style={{ ...lnk, color: "var(--gold-dark)" }}>
         {r.external ? "🧾 Invoice" : "View →"}
       </Link>
-      {hasPending && <span title="A change is waiting on the Approval page" style={{ fontSize: 10.5, fontWeight: 800, color: "#b45309", background: "rgba(217,119,6,0.12)", borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}>⏳ {r.pendingCancel ? "Cancel in approval" : "Edit in approval"}</span>}
+      {hasPending && <span title="A change is waiting on the Approval page" style={{ fontSize: 10.5, fontWeight: 800, color: "#b45309", background: "rgba(217,119,6,0.12)", borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}>⏳ {r.pendingCancel ? "Cancel in approval" : r.pendingVoid ? "Void in approval" : "Edit in approval"}</span>}
       {!hasPending && r.editHref && <button type="button" onClick={() => setEditConfirm(true)} style={{ ...lnk, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>✎ Edit</button>}
       {editConfirm && r.editHref && (
         <span onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20 }}>
@@ -140,13 +154,59 @@ export function InvoiceActions({ r }: { r: InvoiceRow }) {
           )}
         </>
       )}
+      {/* Mig 203 — VOID: cancel ON RECORD (e-way-bill case). Number stays
+          booked forever; the invoice shows as CANCELLED; challan returns. */}
+      {!hasPending && meta && r.cancelId && (
+        <>
+          <button type="button" onClick={() => { setVoidReason(""); setVoiding(true); }} style={{ ...lnk, color: "#7c3aed", background: "transparent", border: "none", cursor: "pointer", padding: 0 }} title="Cancel on record — the number stays booked (e-way bill case)">⊘ Void</button>
+          {voiding && (
+            <span onClick={(e) => e.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", padding: 20 }}>
+              <FinanceLoadingOverlay show={pending} label="Sending void request…" />
+              <form
+                action={requestInvoiceVoidAction}
+                onSubmit={() => setPending(true)}
+                style={{ width: "min(460px, 100%)", background: "var(--surface, #fff)", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 24px 60px rgba(0,0,0,0.3)", textAlign: "left" }}
+              >
+                <input type="hidden" name="source" value={VOID_SOURCE[r.cancelKind!]} />
+                <input type="hidden" name="id" value={r.cancelId} />
+                <input type="hidden" name="amount" value={r.total} />
+                <div style={{ fontSize: 30, marginBottom: 6 }}>⊘</div>
+                <div style={{ fontSize: 16.5, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>Void invoice {r.code}?</div>
+                <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, margin: "0 0 12px" }}>
+                  For invoices already reported to the government (e-way bill made). <strong>{r.code} stays on record as CANCELLED</strong> and its number is <strong>never reused</strong> — the next invoice takes the next number. {meta.back} and it can be billed again under a <strong>new</strong> number. Goes for approval first.
+                </p>
+                <label style={{ display: "grid", gap: 5, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 14 }}>
+                  Reason (required)
+                  <textarea
+                    name="reason"
+                    required
+                    minLength={3}
+                    rows={3}
+                    value={voidReason}
+                    onChange={(e) => setVoidReason(e.target.value)}
+                    placeholder="e.g. E-way bill cancelled — wrong vehicle number; goods did not move"
+                    style={{ fontSize: 13.5, padding: "10px 12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", resize: "vertical", fontFamily: "inherit" }}
+                  />
+                </label>
+                <span style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button type="button" disabled={pending} onClick={() => setVoiding(false)} style={{ fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>Keep it</button>
+                  <button type="submit" disabled={pending || voidReason.trim().length < 3} style={{ fontSize: 13, fontWeight: 800, padding: "9px 17px", borderRadius: 10, border: "none", color: "#fff", background: "#7c3aed", cursor: "pointer", opacity: pending || voidReason.trim().length < 3 ? 0.6 : 1 }}>
+                    {pending ? "Sending…" : "⊘ Void invoice"}
+                  </button>
+                </span>
+              </form>
+            </span>
+          )}
+        </>
+      )}
     </span>
   );
 }
 
 export function CollapsibleInvoiceTemple({ temple, rows }: { temple: string; rows: InvoiceRow[] }) {
   const [open, setOpen] = useState(false);
-  const total = rows.reduce((s, r) => s + r.total, 0);
+  // Voided (cancelled-on-record) rows never count toward the temple total.
+  const total = rows.reduce((s, r) => s + (r.voided ? 0 : r.total), 0);
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--surface)" }}>
       <button
@@ -163,15 +223,17 @@ export function CollapsibleInvoiceTemple({ temple, rows }: { temple: string; row
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.key} style={{ borderTop: "1px solid var(--border)" }}>
-                <td style={{ padding: "9px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+              <tr key={r.key} style={{ borderTop: "1px solid var(--border)", background: r.voided ? "rgba(220,38,38,0.04)" : "transparent" }}>
+                <td style={{ padding: "9px 14px", fontFamily: "ui-monospace, monospace", fontWeight: 700, textDecoration: r.voided ? "line-through" : "none", color: r.voided ? "var(--muted)" : "var(--text)" }}>
                   {r.code}
-                  {r.challanCodes && r.challanCodes.length > 0 && <div style={{ marginTop: 4 }}><ChallanRef codes={r.challanCodes} /></div>}
+                  {r.voided && <span title={r.voidReason ?? undefined} style={{ marginLeft: 8, fontSize: 10, fontWeight: 900, color: "#b91c1c", background: "rgba(220,38,38,0.12)", border: "1px solid #fecaca", borderRadius: 999, padding: "1px 8px", textDecoration: "none", display: "inline-block" }}>⊘ CANCELLED</span>}
+                  {!r.voided && r.challanCodes && r.challanCodes.length > 0 && <div style={{ marginTop: 4 }}><ChallanRef codes={r.challanCodes} /></div>}
+                  {r.voided && r.voidReason && <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 500, fontFamily: "inherit", color: "#991b1b", fontStyle: "italic", textDecoration: "none" }}>Reason: {r.voidReason}</div>}
                 </td>
                 <td style={{ padding: "9px 14px", color: "var(--muted)" }}>
                   {new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
                 </td>
-                <td style={{ padding: "9px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{money(r.total)}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", fontFamily: "ui-monospace, monospace", textDecoration: r.voided ? "line-through" : "none", color: r.voided ? "var(--muted)" : "var(--text)" }}>{money(r.total)}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right" }}>
                   <InvoiceActions r={r} />
                 </td>
@@ -191,20 +253,24 @@ const lnk: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--
 function InvoiceCard({ r }: { r: InvoiceRow }) {
   const src = SOURCE_META[r.sourceType ?? "legacy"];
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", padding: "12px 14px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+    <div style={{ border: `1px solid ${r.voided ? "#fecaca" : "var(--border)"}`, borderRadius: 12, background: r.voided ? "rgba(220,38,38,0.03)" : "var(--surface)", padding: "12px 14px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", opacity: r.voided ? 0.9 : 1 }}>
       <div style={{ minWidth: 150, flex: "0 0 auto" }}>
-        <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14.5 }}>{r.code}</div>
+        <div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14.5, textDecoration: r.voided ? "line-through" : "none", color: r.voided ? "var(--muted)" : "var(--text)" }}>{r.code}</div>
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{new Date(`${r.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}</div>
       </div>
       <div style={{ flex: "1 1 200px", minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>{r.customer || "—"}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10.5, fontWeight: 800, color: src.color, background: src.bg, borderRadius: 999, padding: "2px 9px" }}>{src.label}</span>
+          {r.voided && <span style={{ fontSize: 10.5, fontWeight: 900, color: "#b91c1c", background: "rgba(220,38,38,0.12)", border: "1px solid #fecaca", borderRadius: 999, padding: "2px 9px", letterSpacing: "0.04em" }}>⊘ CANCELLED — number stays booked</span>}
           {r.createdBy && <span style={{ fontSize: 11, color: "var(--muted)" }}>by {r.createdBy}</span>}
-          <ChallanRef codes={r.challanCodes} />
+          {!r.voided && <ChallanRef codes={r.challanCodes} />}
         </div>
+        {r.voided && r.voidReason && (
+          <div style={{ fontSize: 11.5, color: "#991b1b", marginTop: 4, fontStyle: "italic" }}>Reason: {r.voidReason}</div>
+        )}
       </div>
-      <div style={{ flex: "0 0 auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, minWidth: 110, textAlign: "right" }}>₹ {money(r.total)}</div>
+      <div style={{ flex: "0 0 auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14, minWidth: 110, textAlign: "right", textDecoration: r.voided ? "line-through" : "none", color: r.voided ? "var(--muted)" : "var(--text)" }}>₹ {money(r.total)}</div>
       <div style={{ flex: "0 0 auto" }}><InvoiceActions r={r} /></div>
     </div>
   );

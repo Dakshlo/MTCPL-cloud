@@ -189,6 +189,7 @@ export default async function InvoicingListPage() {
   // empty until the migration is run) so the card can lock its actions.
   const pendingEditIds = new Set<string>();
   const pendingCancelIds = new Set<string>();
+  const pendingVoidIds = new Set<string>();
   {
     const collect = async (table: "challans" | "bulk_invoices" | "other_challans") => {
       const { data, error } = await supabase.from(table).select("id, pending_edit_at, pending_cancel_at").or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
@@ -198,7 +199,26 @@ export default async function InvoicingListPage() {
         if (r.pending_cancel_at) pendingCancelIds.add(r.id);
       }
     };
+    // Mig 203 — staged VOID requests, in their own best-effort pass so a
+    // pre-migration deploy keeps the edit/cancel locks working.
+    const collectVoid = async (table: "challans" | "bulk_invoices" | "other_challans") => {
+      const { data, error } = await supabase.from(table).select("id, pending_void_at").not("pending_void_at", "is", null);
+      if (error) return;
+      for (const r of (data ?? []) as Array<{ id: string }>) pendingVoidIds.add(r.id);
+    };
     await collect("challans"); await collect("bulk_invoices"); await collect("other_challans");
+    await collectVoid("challans"); await collectVoid("bulk_invoices"); await collectVoid("other_challans");
+  }
+
+  // Mig 203 — VOIDED invoices: cancelled ON RECORD (e-way-bill case). Their
+  // numbers are burned; they show as CANCELLED rows and never join totals.
+  type VoidedRow = { id: string; source: string; invoice_code: string; party: string | null; invoice_date: string | null; amount: number | null; reason: string; voided_at: string };
+  let voidedRows: VoidedRow[] = [];
+  {
+    const { data, error } = await supabase.from("voided_invoices")
+      .select("id, source, invoice_code, party, invoice_date, amount, reason, voided_at")
+      .order("voided_at", { ascending: false });
+    if (!error) voidedRows = (data ?? []) as VoidedRow[];
   }
 
   // Mig 177 — invoiced custom (dropped) bills: temple challans re-billed as a
@@ -231,14 +251,26 @@ export default async function InvoicingListPage() {
           challanHref: r.source_dispatch_id ? `/dispatch/${r.source_dispatch_id}/print` : null,
           editHref: `/invoicing/running/${r.id}/invoice`, cancelKind: "running", cancelId: r.id,
           challanCodes: challanCode(r.doc_fy, r.doc_seq) ? [challanCode(r.doc_fy, r.doc_seq)!] : [],
-          pendingEdit: pendingEditIds.has(r.id), pendingCancel: pendingCancelIds.has(r.id),
+          pendingEdit: pendingEditIds.has(r.id), pendingCancel: pendingCancelIds.has(r.id), pendingVoid: pendingVoidIds.has(r.id),
           sourceType: "running", createdBy: nameOf(r.custom_billed_by),
         });
       }
     }
   }
 
+  // Mig 203 — voided register entries join the lists as CANCELLED rows: no
+  // actions, no challan chip (the challan moved on), excluded from totals.
+  const voidedInvoiceRows: Row[] = voidedRows.map((v) => ({
+    key: `void:${v.id}`, code: v.invoice_code, date: v.invoice_date ?? v.voided_at.slice(0, 10),
+    customer: v.party || "—", total: Number(v.amount) || 0, href: "#", external: false,
+    sourceType: v.source === "bulk" ? ("work_order" as const) : v.source === "running" ? ("running" as const) : v.source === "other" ? ("other" as const) : ("purchase" as const),
+    voided: true, voidReason: v.reason,
+  }));
+  const voidedTemple = voidedInvoiceRows.filter((r) => r.sourceType !== "other");
+  const voidedOther = voidedInvoiceRows.filter((r) => r.sourceType === "other");
+
   const rows: Row[] = [
+    ...voidedTemple,
     ...customRows,
     ...legacy.map((r) => ({
       key: `inv:${r.id}`, code: r.invoice_number, date: r.invoice_date, customer: r.customer_name,
@@ -252,7 +284,7 @@ export default async function InvoicingListPage() {
       challanHref: c.source_dispatch_id ? `/dispatch/${c.source_dispatch_id}/print` : null,
       editHref: `/invoicing/challans/${c.id}/review?edit=1`, cancelKind: "priced" as const, cancelId: c.id,
       challanCodes: [challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number],
-      pendingEdit: pendingEditIds.has(c.id), pendingCancel: pendingCancelIds.has(c.id),
+      pendingEdit: pendingEditIds.has(c.id), pendingCancel: pendingCancelIds.has(c.id), pendingVoid: pendingVoidIds.has(c.id),
       sourceType: "purchase" as const, createdBy: nameOf(c.priced_by),
     })),
     ...bulkApproved.map((b) => ({
@@ -261,7 +293,7 @@ export default async function InvoicingListPage() {
       href: `/invoicing/bulk/${b.id}/print`, external: true,
       challanHref: null, editHref: `/invoicing/bulk/${b.id}/edit`, cancelKind: "bulk" as const, cancelId: b.id,
       challanCodes: bulkChallanCodes.get(b.id) ?? [],
-      pendingEdit: pendingEditIds.has(b.id), pendingCancel: pendingCancelIds.has(b.id),
+      pendingEdit: pendingEditIds.has(b.id), pendingCancel: pendingCancelIds.has(b.id), pendingVoid: pendingVoidIds.has(b.id),
       sourceType: "work_order" as const, createdBy: nameOf(b.created_by),
     })),
   ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -300,12 +332,15 @@ export default async function InvoicingListPage() {
           date: o.challan_date, total: t.grand, href: `/invoicing/other/${o.id}/print`, external: true, customer: party?.name ?? "—",
           editHref: `/invoicing/other/${o.id}/invoice`, cancelKind: "other" as const, cancelId: o.id,
           challanCodes: challanCode(o.doc_fy, o.doc_seq) ? [challanCode(o.doc_fy, o.doc_seq)!] : [],
-          pendingEdit: pendingEditIds.has(o.id), pendingCancel: pendingCancelIds.has(o.id),
+          pendingEdit: pendingEditIds.has(o.id), pendingCancel: pendingCancelIds.has(o.id), pendingVoid: pendingVoidIds.has(o.id),
           sourceType: "other" as const, createdBy: nameOf(o.converted_by),
         };
       });
     }
   }
+
+  // Mig 203 — voided OTHER-sale invoices join the Other section too.
+  otherRows = [...otherRows, ...voidedOther].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
   // Recent view = every invoice (temple + other) newest first.
   const recent = [...rows, ...otherRows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));

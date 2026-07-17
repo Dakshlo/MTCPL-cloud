@@ -22,7 +22,7 @@ import {
   BUTTON_STYLES,
   EmptyState,
 } from "../../accounts/_ui/components";
-import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAction, ownerRejectBulkAction, approveInvoiceEditAction, rejectInvoiceEditAction, approveInvoiceCancelAction, rejectInvoiceCancelAction } from "../actions";
+import { ownerApproveChallanAction, ownerRejectChallanAction, ownerApproveBulkAction, ownerRejectBulkAction, approveInvoiceEditAction, rejectInvoiceEditAction, approveInvoiceCancelAction, rejectInvoiceCancelAction, approveInvoiceVoidAction, rejectInvoiceVoidAction } from "../actions";
 import { OwnerRejectButton } from "../_ui/owner-reject-button";
 import { getProfilesMap } from "@/lib/profiles";
 import type { ChangeSource } from "@/lib/invoice-approvals";
@@ -199,7 +199,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   // Mig 184 — invoice CHANGE REQUESTS (edit / cancel) awaiting approval, across
   // every source. Best-effort: pre-migration the pending_* columns are absent →
   // the query errors and the section is simply empty.
-  type ChangeReq = { source: ChangeSource; id: string; code: string; party: string; kind: "edit" | "cancel"; by: string | null };
+  type ChangeReq = { source: ChangeSource; id: string; code: string; party: string; kind: "edit" | "cancel" | "void"; by: string | null; reason?: string | null };
   const changeReqs: ChangeReq[] = [];
   {
     const profs = await getProfilesMap();
@@ -209,6 +209,25 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
       if (r.pending_edit_at) changeReqs.push({ source, id: r.id, code, party, kind: "edit", by: nm(r.pending_edit_by) });
       if (r.pending_cancel_at) changeReqs.push({ source, id: r.id, code, party, kind: "cancel", by: nm(r.pending_cancel_by) });
     };
+    // Mig 203 — VOID requests, collected in their own best-effort pass so the
+    // edit/cancel section keeps working on a pre-migration deploy.
+    {
+      const { data, error } = await supabase.from("challans")
+        .select("id, temple, inv_fy, inv_seq, invoice_no_override, custom_billed_at, pending_void_at, pending_void_by, pending_void_reason")
+        .not("pending_void_at", "is", null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!error) for (const r of (data ?? []) as any[]) changeReqs.push({ source: r.custom_billed_at ? "running" : "purchase", id: r.id, code: r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, party: displayNameFor(billNames, r.temple), kind: "void", by: nm(r.pending_void_by), reason: r.pending_void_reason });
+      const { data: bd, error: be } = await supabase.from("bulk_invoices")
+        .select("id, temple, inv_fy, inv_seq, invoice_no_override, pending_void_at, pending_void_by, pending_void_reason")
+        .not("pending_void_at", "is", null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!be) for (const r of (bd ?? []) as any[]) changeReqs.push({ source: "bulk", id: r.id, code: r.invoice_no_override?.trim() || invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, party: displayNameFor(billNames, r.temple), kind: "void", by: nm(r.pending_void_by), reason: r.pending_void_reason });
+      const { data: od, error: oe } = await supabase.from("other_challans")
+        .select("id, inv_fy, inv_seq, pending_void_at, pending_void_by, pending_void_reason, invoice_parties(name)")
+        .not("pending_void_at", "is", null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!oe) for (const r of (od ?? []) as any[]) { const p = Array.isArray(r.invoice_parties) ? r.invoice_parties[0] : r.invoice_parties; changeReqs.push({ source: "other", id: r.id, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) || `INV-${String(r.id).slice(0, 6).toUpperCase()}`, party: p?.name ?? "—", kind: "void", by: nm(r.pending_void_by), reason: r.pending_void_reason }); }
+    }
     {
       const { data, error } = await supabase.from("challans")
         .select("id, temple, inv_fy, inv_seq, invoice_no_override, custom_billed_at, pending_edit_at, pending_cancel_at, pending_edit_by, pending_cancel_by")
@@ -278,23 +297,29 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {changeReqs.map((r) => {
                     const cancel = r.kind === "cancel";
+                    const isVoid = r.kind === "void";
+                    const tint = isVoid ? { bd: "#ddd6fe", edge: "#7c3aed", fg: "#6d28d9", bg: "rgba(124,58,237,0.1)" } : cancel ? { bd: "#fecaca", edge: "#dc2626", fg: "#b91c1c", bg: "rgba(220,38,38,0.1)" } : { bd: "#fde68a", edge: "#d97706", fg: "#b45309", bg: "rgba(217,119,6,0.12)" };
+                    const badge = isVoid ? "⊘ VOID requested · number stays" : cancel ? "✕ CANCEL requested" : "✎ EDIT requested";
+                    const approveAction = isVoid ? approveInvoiceVoidAction : cancel ? approveInvoiceCancelAction : approveInvoiceEditAction;
+                    const rejectAction = isVoid ? rejectInvoiceVoidAction : cancel ? rejectInvoiceCancelAction : rejectInvoiceEditAction;
                     const viewHref = r.source === "bulk" ? `/invoicing/bulk/${r.id}/print` : r.source === "other" ? `/invoicing/other/${r.id}/print` : r.source === "running" ? `/invoicing/challan/${r.id}/custom/print` : `/invoicing/challan/${r.id}/print`;
                     return (
-                      <div key={`${r.source}:${r.id}:${r.kind}`} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface, #fff)", border: `1px solid ${cancel ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${cancel ? "#dc2626" : "#d97706"}`, borderRadius: 10 }}>
+                      <div key={`${r.source}:${r.id}:${r.kind}`} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface, #fff)", border: `1px solid ${tint.bd}`, borderLeft: `4px solid ${tint.edge}`, borderRadius: 10 }}>
                         <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13, color: ACCOUNTS_TOKENS.accent, minWidth: 120 }}>{r.code}</span>
-                        <span style={{ fontSize: 10.5, fontWeight: 800, color: cancel ? "#b91c1c" : "#b45309", background: cancel ? "rgba(220,38,38,0.1)" : "rgba(217,119,6,0.12)", borderRadius: 999, padding: "2px 9px" }}>{cancel ? "✕ CANCEL requested" : "✎ EDIT requested"}</span>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, color: tint.fg, background: tint.bg, borderRadius: 999, padding: "2px 9px" }}>{badge}</span>
                         <span style={{ fontSize: 12, color: "var(--muted)" }}>🏛 {r.party}</span>
                         {r.by && <span style={{ fontSize: 11, color: "var(--muted)" }}>by {r.by}</span>}
+                        {isVoid && r.reason && <span style={{ flexBasis: "100%", fontSize: 12, color: "#6d28d9", fontStyle: "italic" }}>Reason: {r.reason}</span>}
                         <Link href={viewHref} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "var(--gold-dark, #92400e)", textDecoration: "none" }}>🧾 View current →</Link>
                         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           {isOwner ? (
                             <>
-                              <form action={cancel ? approveInvoiceCancelAction : approveInvoiceEditAction}>
+                              <form action={approveAction}>
                                 <input type="hidden" name="source" value={r.source} />
                                 <input type="hidden" name="id" value={r.id} />
-                                <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: "#16a34a", color: "#fff", border: "1px solid #15803d", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✅ Approve {cancel ? "cancel" : "edit"}</button>
+                                <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: isVoid ? "#7c3aed" : "#16a34a", color: "#fff", border: `1px solid ${isVoid ? "#6d28d9" : "#15803d"}`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>{isVoid ? "⊘ Approve void" : `✅ Approve ${cancel ? "cancel" : "edit"}`}</button>
                               </form>
-                              <form action={cancel ? rejectInvoiceCancelAction : rejectInvoiceEditAction}>
+                              <form action={rejectAction}>
                                 <input type="hidden" name="source" value={r.source} />
                                 <input type="hidden" name="id" value={r.id} />
                                 <button type="submit" style={{ fontSize: 12.5, fontWeight: 700, padding: "8px 16px", background: "var(--bg)", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✕ Reject</button>

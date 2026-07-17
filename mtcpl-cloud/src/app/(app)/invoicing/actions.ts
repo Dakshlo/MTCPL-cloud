@@ -25,7 +25,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
-import { financialYear } from "@/lib/doc-code";
+import { financialYear, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { freeInvoiceNumber } from "@/lib/invoice-numbers";
 import { uniformGstPercent } from "@/lib/challan-pricing";
 import { applyInvoiceEdit, applyInvoiceCancel, pendingTableOf, type ChangeSource, type EditPayload } from "@/lib/invoice-approvals";
@@ -952,6 +952,150 @@ export async function rejectInvoiceCancelAction(formData: FormData): Promise<voi
   void logAudit(profile.id, "invoice_cancel_rejected", table, c!.id, {});
   revalidatePath("/invoicing/approval");
   redirect(`/invoicing/approval?toast=${encodeURIComponent("Cancel rejected — invoice kept")}`);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Mig 203 — VOID (the e-way-bill case). Unlike Cancel, the invoice NUMBER IS
+// BURNED (the government keeps a record of the cancelled bill): the invoice
+// stays on record in voided_invoices shown as CANCELLED with a mandatory
+// reason, the number is never freed, and the challan(s) return to their source
+// page to be re-processed under a NEW number. Same approval flow as cancel.
+// ════════════════════════════════════════════════════════════════
+
+/** Stage a VOID request — any invoicing user; reason is mandatory. */
+export async function requestInvoiceVoidAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) redirect("/invoicing?toast=Access+denied");
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/invoices");
+  const reason = txt(formData, "reason").slice(0, 500);
+  if (reason.length < 3) redirect(`/invoicing/invoices?toast=${encodeURIComponent("A reason is required to void an invoice")}`);
+  const amount = Number(txt(formData, "amount"));
+
+  // Validate it's still a live invoice of that source.
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (admin.from(table) as any)
+    .select("id, inv_fy, inv_seq, cancelled_at" + (c!.source === "other" ? ", converted_at" : c!.source === "running" ? ", custom_billed_at" : ""))
+    .eq("id", c!.id).maybeSingle();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const row = data as any;
+  if (!row) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if (row.cancelled_at) redirect(`/invoicing/invoices?toast=${encodeURIComponent("Invoice is already cancelled")}`);
+  if (c!.source === "other" && !row.converted_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
+  if (c!.source === "running" && !row.custom_billed_at) redirect("/invoicing/invoices?toast=Invoice+not+found");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({
+    pending_void_at: new Date().toISOString(), pending_void_by: profile.id,
+    pending_void_reason: reason, pending_void_amount: Number.isFinite(amount) ? amount : null,
+  }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_void_requested", table, c!.id, { reason });
+  refreshInvoicingPaths({ challanId: c!.id });
+  revalidatePath("/invoicing/approval");
+  redirect(`/invoicing/invoices?toast=${encodeURIComponent("Void request sent for approval — the number stays booked")}`);
+}
+
+/** Approve a VOID → freeze the invoice into voided_invoices (shown as
+ *  CANCELLED forever, number NOT freed) + return the challan(s) to their
+ *  source page for a fresh cycle. */
+export async function approveInvoiceVoidAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (admin.from(table) as any).select("*").eq("id", c!.id).maybeSingle();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const row = data as any;
+  if (!row || !row.pending_void_at) redirect(`/invoicing/approval?toast=${encodeURIComponent("No void request pending on that invoice")}`);
+
+  // ── Freeze a full snapshot (header + items + refs) for the record.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let items: any[] = [];
+  let party = "—";
+  let invoiceDate: string | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extra: Record<string, any> = {};
+  if (c!.source === "purchase") {
+    ({ data: items } = (await admin.from("challan_items").select("*").eq("challan_id", c!.id).order("position")) as { data: typeof items });
+    party = row.temple ?? "—";
+    invoiceDate = (row.priced_at ?? row.challan_date ?? "").slice(0, 10) || null;
+    extra.challan_number = row.challan_number ?? null;
+  } else if (c!.source === "running") {
+    ({ data: items } = (await admin.from("challan_custom_items").select("*").eq("challan_id", c!.id).order("position")) as { data: typeof items });
+    party = row.temple ?? "—";
+    invoiceDate = (row.custom_billed_at ?? row.challan_date ?? "").slice(0, 10) || null;
+    extra.challan_number = row.challan_number ?? null;
+  } else if (c!.source === "bulk") {
+    ({ data: items } = (await admin.from("bulk_invoice_items").select("*").eq("bulk_invoice_id", c!.id).order("position")) as { data: typeof items });
+    party = row.temple ?? "—";
+    invoiceDate = (row.invoice_date ?? row.created_at ?? "").slice(0, 10) || null;
+    const { data: jn } = await admin.from("bulk_invoice_challans").select("challan_id").eq("bulk_invoice_id", c!.id);
+    extra.challan_ids = ((jn ?? []) as Array<{ challan_id: string }>).map((r) => r.challan_id);
+  } else {
+    ({ data: items } = (await admin.from("other_challan_items").select("*").eq("other_challan_id", c!.id).order("position")) as { data: typeof items });
+    const { data: p } = await admin.from("invoice_parties").select("name").eq("id", row.party_id).maybeSingle();
+    party = (p as { name: string | null } | null)?.name ?? "—";
+    invoiceDate = (row.converted_at ?? row.challan_date ?? "").slice(0, 10) || null;
+  }
+  const code = (typeof row.invoice_no_override === "string" && row.invoice_no_override.trim())
+    || invoiceCodeFromDoc(row.inv_fy ?? null, row.inv_seq ?? null)
+    || `INV-${String(c!.id).slice(0, 6).toUpperCase()}`;
+
+  const { error: insErr } = await admin.from("voided_invoices").insert({
+    source: c!.source, source_id: c!.id, inv_fy: row.inv_fy ?? null, inv_seq: row.inv_seq ?? null,
+    invoice_code: code, party, invoice_date: invoiceDate,
+    amount: row.pending_void_amount ?? null, reason: row.pending_void_reason ?? "—",
+    snapshot: { header: row, items: items ?? [], ...extra },
+    requested_by: row.pending_void_by ?? null, voided_by: profile.id,
+  } as never);
+  if (insErr) redirect(`/invoicing/approval?toast=${encodeURIComponent(`Could not void: ${insErr.message}`)}`);
+
+  // ── Release the live row — SAME resets as cancel but the number is NOT
+  // freed (freeInvoiceNumber deliberately not called: the counter stays past
+  // it and the lock is never released, so it can never be reused).
+  const clearPending = { pending_void_at: null, pending_void_by: null, pending_void_reason: null, pending_void_amount: null, pending_edit_at: null, pending_edit_by: null, pending_edit_payload: null, pending_cancel_at: null, pending_cancel_by: null };
+  if (c!.source === "purchase") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin.from("challans") as any).update({ inv_fy: null, inv_seq: null, invoice_no_override: null, priced_at: null, priced_by: null, owner_approved_at: null, owner_approved_by: null, owner_rejected_at: null, owner_reject_reason: null, ...clearPending }).eq("id", c!.id);
+  } else if (c!.source === "running") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin.from("challans") as any).update({ inv_fy: null, inv_seq: null, ...clearPending }).eq("id", c!.id);
+  } else if (c!.source === "bulk") {
+    await admin.from("bulk_invoice_challans").delete().eq("bulk_invoice_id", c!.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin.from("bulk_invoices") as any).update({ cancelled_at: new Date().toISOString(), inv_fy: null, inv_seq: null, ...clearPending }).eq("id", c!.id);
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin.from("other_challans") as any).update({ inv_fy: null, inv_seq: null, converted_at: null, converted_by: null, ...clearPending }).eq("id", c!.id);
+  }
+
+  void logAudit(profile.id, "invoice_void_approved", table, c!.id, { code });
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  revalidatePath("/invoicing/bulk");
+  revalidatePath("/invoicing/challans");
+  revalidatePath("/invoicing/other");
+  revalidatePath("/invoicing");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent(`${code} voided — kept on record, number stays booked`)}`);
+}
+
+/** Reject a VOID request → the invoice stays exactly as it was. */
+export async function rejectInvoiceVoidAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth(["owner", "developer", "accountant_star"]);
+  const admin = createAdminSupabaseClient();
+  const c = readChange(formData);
+  if (!c) redirect("/invoicing/approval");
+  const table = pendingTableOf(c!.source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin.from(table) as any).update({ pending_void_at: null, pending_void_by: null, pending_void_reason: null, pending_void_amount: null }).eq("id", c!.id);
+  void logAudit(profile.id, "invoice_void_rejected", table, c!.id, {});
+  revalidatePath("/invoicing/approval");
+  revalidatePath("/invoicing/invoices");
+  redirect(`/invoicing/approval?toast=${encodeURIComponent("Void rejected — invoice unchanged")}`);
 }
 
 // ════════════════════════════════════════════════════════════════
