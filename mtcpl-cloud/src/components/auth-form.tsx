@@ -42,7 +42,12 @@ export function AuthForm() {
       // Supabase / the SMS provider is unreachable. Without this, a
       // network stall or SMS-provider outage left the form stuck on
       // "Sending code…" with no feedback to the user.
-      const otpPromise = supabase.auth.signInWithOtp({ phone: normalized });
+      // shouldCreateUser:false — Jul 2026 bot-signup attack: the open OTP
+      // endpoint let bots auto-create 2000+ junk users. Login must NEVER
+      // create an account; new users are added by owner/dev in Settings →
+      // Users → Add user. ("Allow new signups" is also OFF in the Supabase
+      // dashboard — this is belt & braces.)
+      const otpPromise = supabase.auth.signInWithOtp({ phone: normalized, options: { shouldCreateUser: false } });
       const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
         setTimeout(
           () => resolve({ error: new Error("Request timed out — server didn't respond in 20 seconds. Check network or contact support.") }),
@@ -66,7 +71,7 @@ export function AuthForm() {
       if (raw.toLowerCase().includes("rate limit")) {
         friendly += "\n\nTip: SMS provider has hit a rate limit. Wait 60 seconds and retry.";
       } else if (raw.toLowerCase().includes("signup") || raw.toLowerCase().includes("disabled")) {
-        friendly += "\n\nTip: This phone number isn't registered. Ask the developer to add it to the profiles table first.";
+        friendly += "\n\nTip: This phone number isn't registered. Ask the owner to add you (Settings → Users → Add user), then try again.";
       } else if (raw.toLowerCase().includes("timed out")) {
         friendly += "\n\nTip: Check your internet connection. If it's working, the Supabase project / SMS provider may be down.";
       }

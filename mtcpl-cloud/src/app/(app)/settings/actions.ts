@@ -583,6 +583,85 @@ export async function updateOwnNameAction(formData: FormData) {
   redirect("/settings?toast=Your+name+updated");
 }
 
+/** ADD USER — Jul 2026. Self-signup is CLOSED (bot attack: 2000+ junk
+ *  accounts auto-created via the open OTP endpoint). New team members are
+ *  now pre-created here by owner/developer: we create the auth user with
+ *  the phone already confirmed, then write their profile (name + role +
+ *  active) — so their very first OTP login just works. */
+export async function addUserAction(formData: FormData) {
+  const { profile: currentUser } = await requireAuth(["owner", "developer"]);
+  const admin = createAdminSupabaseClient();
+
+  const full_name = text(formData, "full_name").toUpperCase();
+  const rawPhone = text(formData, "phone");
+  const requestedRole = text(formData, "role");
+  const requestedVendorId = text(formData, "vendor_id") || null;
+
+  if (!full_name) redirect("/settings?toast=Enter+the+person%27s+name");
+
+  // Normalise to 91XXXXXXXXXX (same shape the app stores everywhere).
+  let digits = rawPhone.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10) digits = `91${digits}`;
+  if (!(digits.length === 12 && digits.startsWith("91") && /^[6-9]/.test(digits.slice(2)))) {
+    redirect("/settings?toast=Enter+a+valid+10-digit+Indian+mobile");
+  }
+
+  // Same assignment rules as edit: owner gets the operational roles,
+  // developer can assign anything.
+  const OWNER_ADDABLE = [
+    "senior_incharge", "team_head", "carving_head", "dispatch", "tender_manager",
+    "block_slab_entry", "slab_entry", "block_entry", "cutting_operator",
+    "vendor", "slab_transfer", "tv",
+  ];
+  if (!requestedRole) redirect("/settings?toast=Pick+a+role");
+  if (currentUser.role !== "developer" && !OWNER_ADDABLE.includes(requestedRole)) {
+    redirect("/settings?toast=Cannot+assign+that+role");
+  }
+
+  // Vendor role must be bound to an active carving vendor (same as edit).
+  let vendorIdToSave: string | null = null;
+  if (requestedRole === "vendor") {
+    if (!requestedVendorId) redirect("/settings?toast=Pick+a+carving+vendor+for+this+user");
+    const { data: vendorRow } = await admin
+      .from("vendors")
+      .select("id, vendor_type, is_active")
+      .eq("id", requestedVendorId)
+      .maybeSingle();
+    if (!vendorRow || !vendorRow.is_active || (vendorRow.vendor_type !== "CNC" && vendorRow.vendor_type !== "Outsource")) {
+      redirect("/settings?toast=Pick+an+active+carving+vendor");
+    }
+    vendorIdToSave = requestedVendorId;
+  }
+
+  // Refuse a duplicate phone (clear message instead of a raw auth error).
+  const { data: existing } = await admin.from("profiles").select("id, full_name").eq("phone", digits).maybeSingle();
+  if (existing) redirect(`/settings?toast=${encodeURIComponent(`Phone already registered${existing.full_name ? ` to ${existing.full_name}` : ""}`)}`);
+
+  // 1) auth user, phone pre-confirmed so OTP login works immediately.
+  const { data: created, error: authError } = await admin.auth.admin.createUser({
+    phone: digits,
+    phone_confirm: true,
+  });
+  if (authError || !created?.user) {
+    redirect(`/settings?toast=${encodeURIComponent(authError?.message || "Could not create the login")}`);
+  }
+
+  // 2) profile — the on-signup trigger may have already inserted a stub
+  //    row, so upsert to stamp name/role/active either way.
+  const { error: profError } = await admin
+    .from("profiles")
+    .upsert(
+      { id: created.user.id, full_name, phone: digits, role: requestedRole, is_active: true, vendor_id: vendorIdToSave },
+      { onConflict: "id" },
+    );
+  if (profError) redirect(`/settings?toast=${encodeURIComponent(profError.message)}`);
+
+  void logAudit(currentUser.id, "user_added", "profile", created.user.id, { full_name, phone: digits, role: requestedRole });
+  revalidatePath("/settings");
+  redirect("/settings?toast=User+added+—+they+can+log+in+now");
+}
+
 export async function deleteUserAction(formData: FormData) {
   const { profile: currentUser } = await requireAuth(["owner", "developer"]);
   const admin = createAdminSupabaseClient();
