@@ -19,9 +19,14 @@ export function AddUserForm({ roles, vendors }: { roles: Role[]; vendors: Vendor
   useEffect(() => setMounted(true), []);
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // capture + stopPropagation: Esc must close ONLY this modal, not also the
+    // PeekSection underneath (its window-level Esc listener runs in bubble
+    // phase — stopping here means it never fires).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); setOpen(false); }
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [open]);
 
   const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" };
@@ -36,6 +41,11 @@ export function AddUserForm({ roles, vendors }: { roles: Role[]; vendors: Vendor
       {open && mounted && createPortal(
         <div
           onClick={() => setOpen(false)}
+          // stopPropagation: the portal's events bubble up the REACT tree into
+          // PeekSection, whose backdrop closes on any mousedown outside ITS
+          // dialog — without this, clicking any field here closed the whole
+          // Users peek and dumped you back on the settings page.
+          onMouseDown={(e) => e.stopPropagation()}
           style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)", display: "grid", placeItems: "center", padding: 16 }}
         >
           <div
