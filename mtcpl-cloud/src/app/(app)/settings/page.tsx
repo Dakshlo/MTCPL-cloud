@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, addUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction, deleteAllDevTransferAction } from "./actions";
+import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction, deleteAllDevTransferAction } from "./actions";
+import { AddUserForm } from "./add-user-form";
 import { ensureDevTransferBucket } from "./dev-transfer-shared";
 import { listDevTransferBaskets, type DevBasket } from "./dev-transfer-list";
 import { TempleRenameForm } from "./temple-rename-form";
@@ -622,39 +623,14 @@ export default async function SettingsPage() {
           count={activeUsers.length}          modalMaxWidth={1100}
         >
           {/* ADD USER — Jul 2026. Self-signup is closed (bot attack), so new
-              team members are pre-created here: name + mobile + role → they
-              log in with OTP right away. */}
-          <form
-            action={addUserAction}
-            style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr auto", gap: 8, alignItems: "end", padding: "10px 12px", marginBottom: 14, border: "1.5px dashed var(--border)", borderRadius: 10, background: "var(--bg)" }}
-          >
-            <label style={{ display: "grid", gap: 3, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>
-              Name
-              <input name="full_name" required placeholder="FULL NAME" style={{ textTransform: "uppercase" }} />
-            </label>
-            <label style={{ display: "grid", gap: 3, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>
-              Mobile
-              <input name="phone" required placeholder="10-digit mobile" inputMode="numeric" pattern="[0-9 +\-]{10,15}" />
-            </label>
-            <label style={{ display: "grid", gap: 3, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>
-              Role
-              <select name="role" defaultValue="cutting_operator">
-                {(currentUser.role === "developer" ? UI_ROLES_ALL : UI_ROLES_PLANNER).map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "grid", gap: 3, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>
-              CNC vendor (only for CNC OPERATOR)
-              <select name="vendor_id" defaultValue="">
-                <option value="">— none —</option>
-                {vendorList.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-            </label>
-            <button type="submit" className="primary-button" style={{ whiteSpace: "nowrap", minHeight: 40 }}>➕ Add user</button>
-          </form>
+              team members are pre-created here: a button that opens a centered
+              modal with the form (see add-user-form.tsx). */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <AddUserForm
+              roles={currentUser.role === "developer" ? UI_ROLES_ALL : UI_ROLES_PLANNER}
+              vendors={vendorList.map((v) => ({ id: v.id, name: v.name }))}
+            />
+          </div>
 
           {activeUsers.length === 0 ? (
             <div className="banner">No active users.</div>

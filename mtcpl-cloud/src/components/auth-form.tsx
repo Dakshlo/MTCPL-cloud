@@ -71,7 +71,10 @@ export function AuthForm() {
       if (raw.toLowerCase().includes("rate limit")) {
         friendly += "\n\nTip: SMS provider has hit a rate limit. Wait 60 seconds and retry.";
       } else if (raw.toLowerCase().includes("signup") || raw.toLowerCase().includes("disabled")) {
-        friendly += "\n\nTip: This phone number isn't registered. Ask the owner to add you (Settings → Users → Add user), then try again.";
+        // Unregistered number — REPLACE the raw auth error with a clean,
+        // human message. Never leak internals ("Signups not allowed for
+        // otp" / where the admin adds users) on the public login page.
+        friendly = "This mobile number is not registered with MTCPL.\nPlease contact the office to get access, then try again.";
       } else if (raw.toLowerCase().includes("timed out")) {
         friendly += "\n\nTip: Check your internet connection. If it's working, the Supabase project / SMS provider may be down.";
       }
