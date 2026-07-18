@@ -106,15 +106,15 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ ...label, gridColumn: "1 / -1" }}>
             Vehicle name *
-            <input name="name" required defaultValue={v?.name ?? ""} placeholder="e.g. TATA 407" autoFocus style={input} {...textFill} />
+            <input name="name" required defaultValue={v?.name ?? ""} autoFocus style={input} {...textFill} />
           </label>
           <label style={label}>
             Registration no.
-            <input name="reg_no" defaultValue={v?.reg_no ?? ""} placeholder="RJ 24 GA 1234" style={input} {...textFill} />
+            <input name="reg_no" defaultValue={v?.reg_no ?? ""} style={input} {...textFill} />
           </label>
           <label style={label}>
             Make / model
-            <input name="make_model" defaultValue={v?.make_model ?? ""} placeholder="Tata 407 Gold SFC" style={input} {...textFill} />
+            <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
           </label>
         </div>
 
@@ -128,15 +128,15 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13 }}>
               <label style={label}>
                 EMI amount (₹)
-                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_amount ?? ""} placeholder="18500" style={input} {...noFill} />
+                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_amount ?? ""} style={input} {...noFill} />
               </label>
               <label style={label}>
                 Due day of month
-                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_day ?? ""} placeholder="7" style={input} {...noFill} />
+                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_day ?? ""} style={input} {...noFill} />
               </label>
               <label style={{ ...label, gridColumn: "1 / -1" }}>
                 Lender / bank
-                <input name="emi_lender" defaultValue={v?.emi_lender ?? ""} placeholder="HDFC Bank" style={input} {...textFill} />
+                <input name="emi_lender" defaultValue={v?.emi_lender ?? ""} style={input} {...textFill} />
               </label>
               <label style={label}>
                 Loan start
@@ -156,11 +156,11 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label style={label}>
               Insurance company
-              <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} placeholder="ICICI Lombard" style={input} {...textFill} />
+              <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} style={input} {...textFill} />
             </label>
             <label style={label}>
               Policy no.
-              <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} placeholder="POLICY NUMBER" style={input} {...textFill} />
+              <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} style={input} {...textFill} />
             </label>
             <label style={label}>
               Insurance expiry
@@ -182,7 +182,7 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
         {/* Notes */}
         <div style={{ ...card, marginTop: 14 }}>
           <div style={sectionHd}>📝 Notes / other info</div>
-          <textarea name="notes" rows={2} defaultValue={v?.notes ?? ""} placeholder="Permit details, driver, anything else…" style={{ ...input, resize: "vertical", minHeight: 58 }} {...textFill} />
+          <textarea name="notes" rows={2} defaultValue={v?.notes ?? ""} style={{ ...input, resize: "vertical", minHeight: 58 }} {...textFill} />
         </div>
 
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
