@@ -102,7 +102,7 @@ export default async function SlabsPage() {
   // Entry roles see their own submissions; senior roles see everything.
   let batchQuery = admin
     .from("slab_import_batches")
-    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note")
+    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note, slab_batch_id")
     .order("submitted_at", { ascending: false })
     .limit(40);
   if (isEntryRole) batchQuery = batchQuery.eq("submitted_by", profile.id);
@@ -116,6 +116,7 @@ export default async function SlabsPage() {
     row_count: number | null; slab_count: number | null; file_name: string | null;
     status: string; submitted_by: string | null; submitted_at: string | null;
     reviewed_by: string | null; reviewed_at: string | null; review_note: string | null;
+    slab_batch_id: string | null;
   };
   const importBatches: ImportBatch[] = ((batchRows ?? []) as BatchRow[]).map((b) => ({
     id: b.id,
@@ -131,6 +132,7 @@ export default async function SlabsPage() {
     reviewedByName: b.reviewed_by ? (profilesMap[b.reviewed_by] ?? null) : null,
     reviewedAt: b.reviewed_at,
     reviewNote: b.review_note,
+    slabBatchId: b.slab_batch_id ?? null,
   }));
 
   return (

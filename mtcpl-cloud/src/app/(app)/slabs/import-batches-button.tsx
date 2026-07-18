@@ -7,7 +7,7 @@
 // approval happens on /tasks/slab-imports.
 
 import { useMemo, useState } from "react";
-import { getSlabImportFileUrlAction, loadMoreImportBatchesAction } from "./actions";
+import { getSlabImportFileUrlAction, loadMoreImportBatchesAction, getImportBatchSlabsAction } from "./actions";
 
 export type ImportBatchRowPreview = {
   label: string;
@@ -36,6 +36,20 @@ export type ImportBatch = {
   reviewedByName: string | null;
   reviewedAt: string | null;
   reviewNote: string | null;
+  /** The slab-group id stamped on every slab this batch created (mig 122).
+   *  Present once approved — lets "🔢 Codes" list the real slabs + status. */
+  slabBatchId: string | null;
+};
+
+/** One created slab of an approved batch (for the "🔢 Codes" view). */
+export type BatchSlab = {
+  id: string;
+  label: string | null;
+  description: string | null;
+  length: number;
+  width: number;
+  height: number;
+  status: string;
 };
 
 const STATUS_META: Record<ImportBatch["status"], { label: string; fg: string; bg: string; icon: string }> = {
@@ -43,6 +57,25 @@ const STATUS_META: Record<ImportBatch["status"], { label: string; fg: string; bg
   approved: { label: "Approved", fg: "#166534", bg: "rgba(22,163,74,0.15)", icon: "✅" },
   rejected: { label: "Rejected", fg: "#991b1b", bg: "rgba(220,38,38,0.12)", icon: "✕" },
 };
+
+// Friendly label + colour for a slab's CURRENT status, so the "🔢 Codes" view
+// tells the team where each created slab actually is now.
+const SLAB_STATUS_META: Record<string, { label: string; fg: string; bg: string }> = {
+  open: { label: "Required (open)", fg: "#1d4ed8", bg: "rgba(37,99,235,0.12)" },
+  planned: { label: "Planned", fg: "#7c3aed", bg: "rgba(124,58,237,0.12)" },
+  cut_done: { label: "Cut · at carving", fg: "#b45309", bg: "rgba(180,83,9,0.14)" },
+  carving_assigned: { label: "Carving assigned", fg: "#b45309", bg: "rgba(180,83,9,0.14)" },
+  carving_in_progress: { label: "Carving WIP", fg: "#b45309", bg: "rgba(180,83,9,0.14)" },
+  carving_on_hold: { label: "Carving on hold", fg: "#92400e", bg: "rgba(146,64,14,0.16)" },
+  completed: { label: "Ready to dispatch", fg: "#0f766e", bg: "rgba(15,118,110,0.13)" },
+  dispatched: { label: "Dispatched", fg: "#166534", bg: "rgba(22,101,52,0.14)" },
+  delivered: { label: "Delivered", fg: "#166534", bg: "rgba(22,101,52,0.14)" },
+  rejected: { label: "Rejected", fg: "#991b1b", bg: "rgba(220,38,38,0.12)" },
+  cancelled: { label: "Cancelled", fg: "#991b1b", bg: "rgba(220,38,38,0.12)" },
+};
+function slabStatusMeta(s: string) {
+  return SLAB_STATUS_META[s] ?? { label: s.replace(/_/g, " "), fg: "#475569", bg: "rgba(71,85,105,0.12)" };
+}
 
 function fmtWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -62,6 +95,25 @@ export function ImportBatchesButton({ batches, totalCount }: { batches: ImportBa
   const [extra, setExtra] = useState<ImportBatch[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [done, setDone] = useState(false);
+  // "🔢 Codes" — the real slabs an approved batch created (code + current
+  // status), fetched on demand + cached per batch.
+  const [codesFor, setCodesFor] = useState<string | null>(null);
+  const [codesData, setCodesData] = useState<Record<string, BatchSlab[]>>({});
+  const [codesLoading, setCodesLoading] = useState<string | null>(null);
+  const [codesErr, setCodesErr] = useState<string | null>(null);
+
+  async function toggleCodes(b: ImportBatch) {
+    if (codesFor === b.id) { setCodesFor(null); return; }
+    setCodesFor(b.id);
+    setCodesErr(null);
+    if (!codesData[b.id] && b.slabBatchId) {
+      setCodesLoading(b.id);
+      const res = await getImportBatchSlabsAction(b.slabBatchId);
+      setCodesLoading(null);
+      if (res.ok) setCodesData((m) => ({ ...m, [b.id]: res.slabs }));
+      else setCodesErr(res.error);
+    }
+  }
 
   const allBatches = useMemo(() => {
     const seen = new Set<string>();
@@ -148,6 +200,11 @@ export function ImportBatchesButton({ batches, totalCount }: { batches: ImportBa
                         <button type="button" disabled={downloading === b.id} onClick={() => downloadExcel(b.id)} style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 11px", cursor: downloading === b.id ? "wait" : "pointer" }}>
                           {downloading === b.id ? "…" : "⬇ Excel"}
                         </button>
+                        {b.status === "approved" && b.slabBatchId && (
+                          <button type="button" onClick={() => toggleCodes(b)} style={{ fontSize: 12, fontWeight: 700, color: "#0f766e", background: codesFor === b.id ? "rgba(15,118,110,0.1)" : "none", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 11px", cursor: "pointer" }}>
+                            {codesFor === b.id ? "Hide codes" : "🔢 Codes & status"}
+                          </button>
+                        )}
                       </div>
                       <div className="muted" style={{ fontSize: 11.5 }}>
                         Sent by <strong>{b.submittedByName ?? "—"}</strong> · {fmtWhen(b.submittedAt)}
@@ -187,6 +244,54 @@ export function ImportBatchesButton({ batches, totalCount }: { batches: ImportBa
                               ))}
                             </tbody>
                           </table>
+                        </div>
+                      )}
+                      {codesFor === b.id && (
+                        <div style={{ marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                          {codesLoading === b.id ? (
+                            <div className="muted" style={{ padding: 14, fontSize: 12.5 }}>Loading slab codes…</div>
+                          ) : codesErr ? (
+                            <div style={{ padding: 14, fontSize: 12.5, color: "#991b1b" }}>⚠ {codesErr}</div>
+                          ) : (codesData[b.id] ?? []).length === 0 ? (
+                            <div className="muted" style={{ padding: 14, fontSize: 12.5 }}>No slabs found for this batch — they may have been deleted since.</div>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", padding: "9px 12px", background: "var(--surface-alt, rgba(0,0,0,0.03))", borderBottom: "1px solid var(--border)" }}>
+                                <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)" }}>{(codesData[b.id] ?? []).length} slab{(codesData[b.id] ?? []).length === 1 ? "" : "s"} · where they are now:</span>
+                                {[...(codesData[b.id] ?? []).reduce((m, s) => m.set(s.status, (m.get(s.status) ?? 0) + 1), new Map<string, number>()).entries()]
+                                  .sort((a, z) => z[1] - a[1])
+                                  .map(([st, n]) => {
+                                    const m = slabStatusMeta(st);
+                                    return <span key={st} style={{ fontSize: 11, fontWeight: 800, color: m.fg, background: m.bg, borderRadius: 999, padding: "2px 9px" }}>{n} {m.label}</span>;
+                                  })}
+                              </div>
+                              <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+                                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg)", position: "sticky", top: 0 }}>
+                                      {["#", "Slab code", "Item", "Size (in)", "Status now"].map((h) => (
+                                        <th key={h} style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", textAlign: "left", padding: "6px 10px", whiteSpace: "nowrap" }}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(codesData[b.id] ?? []).map((s, i) => {
+                                      const m = slabStatusMeta(s.status);
+                                      return (
+                                        <tr key={s.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                                          <td style={{ padding: "5px 10px", fontSize: 11, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{i + 1}</td>
+                                          <td style={{ padding: "5px 10px", fontSize: 12.5, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>{s.id}</td>
+                                          <td style={{ padding: "5px 10px", fontSize: 12 }}>{[s.label, s.description].filter(Boolean).join(" · ") || "—"}</td>
+                                          <td style={{ padding: "5px 10px", fontSize: 12, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{s.length}×{s.width}×{s.height}</td>
+                                          <td style={{ padding: "5px 10px" }}><span style={{ fontSize: 11, fontWeight: 800, color: m.fg, background: m.bg, borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>{m.label}</span></td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

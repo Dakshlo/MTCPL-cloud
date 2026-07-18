@@ -10,8 +10,9 @@ import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { fetchUncategorizedOpenSlabs } from "@/lib/uncategorized-slabs";
 import { getProfilesMap } from "@/lib/profiles";
+import { fetchAllPaged } from "@/lib/paginate";
 import type { AppRole } from "@/lib/types";
-import type { ImportBatch, ImportBatchRowPreview } from "./import-batches-button";
+import type { ImportBatch, ImportBatchRowPreview, BatchSlab } from "./import-batches-button";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -700,7 +701,7 @@ export async function loadMoreImportBatchesAction(
 
   let q = supabase
     .from("slab_import_batches")
-    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note")
+    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note, slab_batch_id")
     .order("submitted_at", { ascending: false })
     .range(from, from + IMPORT_BATCH_PAGE - 1);
   if (IMPORT_BATCH_ENTRY_ROLES.includes(profile.role)) q = q.eq("submitted_by", profile.id);
@@ -711,6 +712,7 @@ export async function loadMoreImportBatchesAction(
     row_count: number | null; slab_count: number | null; file_name: string | null;
     status: string; submitted_by: string | null; submitted_at: string | null;
     reviewed_by: string | null; reviewed_at: string | null; review_note: string | null;
+    slab_batch_id: string | null;
   };
   const rows = (data ?? []) as BatchRow[];
   const names = await getProfilesMap();
@@ -723,8 +725,45 @@ export async function loadMoreImportBatchesAction(
     submittedAt: b.submitted_at,
     reviewedByName: b.reviewed_by ? (names[b.reviewed_by] ?? null) : null,
     reviewedAt: b.reviewed_at, reviewNote: b.review_note,
+    slabBatchId: b.slab_batch_id ?? null,
   }));
   return { batches, done: batches.length < IMPORT_BATCH_PAGE };
+}
+
+/** The REAL slabs an approved batch created — their codes, size, and CURRENT
+ *  status. Powers the "🔢 Codes" view on the Batches modal, so the team can
+ *  see the actual slab numbers AND where each one is now (a batch may look
+ *  "missing" from Required Sizes only because its slabs already moved on to
+ *  cut_done / dispatched / etc.). Keyed by slab_requirements.batch_id, which
+ *  equals slab_import_batches.slab_batch_id. Paginated for safety (a batch can
+ *  hold up to 10,000 slabs). */
+export async function getImportBatchSlabsAction(
+  slabBatchId: string,
+): Promise<{ ok: true; slabs: BatchSlab[] } | { ok: false; error: string }> {
+  await requireAuth();
+  const id = String(slabBatchId || "").trim();
+  if (!id) return { ok: false, error: "This batch has no created slabs yet." };
+  const admin = createAdminSupabaseClient();
+  try {
+    const rows = await fetchAllPaged<{ id: string; label: string | null; description: string | null; length_ft: number | string; width_ft: number | string; thickness_ft: number | string; status: string }>((from, to) =>
+      admin
+        .from("slab_requirements")
+        .select("id, label, description, length_ft, width_ft, thickness_ft, status")
+        .eq("batch_id", id)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    return {
+      ok: true,
+      slabs: rows.map((r) => ({
+        id: r.id, label: r.label, description: r.description,
+        length: Number(r.length_ft) || 0, width: Number(r.width_ft) || 0, height: Number(r.thickness_ft) || 0,
+        status: r.status,
+      })),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not load the slabs." };
+  }
 }
 
 /** Signed URL to download a batch's stored Excel audit copy. */
