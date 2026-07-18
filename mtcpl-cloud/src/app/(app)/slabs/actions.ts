@@ -9,7 +9,9 @@ import { nextSlabCodeFromMaxId } from "./utils";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { fetchUncategorizedOpenSlabs } from "@/lib/uncategorized-slabs";
+import { getProfilesMap } from "@/lib/profiles";
 import type { AppRole } from "@/lib/types";
+import type { ImportBatch, ImportBatchRowPreview } from "./import-batches-button";
 
 
 function num(fd: FormData, key: string, fallback = 0) {
@@ -680,6 +682,49 @@ export async function rejectSlabImportBatchAction(formData: FormData) {
   revalidatePath("/slabs");
   revalidatePath("/tasks");
   toast("/tasks/slab-imports", "Batch rejected.");
+}
+
+/** Load an OLDER page of import batches for the 🗂 Batches modal's "Load
+ *  more" button. The page renders the first 40; each click fetches the next
+ *  40 (older) so the team can scroll all the way back — e.g. to check whether
+ *  a 30-Jun import ever landed. Entry roles see only their own submissions,
+ *  mirroring the page's filter exactly. */
+const IMPORT_BATCH_PAGE = 40;
+const IMPORT_BATCH_ENTRY_ROLES: AppRole[] = ["slab_entry", "block_slab_entry"];
+export async function loadMoreImportBatchesAction(
+  offset: number,
+): Promise<{ batches: ImportBatch[]; done: boolean }> {
+  const { profile } = await requireAuth();
+  const supabase = createAdminSupabaseClient();
+  const from = Math.max(0, Math.floor(Number(offset) || 0));
+
+  let q = supabase
+    .from("slab_import_batches")
+    .select("id, temple, stone, rows, row_count, slab_count, file_name, status, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note")
+    .order("submitted_at", { ascending: false })
+    .range(from, from + IMPORT_BATCH_PAGE - 1);
+  if (IMPORT_BATCH_ENTRY_ROLES.includes(profile.role)) q = q.eq("submitted_by", profile.id);
+  const { data } = await q;
+
+  type BatchRow = {
+    id: string; temple: string; stone: string; rows: ImportBatchRowPreview[] | null;
+    row_count: number | null; slab_count: number | null; file_name: string | null;
+    status: string; submitted_by: string | null; submitted_at: string | null;
+    reviewed_by: string | null; reviewed_at: string | null; review_note: string | null;
+  };
+  const rows = (data ?? []) as BatchRow[];
+  const names = await getProfilesMap();
+  const batches: ImportBatch[] = rows.map((b) => ({
+    id: b.id, temple: b.temple, stone: b.stone,
+    rows: Array.isArray(b.rows) ? b.rows : [],
+    rowCount: b.row_count ?? 0, slabCount: b.slab_count ?? 0, fileName: b.file_name,
+    status: (["pending", "approved", "rejected"].includes(b.status) ? b.status : "pending") as ImportBatch["status"],
+    submittedByName: b.submitted_by ? (names[b.submitted_by] ?? null) : null,
+    submittedAt: b.submitted_at,
+    reviewedByName: b.reviewed_by ? (names[b.reviewed_by] ?? null) : null,
+    reviewedAt: b.reviewed_at, reviewNote: b.review_note,
+  }));
+  return { batches, done: batches.length < IMPORT_BATCH_PAGE };
 }
 
 /** Signed URL to download a batch's stored Excel audit copy. */

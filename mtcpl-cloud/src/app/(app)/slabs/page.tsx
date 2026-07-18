@@ -107,6 +107,10 @@ export default async function SlabsPage() {
     .limit(40);
   if (isEntryRole) batchQuery = batchQuery.eq("submitted_by", profile.id);
   const { data: batchRows } = await batchQuery;
+  // Total batch count so the modal's "Load more" knows how far back it goes.
+  let batchCountQuery = admin.from("slab_import_batches").select("id", { count: "exact", head: true });
+  if (isEntryRole) batchCountQuery = batchCountQuery.eq("submitted_by", profile.id);
+  const { count: totalBatchCount } = await batchCountQuery;
   type BatchRow = {
     id: string; temple: string; stone: string; rows: ImportBatchRowPreview[] | null;
     row_count: number | null; slab_count: number | null; file_name: string | null;
@@ -145,7 +149,7 @@ export default async function SlabsPage() {
           {/* Mig 122 — all import batches (pending approval / approved /
               rejected) with row preview + Excel download. */}
           {(canImport || ["carving_head"].includes(profile.role)) && (
-            <ImportBatchesButton batches={importBatches} />
+            <ImportBatchesButton batches={importBatches} totalCount={totalBatchCount ?? importBatches.length} />
           )}
           <Link href="/slabs/view" className="secondary-button">
             View Inventory →

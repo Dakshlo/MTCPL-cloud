@@ -6,8 +6,8 @@
 // a download link for the stored Excel audit copy. Read-only here —
 // approval happens on /tasks/slab-imports.
 
-import { useState } from "react";
-import { getSlabImportFileUrlAction } from "./actions";
+import { useMemo, useState } from "react";
+import { getSlabImportFileUrlAction, loadMoreImportBatchesAction } from "./actions";
 
 export type ImportBatchRowPreview = {
   label: string;
@@ -53,11 +53,41 @@ function fmtWhen(iso: string | null): string {
   }
 }
 
-export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
+export function ImportBatchesButton({ batches, totalCount }: { batches: ImportBatch[]; totalCount?: number }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const pendingCount = batches.filter((b) => b.status === "pending").length;
+  // "Load more" — older batches fetched on demand, appended + deduped so the
+  // team can scroll all the way back (e.g. to verify a 30-Jun import).
+  const [extra, setExtra] = useState<ImportBatch[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const allBatches = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ImportBatch[] = [];
+    for (const b of [...batches, ...extra]) {
+      if (!seen.has(b.id)) { seen.add(b.id); out.push(b); }
+    }
+    return out;
+  }, [batches, extra]);
+  const pendingCount = allBatches.filter((b) => b.status === "pending").length;
+  const total = totalCount ?? allBatches.length;
+  const hasMore = !done && allBatches.length < total;
+
+  async function loadMore() {
+    if (loadingMore || done) return;
+    setLoadingMore(true);
+    try {
+      const res = await loadMoreImportBatchesAction(allBatches.length);
+      setExtra((prev) => [...prev, ...res.batches]);
+      if (res.done || res.batches.length === 0) setDone(true);
+    } catch {
+      /* leave the button so the user can retry */
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function downloadExcel(batchId: string) {
     if (downloading) return;
@@ -90,16 +120,17 @@ export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
                 <div style={{ fontSize: 17, fontWeight: 800 }}>🗂 Import batches</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
                   Every Excel import, newest first. Slabs are created only after a batch is approved.
+                  {total > 0 && <> · Showing <strong>{allBatches.length}</strong> of <strong>{total}</strong></>}
                 </div>
               </div>
               <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "var(--muted)" }}>×</button>
             </div>
 
             <div style={{ maxHeight: "68vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
-              {batches.length === 0 ? (
+              {allBatches.length === 0 ? (
                 <div className="muted" style={{ padding: 24, fontSize: 13 }}>No import batches yet — use 📥 Import from Excel to create the first one.</div>
               ) : (
-                batches.map((b) => {
+                allBatches.map((b) => {
                   const meta = STATUS_META[b.status];
                   const isOpen = expanded === b.id;
                   return (
@@ -161,6 +192,26 @@ export function ImportBatchesButton({ batches }: { batches: ImportBatch[] }) {
                     </div>
                   );
                 })
+              )}
+
+              {/* Load more — older batches, so the team can scroll all the way
+                  back (e.g. to check a 30-Jun import). */}
+              {allBatches.length > 0 && (
+                <div style={{ padding: "14px 18px", textAlign: "center" }}>
+                  {hasMore ? (
+                    <button
+                      type="button"
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      className="secondary-button"
+                      style={{ minWidth: 180, cursor: loadingMore ? "wait" : "pointer" }}
+                    >
+                      {loadingMore ? "Loading…" : `⬇ Load older batches (${Math.max(0, total - allBatches.length)} more)`}
+                    </button>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 12 }}>— all {allBatches.length} batches loaded —</div>
+                  )}
+                </div>
               )}
             </div>
           </div>
