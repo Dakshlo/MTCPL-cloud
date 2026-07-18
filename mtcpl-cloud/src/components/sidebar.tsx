@@ -80,6 +80,7 @@ const DEPT_ACCENTS: Record<Department, string> = {
   register:   "#8a6fb0",  // violet — the records / proof register (mig 102)
   maintenance:"#3f8f86",  // teal — machines / upkeep (mig 108–110)
   salary:     "#9c5f6e",  // rosewood — people + payroll (mig 189)
+  vehicles:   "#4f6d9c",  // steel blue — fleet + road documents (mig 204)
 };
 
 /** Convert "#rrggbb" → "rgba(r,g,b,a)" so we can mix tile accents
@@ -433,6 +434,35 @@ const navEntries: NavEntry[] = [
     icon: "✅",
     roles: ["developer", "owner"],
     department: "salary",
+  },
+  // ── VEHICLES section (mig 204) — vehicle document management. EMI monitor,
+  //    government papers, insurance / PUC / fitness expiries. Owner + dev only.
+  {
+    type: "divider",
+    label: "VEHICLES",
+    roles: ["developer", "owner"],
+    department: "vehicles",
+  },
+  {
+    href: "/vehicles",
+    label: "Overview",
+    icon: "🧭",
+    roles: ["developer", "owner"],
+    department: "vehicles",
+  },
+  {
+    href: "/vehicles/commercial",
+    label: "Commercial",
+    icon: "🚛",
+    roles: ["developer", "owner"],
+    department: "vehicles",
+  },
+  {
+    href: "/vehicles/personal",
+    label: "Personal",
+    icon: "🚗",
+    roles: ["developer", "owner"],
+    department: "vehicles",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──
   {

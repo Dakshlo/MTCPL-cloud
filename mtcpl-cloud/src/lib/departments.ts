@@ -34,7 +34,7 @@
 
 import type { AppRole } from "@/lib/types";
 
-export type Department = "production" | "finance" | "inventory" | "invoicing" | "register" | "maintenance" | "salary";
+export type Department = "production" | "finance" | "inventory" | "invoicing" | "register" | "maintenance" | "salary" | "vehicles";
 
 /** Static metadata for the switcher pill row. Order here = order in
  *  the UI. */
@@ -103,6 +103,16 @@ export const DEPARTMENTS: ReadonlyArray<{
     landingHref: "/salary",
     tooltip: "Employees · salary batches · PF / ESI records · HDFC bank sheet",
   },
+  {
+    // Mig 204 — Vehicles: company vehicle document management. EMI monitor,
+    // government papers (uploads), insurance / PUC / fitness expiries.
+    // Owner + developer only for now.
+    id: "vehicles",
+    label: "Vehicles",
+    icon: "🚚",
+    landingHref: "/vehicles",
+    tooltip: "Vehicle documents — EMI · insurance · PUC · fitness expiries",
+  },
 ] as const;
 
 const FINANCE_PREFIXES = ["/accounts"] as const;
@@ -111,6 +121,7 @@ const INVOICING_PREFIXES = ["/invoicing"] as const;
 const REGISTER_PREFIXES = ["/activity-register"] as const;
 const MAINTENANCE_PREFIXES = ["/maintenance"] as const;
 const SALARY_PREFIXES = ["/salary"] as const;
+const VEHICLES_PREFIXES = ["/vehicles"] as const;
 
 /**
  * Given a request pathname, return which department owns it. Used by
@@ -137,6 +148,9 @@ export function departmentForRoute(pathname: string): Department {
   }
   for (const p of SALARY_PREFIXES) {
     if (pathname === p || pathname.startsWith(p + "/")) return "salary";
+  }
+  for (const p of VEHICLES_PREFIXES) {
+    if (pathname === p || pathname.startsWith(p + "/")) return "vehicles";
   }
   return "production";
 }
@@ -174,7 +188,7 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
   switch (role) {
     case "developer":
     case "owner":
-      return ["production", "finance", "invoicing", "inventory", "register", "maintenance", "salary"];
+      return ["production", "finance", "invoicing", "inventory", "register", "maintenance", "salary", "vehicles"];
     // Mig 058 follow-on (Daksh): ACCOUNTANT★ gets a Finance / Invoicing
     // switcher. Mig 189 — Salary/PF added (they run the bank sheet).
     case "accountant_star":
