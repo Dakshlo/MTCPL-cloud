@@ -10,6 +10,7 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged } from "@/lib/paginate";
 import type {
   FloorMachine,
   FloorQueueItem,
@@ -24,7 +25,7 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
   const [
     { data: vendors },
     { data: machines },
-    { data: jobs },
+    jobs,
     { data: completed },
   ] = await Promise.all([
     admin
@@ -40,13 +41,17 @@ export async function buildFloorViewData(): Promise<FloorVendor[]> {
       )
       .eq("is_active", true)
       .order("machine_code"),
-    admin
+    // Paginated + id tiebreaker — active carving_items will silently cap at
+    // 1000, dropping the oldest in-progress slabs off the floor map.
+    fetchAllPaged((from, to) => admin
       .from("carving_items")
       .select(
         "id, slab_requirement_id, vendor_id, status, urgency, estimated_minutes, vendor_estimated_minutes, cnc_machine_id, loaded_at, assigned_at, received_at_vendor_at, requires_machine_type, batch_id",
       )
       .in("status", ["carving_assigned", "carving_in_progress"])
-      .order("assigned_at", { ascending: true }),
+      .order("assigned_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
     admin
       .from("carving_items")
       .select("id, vendor_id, slab_requirement_id, completed_at, review_approved_at, completed_on_cnc_machine_id")

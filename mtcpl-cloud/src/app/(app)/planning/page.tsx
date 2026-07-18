@@ -41,6 +41,11 @@ export default async function PlanningPage({
         .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority")
         .eq("status", "open")
         .order("created_at", { ascending: false })
+        // Unique tiebreaker → stable pagination. open ≈ 1,785 spans 2 pages and
+        // bulk imports share one created_at, so without a total order a slab at
+        // the page boundary can drop (selected slab won't render its card) or
+        // duplicate. Same fix as slabs/page.tsx.
+        .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) break;

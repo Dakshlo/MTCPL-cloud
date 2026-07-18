@@ -129,15 +129,28 @@ export default async function DispatchCheckPage({
   // Available slabs for this temple that could still be added — completed
   // (carving-approved, ready), NOT parked (storage is pulled in via the picker's
   // toggles), and not yet on any dispatch.
-  const { data: availRows } = await admin
-    .from("slab_requirements")
-    .select("id, label, length_ft, width_ft, thickness_ft")
-    .eq("status", "completed")
-    .eq("is_parked", false)
-    .eq("temple", dispatch.temple)
-    .order("created_at", { ascending: true })
-    .limit(500);
-  const availIds = ((availRows ?? []) as Array<{ id: string }>).map((s) => s.id);
+  // Paginated — a single temple's ready pool can exceed the old .limit(500)
+  // AND PostgREST's 1000-row cap (e.g. RAMALAYAM has 672 completed), which
+  // silently hid the newest ready slabs from the "+ Add slab" search. Fetch
+  // every page with an id tiebreaker so the ordering is stable across pages.
+  type AvailRow = { id: string; label: string | null; length_ft: number; width_ft: number; thickness_ft: number };
+  const availRows: AvailRow[] = [];
+  for (let from = 0; from < 100000; from += 1000) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, label, length_ft, width_ft, thickness_ft")
+      .eq("status", "completed")
+      .eq("is_parked", false)
+      .eq("temple", dispatch.temple)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const page = (data ?? []) as AvailRow[];
+    if (page.length === 0) break;
+    availRows.push(...page);
+    if (page.length < 1000) break;
+  }
+  const availIds = availRows.map((s) => s.id);
 
   // Mig 160 — each ready slab's dispatch station (Main vs a vendor shed), from
   // its carving_items.dispatch_station_id, so the picker can filter by station.

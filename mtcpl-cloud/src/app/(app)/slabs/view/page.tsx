@@ -34,6 +34,13 @@ export default async function SlabViewPage({
         .select("id, label, description, temple, stone, length_ft, width_ft, thickness_ft, status, priority, priority_note, quality, created_at")
         .order("priority", { ascending: false })
         .order("created_at", { ascending: true })
+        // Unique tiebreaker → total order so paginated .range() pages are
+        // stable. priority + created_at are both non-unique (a bulk import
+        // shares one created_at), so without this a tie-group straddling the
+        // 1000-row page boundary could drop or duplicate a slab — the slab a
+        // user just imported would intermittently vanish from View Inventory.
+        // Same fix as slabs/page.tsx and temples/page.tsx.
+        .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (statusParam === "all") {
         q = q.in("status", ["open", "planned"]);

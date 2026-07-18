@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 import {
   canAccessCarvingPage,
   canAddExternalCutSlab,
@@ -212,8 +213,8 @@ export default async function CarvingDashboardPage({
   const [
     unassignedSlabsAll,
     storageSlabsAll,
-    { data: activeJobs },
-    { data: reviewJobs },
+    activeJobs,
+    reviewJobs,
     { data: doneJobs },
     { data: pendingJobs },
     { data: vendors },
@@ -222,42 +223,31 @@ export default async function CarvingDashboardPage({
   ] = await Promise.all([
     fetchAllUnassignedSlabs(),
     fetchStorageSlabs(),
-    admin
+    // Active tab — paginated + id tiebreaker. carving_items (~979 and rising)
+    // will silently cap at 1000, dropping the oldest active jobs from the
+    // carving head's Active view. (held_at/held_reason drive the ON-HOLD ribbon.)
+    fetchAllPaged((from, to) => admin
       .from("carving_items")
       .select(
-        // Daksh June 2026 — also pull held_at / held_reason so the
-        // Active tab can render the on-hold slabs with a proper
-        // "⏸ ON HOLD" ribbon + reason (was selecting neither, and
-        // held slabs weren't fetched at all — see the status filter
-        // change just below).
         "id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, urgency, due_at, assigned_at, completed_at, progress_phase, cnc_machine_id, loaded_at, vendor_estimated_minutes, estimated_minutes, received_at_vendor_at, requires_machine_type, requires_cnc_axes, claimed_by, claimed_at, dropoff_note, held_at, held_reason",
       )
-      // Daksh June 2026 — include carving_on_hold so paused slabs
-      // still appear on the Active tab. Previously the Active fetch
-      // was carving_assigned + carving_in_progress only, so a slab
-      // put on hold from the vendor cockpit silently vanished from
-      // the carving head's Active view (it only lived in the cockpit
-      // On-Hold tray). They're active work — just paused — so they
-      // belong here too, with a clear hold indicator.
       .in("status", ["carving_assigned", "carving_in_progress", "carving_on_hold"])
-      .order("assigned_at", { ascending: false }),
-    admin
+      .order("assigned_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    // Carving Done Approval — paginated + id tiebreaker. This backlog is
+    // unbounded; an uncapped read would silently drop the oldest completed-
+    // unapproved slabs so the reviewer never sees them and they stall forever.
+    fetchAllPaged((from, to) => admin
       .from("carving_items")
-      // completed_on_cnc_machine_id (mig 075) — the machine that DID
-      // the carving, preserved at unload (cnc_machine_id is nulled
-      // when the slab comes off the bed). The Carving Done Approval
-      // card uses it to show which CNC produced the slab. (Daksh)
       .select("id, slab_requirement_id, vendor_id, vendor_name, vendor_type, status, due_at, assigned_at, completed_at, cnc_machine_id, completed_on_cnc_machine_id")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
-      // Mig 097 — slabs marked "Still Pending Work" leave the approval
-      // queue into their own tab; keep them out of Carving Done Approval.
       .is("pending_work_at", null)
-      // Daksh (Jun 2026) — a cancelled slab's carving job (status set to
-      // 'cancelled' on cancel-approval) keeps its completed_at, so it was
-      // lingering in Carving Done Approval. Exclude it.
       .neq("status", "cancelled")
-      .order("completed_at", { ascending: false }),
+      .order("completed_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)),
     admin
       .from("carving_items")
       // Mig 080/081 follow-on (Daksh) — pull the reviewer's approve
@@ -443,11 +433,14 @@ export default async function CarvingDashboardPage({
       additional_description: string | null;
     }
   >();
-  if (uniqueSlabReqIds.length > 0) {
+  // Chunked .in() — the active/review/done/pending job sets are now fully
+  // paginated, so the distinct slab-id list can exceed 1000; a single .in()
+  // would cap the response and leave carving cards with blank temple/dims.
+  for (const idChunk of chunkIds(uniqueSlabReqIds)) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
       .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft, stock_location, cancel_requested_at, component_section, component_element, additional_description")
-      .in("id", uniqueSlabReqIds);
+      .in("id", idChunk);
     for (const s of slabRows ?? []) {
       slabInfoMap.set(s.id, {
         temple: s.temple ?? "(no temple)",
@@ -640,16 +633,21 @@ export default async function CarvingDashboardPage({
   const isOwner = profile.role === "developer" || profile.role === "owner";
   let workOrdersForTab: WorkOrderTabRow[] = [];
   if (canUseOutsource && mode === "outsource") {
-    const [{ data: woRows }, { data: woLineRows }] = await Promise.all([
+    const [{ data: woRows }, woLineRows] = await Promise.all([
       admin
         .from("carving_work_orders")
         .select("id, wo_number, vendor_name, title, temple, status, jobwork_rate, jobwork_unit, reject_reason, cancel_reason, created_at")
         .order("created_at", { ascending: false })
         .limit(300),
-      admin
+      // Paginated + id tiebreaker — grows one row per slab×work-order forever;
+      // an uncapped read would silently drop line items past 1000, so work-order
+      // cards would show incomplete slab lines.
+      fetchAllPaged((from, to) => admin
         .from("carving_work_order_items")
         .select("work_order_id, slab_requirement_id, carving_item_id, description, planned_length_ft, planned_width_ft, planned_thickness_ft, line_status, position")
-        .order("position", { ascending: true }),
+        .order("position", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)),
     ]);
     const woRowsT = (woRows ?? []) as WorkOrderRow[];
     const lineRowsT = (woLineRows ?? []) as Array<{

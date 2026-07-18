@@ -13,6 +13,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 import { getProfilesMap } from "@/lib/profiles";
 import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
 import {
@@ -102,7 +103,7 @@ export default async function DispatchPage({
     { data: provisionalDispatches },
     { data: openDispatches },
     { data: closedDispatches },
-    { data: allDispatchLogs },
+    allDispatchLogs,
     { data: stoneTypeRows },
     { data: templeRows },
     { data: handlingManRow },
@@ -146,10 +147,15 @@ export default async function DispatchPage({
       .limit(200),
     // All dispatch_logs — used to derive per-dispatch slab counts AND
     // to identify "legacy" single-slab dispatches (dispatch_id=null).
-    admin
+    // Paginated — dispatch_logs is one row per slab per dispatch (tens of
+    // thousands); an uncapped read silently truncated to 1000, so older
+    // dispatch cards showed undercounted slab counts + CFT.
+    fetchAllPaged((from, to) => admin
       .from("dispatch_logs")
       .select("id, dispatch_id, slab_requirement_id, dispatched_by, dispatched_at, dispatch_note")
-      .order("dispatched_at", { ascending: false }),
+      .order("dispatched_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)),
     // Stone categories — needed to render marble separately in the UI
     admin.from("stone_types").select("name, stone_category"),
     // Mig 130 — temple site info (Bill-To location, client incharge,
@@ -267,11 +273,16 @@ export default async function DispatchPage({
   // Ready-since timer source: carving review approval time — or, if the
   // slab went through the Rework Tunnel, the moment the hold was cleared.
   const readySinceBySlab = new Map<string, { since: string | null; reworked: boolean }>();
-  if (readyRows.length > 0) {
+  // Chunked .in() — readyRows is the paginated ready pool (can exceed 1000), so
+  // a single .in() would cap the response at 1000 AND overflow the request URL.
+  // 300-id chunks keep every ready slab's timer + gate correct. Reused below.
+  const readyIdChunks: string[][] = [];
+  for (let i = 0; i < readyRows.length; i += 300) readyIdChunks.push(readyRows.slice(i, i + 300).map((s) => s.id));
+  for (const chunk of readyIdChunks) {
     const { data: ciRows } = await admin
       .from("carving_items")
       .select("slab_requirement_id, review_approved_at, depart_cleared_at")
-      .in("slab_requirement_id", readyRows.map((s) => s.id));
+      .in("slab_requirement_id", chunk);
     for (const r of (ciRows ?? []) as Array<{ slab_requirement_id: string; review_approved_at: string | null; depart_cleared_at: string | null }>) {
       readySinceBySlab.set(r.slab_requirement_id, {
         since: r.depart_cleared_at ?? r.review_approved_at,
@@ -288,11 +299,11 @@ export default async function DispatchPage({
   // the timer above so a pre-migration schema only loses the gate
   // (everything stays clickable) rather than breaking the timer too.
   const dispatchGateBySlab = new Map<string, { receivedAtDispatch: string | null; stationId: string | null }>();
-  if (readyRows.length > 0) {
+  for (const chunk of readyIdChunks) {
     const { data: gateRows } = await admin
       .from("carving_items")
       .select("slab_requirement_id, ready_to_dispatch_at, received_at_dispatch_at, dispatch_station_id")
-      .in("slab_requirement_id", readyRows.map((s) => s.id));
+      .in("slab_requirement_id", chunk);
     for (const r of (gateRows ?? []) as Array<{
       slab_requirement_id: string;
       ready_to_dispatch_at: string | null;
@@ -585,11 +596,12 @@ export default async function DispatchPage({
   const provisionalSlabIds = provisionalRows
     .flatMap((d) => logsByDispatch.get(d.id) ?? []);
   const provisionalSlabDetails = new Map<string, ReadySlab>();
-  if (provisionalSlabIds.length > 0) {
+  // Chunked .in() — provisional volume can push this past 1000 ids.
+  for (const idChunk of chunkIds(provisionalSlabIds)) {
     const { data: slabRows } = await admin
       .from("slab_requirements")
       .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, component_section, component_element, additional_description")
-      .in("id", provisionalSlabIds);
+      .in("id", idChunk);
     for (const s of slabRows ?? []) {
       provisionalSlabDetails.set(s.id, shapeReadySlab(s));
     }

@@ -114,24 +114,47 @@ export default async function WorkOrderDetailPage({ params, searchParams }: { pa
     }
   }
 
-  // Cut-done slabs available to bind to a future-need line.
-  const { data: availRows } = await admin
-    .from("slab_requirements")
-    .select("id, label, temple")
-    .eq("status", "cut_done")
-    .order("created_at", { ascending: false })
-    .limit(300);
+  // Cut-done slabs available to bind to a future-need line. Paginated — cut_done
+  // is the largest live pool (~2,785), so the old .limit(300) hid every cut
+  // slab older than the newest 300 from this picker. Matches the New-work-order
+  // picker, which already paginates the identical set. id tiebreaker for stable
+  // pages.
+  const availRows: Array<{ id: string; label: string | null; temple: string }> = [];
+  for (let from = 0; from < 100000; from += 1000) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, label, temple")
+      .eq("status", "cut_done")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const page = (data ?? []) as Array<{ id: string; label: string | null; temple: string }>;
+    if (page.length === 0) break;
+    availRows.push(...page);
+    if (page.length < 1000) break;
+  }
   // A slab is "taken" only by a live line on a live work order. A rejected /
   // cancelled / dismissed order can carry leftover non-cancelled lines (e.g. a
   // 'planned' line a rejected order never cleared) — those must NOT keep the
   // slab out of this picker. Resolve the parent order and drop dead ones, the
   // same way the New-work-order picker does. (Daksh June 2026.)
-  const { data: liveLineRows } = await admin
-    .from("carving_work_order_items")
-    .select("slab_requirement_id, work_order_id")
-    .neq("line_status", "cancelled")
-    .not("slab_requirement_id", "is", null);
-  const liveLineList = (liveLineRows ?? []) as Array<{ slab_requirement_id: string | null; work_order_id: string | null }>;
+  // Paginated — carving_work_order_items grows one row per slab×work-order
+  // forever; an uncapped read would silently drop older live lines past 1000,
+  // so a committed slab wouldn't be excluded and could be double-added.
+  const liveLineList: Array<{ slab_requirement_id: string | null; work_order_id: string | null }> = [];
+  for (let from = 0; from < 100000; from += 1000) {
+    const { data } = await admin
+      .from("carving_work_order_items")
+      .select("slab_requirement_id, work_order_id")
+      .neq("line_status", "cancelled")
+      .not("slab_requirement_id", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const page = (data ?? []) as Array<{ slab_requirement_id: string | null; work_order_id: string | null }>;
+    if (page.length === 0) break;
+    liveLineList.push(...page);
+    if (page.length < 1000) break;
+  }
   const lineWoIds = Array.from(new Set(liveLineList.map((r) => r.work_order_id).filter(Boolean) as string[]));
   const deadWo = new Set<string>();
   if (lineWoIds.length > 0) {

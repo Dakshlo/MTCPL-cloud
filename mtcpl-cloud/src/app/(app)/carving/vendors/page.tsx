@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged } from "@/lib/paginate";
 import { VendorForm } from "./vendor-form";
 
 export default async function VendorDirectoryPage() {
@@ -14,7 +15,7 @@ export default async function VendorDirectoryPage() {
   const [
     { data: vendors },
     { data: machines },
-    { data: activeJobs },
+    activeJobs,
   ] = await Promise.all([
     // Exclude block_vendor — this page is for CARVING vendors only
     // (CNC, Manual, Outsource). Block-side vendors live elsewhere.
@@ -24,7 +25,9 @@ export default async function VendorDirectoryPage() {
       .neq("vendor_type", "block_vendor")
       .order("name"),
     admin.from("cnc_machines").select("id, vendor_id, machine_code, operator_name, is_active"),
-    admin.from("carving_items").select("vendor_id, status").in("status", ["carving_assigned", "carving_in_progress"]),
+    // Paginated — active carving_items feeds the per-vendor "active jobs" count;
+    // an uncapped read would silently cap at 1000 and undercount busy vendors.
+    fetchAllPaged((from, to) => admin.from("carving_items").select("vendor_id, status").in("status", ["carving_assigned", "carving_in_progress"]).order("id", { ascending: true }).range(from, to)),
   ]);
 
   const machineCountByVendor = new Map<string, number>();

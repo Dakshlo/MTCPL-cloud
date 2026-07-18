@@ -1467,14 +1467,25 @@ export async function fetchTempleStorageSlabsAction(
   const t = String(temple || "").trim();
   if (!t) return { carving: [], dispatch: [] };
   const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("slab_requirements")
-    .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
-    .eq("temple", t)
-    .eq("is_parked", true)
-    .in("status", ["cut_done", "completed"])
-    .order("id", { ascending: true });
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  // Paginated — a temple's parked storage (cut_done + completed) can exceed
+  // PostgREST's 1000-row cap (parked cut_done alone is ~1,585 across temples),
+  // which silently hid stored slabs from the make-dispatch / check "📦 Storage"
+  // search. id order makes the pages stable.
+  const rows: Array<Record<string, unknown>> = [];
+  for (let from = 0; from < 100000; from += 1000) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, status, cancel_requested_at, component_section, component_element, additional_description")
+      .eq("temple", t)
+      .eq("is_parked", true)
+      .in("status", ["cut_done", "completed"])
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    const page = (data ?? []) as Array<Record<string, unknown>>;
+    if (page.length === 0) break;
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
   const map = (s: Record<string, unknown>, source: "carving" | "dispatch"): StorageSlab => {
     const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, th = Number(s.thickness_ft) || 0;
     return {

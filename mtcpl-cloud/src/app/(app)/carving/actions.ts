@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged } from "@/lib/paginate";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import {
@@ -1121,12 +1122,16 @@ async function notifyCarvingApprovalBacklog(
     // Same predicate as the carving "Done Approval" tab (page.tsx), so the
     // alerted number always matches what the reviewer sees: marked done, not
     // yet approved, not parked in "Still Pending".
-    const { data: pendingRows } = await admin
+    // Paginated so the alerted count matches the (now-paginated) Done-Approval
+    // list even past 1000 — an uncapped read would under-report the backlog.
+    const pendingRows = await fetchAllPaged((from, to) => admin
       .from("carving_items")
       .select("slab_requirement_id, vendor_name, completed_at, temporary_location")
       .not("completed_at", "is", null)
       .is("review_approved_at", null)
-      .is("pending_work_at", null);
+      .is("pending_work_at", null)
+      .order("id", { ascending: true })
+      .range(from, to));
     const pending = (pendingRows ?? []) as {
       slab_requirement_id: string;
       vendor_name: string | null;

@@ -54,6 +54,10 @@ async function fetchExistingCats(
     const { data, error } = await admin
       .from("slab_requirements")
       .select("temple, component_section, component_element, label")
+      // Deterministic page boundaries — without an order key PostgREST paging
+      // is undefined and a row can be skipped between pages (a distinct
+      // category/label autocomplete hint would then go missing).
+      .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (error) break;
     const rows = (data ?? []) as Array<{ temple: string | null; component_section: string | null; component_element: string | null; label: string | null }>;
