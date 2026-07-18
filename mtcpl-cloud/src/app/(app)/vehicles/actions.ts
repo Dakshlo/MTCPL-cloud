@@ -22,6 +22,8 @@ function txt(fd: FormData, key: string): string {
   return typeof v === "string" ? v.trim() : "";
 }
 const orNull = (s: string) => (s ? s : null);
+// Text fields are stored UPPERCASE to match the all-caps form display.
+const upNull = (s: string) => (s ? s.toUpperCase() : null);
 const numOrNull = (s: string) => {
   if (!s) return null;
   const n = Number(s);
@@ -54,21 +56,21 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
   const row = {
     kind,
     name,
-    reg_no: orNull(txt(formData, "reg_no").toUpperCase()),
-    make_model: orNull(txt(formData, "make_model")),
+    reg_no: upNull(txt(formData, "reg_no")),
+    make_model: upNull(txt(formData, "make_model")),
     emi_active: emiActive,
     emi_amount: emiActive ? numOrNull(txt(formData, "emi_amount")) : null,
     emi_day: emiActive && emiDayRaw != null ? Math.min(31, Math.max(1, Math.round(emiDayRaw))) : null,
-    emi_lender: emiActive ? orNull(txt(formData, "emi_lender")) : null,
+    emi_lender: emiActive ? upNull(txt(formData, "emi_lender")) : null,
     emi_start: emiActive ? orNull(txt(formData, "emi_start")) : null,
     emi_end: emiActive ? orNull(txt(formData, "emi_end")) : null,
-    insurance_company: orNull(txt(formData, "insurance_company")),
-    insurance_policy_no: orNull(txt(formData, "insurance_policy_no")),
+    insurance_company: upNull(txt(formData, "insurance_company")),
+    insurance_policy_no: upNull(txt(formData, "insurance_policy_no")),
     insurance_expiry: orNull(txt(formData, "insurance_expiry")),
     puc_expiry: orNull(txt(formData, "puc_expiry")),
     // fitness is a commercial-vehicle concept; a personal save never writes it
     fitness_expiry: kind === "commercial" ? orNull(txt(formData, "fitness_expiry")) : null,
-    notes: orNull(txt(formData, "notes")),
+    notes: upNull(txt(formData, "notes")),
   };
 
   if (id) {

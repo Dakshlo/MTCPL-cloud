@@ -60,9 +60,19 @@ function monthsLeft(end: string | null): number | null {
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
 // ── shared field styles ─────────────────────────────────────────────
-const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" };
-const input: React.CSSProperties = { fontSize: 13.5, padding: "9px 11px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", width: "100%", fontFamily: "inherit" };
-const btn: React.CSSProperties = { fontSize: 12.5, fontWeight: 800, padding: "8px 14px", borderRadius: 9, cursor: "pointer", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" };
+const ACCENT = "#4f6d9c";
+const label: React.CSSProperties = { display: "grid", gap: 5, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" };
+// All entry fields render UPPERCASE + bold; the focus ring comes from the
+// scoped `.veh-in` <style> block below.
+const input: React.CSSProperties = { fontSize: 14, fontWeight: 700, letterSpacing: "0.01em", padding: "10px 12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text)", width: "100%", fontFamily: "inherit", textTransform: "uppercase", transition: "border-color .12s, box-shadow .12s" };
+const btn: React.CSSProperties = { fontSize: 12.5, fontWeight: 800, padding: "9px 15px", borderRadius: 9, cursor: "pointer", border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)" };
+const card: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 12, padding: "13px 15px", background: "var(--bg)" };
+const sectionHd: React.CSSProperties = { fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text)", marginBottom: 11 };
+
+// Kills the browser's saved-data autofill dropdown + spellcheck squiggles on
+// every field. Text fields add autoCapitalize so mobile keyboards start in CAPS.
+const noFill = { autoComplete: "off", autoCorrect: "off", spellCheck: false, className: "veh-in" } as const;
+const textFill = { ...noFill, autoCapitalize: "characters" } as const;
 
 // ── Add / Edit modal ────────────────────────────────────────────────
 function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; onClose: () => void }) {
@@ -74,99 +84,110 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
         action={upsertVehicleAction}
         onSubmit={() => setSaving(true)}
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(560px, 96vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.35)", padding: "20px 22px" }}
+        autoComplete="off"
+        style={{ width: "min(560px, 96vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderTop: `3px solid ${ACCENT}`, borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.4)", padding: "20px 24px 22px" }}
       >
+        <style>{`.veh-in:focus{border-color:${ACCENT} !important;box-shadow:0 0 0 3px rgba(79,109,156,0.18)}.veh-in::placeholder{font-weight:500;text-transform:none;opacity:.55}`}</style>
         <input type="hidden" name="kind" value={kind} />
         {v && <input type="hidden" name="id" value={v.id} />}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ fontSize: 16.5, fontWeight: 900 }}>{v ? "✎ Edit vehicle" : `➕ Add ${kind} vehicle`}</div>
-          <button type="button" onClick={onClose} aria-label="Close" style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 18, fontWeight: 900, cursor: "pointer", lineHeight: 1 }}>✕</button>
-        </div>
 
+        {/* header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>{kind === "commercial" ? "🚛" : "🚗"}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 900, lineHeight: 1.15 }}>{v ? "Edit vehicle" : "Add vehicle"}</div>
+            <div style={{ fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.07em", color: ACCENT }}>{kind} vehicle</div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 19, fontWeight: 900, cursor: "pointer", lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ height: 1, background: "var(--border)", margin: "14px 0 16px" }} />
+
+        {/* identity */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ ...label, gridColumn: "1 / -1" }}>
             Vehicle name *
-            <input name="name" required defaultValue={v?.name ?? ""} placeholder="e.g. TATA 407" autoFocus style={{ ...input, textTransform: "uppercase" }} />
+            <input name="name" required defaultValue={v?.name ?? ""} placeholder="e.g. TATA 407" autoFocus style={input} {...textFill} />
           </label>
           <label style={label}>
             Registration no.
-            <input name="reg_no" defaultValue={v?.reg_no ?? ""} placeholder="RJ 24 GA 1234" style={{ ...input, textTransform: "uppercase" }} />
+            <input name="reg_no" defaultValue={v?.reg_no ?? ""} placeholder="RJ 24 GA 1234" style={input} {...textFill} />
           </label>
           <label style={label}>
             Make / model
-            <input name="make_model" defaultValue={v?.make_model ?? ""} placeholder="Tata 407 Gold SFC" style={input} />
+            <input name="make_model" defaultValue={v?.make_model ?? ""} placeholder="Tata 407 Gold SFC" style={input} {...textFill} />
           </label>
         </div>
 
         {/* EMI */}
-        <div style={{ marginTop: 16, border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
+        <div style={{ ...card, marginTop: 16 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>
-            <input type="checkbox" name="emi_active" checked={emi} onChange={(e) => setEmi(e.target.checked)} style={{ width: 17, height: 17, accentColor: "#4f6d9c" }} />
+            <input type="checkbox" name="emi_active" checked={emi} onChange={(e) => setEmi(e.target.checked)} style={{ width: 17, height: 17, accentColor: ACCENT }} />
             💳 Vehicle is on EMI / loan
           </label>
           {emi && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13 }}>
               <label style={label}>
                 EMI amount (₹)
-                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_amount ?? ""} placeholder="18500" style={input} />
+                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_amount ?? ""} placeholder="18500" style={input} {...noFill} />
               </label>
               <label style={label}>
                 Due day of month
-                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_day ?? ""} placeholder="7" style={input} />
+                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_day ?? ""} placeholder="7" style={input} {...noFill} />
               </label>
               <label style={{ ...label, gridColumn: "1 / -1" }}>
                 Lender / bank
-                <input name="emi_lender" defaultValue={v?.emi_lender ?? ""} placeholder="HDFC Bank" style={input} />
+                <input name="emi_lender" defaultValue={v?.emi_lender ?? ""} placeholder="HDFC Bank" style={input} {...textFill} />
               </label>
               <label style={label}>
                 Loan start
-                <input name="emi_start" type="date" defaultValue={v?.emi_start ?? ""} style={input} />
+                <input name="emi_start" type="date" defaultValue={v?.emi_start ?? ""} style={input} {...noFill} />
               </label>
               <label style={label}>
                 Loan ends
-                <input name="emi_end" type="date" defaultValue={v?.emi_end ?? ""} style={input} />
+                <input name="emi_end" type="date" defaultValue={v?.emi_end ?? ""} style={input} {...noFill} />
               </label>
             </div>
           )}
         </div>
 
         {/* Expiries */}
-        <div style={{ marginTop: 14, border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", background: "var(--bg)" }}>
-          <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 10 }}>📅 Expiry dates</div>
+        <div style={{ ...card, marginTop: 14 }}>
+          <div style={sectionHd}>📅 Expiry dates</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label style={label}>
               Insurance company
-              <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} placeholder="ICICI Lombard" style={input} />
+              <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} placeholder="ICICI Lombard" style={input} {...textFill} />
             </label>
             <label style={label}>
               Policy no.
-              <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} style={input} />
+              <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} placeholder="POLICY NUMBER" style={input} {...textFill} />
             </label>
             <label style={label}>
               Insurance expiry
-              <input name="insurance_expiry" type="date" defaultValue={v?.insurance_expiry ?? ""} style={input} />
+              <input name="insurance_expiry" type="date" defaultValue={v?.insurance_expiry ?? ""} style={input} {...noFill} />
             </label>
             <label style={label}>
               PUC expiry
-              <input name="puc_expiry" type="date" defaultValue={v?.puc_expiry ?? ""} style={input} />
+              <input name="puc_expiry" type="date" defaultValue={v?.puc_expiry ?? ""} style={input} {...noFill} />
             </label>
             {kind === "commercial" && (
               <label style={label}>
                 Fitness expiry
-                <input name="fitness_expiry" type="date" defaultValue={v?.fitness_expiry ?? ""} style={input} />
+                <input name="fitness_expiry" type="date" defaultValue={v?.fitness_expiry ?? ""} style={input} {...noFill} />
               </label>
             )}
           </div>
         </div>
 
-        <label style={{ ...label, marginTop: 14 }}>
-          Notes / other info
-          <textarea name="notes" rows={2} defaultValue={v?.notes ?? ""} placeholder="Permit details, driver, anything else…" style={{ ...input, resize: "vertical" }} />
-        </label>
+        {/* Notes */}
+        <div style={{ ...card, marginTop: 14 }}>
+          <div style={sectionHd}>📝 Notes / other info</div>
+          <textarea name="notes" rows={2} defaultValue={v?.notes ?? ""} placeholder="Permit details, driver, anything else…" style={{ ...input, resize: "vertical", minHeight: 58 }} {...textFill} />
+        </div>
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
           <button type="button" disabled={saving} onClick={onClose} style={btn}>Cancel</button>
-          <button type="submit" disabled={saving} style={{ ...btn, background: "#4f6d9c", borderColor: "#415980", color: "#fff", opacity: saving ? 0.7 : 1 }}>
+          <button type="submit" disabled={saving} style={{ ...btn, padding: "9px 18px", background: ACCENT, borderColor: "#415980", color: "#fff", boxShadow: "0 4px 14px rgba(79,109,156,0.35)", opacity: saving ? 0.7 : 1 }}>
             {saving ? "Saving…" : v ? "✓ Save changes" : "➕ Add vehicle"}
           </button>
         </div>
