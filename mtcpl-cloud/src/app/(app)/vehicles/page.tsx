@@ -71,11 +71,6 @@ export default async function VehiclesOverviewPage() {
             {stat("💳", emis.length ? inr(emiTotal) : "—", `Monthly EMI · ${emis.length} loan${emis.length === 1 ? "" : "s"}`, "#4f6d9c")}
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-            <Link href="/vehicles/commercial" style={{ fontSize: 13, fontWeight: 800, color: "#fff", background: "#4f6d9c", borderRadius: 10, padding: "10px 18px", textDecoration: "none" }}>🚛 Commercial →</Link>
-            <Link href="/vehicles/personal" style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 18px", textDecoration: "none" }}>🚗 Personal →</Link>
-          </div>
-
           {/* Expiry radar */}
           <div style={{ marginTop: 22 }}>
             <div style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 9 }}>📅 Expiry radar — next 45 days</div>
