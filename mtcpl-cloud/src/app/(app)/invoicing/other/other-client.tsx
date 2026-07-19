@@ -10,7 +10,7 @@
  * reuse invoice_parties (billing + shipping + GST).
  */
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createOtherChallanAction, updateOtherChallanAction, cancelOtherChallanAction } from "./actions";
@@ -26,10 +26,16 @@ export type Party = {
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
 };
 export type OtherItem = { particulars: string; hsn: string; unit: string; quantity: number; rate: number; amount: number; sectionIndex: number; sectionHead: string | null };
+export type OtherTransport = { company: string | null; phone: string | null; lr: string | null; vehicle: string | null; driver: string | null; driverPhone: string | null };
 export type OtherChallan = {
   id: string; code: string; date: string; partyId: string; partyName: string; category: string | null;
   notes: string | null; items: OtherItem[]; converted: boolean; invoiceCode: string | null; total: number;
+  transport?: OtherTransport;
 };
+
+// Form-state shape for the transport strip (all strings while editing).
+type TransportForm = { company: string; phone: string; lr: string; vehicle: string; driver: string; driverPhone: string };
+const emptyTransport = (): TransportForm => ({ company: "", phone: "", lr: "", vehicle: "", driver: "", driverPhone: "" });
 
 type Line = { particulars: string; hsn: string; unit: string; quantity: string };
 type Section = { head: string; lines: Line[] };
@@ -65,6 +71,7 @@ export function OtherSalesClient({
   const [date, setDate] = useState(todayIST());
   const [sections, setSections] = useState<Section[]>([blankSection()]);
   const [notes, setNotes] = useState("");
+  const [transport, setTransport] = useState<TransportForm>(emptyTransport());
   const [clientModal, setClientModal] = useState(false);
   const [pendingClient, setPendingClient] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
@@ -79,13 +86,16 @@ export function OtherSalesClient({
   const cur = clients.find((c) => c.id === party) ?? null;
 
   function resetForm() {
-    setEditId(null); setParty(""); setDate(todayIST()); setSections([blankSection()]); setNotes("");
+    setEditId(null); setParty(""); setDate(todayIST()); setSections([blankSection()]); setNotes(""); setTransport(emptyTransport());
   }
   function startNew() { resetForm(); if (preselectId) setParty(preselectId); setFormOpen(true); }
   function startEdit(ch: OtherChallan) {
     setEditId(ch.id); setParty(ch.partyId); setDate(ch.date); setSections(toSections(ch.items)); setNotes(ch.notes ?? "");
+    const t = ch.transport;
+    setTransport({ company: t?.company ?? "", phone: t?.phone ?? "", lr: t?.lr ?? "", vehicle: t?.vehicle ?? "", driver: t?.driver ?? "", driverPhone: t?.driverPhone ?? "" });
     setFormOpen(true);
   }
+  const setTf = (k: keyof TransportForm, v: string) => setTransport((p) => ({ ...p, [k]: v }));
 
   const setLine = (si: number, li: number, k: keyof Line, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, lines: s.lines.map((l, j) => (j === li ? { ...l, [k]: v } : l)) } : s)));
   const setHead = (si: number, v: string) => setSections((p) => p.map((s, i) => (i === si ? { ...s, head: v } : s)));
@@ -146,19 +156,7 @@ export function OtherSalesClient({
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
             <label className="stack" style={{ flex: "1 1 320px" }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Client</span>
-              <select value={party} onChange={(e) => setParty(e.target.value)} required style={FIELD}>
-                <option value="">Select a client…</option>
-                {clients.some((c) => !c.id.startsWith("temple:")) && (
-                  <optgroup label="Clients">
-                    {clients.filter((c) => !c.id.startsWith("temple:")).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </optgroup>
-                )}
-                {clients.some((c) => c.id.startsWith("temple:")) && (
-                  <optgroup label="Temples">
-                    {clients.filter((c) => c.id.startsWith("temple:")).map((c) => <option key={c.id} value={c.id}>🛕 {c.name}</option>)}
-                  </optgroup>
-                )}
-              </select>
+              <ClientPicker clients={clients} value={party} onChange={setParty} />
             </label>
             <button type="button" onClick={() => setClientModal(true)} style={btnGhost}>＋ New client</button>
             <label className="stack" style={{ flex: "0 0 160px" }}>
@@ -172,6 +170,19 @@ export function OtherSalesClient({
               <div><strong style={{ color: "var(--text)" }}>Ship to:</strong> {[cur.ship_name, cur.ship_address, cur.ship_city].filter(Boolean).join(", ") || "same as billing"}</div>
             </div>
           )}
+
+          {/* Transportation (mig 206) — prints on the challan AND its invoice. */}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", background: "var(--bg)", marginBottom: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)", marginBottom: 10 }}>🚚 Transportation <span style={{ fontWeight: 600, textTransform: "none" }}>(optional — prints on the challan &amp; invoice)</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+              <label className="stack"><span style={tlbl}>Transport company</span><input name="transport_company" value={transport.company} onChange={(e) => setTf("company", e.target.value)} autoComplete="off" style={{ ...FIELD, textTransform: "uppercase" }} /></label>
+              <label className="stack"><span style={tlbl}>Company phone</span><input name="transport_phone" value={transport.phone} onChange={(e) => setTf("phone", e.target.value)} inputMode="tel" autoComplete="off" style={FIELD} /></label>
+              <label className="stack"><span style={tlbl}>LR no.</span><input name="lr_no" value={transport.lr} onChange={(e) => setTf("lr", e.target.value)} autoComplete="off" style={{ ...FIELD, textTransform: "uppercase" }} /></label>
+              <label className="stack"><span style={tlbl}>Vehicle no.</span><input name="transport_vehicle_no" value={transport.vehicle} onChange={(e) => setTf("vehicle", e.target.value)} autoComplete="off" style={{ ...FIELD, textTransform: "uppercase" }} /></label>
+              <label className="stack"><span style={tlbl}>Driver name</span><input name="transport_driver_name" value={transport.driver} onChange={(e) => setTf("driver", e.target.value)} autoComplete="off" style={{ ...FIELD, textTransform: "uppercase" }} /></label>
+              <label className="stack"><span style={tlbl}>Driver phone</span><input name="transport_driver_phone" value={transport.driverPhone} onChange={(e) => setTf("driverPhone", e.target.value)} inputMode="tel" autoComplete="off" style={FIELD} /></label>
+            </div>
+          </div>
 
           {/* Sectioned line items (table heads), NO rate — it's a challan. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -273,6 +284,7 @@ export function OtherSalesClient({
           date={date}
           docCode={editId ? "DRAFT" : `${chPrefix}${chAuto}`}
           sections={sections}
+          transport={transport}
           onClose={() => setPreview(false)}
         />
       )}
@@ -310,9 +322,10 @@ function ChallanCard({ ch, onEdit }: { ch: OtherChallan; onEdit?: () => void }) 
 }
 
 /** Client-side preview of the plain delivery challan (NOT VALID watermark). */
-function OtherChallanPreview({ client, date, docCode, sections, onClose }: {
-  client: Party; date: string; docCode: string; sections: Section[]; onClose: () => void;
+function OtherChallanPreview({ client, date, docCode, sections, transport, onClose }: {
+  client: Party; date: string; docCode: string; sections: Section[]; transport: TransportForm; onClose: () => void;
 }) {
+  const hasT = transport.company || transport.lr || transport.vehicle || transport.driver;
   const filled = sections.map((s) => ({ head: s.head, lines: s.lines.filter((l) => l.particulars.trim() || Number(l.quantity)) })).filter((s) => s.lines.length);
   const shipName = (client.ship_name ?? "").trim() || client.name;
   const pcell: React.CSSProperties = { padding: "4px 7px", border: "1px solid #e2e7ee", fontWeight: 700, color: "#1a1a1a", fontSize: 11 };
@@ -349,6 +362,15 @@ function OtherChallanPreview({ client, date, docCode, sections, onClose }: {
               <div style={{ fontSize: 11.5, color: "#333" }}>{client.ship_address ?? client.address ?? "Same as billing"}</div>
             </div>
           </div>
+          {hasT && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 16px", border: "1px solid #d8d2c4", borderRadius: 6, padding: "5px 9px", marginBottom: 8, background: "#f7f5ef", fontSize: 10.5 }}>
+              <span style={{ fontWeight: 800, textTransform: "uppercase", color: "#5b2e0a", fontSize: 8.5, letterSpacing: "0.05em", alignSelf: "center" }}>🚚 Transport</span>
+              {transport.company && <span><strong>Company:</strong> {transport.company}{transport.phone ? ` · ☎ ${transport.phone}` : ""}</span>}
+              {transport.lr && <span><strong>LR No:</strong> {transport.lr}</span>}
+              {transport.vehicle && <span><strong>Vehicle:</strong> {transport.vehicle}</span>}
+              {transport.driver && <span><strong>Driver:</strong> {transport.driver}{transport.driverPhone ? ` · ☎ ${transport.driverPhone}` : ""}</span>}
+            </div>
+          )}
           {filled.length === 0 ? <p style={{ color: "#888", fontSize: 11 }}>No line items yet.</p> : filled.map((s, gi) => (
             <div key={gi} style={{ marginBottom: 8 }}>
               {(filled.length > 1 || s.head.trim()) && <div style={{ fontSize: 10.5, fontWeight: 800, color: "#5b2e0a", background: "#f3efe7", borderLeft: "3px solid #7c4a1e", borderRadius: 3, padding: "4px 9px", textTransform: "uppercase" }}>{s.head.trim() || `Table ${gi + 1}`}</div>}
@@ -446,6 +468,62 @@ function NewClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: (n
     </div>
   );
 }
+
+/** Our own searchable client dropdown (replaces the browser <select>): a styled
+ *  button → a panel with a search box + grouped Clients / Temples list. */
+function ClientPicker({ clients, value, onChange }: { clients: Party[]; value: string; onChange: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const sel = clients.find((c) => c.id === value) ?? null;
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); window.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const ql = q.trim().toLowerCase();
+  const hit = (c: Party) => !ql || c.name.toLowerCase().includes(ql);
+  const realClients = clients.filter((c) => !c.id.startsWith("temple:") && hit(c));
+  const temples = clients.filter((c) => c.id.startsWith("temple:") && hit(c));
+  const pick = (id: string) => { onChange(id); setOpen(false); setQ(""); };
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} style={{ ...FIELD, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "pointer", textAlign: "left" }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: sel ? "var(--text)" : "var(--muted)", fontWeight: sel ? 700 : 400 }}>
+          {sel ? `${sel.id.startsWith("temple:") ? "🛕 " : ""}${sel.name}` : "Select a client…"}
+        </span>
+        <span style={{ color: "var(--muted)", fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 60, background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 16px 42px rgba(0,0,0,0.28)", overflow: "hidden" }}>
+          <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search client or temple…" autoComplete="off" style={{ ...FIELD, padding: "8px 10px" }} />
+          </div>
+          <div style={{ maxHeight: 260, overflowY: "auto", padding: "4px 0" }}>
+            {realClients.length === 0 && temples.length === 0 && <div className="muted" style={{ padding: "10px 14px", fontSize: 12.5 }}>No match.</div>}
+            {realClients.length > 0 && <div style={grpHd}>Clients</div>}
+            {realClients.map((c) => <ClientRow key={c.id} c={c} active={c.id === value} onPick={() => pick(c.id)} />)}
+            {temples.length > 0 && <div style={grpHd}>Temples</div>}
+            {temples.map((c) => <ClientRow key={c.id} c={c} temple active={c.id === value} onPick={() => pick(c.id)} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function ClientRow({ c, temple, active, onPick }: { c: Party; temple?: boolean; active: boolean; onPick: () => void }) {
+  return (
+    <button type="button" onMouseDown={(e) => { e.preventDefault(); onPick(); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 14px", border: "none", background: active ? "rgba(180,83,9,0.1)" : "transparent", color: "var(--text)", cursor: "pointer", fontSize: 13 }}>
+      <span style={{ width: 12, color: "var(--gold-dark)", fontWeight: 900 }}>{active ? "✓" : ""}</span>
+      <span style={{ fontWeight: 600 }}>{temple ? "🛕 " : ""}{c.name}</span>
+    </button>
+  );
+}
+const tlbl: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "var(--muted)" };
+const grpHd: React.CSSProperties = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", padding: "6px 14px 3px" };
 
 const seg = (active: boolean): React.CSSProperties => ({ fontSize: 12.5, fontWeight: 800, padding: "7px 14px", borderRadius: 9, cursor: "pointer", border: "none", background: active ? "var(--gold)" : "transparent", color: active ? "#fff" : "var(--muted)" });
 const CARD: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 12, padding: "16px", background: "var(--surface)" };

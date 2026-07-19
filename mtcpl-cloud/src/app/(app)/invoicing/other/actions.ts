@@ -25,6 +25,19 @@ function txt(fd: FormData, key: string): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+/** Mig 206 — transportation fields on an other-sales challan (shown on the
+ *  printed challan AND its invoice). Same column names as the temple challan. */
+function transportFields(fd: FormData) {
+  return {
+    transport_company: txt(fd, "transport_company") || null,
+    transport_phone: txt(fd, "transport_phone") || null,
+    lr_no: txt(fd, "lr_no") || null,
+    transport_vehicle_no: txt(fd, "transport_vehicle_no") || null,
+    transport_driver_name: txt(fd, "transport_driver_name") || null,
+    transport_driver_phone: txt(fd, "transport_driver_phone") || null,
+  };
+}
+
 function refresh(id?: string) {
   revalidatePath("/invoicing/other");
   revalidatePath("/invoicing/invoices");
@@ -142,18 +155,18 @@ export async function createOtherChallanAction(formData: FormData) {
     if (typeof seq === "number") docSeq = seq;
   } catch { /* counter unavailable — leave null */ }
 
-  const { data: row, error } = await admin
-    .from("other_challans")
-    .insert({
-      party_id: resolvedPartyId,
-      challan_date: challanDate ?? undefined,
-      doc_fy: docSeq != null ? fy : null,
-      doc_seq: docSeq,
-      notes: txt(formData, "notes") || null,
-      created_by: profile.id,
-    })
-    .select("id")
-    .single();
+  const baseRow = {
+    party_id: resolvedPartyId,
+    challan_date: challanDate ?? undefined,
+    doc_fy: docSeq != null ? fy : null,
+    doc_seq: docSeq,
+    notes: txt(formData, "notes") || null,
+    created_by: profile.id,
+  };
+  // Transport cols are mig 206 — retry without them on an older schema.
+  let ins = await admin.from("other_challans").insert({ ...baseRow, ...transportFields(formData) } as never).select("id").single();
+  if (ins.error) ins = await admin.from("other_challans").insert(baseRow).select("id").single();
+  const { data: row, error } = ins;
   if (error || !row) redirect(`/invoicing/other?toast=${encodeURIComponent(error?.message || "Failed to create challan")}`);
   const id = (row as { id: string }).id;
   await writeItems(admin, id, items);
@@ -183,14 +196,14 @@ export async function updateOtherChallanAction(formData: FormData) {
   const partyId = txt(formData, "party_id");
   const resolvedPartyId = partyId ? await resolvePartyId(admin, partyId) : "";
 
-  await admin
-    .from("other_challans")
-    .update({
-      ...(resolvedPartyId ? { party_id: resolvedPartyId } : {}),
-      ...(txt(formData, "challan_date") ? { challan_date: txt(formData, "challan_date") } : {}),
-      notes: txt(formData, "notes") || null,
-    })
-    .eq("id", id);
+  const upd = {
+    ...(resolvedPartyId ? { party_id: resolvedPartyId } : {}),
+    ...(txt(formData, "challan_date") ? { challan_date: txt(formData, "challan_date") } : {}),
+    notes: txt(formData, "notes") || null,
+  };
+  // Transport cols are mig 206 — retry without them on an older schema.
+  const updRes = await admin.from("other_challans").update({ ...upd, ...transportFields(formData) } as never).eq("id", id);
+  if (updRes.error) await admin.from("other_challans").update(upd).eq("id", id);
   await admin.from("other_challan_items").delete().eq("other_challan_id", id);
   await writeItems(admin, id, items);
 

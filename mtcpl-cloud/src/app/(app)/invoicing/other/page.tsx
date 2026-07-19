@@ -83,22 +83,19 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
   const baseCols = "id, party_id, challan_date, doc_fy, doc_seq, notes, inv_fy, inv_seq, converted_at, cancelled_at, invoice_parties(name, category)";
   let challans: OtherChallan[] = [];
   {
+    // Mig 206 transport cols + mig 183 section cols may be absent — try richest
+    // → poorest so a pre-migration schema still loads (only the newest fields
+    // fall away). needsMigration only if even the core select fails.
+    const TRANSPORT = ", transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone";
+    const SEC = ", other_challan_items(position, particulars, hsn, unit, quantity, rate, amount, section_index, section_head)";
+    const NOSEC = ", other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)";
+    const attempts = [baseCols + TRANSPORT + SEC, baseCols + TRANSPORT + NOSEC, baseCols + SEC, baseCols + NOSEC];
     let rows: any[] | null = null;
-    const withSec = await admin
-      .from("other_challans")
-      .select(`${baseCols}, other_challan_items(position, particulars, hsn, unit, quantity, rate, amount, section_index, section_head)`)
-      .is("cancelled_at", null)
-      .order("created_at", { ascending: false });
-    if (withSec.error) {
-      const plain = await admin
-        .from("other_challans")
-        .select(`${baseCols}, other_challan_items(position, particulars, hsn, unit, quantity, rate, amount)`)
-        .is("cancelled_at", null)
-        .order("created_at", { ascending: false });
-      if (plain.error) needsMigration = true; else rows = plain.data as any[];
-    } else {
-      rows = withSec.data as any[];
+    for (const cols of attempts) {
+      const res = await admin.from("other_challans").select(cols).is("cancelled_at", null).order("created_at", { ascending: false });
+      if (!res.error) { rows = res.data as any[]; break; }
     }
+    if (rows === null) needsMigration = true;
     challans = ((rows ?? []) as any[]).map((r) => {
       const code = challanCode(r.doc_fy, r.doc_seq) ?? `CH-${String(r.id).slice(0, 6).toUpperCase()}`;
       const invoiceCode = r.inv_fy && r.inv_seq != null ? `INV-${r.inv_fy}-${pad(r.inv_seq)}` : null;
@@ -110,6 +107,10 @@ export default async function OtherSalesPage({ searchParams }: { searchParams: P
       return {
         id: r.id, code, date: r.challan_date, partyId: r.party_id, partyName: p?.name ?? "—", category: p?.category ?? null,
         notes: r.notes ?? null, items, converted: !!r.converted_at, invoiceCode, total,
+        transport: {
+          company: r.transport_company ?? null, phone: r.transport_phone ?? null, lr: r.lr_no ?? null,
+          vehicle: r.transport_vehicle_no ?? null, driver: r.transport_driver_name ?? null, driverPhone: r.transport_driver_phone ?? null,
+        },
       };
     });
   }

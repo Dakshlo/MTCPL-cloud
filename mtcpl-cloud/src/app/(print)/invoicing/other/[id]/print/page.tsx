@@ -182,6 +182,17 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
           <Party label="Ship To" name={shipName} p={shipParty} fallback="Same as billing address" />
         </div>
 
+        {/* Mig 206 — transportation strip (Company · LR · Vehicle · Driver). */}
+        {(o.transport_company || o.lr_no || o.transport_vehicle_no || o.transport_driver_name) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 18px", border: "1px solid #d8d2c4", borderRadius: 6, padding: "6px 10px", margin: "0 0 8px", background: "#f7f5ef", fontSize: 10.5, color: "#1a1a1a" }}>
+            <span style={{ fontWeight: 800, textTransform: "uppercase", color: "#5b2e0a", fontSize: 9, letterSpacing: "0.05em", alignSelf: "center" }}>🚚 Transport</span>
+            {o.transport_company && <span><strong>Company:</strong> {o.transport_company}{o.transport_phone ? ` · ☎ ${o.transport_phone}` : ""}</span>}
+            {o.lr_no && <span><strong>LR No:</strong> {o.lr_no}</span>}
+            {o.transport_vehicle_no && <span><strong>Vehicle:</strong> {o.transport_vehicle_no}</span>}
+            {o.transport_driver_name && <span><strong>Driver:</strong> {o.transport_driver_name}{o.transport_driver_phone ? ` · ☎ ${o.transport_driver_phone}` : ""}</span>}
+          </div>
+        )}
+
         {items.length === 0 ? (
           <p style={{ color: "#888", fontSize: 11, marginTop: 12 }}>No line items.</p>
         ) : (
