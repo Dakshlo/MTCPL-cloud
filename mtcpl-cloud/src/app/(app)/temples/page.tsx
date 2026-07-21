@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canReadRequiredSizes } from "@/lib/cutting-permissions";
+import { canUseParkota } from "@/lib/parkota-access";
 import { TempleViewClient, type TempleTree, type StageBucket, type ComponentImage } from "./temple-view-client";
 import { STAGE_ORDER } from "./temple-shared";
 import { AddTempleImageButton } from "./add-image-button";
@@ -128,6 +129,9 @@ export default async function TemplesPage() {
   const canEditCategories = CATEGORY_EDIT_ROLES.includes(profile.role);
   // Admin-only cleanup of uncategorized open slabs (soft-archive).
   const canCleanup = ["owner", "developer", "senior_incharge"].includes(profile.role);
+  // Mig 207 — the Baba Mastnath card is the door to the Parkota pillar board
+  // (2-second press). Everyone else's list behaves exactly as before.
+  const canOpenParkota = canUseParkota(profile);
   const admin = createAdminSupabaseClient();
 
   // Paginated fetch of every slab (all statuses) — mirrors the slabs page
@@ -332,7 +336,7 @@ export default async function TemplesPage() {
           {canWriteImages && <AddTempleImageButton categoryStruct={categoryStruct} />}
         </div>
       </div>
-      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} canEditCategories={canEditCategories} templeCats={templeCats} cancelAlerts={cancelAlerts} />
+      <TempleViewClient trees={trees} imagesByNode={imagesByNode} canManageImages={canWriteImages} canEditCategories={canEditCategories} templeCats={templeCats} cancelAlerts={cancelAlerts} canOpenParkota={canOpenParkota} />
     </div>
   );
 }

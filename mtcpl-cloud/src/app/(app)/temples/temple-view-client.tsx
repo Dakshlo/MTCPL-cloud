@@ -4,8 +4,10 @@
 // (Section › … › Element), each node shows a stage progress bar + counts.
 // Leaf nodes expand to the slab list. Read-only.
 
-import { useEffect, useMemo, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import { isParkotaTemple } from "@/lib/parkota-access";
 import { TempleCardBrowser } from "./temple-card-browser";
 import { decideCancelledSlabAction } from "../slabs/cancel-actions";
 import {
@@ -297,7 +299,7 @@ function StageLegend() {
   );
 }
 
-export function TempleViewClient({ trees, imagesByNode, canManageImages, canEditCategories = false, templeCats, cancelAlerts = [] }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; canEditCategories?: boolean; templeCats: TempleCats; cancelAlerts?: Array<{ slabId: string; temple: string }> }) {
+export function TempleViewClient({ trees, imagesByNode, canManageImages, canEditCategories = false, templeCats, cancelAlerts = [], canOpenParkota = false }: { trees: TempleTree[]; imagesByNode: Record<string, ComponentImage[]>; canManageImages: boolean; canEditCategories?: boolean; templeCats: TempleCats; cancelAlerts?: Array<{ slabId: string; temple: string }>; canOpenParkota?: boolean }) {
   const [selected, setSelected] = useState<string>(trees[0]?.temple ?? "");
   const [q, setQ] = useState("");
   // Mig 132 — the replace / no-replace decision uses the same write
@@ -311,6 +313,58 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
   const [stageFilter, setStageFilter] = useState<StageBucket | null>(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setStageFilter(null); }, [selected]);
+
+  // ── Parkota tracker entry point (mig 207) ────────────────────────────
+  // The Baba Mastnath card doubles as the door to the parkota pillar board.
+  // Deliberately a 2-second press rather than a button: the tracker is a
+  // separate full-screen tool, so nobody should land in it from a stray tap
+  // while browsing temples — and the card keeps behaving normally on a tap.
+  const HOLD_MS = 2000;
+  const [holdTemple, setHoldTemple] = useState<string | null>(null);
+  const [holdPct, setHoldPct] = useState(0);
+  const [askParkota, setAskParkota] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdRaf = useRef<number | null>(null);
+  const holdFired = useRef(false);
+  const holdFrom = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => setMounted(true), []);
+
+  function cancelHold() {
+    if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
+    if (holdRaf.current !== null) { cancelAnimationFrame(holdRaf.current); holdRaf.current = null; }
+    holdFrom.current = null;
+    setHoldTemple(null);
+    setHoldPct(0);
+  }
+  useEffect(() => cancelHold, []);
+
+  function startHold(temple: string, x: number, y: number) {
+    holdFired.current = false;
+    holdFrom.current = { x, y };
+    setHoldTemple(temple);
+    setHoldPct(0);
+    const t0 = performance.now();
+    const tick = () => {
+      const p = Math.min(1, (performance.now() - t0) / HOLD_MS);
+      setHoldPct(p);
+      if (p < 1) holdRaf.current = requestAnimationFrame(tick);
+    };
+    holdRaf.current = requestAnimationFrame(tick);
+    holdTimer.current = setTimeout(() => {
+      holdFired.current = true;   // suppress the click that follows the release
+      cancelHold();
+      setAskParkota(true);
+      try { navigator.vibrate?.(35); } catch { /* not supported — fine */ }
+    }, HOLD_MS);
+  }
+
+  // A press that turns into a scroll must not count as a hold.
+  function moveHold(x: number, y: number) {
+    const from = holdFrom.current;
+    if (!from) return;
+    if (Math.abs(x - from.x) > 12 || Math.abs(y - from.y) > 12) cancelHold();
+  }
   // View modes: list (default) or immersive fullscreen cards; plus a
   // hide-menu toggle for a bigger list page.
   const [cardMode, setCardMode] = useState(false);
@@ -430,6 +484,45 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
         </div>
       )}
 
+      {/* Parkota confirm — portalled to <body> so an ancestor transform can't
+          break position:fixed (the temple cards animate in on mount). */}
+      {askParkota && mounted && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) setAskParkota(false); }}
+          onKeyDown={(e) => { if (e.key === "Escape") setAskParkota(false); }}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.45)", display: "grid", placeItems: "center", padding: 16 }}
+        >
+          <div style={{ width: "min(430px, 100%)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 18px 14px", boxShadow: "0 18px 50px rgba(0,0,0,0.32)" }}>
+            <div style={{ fontSize: 16.5, fontWeight: 800, marginBottom: 7 }}>⛩ Open Parkota Tracker?</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55, marginBottom: 16 }}>
+              The live 645-pillar board for the Baba Mastnath parkota — made / fixed status, parts and stock.
+              It opens as a separate full-screen tool in a new tab, and everything you mark there is shared with the rest of the team.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setAskParkota(false)}
+                style={{ padding: "9px 15px", fontSize: 13, fontWeight: 700, borderRadius: 9, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => { setAskParkota(false); window.open("/parkota", "_blank", "noopener"); }}
+                style={{ cursor: "pointer" }}
+              >
+                Open tracker →
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {/* View controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
@@ -453,11 +546,32 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: "72vh", overflowY: "auto" }}>
           {filteredTemples.map((t, i) => {
             const active = current?.temple === t.temple;
+            // Only this one temple, and only for the roles that run that site.
+            const parkota = canOpenParkota && isParkotaTemple(t.temple);
+            const holding = parkota && holdTemple === t.temple;
             return (
               <button
                 key={t.temple}
                 type="button"
-                onClick={() => setSelected(t.temple)}
+                onClick={() => {
+                  // The press already opened the prompt — swallow the click
+                  // that the browser fires on release.
+                  if (holdFired.current) { holdFired.current = false; return; }
+                  setSelected(t.temple);
+                }}
+                {...(parkota
+                  ? {
+                      onPointerDown: (e: React.PointerEvent) => {
+                        if (e.pointerType === "mouse" && e.button !== 0) return;
+                        startHold(t.temple, e.clientX, e.clientY);
+                      },
+                      onPointerMove: (e: React.PointerEvent) => moveHold(e.clientX, e.clientY),
+                      onPointerUp: cancelHold,
+                      onPointerLeave: cancelHold,
+                      onPointerCancel: cancelHold,
+                      onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+                    }
+                  : {})}
                 className="tv-anim tv-temple"
                 style={{
                   animationDelay: `${Math.min(i * 25, 300)}ms`,
@@ -466,6 +580,7 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
                   border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
                   borderLeft: `3px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
                   background: active ? "rgba(184,115,51,0.07)" : "transparent",
+                  ...(parkota ? { position: "relative" as const, overflow: "hidden" as const, userSelect: "none" as const, WebkitUserSelect: "none" as const } : {}),
                 }}
               >
                 <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
@@ -473,6 +588,17 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
                   <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", flexShrink: 0 }}>{t.counts.done}/{t.total}</span>
                 </span>
                 <StageBar counts={t.counts} total={t.total} animate={false} />
+                {parkota && (
+                  <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.2, color: "var(--gold-dark)", opacity: holding ? 1 : 0.75 }}>
+                    ⛩ {holding ? "keep holding…" : "hold 2s → Parkota tracker"}
+                  </span>
+                )}
+                {holding && (
+                  <span
+                    aria-hidden
+                    style={{ position: "absolute", left: 0, bottom: 0, height: 3, width: `${holdPct * 100}%`, background: "var(--gold-dark)", borderRadius: 2 }}
+                  />
+                )}
               </button>
             );
           })}
