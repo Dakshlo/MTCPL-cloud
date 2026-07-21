@@ -224,6 +224,26 @@ export function OtherSalesClient({
                         </tr>
                       ))}
                     </tbody>
+                    {/* Running qty total while typing — same rule as the print:
+                        no total when the table mixes units. */}
+                    {(() => {
+                      const units = new Set(s.lines.map((l) => String(l.unit ?? "").trim().toUpperCase()).filter(Boolean));
+                      const qtySum = s.lines.reduce((a, l) => a + (Number(l.quantity) || 0), 0);
+                      const mixed = units.size > 1;
+                      const unit = units.size === 1 ? [...units][0] : "";
+                      const foot = { ...cell, fontWeight: 800, background: "var(--surface)" };
+                      return (
+                        <tfoot>
+                          <tr>
+                            <td colSpan={4} style={{ ...foot, textAlign: "right" }}>Total</td>
+                            <td style={{ ...foot, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                              {mixed ? "—" : `${qtySum}${unit ? ` ${unit}` : ""}`}
+                            </td>
+                            <td style={foot} />
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
                   </table>
                 </div>
                 <div style={{ padding: "8px 10px" }}>
@@ -387,6 +407,23 @@ function OtherChallanPreview({ client, date, docCode, sections, transport, onClo
                     </tr>
                   ))}
                 </tbody>
+                {(() => {
+                  const units = new Set(s.lines.map((l) => String(l.unit ?? "").trim().toUpperCase()).filter(Boolean));
+                  const qtySum = s.lines.reduce((a, l) => a + (Number(l.quantity) || 0), 0);
+                  const mixed = units.size > 1;
+                  const unit = units.size === 1 ? [...units][0] : "";
+                  const foot = { ...pcell, fontWeight: 800, background: "#f3f6fa" };
+                  return (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={4} style={{ ...foot, textAlign: "right" }}>Total</td>
+                        <td style={{ ...foot, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
+                          {mixed ? "—" : `${qtySum}${unit ? ` ${unit}` : ""}`}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           ))}

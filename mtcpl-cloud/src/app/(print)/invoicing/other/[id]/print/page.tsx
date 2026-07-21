@@ -122,6 +122,9 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
         .t .r { text-align: right; white-space: nowrap; font-family: ui-monospace, monospace; }
         .t th.q { background: #c7ddf6; } .t td.q { background: #e6f0fb; }
         .t th.a { background: #ffe6a8; } .t td.a { background: #fff7e0; }
+        table.t tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; }
+        table.t tfoot td.q { background: #d9e8f8; }
+        table.t tfoot td.a { background: #ffefc4; }
         .subtotal-row { display: flex; justify-content: flex-end; gap: 18px; font-size: 11px; font-weight: 800; padding: 6px 6px 0; }
         .totbox { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 10px; }
         .terms { flex: 1 1 auto; max-width: 58%; }
@@ -233,6 +236,27 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                       );
                     })}
                   </tbody>
+                  {/* Per-table totals (Daksh, Jul 2026) — same shape as the temple
+                      delivery challan: Qty and Amount are summed, Rate deliberately
+                      is not (adding up rates gives a meaningless number). */}
+                  {(() => {
+                    const units = new Set(g.rows.map((r) => String(r.unit ?? "").trim().toUpperCase()).filter(Boolean));
+                    const qtySum = g.rows.reduce((a, r) => a + (Number(r.quantity) || 0), 0);
+                    const amtSum = g.rows.reduce((a, r) => a + (r.amount != null ? Number(r.amount) : (Number(r.quantity) || 0) * (Number(r.rate) || 0)), 0);
+                    // A table mixing CFT with NOS has no single qty total worth printing.
+                    const mixed = units.size > 1;
+                    const unit = units.size === 1 ? [...units][0] : "";
+                    return (
+                      <tfoot>
+                        <tr>
+                          <td colSpan={4} className="r">Total</td>
+                          <td className="r q">{mixed ? "—" : `${fmt(qtySum)}${unit ? ` ${unit}` : ""}`}</td>
+                          {converted && <td />}
+                          {converted && <td className="r a">{rupee(amtSum)}</td>}
+                        </tr>
+                      </tfoot>
+                    );
+                  })()}
                 </table>
               </div>
             ))}

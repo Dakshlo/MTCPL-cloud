@@ -126,6 +126,27 @@ export function OtherInvoiceForm({ id, chCode, party, editMode, initSections, in
                         </tr>
                       ))}
                     </tbody>
+                    {/* Live per-table totals while pricing. Rate is not summed
+                        (meaningless); qty only when the table uses one unit. */}
+                    {(() => {
+                      const units = new Set(s.lines.map((l) => String(l.unit ?? "").trim().toUpperCase()).filter(Boolean));
+                      const qtySum = s.lines.reduce((a, l) => a + (Number(l.quantity) || 0), 0);
+                      const amtSum = s.lines.reduce((a, l) => a + (Number(amountOf(l)) || 0), 0);
+                      const mixed = units.size > 1;
+                      const unit = units.size === 1 ? [...units][0] : "";
+                      const foot = { ...cell, fontWeight: 800, background: "var(--surface)" };
+                      const num = { ...foot, textAlign: "right" as const, fontFamily: "ui-monospace, monospace" };
+                      return (
+                        <tfoot>
+                          <tr>
+                            <td colSpan={3} style={{ ...foot, textAlign: "right" }}>Total</td>
+                            <td style={num}>{mixed ? "—" : `${qtySum}${unit ? ` ${unit}` : ""}`}</td>
+                            <td style={foot} />
+                            <td style={num}>{rupee(amtSum)}</td>
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
                   </table>
                 </div>
               </div>
