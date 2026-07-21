@@ -21,6 +21,19 @@ const nextConfig: NextConfig = {
   // imapflow + mailparser (June 2026) — Node-only TCP/stream internals for
   // the owner email snapshot; same keep-out-of-the-bundle treatment.
   serverExternalPackages: ["xlsx", "exceljs", "imapflow", "mailparser"],
+
+  /**
+   * Parkota Pillar Tracker (Daksh, Jul 2026) — a standalone, self-contained
+   * single-file HTML app (Baba Mastnath Ji parkota: pillar map, made/fixed
+   * status, parts, stock). It lives in `public/` and is served as a plain
+   * static asset, so it is deliberately NOT part of the Next app: no auth,
+   * no layout, no sidebar entry. This rewrite just gives it a clean URL —
+   *     /parkota   →   /parkota-tracker.html
+   * so it can be shared as <domain>/parkota. Nothing else links to it yet.
+   */
+  async rewrites() {
+    return [{ source: "/parkota", destination: "/parkota-tracker.html" }];
+  },
 };
 
 /**

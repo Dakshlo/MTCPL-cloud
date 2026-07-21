@@ -39,5 +39,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]
+  // `parkota` is excluded because the Parkota Pillar Tracker is a ~20 MB
+  // self-contained static file in public/ (served at /parkota). It needs no
+  // Supabase session, so running the auth refresh above on it would just add
+  // a network round-trip — and an edge invocation — to every load of a large
+  // asset. Covers both /parkota and /parkota-tracker.html.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|parkota).*)"]
 };
