@@ -16,6 +16,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
@@ -203,9 +204,9 @@ export type DailyReport = {
 // dims for a set of slab ids → map id → cft.
 async function cftBySlab(admin: AdminClient, ids: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  for (let i = 0; i < ids.length; i += 1000) {
-    const chunk = ids.slice(i, i + 1000);
-    if (chunk.length === 0) break;
+  // 500-id chunks: a 1000-id .in() would land EXACTLY on PostgREST's 1000-row
+  // cap (zero margin) and make a very long URL.
+  for (const chunk of chunkIds(ids, 500)) {
     const { data } = await admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft")
@@ -267,13 +268,20 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
     const blockIds = [...new Set(((doneBlocks ?? []) as Array<{ block_id: string }>).map((b) => b.block_id).filter(Boolean))];
     if (blockIds.length > 0) {
       const slabs: Array<{ stone: string | null; length_ft: number; width_ft: number; thickness_ft: number }> = [];
-      for (let i = 0; i < blockIds.length; i += 200) {
-        const { data } = await admin
-          .from("slab_requirements")
-          .select("stone, length_ft, width_ft, thickness_ft, status")
-          .in("source_block_id", blockIds.slice(i, i + 200))
-          .not("status", "in", "(open,rejected,cancelled)");
-        slabs.push(...((data ?? []) as typeof slabs));
+      // Each 200-block chunk can yield FAR more than 1000 slabs, so the result
+      // needs paginating too — otherwise the cutting card silently under-counts
+      // the same way the dispatch card did.
+      for (const chunk of chunkIds(blockIds, 200)) {
+        const page = await fetchAllPaged<{ stone: string | null; length_ft: number; width_ft: number; thickness_ft: number }>((from, to) =>
+          admin
+            .from("slab_requirements")
+            .select("stone, length_ft, width_ft, thickness_ft, status")
+            .in("source_block_id", chunk)
+            .not("status", "in", "(open,rejected,cancelled)")
+            .order("id", { ascending: true })
+            .range(from, to),
+        );
+        slabs.push(...page);
       }
       const byStone = new Map<string, { slabs: number; cft: number }>();
       for (const s of slabs) {
@@ -310,20 +318,36 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
 
   // 4. DISPATCH today — trucks sent today; slabs + tonnes by temple.
   {
-    const { data: disp } = await admin
-      .from("dispatches")
-      .select("id, temple, dispatched_at")
-      .gte("dispatched_at", startUTC)
-      .lte("dispatched_at", endUTC);
-    const dispatches = (disp ?? []) as Array<{ id: string; temple: string }>;
+    const dispatches = await fetchAllPaged<{ id: string; temple: string }>((from, to) =>
+      admin
+        .from("dispatches")
+        .select("id, temple, dispatched_at")
+        .gte("dispatched_at", startUTC)
+        .lte("dispatched_at", endUTC)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
     totals.dispatch.trucks = dispatches.length;
     if (dispatches.length > 0) {
-      const { data: logs } = await admin
-        .from("dispatch_logs")
-        .select("dispatch_id, slab_requirement_id, weight_tonnes")
-        .in("dispatch_id", dispatches.map((d) => d.id));
+      // dispatch_logs holds one row PER SLAB per dispatch, so a month-to-date
+      // window blows past PostgREST's 1000-row cap (Jul 2026 = 1,467 rows) — the
+      // old uncapped .in() silently kept 1000 and UNDER-reported the dispatch
+      // slabs / CFT / tonnes on the daily report. Chunk the dispatch ids AND
+      // paginate each chunk so every log row is counted.
+      type LogRow = { dispatch_id: string | null; slab_requirement_id: string | null; weight_tonnes: number | null };
+      const logRows: LogRow[] = [];
+      for (const idChunk of chunkIds(dispatches.map((d) => d.id), 100)) {
+        const page = await fetchAllPaged<LogRow>((from, to) =>
+          admin
+            .from("dispatch_logs")
+            .select("dispatch_id, slab_requirement_id, weight_tonnes")
+            .in("dispatch_id", idChunk)
+            .order("id", { ascending: true })
+            .range(from, to),
+        );
+        logRows.push(...page);
+      }
       const templeOf = new Map(dispatches.map((d) => [d.id, d.temple]));
-      const logRows = (logs ?? []) as Array<{ dispatch_id: string | null; slab_requirement_id: string | null; weight_tonnes: number | null }>;
       const dims = await cftBySlab(admin, logRows.map((l) => l.slab_requirement_id).filter(Boolean) as string[]);
       const byTemple = new Map<string, { slabs: number; cft: number; tonnes: number }>();
       for (const l of logRows) {
