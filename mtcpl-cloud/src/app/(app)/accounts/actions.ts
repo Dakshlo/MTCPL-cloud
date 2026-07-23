@@ -3911,9 +3911,13 @@ export async function getRoyaltySummaryAction(
         /** Bucket key — YYYY-MM-DD for day, YYYY-Www for week,
          *  YYYY-MM for month. */
         key: string;
-        /** Human label — e.g. "Fri 22 May 2026", "Week 21 (18-24 May)",
-         *  "May 2026". */
+        /** Human label — e.g. "Fri 22 May 2026", "Week 21", "May 2026". */
         label: string;
+        /** Actual first / last entry date (ISO) that landed in this
+         *  bucket. Lets the week/month rows show the real dates the
+         *  entries fall on. */
+        rangeStart: string;
+        rangeEnd: string;
         received: number;
         given: number;
         net: number;
@@ -4059,10 +4063,12 @@ export async function getRoyaltySummaryAction(
     }
     const weekNum =
       1 + Math.ceil((firstThursday - target.getTime()) / 604800000);
-    const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    // Label is just the week number; the actual entry date range is
+    // shown as a secondary line on the row (from rangeStart/rangeEnd).
+    void sunday;
     return {
       key: `${monday.getFullYear()}-W${String(weekNum).padStart(2, "0")}`,
-      label: `Week ${weekNum} · ${monday.getDate()} ${monthShort[monday.getMonth()]} – ${sunday.getDate()} ${monthShort[sunday.getMonth()]}`,
+      label: `Week ${weekNum}`,
     };
   }
 
@@ -4077,6 +4083,8 @@ export async function getRoyaltySummaryAction(
     string,
     {
       label: string;
+      firstIso: string;
+      lastIso: string;
       received: number;
       given: number;
       entryCount: number;
@@ -4096,11 +4104,16 @@ export async function getRoyaltySummaryAction(
       bucketMap.get(key) ??
       {
         label,
+        firstIso: iso,
+        lastIso: iso,
         received: 0,
         given: 0,
         entryCount: 0,
         vendorMap: new Map<string, VendorTally>(),
       };
+    // ISO date strings compare chronologically — track the real span.
+    if (iso < bucket.firstIso) bucket.firstIso = iso;
+    if (iso > bucket.lastIso) bucket.lastIso = iso;
     const amt = Number(r.amount) || 0;
     if (r.entry_type === "received") bucket.received += amt;
     else bucket.given += amt;
@@ -4167,6 +4180,8 @@ export async function getRoyaltySummaryAction(
     .map(([key, b]) => ({
       key,
       label: b.label,
+      rangeStart: b.firstIso,
+      rangeEnd: b.lastIso,
       received: b.received,
       given: b.given,
       // Net = given - received. Positive means we paid out more

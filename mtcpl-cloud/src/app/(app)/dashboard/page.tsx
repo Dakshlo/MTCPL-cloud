@@ -7,6 +7,7 @@ import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
 import { BlockJourneyEntryCard } from "@/components/block-journey-entry-card";
 import { TvModeEntryCard } from "@/components/tv-mode-entry-card";
 import { EmailSnapshotCard } from "./email-snapshot-card";
+import { RoyaltySecretDot } from "./royalty-secret-dot";
 import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
@@ -400,11 +401,11 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Daksh May 2026 — discreet entry to cross-vendor royalty
-          summary. Owner / developer only; passphrase-gated on the
-          destination page. Shrunk to a single tiny dot per dad's
-          ask — he knows where it lives and doesn't want a button
-          taking up real estate. */}
+      {/* Daksh May 2026 → Jul 2026 — discreet entry to the cross-vendor
+          royalty summary. No longer a link: it's a secret gesture (hover the
+          dot + type "aadesh", or long-press on a tablet), which navigates to
+          the passphrase-gated summary page. Owner / developer only. See
+          royalty-secret-dot.tsx. */}
       {(profile.role === "owner" || profile.role === "developer") && (
         <div
           style={{
@@ -413,20 +414,7 @@ export default async function DashboardPage() {
             justifyContent: "center",
           }}
         >
-          <Link
-            href="/accounts/royalty-summary"
-            title="Cross-vendor royalty summary (passphrase required)"
-            aria-label="Royalty Summary"
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              background: "#d97706",
-              boxShadow: "0 0 0 3px rgba(217,119,6,0.15)",
-              opacity: 0.55,
-            }}
-          />
+          <RoyaltySecretDot />
         </div>
       )}
 

@@ -33,6 +33,8 @@ type SummaryResult =
       buckets: Array<{
         key: string;
         label: string;
+        rangeStart: string;
+        rangeEnd: string;
         received: number;
         given: number;
         net: number;
@@ -53,6 +55,20 @@ type Granularity = "day" | "week" | "month";
 
 function fmtPoints(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2 Jul – 22 Jul 2026" for a span, or "15 Jul 2026" when both ends
+ *  are the same day. Powers the date line on the Week / Month rows. */
+function fmtDateRange(startIso: string, endIso: string): string {
+  const s = startIso.split("-").map(Number); // [y, m, d]
+  const e = endIso.split("-").map(Number);
+  if (s.length !== 3 || e.length !== 3) return "";
+  const one = (a: number[]) => `${a[2]} ${MON[a[1] - 1]} ${a[0]}`;
+  if (startIso === endIso) return one(s);
+  // Same year → don't repeat it on the left side.
+  const left = s[0] === e[0] ? `${s[2]} ${MON[s[1] - 1]}` : one(s);
+  return `${left} – ${one(e)}`;
 }
 
 /** YYYY-MM-DD for today in IST. Defaults the date picker. */
@@ -688,6 +704,19 @@ export function RoyaltySummaryClient({
                                 </span>
                               )}
                               {b.label}
+                              {granularity !== "day" && (
+                                <div
+                                  style={{
+                                    marginLeft: isSingleBucket ? 0 : 18,
+                                    marginTop: 2,
+                                    fontSize: 11,
+                                    fontWeight: 500,
+                                    color: "var(--muted)",
+                                  }}
+                                >
+                                  {fmtDateRange(b.rangeStart, b.rangeEnd)}
+                                </div>
+                              )}
                             </td>
                             <td
                               style={{
@@ -744,16 +773,103 @@ export function RoyaltySummaryClient({
                               {b.entryCount}
                             </td>
                           </tr>
-                          {showVendors && b.vendors.length > 0 && (
-                            <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                              <td colSpan={5} style={{ padding: 0 }}>
-                                <VendorBreakdownRows
-                                  vendors={b.vendors}
-                                  parentTone={isExpanded ? "#fffbeb" : "#fafafa"}
-                                />
-                              </td>
-                            </tr>
-                          )}
+                          {/* Vendor breakdown — rendered as real rows in THIS
+                              table so every column lines up under the bucket
+                              row above (a nested table drifted out of line). */}
+                          {showVendors &&
+                            b.vendors.map((v) => {
+                              const vSign =
+                                v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
+                              const vColor =
+                                v.net > 0.5
+                                  ? "#b45309"
+                                  : v.net < -0.5
+                                    ? "#15803d"
+                                    : "var(--muted)";
+                              const subBg = isExpanded ? "#fffbeb" : "#fafafa";
+                              return (
+                                <tr
+                                  key={`${b.key}:${v.id}`}
+                                  style={{
+                                    background: subBg,
+                                    borderBottom: "1px solid #f1f5f9",
+                                  }}
+                                >
+                                  <td
+                                    style={{
+                                      ...td(),
+                                      padding: "6px 14px 6px 34px",
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      color: "#475569",
+                                    }}
+                                  >
+                                    · {v.name}
+                                  </td>
+                                  <td
+                                    style={{
+                                      ...td(),
+                                      padding: "6px 14px",
+                                      textAlign: "right",
+                                      fontSize: 12,
+                                      fontFamily: "ui-monospace, monospace",
+                                      color:
+                                        v.received > 0
+                                          ? "#15803d"
+                                          : "var(--muted-light)",
+                                      fontWeight: v.received > 0 ? 700 : 500,
+                                    }}
+                                  >
+                                    {v.received > 0
+                                      ? `+${fmtPoints(v.received)}`
+                                      : "—"}
+                                  </td>
+                                  <td
+                                    style={{
+                                      ...td(),
+                                      padding: "6px 14px",
+                                      textAlign: "right",
+                                      fontSize: 12,
+                                      fontFamily: "ui-monospace, monospace",
+                                      color:
+                                        v.given > 0
+                                          ? "#b45309"
+                                          : "var(--muted-light)",
+                                      fontWeight: v.given > 0 ? 700 : 500,
+                                    }}
+                                  >
+                                    {v.given > 0
+                                      ? `−${fmtPoints(v.given)}`
+                                      : "—"}
+                                  </td>
+                                  <td
+                                    style={{
+                                      ...td(),
+                                      padding: "6px 14px",
+                                      textAlign: "right",
+                                      fontSize: 12,
+                                      fontFamily: "ui-monospace, monospace",
+                                      fontWeight: 800,
+                                      color: vColor,
+                                    }}
+                                  >
+                                    {vSign}
+                                    {fmtPoints(Math.abs(v.net))}
+                                  </td>
+                                  <td
+                                    style={{
+                                      ...td(),
+                                      padding: "6px 14px",
+                                      textAlign: "right",
+                                      fontSize: 11,
+                                      color: "var(--muted)",
+                                    }}
+                                  >
+                                    {v.entryCount}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                         </Fragment>
                       );
                     })}
@@ -1046,103 +1162,6 @@ function TotalTile({
         {prefix ?? ""}
         {value}
       </div>
-    </div>
-  );
-}
-
-/** Renders the per-vendor breakdown inside an expanded bucket row.
- *  Lives in a single colSpan=5 cell so we don't fight the parent
- *  table's column widths. Indented + slightly muted so it reads as
- *  a sub-list, not a peer of the main row. */
-function VendorBreakdownRows({
-  vendors,
-  parentTone,
-}: {
-  vendors: VendorBreakdown[];
-  parentTone: string;
-}) {
-  return (
-    <div style={{ background: parentTone, padding: "6px 14px 10px 32px" }}>
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          fontSize: 12,
-        }}
-      >
-        <tbody>
-          {vendors.map((v) => {
-            const netSign = v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
-            const netColor =
-              v.net > 0.5
-                ? "#b45309"
-                : v.net < -0.5
-                  ? "#15803d"
-                  : "var(--muted)";
-            return (
-              <tr key={v.id}>
-                <td
-                  style={{
-                    padding: "4px 8px 4px 0",
-                    color: "#475569",
-                    fontWeight: 600,
-                  }}
-                >
-                  · {v.name}
-                </td>
-                <td
-                  style={{
-                    padding: "4px 8px",
-                    textAlign: "right",
-                    fontFamily: "ui-monospace, monospace",
-                    color: v.received > 0 ? "#15803d" : "var(--muted-light)",
-                    fontWeight: v.received > 0 ? 700 : 500,
-                    minWidth: 90,
-                  }}
-                >
-                  {v.received > 0 ? `+${fmtPoints(v.received)}` : "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "4px 8px",
-                    textAlign: "right",
-                    fontFamily: "ui-monospace, monospace",
-                    color: v.given > 0 ? "#b45309" : "var(--muted-light)",
-                    fontWeight: v.given > 0 ? 700 : 500,
-                    minWidth: 90,
-                  }}
-                >
-                  {v.given > 0 ? `−${fmtPoints(v.given)}` : "—"}
-                </td>
-                <td
-                  style={{
-                    padding: "4px 8px",
-                    textAlign: "right",
-                    fontFamily: "ui-monospace, monospace",
-                    fontWeight: 800,
-                    color: netColor,
-                    minWidth: 90,
-                  }}
-                >
-                  {netSign}
-                  {fmtPoints(Math.abs(v.net))}
-                </td>
-                <td
-                  style={{
-                    padding: "4px 0 4px 8px",
-                    textAlign: "right",
-                    color: "var(--muted)",
-                    fontSize: 11,
-                    minWidth: 40,
-                  }}
-                >
-                  {v.entryCount}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
