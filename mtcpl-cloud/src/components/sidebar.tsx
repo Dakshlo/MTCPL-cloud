@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AppRole } from "@/lib/types";
+import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import {
   DEPARTMENTS,
   allowedDepartmentsForRole,
@@ -440,28 +441,28 @@ const navEntries: NavEntry[] = [
   {
     type: "divider",
     label: "VEHICLES",
-    roles: ["developer", "owner"],
+    roles: VEHICLES_ROLES,
     department: "vehicles",
   },
   {
     href: "/vehicles",
     label: "Overview",
     icon: "🧭",
-    roles: ["developer", "owner"],
+    roles: VEHICLES_ROLES,
     department: "vehicles",
   },
   {
     href: "/vehicles/commercial",
     label: "Commercial",
     icon: "🚛",
-    roles: ["developer", "owner"],
+    roles: VEHICLES_ROLES,
     department: "vehicles",
   },
   {
     href: "/vehicles/personal",
     label: "Personal",
     icon: "🚗",
-    roles: ["developer", "owner"],
+    roles: VEHICLES_ROLES,
     department: "vehicles",
   },
   // ── ACCOUNTS section (Finance department, mig 028 + 037 crosscheck) ──

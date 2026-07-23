@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
+import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import { loadVehicles } from "./_data";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ const fmtD = (d: string) =>
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
 export default async function VehiclesOverviewPage() {
-  await requireAuth(["owner", "developer"]);
+  await requireAuth(VEHICLES_ROLES);
   const { rows, migMissing } = await loadVehicles();
 
   type Alert = { vehicle: string; kind: "commercial" | "personal"; doc: string; date: string; days: number };

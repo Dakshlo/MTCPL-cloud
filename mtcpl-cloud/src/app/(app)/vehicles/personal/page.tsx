@@ -2,13 +2,14 @@
 // government-paper uploads + insurance / PUC expiries (no fitness).
 
 import { requireAuth } from "@/lib/auth";
+import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import { loadVehicles, toastFrom } from "../_data";
 import { VehiclesBoard } from "../vehicles-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function PersonalVehiclesPage({ searchParams }: { searchParams: Promise<{ toast?: string }> }) {
-  await requireAuth(["owner", "developer"]);
+  await requireAuth(VEHICLES_ROLES);
   const sp = await searchParams;
   const { rows, migMissing } = await loadVehicles("personal");
   const toast = toastFrom(sp);

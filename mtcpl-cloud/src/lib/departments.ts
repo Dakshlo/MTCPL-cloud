@@ -106,7 +106,7 @@ export const DEPARTMENTS: ReadonlyArray<{
   {
     // Mig 204 — Vehicles: company vehicle document management. EMI monitor,
     // government papers (uploads), insurance / PUC / fitness expiries.
-    // Owner + developer only for now.
+    // Owner + developer + ACCOUNTANT (Jul 2026) — see vehicles-access.ts.
     id: "vehicles",
     label: "Vehicles",
     icon: "🚚",
@@ -218,8 +218,11 @@ export function allowedDepartmentsForRole(role: AppRole): Department[] {
     // Work Order Doc inside Invoicing.)
     // Jul 2026 (Daksh) — plain accountant also runs the Employees department
     // (salary / PF / ESI), same as accountant★.
+    // Jul 2026 (Daksh) — and Vehicles: they pay the EMIs and renew insurance /
+    // PUC / fitness, so they get the same rights there as owner. accountant★
+    // deliberately does NOT get it (asked + confirmed). See vehicles-access.ts.
     case "accountant":
-      return ["finance", "invoicing", "salary"];
+      return ["finance", "invoicing", "salary", "vehicles"];
     // Mig 195 — Employee-register role: ONLY the Employees department.
     case "employee_register":
       return ["salary"];

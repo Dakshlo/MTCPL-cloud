@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
+import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 
@@ -43,7 +44,7 @@ function refresh() {
 
 /** Create or update a vehicle (id present → update). */
 export async function upsertVehicleAction(formData: FormData): Promise<void> {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(VEHICLES_ROLES);
   const admin = createAdminSupabaseClient();
 
   const id = txt(formData, "id");
@@ -90,7 +91,7 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
 
 /** Delete a vehicle + its documents (rows cascade; storage best-effort). */
 export async function deleteVehicleAction(formData: FormData): Promise<void> {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(VEHICLES_ROLES);
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "id");
   const kind = txt(formData, "kind") === "personal" ? "personal" : "commercial";
@@ -113,7 +114,7 @@ export async function deleteVehicleAction(formData: FormData): Promise<void> {
 export async function prepareVehicleDocUploadsAction(
   formData: FormData,
 ): Promise<{ ok: true; uploads: Array<{ name: string; path: string; token: string }> } | { ok: false; error: string }> {
-  await requireAuth(["owner", "developer"]);
+  await requireAuth(VEHICLES_ROLES);
   const admin = createAdminSupabaseClient();
   const vehicleId = txt(formData, "vehicle_id");
   if (!vehicleId) return { ok: false, error: "Missing vehicle." };
@@ -143,7 +144,7 @@ export async function prepareVehicleDocUploadsAction(
 export async function saveVehicleDocsAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(VEHICLES_ROLES);
   const admin = createAdminSupabaseClient();
   const vehicleId = txt(formData, "vehicle_id");
   const docType = orNull(txt(formData, "doc_type"));
@@ -174,7 +175,7 @@ export async function saveVehicleDocsAction(
 export async function deleteVehicleDocAction(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["owner", "developer"]);
+  const { profile } = await requireAuth(VEHICLES_ROLES);
   const admin = createAdminSupabaseClient();
   const id = txt(formData, "doc_id");
   if (!id) return { ok: false, error: "Missing document." };
