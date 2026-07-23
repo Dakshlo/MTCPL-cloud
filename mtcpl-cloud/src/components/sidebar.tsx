@@ -929,6 +929,10 @@ export function Sidebar({
       return pathname === "/invoicing/challans" || pathname.startsWith("/invoicing/challans/");
     if (href === "/invoicing/parties")
       return pathname === "/invoicing/parties" || pathname.startsWith("/invoicing/parties/");
+    // Vehicles: /vehicles is the Overview landing; /vehicles/commercial and
+    // /vehicles/personal are siblings. Without an exact match the fallback
+    // below lights Overview up on every vehicles sub-page too (Daksh flagged).
+    if (href === "/vehicles") return pathname === "/vehicles";
     return pathname === href || pathname.startsWith(href + "/");
   }
 

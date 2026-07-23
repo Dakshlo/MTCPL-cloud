@@ -33,22 +33,6 @@ export function daysTo(date: string | null): number | null {
 const fmtD = (d: string | null) =>
   d ? new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-/** Colour-coded expiry chip: red expired · amber ≤30 days · green ok · grey unset. */
-function ExpiryChip({ label, date }: { label: string; date: string | null }) {
-  const d = daysTo(date);
-  const c =
-    d == null ? { fg: "var(--muted)", bg: "var(--bg)", bd: "var(--border)", note: "not set" } :
-    d < 0 ? { fg: "#b91c1c", bg: "rgba(220,38,38,0.1)", bd: "#fecaca", note: `expired ${Math.abs(d)}d ago` } :
-    d <= 30 ? { fg: "#b45309", bg: "rgba(217,119,6,0.12)", bd: "#fde68a", note: `${d}d left` } :
-    { fg: "#15803d", bg: "rgba(22,163,74,0.1)", bd: "#bbf7d0", note: `${d}d left` };
-  return (
-    <span title={date ? `${label}: ${fmtD(date)}` : `${label} date not set`} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: c.fg, background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}>
-      {label}
-      <span style={{ fontWeight: 700, opacity: 0.9 }}>{date ? `${fmtD(date)} · ${c.note}` : "—"}</span>
-    </span>
-  );
-}
-
 function monthsLeft(end: string | null): number | null {
   if (!end) return null;
   const now = new Date();
@@ -197,10 +181,38 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
   );
 }
 
-// ── one vehicle card ────────────────────────────────────────────────
+// Loan completion (elapsed / total term) — powers the per-card progress bar.
+function loanProgress(start: string | null, end: string | null): number | null {
+  if (!start || !end) return null;
+  const s = new Date(`${start.slice(0, 10)}T00:00:00+05:30`).getTime();
+  const e = new Date(`${end.slice(0, 10)}T00:00:00+05:30`).getTime();
+  if (!(e > s)) return null;
+  return Math.max(0, Math.min(100, Math.round(((Date.now() - s) / (e - s)) * 100)));
+}
+
+// One expiry line inside a card: coloured status dot + label + date + days-left.
+// Reads as an at-a-glance compliance panel — clearer than the crammed pills.
+function ExpiryRow({ label, date }: { label: string; date: string | null }) {
+  const d = daysTo(date);
+  const c =
+    d == null ? { fg: "var(--muted)", note: "not set" } :
+    d < 0 ? { fg: "#dc2626", note: `expired ${Math.abs(d)}d ago` } :
+    d <= 30 ? { fg: "#d97706", note: `${d}d left` } :
+    { fg: "#16a34a", note: `${d}d left` };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 0", borderTop: "1px solid var(--border)" }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.fg, flexShrink: 0 }} />
+      <span style={{ width: 74, fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--muted)" }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 700 }}>{date ? fmtD(date) : "—"}</span>
+      <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 800, color: c.fg, whiteSpace: "nowrap" }}>{c.note}</span>
+    </div>
+  );
+}
+
+// ── one vehicle card (vertical) ─────────────────────────────────────
 function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [docType, setDocType] = useState("Other");
   const [uploading, setUploading] = useState(false);
@@ -208,6 +220,13 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const icon = v.kind === "commercial" ? "🚛" : "🚗";
   const mLeft = v.emi_active ? monthsLeft(v.emi_end) : null;
+  const prog = v.emi_active ? loanProgress(v.emi_start, v.emi_end) : null;
+
+  // Worst expiry status drives a slim colour rail down the left of the card, so
+  // a red/amber card is spottable in a grid without reading anything.
+  const applicable = [v.insurance_expiry, v.puc_expiry, ...(v.kind === "commercial" ? [v.fitness_expiry] : [])];
+  const days = applicable.map(daysTo).filter((d): d is number => d != null);
+  const rail = days.some((d) => d < 0) ? "#dc2626" : days.some((d) => d <= 30) ? "#d97706" : days.length ? "#16a34a" : "var(--border)";
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
@@ -233,6 +252,7 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
       fd2.set("files", JSON.stringify(metas));
       const saved = await saveVehicleDocsAction(fd2);
       if (!saved.ok) { setErr(saved.error); return; }
+      setShowDocs(true);
       router.refresh();
     } finally {
       setUploading(false);
@@ -248,74 +268,83 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
   }
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", overflow: "hidden" }}>
-      {/* header — always visible, click to expand */}
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "13px 16px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
-        <span style={{ fontSize: 22 }}>{icon}</span>
-        <span style={{ minWidth: 140 }}>
-          <span style={{ display: "block", fontSize: 15, fontWeight: 900 }}>{v.name}</span>
-          <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{v.reg_no || "no reg. no"}{v.make_model ? ` · ${v.make_model}` : ""}</span>
-        </span>
-        <span style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1 }}>
-          <ExpiryChip label="INSURANCE" date={v.insurance_expiry} />
-          <ExpiryChip label="PUC" date={v.puc_expiry} />
-          {v.kind === "commercial" && <ExpiryChip label="FITNESS" date={v.fitness_expiry} />}
-          {v.emi_active && v.emi_amount != null && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: "#4f6d9c", background: "rgba(79,109,156,0.1)", border: "1px solid rgba(79,109,156,0.35)", borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}>
-              💳 {inr(v.emi_amount)}{v.emi_day ? ` · day ${v.emi_day}` : ""}{mLeft != null ? ` · ${mLeft} left` : ""}
-            </span>
-          )}
-        </span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", whiteSpace: "nowrap" }}>📎 {v.docs.length} · {open ? "▴ close" : "▾ open"}</span>
-      </button>
+    <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderLeft: `4px solid ${rail}`, borderRadius: 14, background: "var(--surface)", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "13px 15px 11px" }}>
+        <span style={{ fontSize: 26, lineHeight: 1 }}>{icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15.5, fontWeight: 900, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.reg_no || "no reg. no"}{v.make_model ? ` · ${v.make_model}` : ""}</div>
+        </div>
+        <button type="button" onClick={onEdit} title="Edit" style={{ border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 13, flexShrink: 0, lineHeight: 1 }}>✎</button>
+      </div>
 
-      {open && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "14px 16px", display: "grid", gap: 14 }}>
-          {/* details grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, fontSize: 12.5 }}>
-            <div><span style={{ color: "var(--muted)", fontWeight: 700 }}>Insurance:</span> {v.insurance_company || "—"}{v.insurance_policy_no ? ` · ${v.insurance_policy_no}` : ""}</div>
-            {v.emi_active ? (
-              <div><span style={{ color: "var(--muted)", fontWeight: 700 }}>EMI:</span> {v.emi_amount != null ? inr(v.emi_amount) : "—"}{v.emi_day ? ` on day ${v.emi_day}` : ""}{v.emi_lender ? ` · ${v.emi_lender}` : ""}{v.emi_end ? ` · ends ${fmtD(v.emi_end)}` : ""}{mLeft != null ? ` (${mLeft} EMIs left)` : ""}</div>
-            ) : (
-              <div><span style={{ color: "var(--muted)", fontWeight: 700 }}>EMI:</span> no loan</div>
-            )}
-            {v.notes && <div style={{ gridColumn: "1 / -1" }}><span style={{ color: "var(--muted)", fontWeight: 700 }}>Notes:</span> {v.notes}</div>}
+      {/* status panel */}
+      <div style={{ padding: "0 15px 4px" }}>
+        <ExpiryRow label="Insurance" date={v.insurance_expiry} />
+        <ExpiryRow label="PUC" date={v.puc_expiry} />
+        {v.kind === "commercial" && <ExpiryRow label="Fitness" date={v.fitness_expiry} />}
+      </div>
+
+      {/* EMI block */}
+      {v.emi_active && v.emi_amount != null ? (
+        <div style={{ margin: "8px 15px 0", padding: "9px 11px", borderRadius: 10, background: "rgba(79,109,156,0.08)", border: "1px solid rgba(79,109,156,0.22)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 900, color: "#4f6d9c", fontFamily: "ui-monospace, monospace" }}>💳 {inr(v.emi_amount)}<span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", fontFamily: "inherit" }}>/mo</span></span>
+            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)" }}>{v.emi_day ? `due day ${v.emi_day}` : ""}{v.emi_lender ? `${v.emi_day ? " · " : ""}${v.emi_lender}` : ""}</span>
           </div>
-
-          {/* documents */}
-          <div style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "11px 13px", background: "var(--bg)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: v.docs.length ? 10 : 0 }}>
-              <span style={{ fontSize: 12, fontWeight: 900 }}>📄 Documents</span>
-              <span style={{ flex: 1 }} />
-              <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ ...input, width: "auto", padding: "6px 9px", fontSize: 12 }}>
-                {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <input ref={fileInput} type="file" multiple style={{ display: "none" }} onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) void uploadFiles(fs); e.target.value = ""; }} />
-              <button type="button" disabled={uploading} onClick={() => fileInput.current?.click()} style={{ ...btn, padding: "6px 12px", fontSize: 12 }}>
-                {uploading ? "Uploading…" : "📎 Upload"}
-              </button>
-            </div>
-            {err && <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>⚠ {err}</div>}
-            {v.docs.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>No papers uploaded yet — RC, insurance policy, PUC, anything.</div>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                {v.docs.map((d) => (
-                  <span key={d.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: "5px 10px", maxWidth: "100%" }}>
-                    {d.doc_type && <span style={{ fontSize: 9.5, fontWeight: 900, textTransform: "uppercase", color: "#4f6d9c", background: "rgba(79,109,156,0.1)", borderRadius: 5, padding: "1px 6px" }}>{d.doc_type}</span>}
-                    <a href={d.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--text)", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{d.name}</a>
-                    <button type="button" title="Delete" onClick={() => void removeDoc(d.id)} style={{ border: "none", background: "transparent", color: "#b91c1c", fontWeight: 900, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
-                  </span>
-                ))}
+          {prog != null && (
+            <div style={{ marginTop: 7 }}>
+              <div style={{ height: 5, borderRadius: 999, background: "rgba(79,109,156,0.2)", overflow: "hidden" }}>
+                <div style={{ width: `${prog}%`, height: "100%", background: "#4f6d9c", borderRadius: 999 }} />
               </div>
-            )}
-          </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 700, color: "var(--muted)", marginTop: 3 }}>
+                <span>{prog}% paid</span>
+                {mLeft != null && <span>{mLeft} EMI{mLeft === 1 ? "" : "s"} left</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
 
-          {/* actions */}
-          <div style={{ display: "flex", gap: 9, justifyContent: "flex-end" }}>
-            <button type="button" onClick={onEdit} style={btn}>✎ Edit</button>
-            <button type="button" onClick={() => setConfirmDel(true)} style={{ ...btn, color: "#b91c1c", borderColor: "#fecaca" }}>🗑 Remove</button>
+      {v.notes && <div style={{ margin: "9px 15px 0", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}><span style={{ fontWeight: 700 }}>Note:</span> {v.notes}</div>}
+
+      {/* footer — docs toggle + remove, pinned to card bottom */}
+      <div style={{ marginTop: "auto", padding: "11px 15px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+          <button type="button" onClick={() => setShowDocs((s) => !s)} style={{ ...btn, padding: "6px 11px", fontSize: 12 }}>
+            📎 {v.docs.length} doc{v.docs.length === 1 ? "" : "s"} {showDocs ? "▴" : "▾"}
+          </button>
+          <input ref={fileInput} type="file" multiple style={{ display: "none" }} onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) void uploadFiles(fs); e.target.value = ""; }} />
+          <button type="button" disabled={uploading} onClick={() => fileInput.current?.click()} style={{ ...btn, padding: "6px 11px", fontSize: 12 }}>{uploading ? "Uploading…" : "＋ Upload"}</button>
+          <span style={{ flex: 1 }} />
+          <button type="button" onClick={() => setConfirmDel(true)} title="Remove vehicle" style={{ ...btn, padding: "6px 10px", fontSize: 12, color: "#b91c1c", borderColor: "#fecaca" }}>🗑</button>
+        </div>
+      </div>
+
+      {/* documents drawer */}
+      {showDocs && (
+        <div style={{ padding: "10px 15px 14px" }}>
+          {err && <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>⚠ {err}</div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: v.docs.length ? 9 : 0 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>Tag next upload:</span>
+            <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ ...input, width: "auto", padding: "5px 8px", fontSize: 12 }}>
+              {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
+          {v.docs.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>No papers yet — RC, insurance, PUC, anything.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {v.docs.map((d) => (
+                <span key={d.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 9, padding: "5px 10px", maxWidth: "100%" }}>
+                  {d.doc_type && <span style={{ fontSize: 9.5, fontWeight: 900, textTransform: "uppercase", color: "#4f6d9c", background: "rgba(79,109,156,0.1)", borderRadius: 5, padding: "1px 6px" }}>{d.doc_type}</span>}
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--text)", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{d.name}</a>
+                  <button type="button" title="Delete" onClick={() => void removeDoc(d.id)} style={{ border: "none", background: "transparent", color: "#b91c1c", fontWeight: 900, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -364,7 +393,7 @@ export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "person
           {vehicles.length === 0 ? `No ${kind} vehicles yet — add the first one.` : "Nothing matches the search."}
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14, alignItems: "start" }}>
           {shown.map((v) => <VehicleCard key={v.id} v={v} onEdit={() => setModal({ v })} />)}
         </div>
       )}
