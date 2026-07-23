@@ -53,6 +53,9 @@ export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
     if (loggedOut.current) return;
     loggedOut.current = true;
     try {
+      // Clear the persisted activity stamp so the fresh login that follows
+      // isn't immediately judged "idle" by the mount check below (would loop).
+      localStorage.removeItem(ACTIVITY_KEY);
       localStorage.setItem(LOGOUT_KEY, String(Date.now())); // tell other tabs
     } catch {
       /* ignore */
@@ -83,6 +86,33 @@ export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
 
   useEffect(() => {
     if (!enabled) return;
+
+    // ── Count time the tab/browser was CLOSED, not just open ──────────
+    // The idle window must reflect real inactivity, including while the app
+    // wasn't running. On every (re)mount — reopening a closed tab, restarting
+    // the browser, waking the laptop — decide from the LAST activity time
+    // persisted in localStorage, NOT from this fresh mount. Without this,
+    // closing the tab silently reset the clock and an abandoned session
+    // stayed logged in when reopened (Daksh flagged Jul 2026).
+    try {
+      const storedRaw = localStorage.getItem(ACTIVITY_KEY);
+      const stored = storedRaw ? Number(storedRaw) : 0;
+      if (stored > 0) {
+        if (Date.now() - stored >= idleMs) {
+          // Away longer than the whole window → sign out now, no warning.
+          doLogout();
+          return;
+        }
+        // Reopened within the window → resume the countdown where it left off.
+        lastActivity.current = stored;
+      } else {
+        // No history (first login here, or storage cleared) → start fresh.
+        lastActivity.current = Date.now();
+        localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
+      }
+    } catch {
+      lastActivity.current = Date.now();
+    }
 
     const onActivity = () => {
       const now = Date.now();
