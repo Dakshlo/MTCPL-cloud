@@ -94,27 +94,87 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
   // on the unknown column, so retry once without it rather than erroring out.
   const missingOwnerCol = (msg: string) => /owner_name/i.test(msg);
 
+  // Mig 211 — best-effort timeline event. Never blocks a save (pre-migration
+  // deploys simply don't record history yet).
+  const logEvent = async (vehicleId: string, type: "created" | "updated", changes: VehicleChange[]) => {
+    try {
+      await admin.from("vehicle_events").insert({
+        vehicle_id: vehicleId, event_type: type, changes,
+        created_by: profile.id, created_by_name: profile.full_name ?? null,
+      } as never);
+    } catch { /* table missing pre-mig-211 — skip */ }
+  };
+
   if (id) {
+    // Current row: needed for the timeline diff AND the identity lock.
+    const { data: cur } = await admin.from("vehicles").select("*").eq("id", id).maybeSingle();
+    if (!cur) backTo(kind, "Vehicle not found");
+    const curRow = cur as Record<string, unknown>;
+
+    // Identity lock (Daksh): once created, vehicle DETAILS (reg no / name /
+    // make / owner) can only be changed by the developer. Everyone else's
+    // submit keeps the stored identity, whatever the form sent — EMI + expiry
+    // dates + notes stay editable and go on the timeline.
+    if (profile.role !== "developer") {
+      row.name = String(curRow.name ?? row.name);
+      row.reg_no = (curRow.reg_no ?? null) as string | null;
+      row.make_model = (curRow.make_model ?? null) as string | null;
+      row.owner_name = (curRow.owner_name ?? null) as string | null;
+    }
+
     let { error } = await admin.from("vehicles").update(row as never).eq("id", id);
     if (error && missingOwnerCol(error.message)) {
       const { owner_name: _drop, ...noOwner } = row;
       ({ error } = await admin.from("vehicles").update(noOwner as never).eq("id", id));
     }
     if (error) backTo(kind, error.message);
+    const changes = diffVehicle(curRow, row as unknown as Record<string, unknown>);
+    if (changes.length) await logEvent(id, "updated", changes);
     void logAudit(profile.id, "vehicle_updated", "vehicle", id, { name });
     refresh();
     backTo(kind, "Vehicle updated");
   } else {
-    let { error } = await admin.from("vehicles").insert({ ...row, created_by: profile.id } as never);
+    let { data: ins, error } = await admin.from("vehicles").insert({ ...row, created_by: profile.id } as never).select("id").single();
     if (error && missingOwnerCol(error.message)) {
       const { owner_name: _drop, ...noOwner } = row;
-      ({ error } = await admin.from("vehicles").insert({ ...noOwner, created_by: profile.id } as never));
+      ({ data: ins, error } = await admin.from("vehicles").insert({ ...noOwner, created_by: profile.id } as never).select("id").single());
     }
     if (error) backTo(kind, error.message);
+    const newId = (ins as { id?: string } | null)?.id;
+    if (newId) await logEvent(newId, "created", []);
     void logAudit(profile.id, "vehicle_added", "vehicle", name, { kind });
     refresh();
     backTo(kind, "Vehicle added");
   }
+}
+
+// ── timeline diff (mig 211) ─────────────────────────────────────────
+type VehicleChange = { field: string; label: string; from: string | null; to: string | null };
+
+const DIFF_FIELDS: Array<[string, string]> = [
+  ["name", "Vehicle name"], ["reg_no", "Registration no."], ["make_model", "Make/model"],
+  ["owner_name", "Owner"], ["emi_active", "EMI status"], ["emi_amount", "EMI amount"],
+  ["emi_day", "EMI due day"], ["emi_lender", "Lender"], ["emi_start", "Loan start"],
+  ["emi_end", "Loan ends"], ["insurance_company", "Insurance company"],
+  ["insurance_policy_no", "Policy no."], ["insurance_expiry", "Insurance expiry"],
+  ["puc_expiry", "PUC expiry"], ["fitness_expiry", "Fitness expiry"], ["notes", "Notes"],
+];
+
+/** Normalise a stored/submitted value for comparison + display. */
+function normVal(v: unknown): string {
+  if (v == null || v === "") return "";
+  if (typeof v === "boolean") return v ? "ON" : "OFF";
+  return String(v);
+}
+
+function diffVehicle(cur: Record<string, unknown>, next: Record<string, unknown>): VehicleChange[] {
+  const out: VehicleChange[] = [];
+  for (const [field, label] of DIFF_FIELDS) {
+    const a = normVal(cur[field]);
+    const b = normVal(next[field]);
+    if (a !== b) out.push({ field, label, from: a || null, to: b || null });
+  }
+  return out;
 }
 
 /** Delete a vehicle + its documents (rows cascade; storage best-effort). */

@@ -9,7 +9,7 @@ import { VehiclesBoard } from "../vehicles-client";
 export const dynamic = "force-dynamic";
 
 export default async function PersonalVehiclesPage({ searchParams }: { searchParams: Promise<{ toast?: string }> }) {
-  await requireAuth(VEHICLES_ROLES);
+  const { profile } = await requireAuth(VEHICLES_ROLES);
   const sp = await searchParams;
   const { rows, migMissing } = await loadVehicles("personal");
   const toast = toastFrom(sp);
@@ -25,7 +25,7 @@ export default async function PersonalVehiclesPage({ searchParams }: { searchPar
       {migMissing ? (
         <div className="banner" style={{ marginTop: 14 }}>Run migration <strong>204_vehicles_department.sql</strong> to switch this department on.</div>
       ) : (
-        <VehiclesBoard kind="personal" vehicles={rows} />
+        <VehiclesBoard kind="personal" vehicles={rows} canEditIdentity={profile.role === "developer"} />
       )}
     </section>
   );

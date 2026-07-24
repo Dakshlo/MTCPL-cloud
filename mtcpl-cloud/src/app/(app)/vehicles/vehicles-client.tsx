@@ -14,6 +14,13 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { upsertVehicleAction, deleteVehicleAction, prepareVehicleDocUploadsAction, saveVehicleDocsAction, deleteVehicleDocAction } from "./actions";
 
 export type VehicleDoc = { id: string; name: string; url: string; doc_type: string | null; created_at: string };
+export type VehicleEvent = {
+  id: string;
+  event_type: "created" | "updated";
+  changes: Array<{ field: string; label: string; from: string | null; to: string | null }>;
+  created_by_name: string | null;
+  created_at: string;
+};
 export type VehicleRow = {
   id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; make_model: string | null;
   owner_name: string | null;
@@ -21,6 +28,7 @@ export type VehicleRow = {
   insurance_company: string | null; insurance_policy_no: string | null; insurance_expiry: string | null;
   puc_expiry: string | null; fitness_expiry: string | null; notes: string | null;
   docs: VehicleDoc[];
+  events: VehicleEvent[];
 };
 
 const DOC_TYPES = ["RC", "Insurance", "PUC", "Fitness", "Loan / EMI", "Permit", "Other"];
@@ -62,7 +70,20 @@ const textFill = { ...noFill, autoCapitalize: "characters" } as const;
 // ── Add / Edit modal ────────────────────────────────────────────────
 const EMI_FIELDS = ["emi_amount", "emi_day", "emi_lender", "emi_start", "emi_end"] as const;
 
-function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; onClose: () => void }) {
+const fmtDT = (iso: string) =>
+  new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+/** Timeline value display: dates prettified, EMI amounts as ₹. */
+function evVal(field: string, v: string | null): string {
+  if (!v) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtD(v);
+  if (field === "emi_amount") { const n = Number(v); if (Number.isFinite(n)) return inr(n); }
+  return v;
+}
+
+function VehicleModal({ kind, v, canEditIdentity, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; canEditIdentity: boolean; onClose: () => void }) {
+  // Identity lock (mig 211): after creation, only the developer can change
+  // vehicle details — everyone else sees them read-only (server enforces too).
+  const lockId = !!v && !canEditIdentity;
   const [saving, setSaving] = useState(false);
   // EMI is all-or-none: fields are always visible; filling ANY makes all five
   // mandatory (server enforces the same rule).
@@ -105,23 +126,28 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
             identified); name + make/model + registered owner follow. */}
         <div style={card}>
           <div style={sectionHd}>{kind === "commercial" ? "🚛" : "🚗"} Vehicle details</div>
+          {lockId && (
+            <div style={{ fontSize: 11, color: "var(--muted)", margin: "-5px 0 11px", lineHeight: 1.4 }}>
+              🔒 Locked after creation — only the developer can change these. EMI &amp; expiry dates stay editable; every change lands on the timeline below.
+            </div>
+          )}
           {/* One wide row: Reg no → Name → Make/model; owner underneath. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
             <label style={label}>
               Registration no.
-              <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
+              <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus={!lockId} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
             </label>
             <label style={label}>
               Vehicle name *
-              <input name="name" required defaultValue={v?.name ?? ""} style={input} {...textFill} />
+              <input name="name" required defaultValue={v?.name ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
             </label>
             <label style={label}>
               Make / model
-              <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
+              <input name="make_model" defaultValue={v?.make_model ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
             </label>
             <label style={{ ...label, gridColumn: "1 / -1" }}>
               Owner / registered to
-              <input name="owner_name" defaultValue={v?.owner_name ?? ""} style={input} {...textFill} />
+              <input name="owner_name" defaultValue={v?.owner_name ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
             </label>
           </div>
         </div>
@@ -199,6 +225,42 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
           <div style={sectionHd}>📝 Notes / other info</div>
           <textarea name="notes" rows={2} defaultValue={v?.notes ?? ""} style={{ ...input, resize: "vertical", minHeight: 58 }} {...textFill} />
         </div>
+
+        {/* Timeline (mig 211) — full history of this vehicle: added + every
+            change (old → new), e.g. an insurance renewal keeps both policies
+            on record instead of overwriting. */}
+        {v && (
+          <div style={{ ...card, marginTop: 14 }}>
+            <div style={sectionHd}>🕘 Timeline</div>
+            {v.events.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>No changes recorded yet — history starts from the next save.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 11, maxHeight: 240, overflowY: "auto", paddingRight: 4 }}>
+                {v.events.map((ev) => (
+                  <div key={ev.id} style={{ borderLeft: `3px solid ${ev.event_type === "created" ? "#16a34a" : ACCENT}`, paddingLeft: 11 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>
+                      {fmtDT(ev.created_at)}{ev.created_by_name ? ` · ${ev.created_by_name}` : ""}
+                    </div>
+                    {ev.event_type === "created" ? (
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "#15803d", marginTop: 2 }}>✚ Vehicle added</div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 2, marginTop: 2 }}>
+                        {ev.changes.map((c, i) => (
+                          <div key={i} style={{ fontSize: 12, lineHeight: 1.45 }}>
+                            <span style={{ fontWeight: 800 }}>{c.label}:</span>{" "}
+                            <span style={{ color: "var(--muted)", textDecoration: "line-through" }}>{evVal(c.field, c.from)}</span>
+                            <span style={{ color: "var(--muted)" }}> → </span>
+                            <span style={{ fontWeight: 700 }}>{evVal(c.field, c.to)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
           <button type="button" disabled={saving} onClick={onClose} style={btn}>Cancel</button>
@@ -411,7 +473,7 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
 }
 
 // ── the page board ──────────────────────────────────────────────────
-export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "personal"; vehicles: VehicleRow[] }) {
+export function VehiclesBoard({ kind, vehicles, canEditIdentity = false }: { kind: "commercial" | "personal"; vehicles: VehicleRow[]; canEditIdentity?: boolean }) {
   const [modal, setModal] = useState<null | { v: VehicleRow | null }>(null);
   const [q, setQ] = useState("");
   const shown = useMemo(() => {
@@ -440,7 +502,7 @@ export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "person
         </div>
       )}
 
-      {modal && <VehicleModal kind={kind} v={modal.v} onClose={() => setModal(null)} />}
+      {modal && <VehicleModal kind={kind} v={modal.v} canEditIdentity={canEditIdentity} onClose={() => setModal(null)} />}
     </div>
   );
 }

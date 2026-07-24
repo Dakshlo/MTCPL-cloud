@@ -30,6 +30,7 @@ export async function loadVehicles(
     insurance_company: r.insurance_company ?? null, insurance_policy_no: r.insurance_policy_no ?? null,
     insurance_expiry: r.insurance_expiry ?? null, puc_expiry: r.puc_expiry ?? null,
     fitness_expiry: r.fitness_expiry ?? null, notes: r.notes ?? null,
+    events: [], // filled below (mig 211)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     docs: ((r.vehicle_documents ?? []) as any[])
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
@@ -38,6 +39,34 @@ export async function loadVehicles(
         url: admin.storage.from("vehicle-docs").getPublicUrl(d.path).data.publicUrl,
       })),
   })) as VehicleRow[];
+
+  // Mig 211 — per-vehicle change timeline, newest first. Best-effort: on a
+  // pre-migration deploy the query errors and every timeline just stays empty.
+  if (rows.length) {
+    const { data: evs } = await admin
+      .from("vehicle_events")
+      .select("id, vehicle_id, event_type, changes, created_by_name, created_at")
+      .in("vehicle_id", rows.map((r) => r.id))
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    if (evs) {
+      const byVehicle = new Map<string, VehicleRow["events"]>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const e of evs as any[]) {
+        const list = byVehicle.get(e.vehicle_id) ?? [];
+        list.push({
+          id: e.id,
+          event_type: e.event_type === "created" ? "created" : "updated",
+          changes: Array.isArray(e.changes) ? e.changes : [],
+          created_by_name: e.created_by_name ?? null,
+          created_at: e.created_at,
+        });
+        byVehicle.set(e.vehicle_id, list);
+      }
+      for (const r of rows) r.events = byVehicle.get(r.id) ?? [];
+    }
+  }
+
   return { rows, migMissing: false };
 }
 
