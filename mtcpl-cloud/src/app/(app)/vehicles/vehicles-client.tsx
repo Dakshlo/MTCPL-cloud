@@ -24,6 +24,7 @@ export type VehicleEvent = {
 export type VehicleRow = {
   id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; make_model: string | null;
   owner_name: string | null;
+  engine_no: string | null; chassis_no: string | null;
   emi_active: boolean; emi_amount: number | null; emi_day: number | null; emi_lender: string | null; emi_start: string | null; emi_end: string | null;
   insurance_company: string | null; insurance_policy_no: string | null; insurance_expiry: string | null;
   puc_expiry: string | null; fitness_expiry: string | null; notes: string | null;
@@ -144,6 +145,14 @@ function VehicleModal({ kind, v, canEditIdentity, onClose }: { kind: "commercial
             <label style={label}>
               Make / model
               <input name="make_model" defaultValue={v?.make_model ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+            </label>
+            <label style={label}>
+              Engine no.
+              <input name="engine_no" defaultValue={v?.engine_no ?? ""} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+            </label>
+            <label style={label}>
+              Chassis no.
+              <input name="chassis_no" defaultValue={v?.chassis_no ?? ""} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
             </label>
             <label style={{ ...label, gridColumn: "1 / -1" }}>
               Owner / registered to

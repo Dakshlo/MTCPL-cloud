@@ -23,6 +23,7 @@ export async function loadVehicles(
     id: r.id, kind: r.kind === "personal" ? "personal" : "commercial",
     name: r.name, reg_no: r.reg_no ?? null, make_model: r.make_model ?? null,
     owner_name: r.owner_name ?? null, // mig 210; select("*") keeps this pre-mig-safe
+    engine_no: r.engine_no ?? null, chassis_no: r.chassis_no ?? null, // mig 212
     emi_active: r.emi_active === true,
     emi_amount: r.emi_amount != null ? Number(r.emi_amount) : null,
     emi_day: r.emi_day != null ? Number(r.emi_day) : null,
