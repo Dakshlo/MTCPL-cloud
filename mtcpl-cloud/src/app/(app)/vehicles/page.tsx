@@ -236,6 +236,23 @@ export default async function VehiclesOverviewPage() {
               // (Σ EMI × months remaining).
               const emiTotal = emis.reduce((s, v) => s + (v.emi_amount ?? 0), 0);
               const liability = emis.reduce((s, v) => s + (v.emi_amount ?? 0) * (monthsLeft(v.emi_end) ?? 0), 0);
+              // Whole-loan value (EMI × full term) so the ring can show how much
+              // of ALL the loans is still left. A loan missing its start date
+              // counts as fully remaining.
+              const termMonths = (start: string | null, end: string | null): number | null => {
+                if (!start || !end) return null;
+                const s = new Date(`${start.slice(0, 10)}T00:00:00+05:30`);
+                const e = new Date(`${end.slice(0, 10)}T00:00:00+05:30`);
+                const m = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + (e.getDate() >= s.getDate() ? 1 : 0);
+                return Math.max(0, m);
+              };
+              const totalLoan = emis.reduce((s, v) => {
+                const amt = v.emi_amount ?? 0;
+                const tm = termMonths(v.emi_start, v.emi_end);
+                return s + amt * (tm ?? monthsLeft(v.emi_end) ?? 0);
+              }, 0);
+              const paid = Math.max(0, totalLoan - liability);
+              const pctLeft = totalLoan > 0 ? Math.round((liability / totalLoan) * 100) : 0;
               const stat = (label: string, value: string, sub: string): React.ReactNode => (
                 <div style={{ flex: "1 1 200px", border: "1px solid rgba(79,109,156,0.3)", background: "rgba(79,109,156,0.07)", borderRadius: 11, padding: "10px 14px" }}>
                   <div style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>{label}</div>
@@ -245,9 +262,28 @@ export default async function VehiclesOverviewPage() {
               );
               return (
                 <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
                     {stat("Monthly EMI", inr(emiTotal), `${emis.length} active loan${emis.length === 1 ? "" : "s"} / month`)}
                     {stat("Total liability left", inr(liability), "sum of all remaining EMIs")}
+                    {/* Ring: how much of ALL the loans is still left. Paid part
+                        green, remaining part blue — % left in the centre. */}
+                    <div style={{ flex: "1 1 230px", border: "1px solid rgba(79,109,156,0.3)", background: "rgba(79,109,156,0.07)", borderRadius: 11, padding: "10px 14px", display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ position: "relative", width: 76, height: 76, flexShrink: 0 }}>
+                        <div style={{ width: 76, height: 76, borderRadius: "50%", background: `conic-gradient(${ACCENT} 0% ${pctLeft}%, ${GREEN} ${pctLeft}% 100%)` }} />
+                        <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "grid", placeItems: "center" }}>
+                          <div style={{ textAlign: "center", lineHeight: 1.05 }}>
+                            <div style={{ fontSize: 16, fontWeight: 900, color: ACCENT }}>{pctLeft}%</div>
+                            <div style={{ fontSize: 8, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>left</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gap: 3, fontSize: 11, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>Loan progress</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: GREEN, flexShrink: 0 }} /><span style={{ fontWeight: 700 }}>Paid</span><span style={{ marginLeft: "auto", fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{inr(paid)}</span></div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: ACCENT, flexShrink: 0 }} /><span style={{ fontWeight: 700 }}>Left</span><span style={{ marginLeft: "auto", fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{inr(liability)}</span></div>
+                        <div style={{ color: "var(--muted)", fontSize: 10.5 }}>of {inr(totalLoan)} total loan</div>
+                      </div>
+                    </div>
                   </div>
                   {groups.map((g) => (
                     <div key={g.key} style={{ display: "grid", gap: 8 }}>
