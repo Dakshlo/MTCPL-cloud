@@ -17,23 +17,28 @@ function daysTo(date: string | null): number | null {
   const target = new Date(`${date.slice(0, 10)}T00:00:00+05:30`).getTime();
   return Math.floor((target - Date.now()) / 86_400_000);
 }
-function monthsLeft(end: string | null): number | null {
-  if (!end) return null;
-  const now = new Date();
-  const e = new Date(`${end.slice(0, 10)}T00:00:00+05:30`);
-  const m = (e.getFullYear() - now.getFullYear()) * 12 + (e.getMonth() - now.getMonth());
-  return Math.max(0, m + (e.getDate() >= now.getDate() ? 1 : 0));
-}
-function loanPct(start: string | null, end: string | null): number | null {
-  if (!start || !end) return null;
-  const s = new Date(`${start.slice(0, 10)}T00:00:00+05:30`).getTime();
-  const e = new Date(`${end.slice(0, 10)}T00:00:00+05:30`).getTime();
-  if (!(e > s)) return null;
-  return Math.max(0, Math.min(100, Math.round(((Date.now() - s) / (e - s)) * 100)));
-}
 const fmtD = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** The next date this EMI's due-day falls on, from today (IST). Day 1 with
+ *  today = 24 Jul → 1 Aug. Clamps day 31 to the target month's length. */
+function nextEmiDue(day: number | null | undefined): { y: number; m: number; d: number; iso: string } | null {
+  if (!day || day < 1) return null;
+  const ist = new Date(Date.now() + 5.5 * 3_600_000); // shift so getUTC* = IST wall clock
+  let y = ist.getUTCFullYear();
+  let m = ist.getUTCMonth();
+  const today = ist.getUTCDate();
+  const dim = (yy: number, mm: number) => new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+  let d = Math.min(day, dim(y, m));
+  if (d < today) { // this month's due-day already passed → roll to next month
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+    d = Math.min(day, dim(y, m));
+  }
+  return { y, m, d, iso: `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}` };
+}
 
 const RED = "#dc2626", AMBER = "#d97706", GREEN = "#16a34a", GREY = "#94a3b8", ACCENT = "#4f6d9c";
 
@@ -49,7 +54,7 @@ export default async function VehiclesOverviewPage() {
   // One column per doc type. Fitness only applies to commercial vehicles, so
   // it only appears when the fleet has any. Order (left→right) per Daksh:
   // Fitness, PUC, Insurance.
-  type Alert = { vehicle: string; kind: "commercial" | "personal"; date: string; days: number };
+  type Alert = { vehicle: string; name: string; kind: "commercial" | "personal"; date: string; days: number };
   const docDefs = [
     { key: "fitness", label: "Fitness", icon: "🛠", applies: commercial > 0, get: (v: (typeof rows)[number]) => (v.kind === "commercial" ? v.fitness_expiry : null) },
     { key: "puc", label: "PUC", icon: "🌿", applies: true, get: (v: (typeof rows)[number]) => v.puc_expiry },
@@ -60,7 +65,7 @@ export default async function VehiclesOverviewPage() {
     for (const d of docDefs) {
       const date = d.get(v);
       const dd = daysTo(date);
-      if (date && dd != null && dd <= 45) byDoc[d.key].push({ vehicle: v.reg_no || v.name, kind: v.kind, date, days: dd });
+      if (date && dd != null && dd <= 45) byDoc[d.key].push({ vehicle: v.reg_no || v.name, name: v.name, kind: v.kind, date, days: dd });
     }
   }
   for (const k of Object.keys(byDoc)) byDoc[k].sort((a, b) => a.days - b.days);
@@ -190,6 +195,9 @@ export default async function VehiclesOverviewPage() {
                                   <span style={{ fontSize: 13 }}>{a.kind === "commercial" ? "🚛" : "🚗"}</span>
                                   <span style={{ fontWeight: 800, fontSize: 12.5, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.vehicle}</span>
                                 </div>
+                                {a.name !== a.vehicle && (
+                                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
+                                )}
                                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 3 }}>
                                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{fmtD(a.date)}</span>
                                   <span style={{ fontSize: 11, fontWeight: 900, color: exp ? "#b91c1c" : "#b45309" }}>{exp ? `expired ${Math.abs(a.days)}d` : a.days === 0 ? "TODAY" : `${a.days}d left`}</span>
@@ -212,32 +220,25 @@ export default async function VehiclesOverviewPage() {
             {emis.length === 0 ? emptyBox("No vehicles on EMI.") : (
               <div style={{ display: "grid", gap: 8 }}>
                 {emis.map((v) => {
-                  const pct = loanPct(v.emi_start, v.emi_end);
-                  const mLeft = monthsLeft(v.emi_end);
+                  // The overview answers "when is the next payment and how much".
+                  // The % paid / EMIs-left detail lives on the vehicle's own card.
+                  const due = nextEmiDue(v.emi_day);
                   return (
-                    <Link key={v.id} href={`/vehicles/${v.kind}`} style={{ display: "block", padding: "11px 14px", borderRadius: 11, textDecoration: "none", color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${ACCENT}` }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                        <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 9, background: "rgba(79,109,156,0.1)", border: "1px solid rgba(79,109,156,0.3)", flexShrink: 0 }}>
-                          <span style={{ fontSize: 15, fontWeight: 900, color: ACCENT, lineHeight: 1 }}>{v.emi_day ?? "—"}</span>
-                          <span style={{ fontSize: 7.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>day</span>
-                        </span>
-                        <span style={{ minWidth: 130 }}>
-                          <span style={{ display: "block", fontSize: 13.5, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
-                          <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
-                        </span>
-                        <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: ACCENT }}>{inr(v.emi_amount ?? 0)}</span>
-                      </div>
-                      {pct != null && (
-                        <div style={{ marginTop: 9 }}>
-                          <div style={{ height: 6, borderRadius: 999, background: "var(--bg)", overflow: "hidden", border: "1px solid var(--border)" }}>
-                            <div style={{ width: `${pct}%`, height: "100%", background: ACCENT }} />
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", marginTop: 3 }}>
-                            <span>{pct}% paid{v.emi_end ? ` · ends ${fmtD(v.emi_end)}` : ""}</span>
-                            {mLeft != null && <span>{mLeft} EMI{mLeft === 1 ? "" : "s"} left · {inr((v.emi_amount ?? 0) * mLeft)}</span>}
-                          </div>
-                        </div>
-                      )}
+                    <Link key={v.id} href={`/vehicles/${v.kind}`} style={{ display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap", padding: "11px 14px", borderRadius: 11, textDecoration: "none", color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${ACCENT}` }}>
+                      {/* next-due calendar chip: month over day, so it reads as a date */}
+                      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", width: 46, borderRadius: 9, overflow: "hidden", border: "1px solid rgba(79,109,156,0.35)", flexShrink: 0, textAlign: "center", lineHeight: 1 }}>
+                        <span style={{ fontSize: 8.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: ACCENT, padding: "2px 0" }}>{due ? MON[due.m] : "—"}</span>
+                        <span style={{ fontSize: 18, fontWeight: 900, color: ACCENT, padding: "3px 0", background: "rgba(79,109,156,0.1)" }}>{due ? due.d : "—"}</span>
+                      </span>
+                      <span style={{ minWidth: 150, flex: "1 1 auto" }}>
+                        <span style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
+                        {v.reg_no && <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{v.name}</span>}
+                        <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
+                      </span>
+                      <span style={{ marginLeft: "auto", textAlign: "right" }}>
+                        <span style={{ display: "block", fontSize: 15, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: ACCENT }}>{inr(v.emi_amount ?? 0)}</span>
+                        <span style={{ display: "block", fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{due ? `next EMI · ${fmtD(due.iso)}` : "next EMI"}</span>
+                      </span>
                     </Link>
                   );
                 })}
