@@ -409,9 +409,13 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
               <div style={{ height: 5, borderRadius: 999, background: "rgba(79,109,156,0.2)", overflow: "hidden" }}>
                 <div style={{ width: `${prog}%`, height: "100%", background: "#4f6d9c", borderRadius: 999 }} />
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 700, color: "var(--muted)", marginTop: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10, fontWeight: 700, color: "var(--muted)", marginTop: 3 }}>
                 <span>{prog}% paid</span>
-                {mLeft != null && <span>{mLeft} EMI{mLeft === 1 ? "" : "s"} left</span>}
+                {mLeft != null && (
+                  <span>
+                    {mLeft} EMI{mLeft === 1 ? "" : "s"} left · <span style={{ fontWeight: 900, color: "#4f6d9c", fontFamily: "ui-monospace, monospace" }}>{inr((v.emi_amount ?? 0) * mLeft)}</span>
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -425,11 +429,12 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
           like they spill out (Daksh flagged). */}
       <div style={{ marginTop: "auto", padding: "11px 15px 13px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+          {/* One entry point: the docs drawer holds the tag picker AND the
+              Upload button together (two separate buttons here read as two
+              different features — Daksh flagged). */}
           <button type="button" onClick={() => setShowDocs((s) => !s)} style={{ ...btn, padding: "6px 11px", fontSize: 12 }}>
             📎 {v.docs.length} doc{v.docs.length === 1 ? "" : "s"} {showDocs ? "▴" : "▾"}
           </button>
-          <input ref={fileInput} type="file" multiple style={{ display: "none" }} onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) void uploadFiles(fs); e.target.value = ""; }} />
-          <button type="button" disabled={uploading} onClick={() => fileInput.current?.click()} style={{ ...btn, padding: "6px 11px", fontSize: 12 }}>{uploading ? "Uploading…" : "＋ Upload"}</button>
           <span style={{ flex: 1 }} />
           <button type="button" onClick={() => setConfirmDel(true)} title="Remove vehicle" style={{ ...btn, padding: "6px 10px", fontSize: 12, color: "#b91c1c", borderColor: "#fecaca" }}>🗑</button>
         </div>
@@ -439,11 +444,15 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
       {showDocs && (
         <div style={{ padding: "0 15px 14px" }}>
           {err && <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>⚠ {err}</div>}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: v.docs.length ? 9 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: v.docs.length ? 9 : 8 }}>
             <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>Tag next upload:</span>
             <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ ...input, width: "auto", padding: "5px 8px", fontSize: 12 }}>
               {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            <input ref={fileInput} type="file" multiple style={{ display: "none" }} onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) void uploadFiles(fs); e.target.value = ""; }} />
+            <button type="button" disabled={uploading} onClick={() => fileInput.current?.click()} style={{ ...btn, padding: "5px 12px", fontSize: 12, background: "#4f6d9c", borderColor: "#415980", color: "#fff" }}>
+              {uploading ? "Uploading…" : "＋ Upload"}
+            </button>
           </div>
           {v.docs.length === 0 ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>No papers yet — RC, insurance, PUC, anything.</div>
