@@ -60,17 +60,31 @@ const noFill = { autoComplete: "off", autoCorrect: "off", spellCheck: false, cla
 const textFill = { ...noFill, autoCapitalize: "characters" } as const;
 
 // ── Add / Edit modal ────────────────────────────────────────────────
+const EMI_FIELDS = ["emi_amount", "emi_day", "emi_lender", "emi_start", "emi_end"] as const;
+
 function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; onClose: () => void }) {
-  const [emi, setEmi] = useState(v?.emi_active ?? false);
   const [saving, setSaving] = useState(false);
+  // EMI is all-or-none: fields are always visible; filling ANY makes all five
+  // mandatory (server enforces the same rule).
+  const [emiErr, setEmiErr] = useState<string | null>(null);
   return createPortal(
     <div onMouseDown={(e) => e.stopPropagation()} onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(2px)", display: "grid", placeItems: "center", padding: 16 }}>
       <form
         action={upsertVehicleAction}
-        onSubmit={() => setSaving(true)}
+        onSubmit={(e) => {
+          const fd = new FormData(e.currentTarget);
+          const filled = EMI_FIELDS.filter((n) => String(fd.get(n) ?? "").trim()).length;
+          if (filled > 0 && filled < EMI_FIELDS.length) {
+            e.preventDefault();
+            setEmiErr("Fill ALL the EMI fields (amount, due day, lender, loan start, loan ends) — or leave every one empty.");
+            return;
+          }
+          setEmiErr(null);
+          setSaving(true);
+        }}
         onClick={(e) => e.stopPropagation()}
         autoComplete="off"
-        style={{ width: "min(560px, 96vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderTop: `3px solid ${ACCENT}`, borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.4)", padding: "20px 24px 22px" }}
+        style={{ width: "min(780px, 96vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderTop: `3px solid ${ACCENT}`, borderRadius: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.4)", padding: "20px 24px 22px" }}
       >
         <style>{`.veh-in:focus{border-color:${ACCENT} !important;box-shadow:0 0 0 3px rgba(79,109,156,0.18)}.veh-in::placeholder{font-weight:500;text-transform:none;opacity:.55}`}</style>
         <input type="hidden" name="kind" value={kind} />
@@ -91,8 +105,9 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
             identified); name + make/model + registered owner follow. */}
         <div style={card}>
           <div style={sectionHd}>{kind === "commercial" ? "🚛" : "🚗"} Vehicle details</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label style={{ ...label, gridColumn: "1 / -1" }}>
+          {/* One wide row: Reg no → Name → Make/model; owner underneath. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <label style={label}>
               Registration no.
               <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
             </label>
@@ -111,64 +126,71 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
           </div>
         </div>
 
-        {/* EMI */}
-        <div style={{ ...card, marginTop: 16 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>
-            <input type="checkbox" name="emi_active" checked={emi} onChange={(e) => setEmi(e.target.checked)} style={{ width: 17, height: 17, accentColor: ACCENT }} />
-            💳 Vehicle is on EMI / loan
-          </label>
-          {emi && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 13 }}>
+        {/* EMI (left) + Expiry dates (right) — side by side on wide screens.
+            No on-EMI checkbox any more: fields are always open; empty = no
+            loan, any filled = all five mandatory (validated on submit +
+            server-side). */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14, marginTop: 14, alignItems: "start" }}>
+          <div style={card}>
+            <div style={sectionHd}>💳 EMI / loan</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", margin: "-5px 0 11px", lineHeight: 1.4 }}>
+              No loan? Leave all empty. Filling any field makes all of them required.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <label style={label}>
                 EMI amount (₹)
-                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_amount ?? ""} style={input} {...noFill} />
+                <input name="emi_amount" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={v?.emi_active ? (v?.emi_amount ?? "") : ""} style={input} {...noFill} />
               </label>
               <label style={label}>
                 Due day of month
-                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_day ?? ""} style={input} {...noFill} />
+                <input name="emi_day" type="number" min="1" max="31" inputMode="numeric" defaultValue={v?.emi_active ? (v?.emi_day ?? "") : ""} style={input} {...noFill} />
               </label>
               <label style={{ ...label, gridColumn: "1 / -1" }}>
                 Lender / bank
-                <input name="emi_lender" defaultValue={v?.emi_lender ?? ""} style={input} {...textFill} />
+                <input name="emi_lender" defaultValue={v?.emi_active ? (v?.emi_lender ?? "") : ""} style={input} {...textFill} />
               </label>
               <label style={label}>
                 Loan start
-                <input name="emi_start" type="date" defaultValue={v?.emi_start ?? ""} style={input} {...noFill} />
+                <input name="emi_start" type="date" defaultValue={v?.emi_active ? (v?.emi_start ?? "") : ""} style={input} {...noFill} />
               </label>
               <label style={label}>
                 Loan ends
-                <input name="emi_end" type="date" defaultValue={v?.emi_end ?? ""} style={input} {...noFill} />
+                <input name="emi_end" type="date" defaultValue={v?.emi_active ? (v?.emi_end ?? "") : ""} style={input} {...noFill} />
               </label>
             </div>
-          )}
-        </div>
-
-        {/* Expiries */}
-        <div style={{ ...card, marginTop: 14 }}>
-          <div style={sectionHd}>📅 Expiry dates</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label style={label}>
-              Insurance company
-              <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} style={input} {...textFill} />
-            </label>
-            <label style={label}>
-              Policy no.
-              <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} style={input} {...textFill} />
-            </label>
-            <label style={label}>
-              Insurance expiry
-              <input name="insurance_expiry" type="date" defaultValue={v?.insurance_expiry ?? ""} style={input} {...noFill} />
-            </label>
-            <label style={label}>
-              PUC expiry
-              <input name="puc_expiry" type="date" defaultValue={v?.puc_expiry ?? ""} style={input} {...noFill} />
-            </label>
-            {kind === "commercial" && (
-              <label style={label}>
-                Fitness expiry
-                <input name="fitness_expiry" type="date" defaultValue={v?.fitness_expiry ?? ""} style={input} {...noFill} />
-              </label>
+            {emiErr && (
+              <div style={{ marginTop: 11, fontSize: 12, fontWeight: 700, color: "#b91c1c", background: "rgba(220,38,38,0.07)", border: "1px solid #fecaca", borderRadius: 8, padding: "7px 10px", lineHeight: 1.4 }}>
+                ⚠ {emiErr}
+              </div>
             )}
+          </div>
+
+          <div style={card}>
+            <div style={sectionHd}>📅 Expiry dates</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={label}>
+                Insurance company
+                <input name="insurance_company" defaultValue={v?.insurance_company ?? ""} style={input} {...textFill} />
+              </label>
+              <label style={label}>
+                Policy no.
+                <input name="insurance_policy_no" defaultValue={v?.insurance_policy_no ?? ""} style={input} {...textFill} />
+              </label>
+              <label style={label}>
+                Insurance expiry
+                <input name="insurance_expiry" type="date" defaultValue={v?.insurance_expiry ?? ""} style={input} {...noFill} />
+              </label>
+              <label style={label}>
+                PUC expiry
+                <input name="puc_expiry" type="date" defaultValue={v?.puc_expiry ?? ""} style={input} {...noFill} />
+              </label>
+              {kind === "commercial" && (
+                <label style={label}>
+                  Fitness expiry
+                  <input name="fitness_expiry" type="date" defaultValue={v?.fitness_expiry ?? ""} style={input} {...noFill} />
+                </label>
+              )}
+            </div>
           </div>
         </div>
 

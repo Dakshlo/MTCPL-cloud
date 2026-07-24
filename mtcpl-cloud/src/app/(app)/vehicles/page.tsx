@@ -1,6 +1,6 @@
-// Vehicles → Overview (mig 204). A compliance cockpit over BOTH fleets:
-// per-fleet counts + how many are on EMI, a fleet-health donut, an expiry
-// radar organised into one column per document type, and the EMI monitor.
+// Vehicles → Overview (mig 204). Fleet-health donut + expiry radar (one
+// column per document type, commercial/personal grouped) + EMI monitor
+// (grouped the same way, coloured by how soon the next EMI hits).
 // Pure server render — fast.
 
 import Link from "next/link";
@@ -47,13 +47,12 @@ export default async function VehiclesOverviewPage() {
   const { rows, migMissing } = await loadVehicles();
 
   const commercial = rows.filter((v) => v.kind === "commercial").length;
-  const personal = rows.length - commercial;
-  const emis = rows.filter((v) => v.emi_active && v.emi_amount != null).sort((a, b) => (a.emi_day ?? 32) - (b.emi_day ?? 32));
+  const emis = rows.filter((v) => v.emi_active && v.emi_amount != null);
 
   // ── Expiry radar, grouped by document type ────────────────────────
-  // One column per doc type. Fitness only applies to commercial vehicles, so
-  // it only appears when the fleet has any. Order (left→right) per Daksh:
-  // Fitness, PUC, Insurance.
+  // One column per doc type (Fitness · PUC · Insurance); fitness only exists
+  // for commercial vehicles. Inside a column, items are grouped commercial →
+  // personal (headers only when both kinds appear).
   type Alert = { vehicle: string; name: string; kind: "commercial" | "personal"; date: string; days: number };
   const docDefs = [
     { key: "fitness", label: "Fitness", icon: "🛠", applies: commercial > 0, get: (v: (typeof rows)[number]) => (v.kind === "commercial" ? v.fitness_expiry : null) },
@@ -70,8 +69,6 @@ export default async function VehiclesOverviewPage() {
   }
   for (const k of Object.keys(byDoc)) byDoc[k].sort((a, b) => a.days - b.days);
   const allAlerts = [...byDoc.fitness, ...byDoc.puc, ...byDoc.insurance];
-  const expired = allAlerts.filter((a) => a.days < 0).length;
-  const soon = allAlerts.filter((a) => a.days >= 0 && a.days <= 30).length;
   const radarCols = docDefs.filter((d) => d.applies);
 
   // ── fleet health: worst applicable-doc status per vehicle ─────────
@@ -85,14 +82,15 @@ export default async function VehiclesOverviewPage() {
     else health.ok++;
   }
 
-  // ── little presentational helpers (server) ────────────────────────
-  const Tile = (icon: string, value: string | number, label: string, sub?: string, color?: string): React.ReactNode => (
-    <div style={{ flex: "1 1 150px", minWidth: 140, border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "15px 16px" }}>
-      <div style={{ fontSize: 12.5 }}>{icon}</div>
-      <div style={{ fontSize: 23, fontWeight: 900, color: color ?? "var(--text)", marginTop: 3, lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginTop: 4 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>{sub}</div>}
-    </div>
+  // Today (IST) at midnight UTC-encoded — for "next EMI in N days".
+  const istNow = new Date(Date.now() + 5.5 * 3_600_000);
+  const todayUtc = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate());
+
+  // ── shared card chrome (matches the Fleet health card) ────────────
+  const cardBox: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px", marginTop: 14 };
+  const cardHd: React.CSSProperties = { fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 12 };
+  const groupHd = (label: string): React.ReactNode => (
+    <div style={{ fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", margin: "2px 2px 6px" }}>{label}</div>
   );
 
   const donut = () => {
@@ -110,8 +108,8 @@ export default async function VehiclesOverviewPage() {
     });
     const ring = stops.length ? stops.join(", ") : `${GREY} 0% 100%`;
     return (
-      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px", marginTop: 14 }}>
-        <div style={{ fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 12 }}>🩺 Fleet health</div>
+      <div style={{ ...cardBox, marginTop: 16 }}>
+        <div style={cardHd}>🩺 Fleet health</div>
         <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
           <div style={{ position: "relative", width: 132, height: 132, flexShrink: 0 }}>
             <div style={{ width: 132, height: 132, borderRadius: "50%", background: `conic-gradient(${ring})` }} />
@@ -134,11 +132,37 @@ export default async function VehiclesOverviewPage() {
     );
   };
 
-  const sectionHd = (t: string): React.ReactNode => (
-    <div style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 9 }}>{t}</div>
-  );
+  /** Split a list into commercial → personal groups; group headers only when
+   *  BOTH kinds are present (Daksh). */
+  function kindGroups<T extends { kind: "commercial" | "personal" }>(items: T[]) {
+    const groups = [
+      { key: "commercial", label: "🚛 Commercial", items: items.filter((i) => i.kind === "commercial") },
+      { key: "personal", label: "🚗 Personal", items: items.filter((i) => i.kind === "personal") },
+    ].filter((g) => g.items.length > 0);
+    return { groups, showHeaders: groups.length > 1 };
+  }
+
+  const alertCard = (a: Alert, i: number): React.ReactNode => {
+    const exp = a.days < 0;
+    return (
+      <Link key={i} href={`/vehicles/${a.kind}`} style={{ display: "block", textDecoration: "none", color: "var(--text)", padding: "7px 9px", borderRadius: 9, background: exp ? "rgba(220,38,38,0.05)" : "rgba(217,119,6,0.05)", border: `1px solid ${exp ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${exp ? RED : AMBER}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ fontSize: 13 }}>{a.kind === "commercial" ? "🚛" : "🚗"}</span>
+          <span style={{ fontWeight: 800, fontSize: 12.5, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.vehicle}</span>
+        </div>
+        {a.name !== a.vehicle && (
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
+        )}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 3 }}>
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{fmtD(a.date)}</span>
+          <span style={{ fontSize: 11, fontWeight: 900, color: exp ? "#b91c1c" : "#b45309" }}>{exp ? `expired ${Math.abs(a.days)}d` : a.days === 0 ? "TODAY" : `${a.days}d left`}</span>
+        </div>
+      </Link>
+    );
+  };
+
   const emptyBox = (t: string): React.ReactNode => (
-    <div style={{ border: "1px dashed var(--border)", borderRadius: 12, background: "var(--surface)", padding: "22px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>{t}</div>
+    <div style={{ border: "1px dashed var(--border)", borderRadius: 12, background: "var(--bg)", padding: "22px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>{t}</div>
   );
 
   return (
@@ -158,53 +182,32 @@ export default async function VehiclesOverviewPage() {
         </div>
       ) : (
         <>
-          {/* KPI strip — fleet counts, EMI coverage, and what needs attention */}
-          <div style={{ display: "flex", gap: 11, flexWrap: "wrap", marginTop: 16 }}>
-            {Tile("🚛", commercial, "Commercial", `vehicle${commercial === 1 ? "" : "s"}`)}
-            {Tile("🚗", personal, "Personal", `vehicle${personal === 1 ? "" : "s"}`)}
-            {Tile("💳", `${emis.length} / ${rows.length}`, "On EMI / loan", "of all vehicles", ACCENT)}
-            {Tile("⛔", expired, "Expired documents", expired ? "renew now" : "none overdue", expired ? RED : undefined)}
-            {Tile("⏳", soon, "Expiring ≤ 30 days", soon ? "coming due" : "nothing soon", soon ? AMBER : undefined)}
-          </div>
-
-          {/* Fleet health donut */}
+          {/* Fleet health */}
           {donut()}
 
-          {/* Expiry radar — one column per document type */}
-          <div style={{ marginTop: 22 }}>
-            {sectionHd("📅 Expiry radar — next 45 days")}
+          {/* Expiry radar — card chrome matches Fleet health */}
+          <div style={cardBox}>
+            <div style={cardHd}>📅 Expiry radar — next 45 days</div>
             {allAlerts.length === 0 ? emptyBox("✅ Nothing expiring in the next 45 days.") : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, alignItems: "start" }}>
                 {radarCols.map((col) => {
-                  const items = byDoc[col.key];
+                  const { groups, showHeaders } = kindGroups(byDoc[col.key]);
                   return (
-                    <div key={col.key} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", overflow: "hidden" }}>
-                      <div style={{ padding: "9px 12px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    <div key={col.key} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", overflow: "hidden" }}>
+                      <div style={{ padding: "9px 12px", background: "var(--surface)", borderBottom: "1px solid var(--border)", fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                         {col.icon} {col.label}
-                        <span style={{ color: "var(--muted)", fontWeight: 800 }}>{items.length ? ` · ${items.length}` : ""}</span>
+                        <span style={{ color: "var(--muted)", fontWeight: 800 }}>{byDoc[col.key].length ? ` · ${byDoc[col.key].length}` : ""}</span>
                       </div>
-                      {items.length === 0 ? (
+                      {groups.length === 0 ? (
                         <div style={{ padding: "16px 12px", textAlign: "center", color: GREEN, fontSize: 12, fontWeight: 700 }}>✓ all valid</div>
                       ) : (
                         <div style={{ display: "grid", gap: 6, padding: 8 }}>
-                          {items.map((a, i) => {
-                            const exp = a.days < 0;
-                            return (
-                              <Link key={i} href={`/vehicles/${a.kind}`} style={{ display: "block", textDecoration: "none", color: "var(--text)", padding: "7px 9px", borderRadius: 9, background: exp ? "rgba(220,38,38,0.05)" : "rgba(217,119,6,0.05)", border: `1px solid ${exp ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${exp ? RED : AMBER}` }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                  <span style={{ fontSize: 13 }}>{a.kind === "commercial" ? "🚛" : "🚗"}</span>
-                                  <span style={{ fontWeight: 800, fontSize: 12.5, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.vehicle}</span>
-                                </div>
-                                {a.name !== a.vehicle && (
-                                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                                )}
-                                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 3 }}>
-                                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{fmtD(a.date)}</span>
-                                  <span style={{ fontSize: 11, fontWeight: 900, color: exp ? "#b91c1c" : "#b45309" }}>{exp ? `expired ${Math.abs(a.days)}d` : a.days === 0 ? "TODAY" : `${a.days}d left`}</span>
-                                </div>
-                              </Link>
-                            );
-                          })}
+                          {groups.map((g) => (
+                            <div key={g.key} style={{ display: "grid", gap: 6 }}>
+                              {showHeaders && groupHd(g.label)}
+                              {g.items.map((a, i) => alertCard(a, i))}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -214,36 +217,49 @@ export default async function VehiclesOverviewPage() {
             )}
           </div>
 
-          {/* EMI monitor — per-loan progress, ordered by due day */}
-          <div style={{ marginTop: 22 }}>
-            {sectionHd("💳 EMI monitor — by due day")}
-            {emis.length === 0 ? emptyBox("No vehicles on EMI.") : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {emis.map((v) => {
-                  // The overview answers "when is the next payment and how much".
-                  // The % paid / EMIs-left detail lives on the vehicle's own card.
-                  const due = nextEmiDue(v.emi_day);
-                  return (
-                    <Link key={v.id} href={`/vehicles/${v.kind}`} style={{ display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap", padding: "11px 14px", borderRadius: 11, textDecoration: "none", color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${ACCENT}` }}>
-                      {/* next-due calendar chip: month over day, so it reads as a date */}
-                      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", width: 46, borderRadius: 9, overflow: "hidden", border: "1px solid rgba(79,109,156,0.35)", flexShrink: 0, textAlign: "center", lineHeight: 1 }}>
-                        <span style={{ fontSize: 8.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: ACCENT, padding: "2px 0" }}>{due ? MON[due.m] : "—"}</span>
-                        <span style={{ fontSize: 18, fontWeight: 900, color: ACCENT, padding: "3px 0", background: "rgba(79,109,156,0.1)" }}>{due ? due.d : "—"}</span>
-                      </span>
-                      <span style={{ minWidth: 150, flex: "1 1 auto" }}>
-                        <span style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
-                        {v.reg_no && <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{v.name}</span>}
-                        <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
-                      </span>
-                      <span style={{ marginLeft: "auto", textAlign: "right" }}>
-                        <span style={{ display: "block", fontSize: 15, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: ACCENT }}>{inr(v.emi_amount ?? 0)}</span>
-                        <span style={{ display: "block", fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{due ? `next EMI · ${fmtD(due.iso)}` : "next EMI"}</span>
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
+          {/* EMI monitor — grouped commercial / personal, coloured by urgency */}
+          <div style={cardBox}>
+            <div style={cardHd}>💳 EMI monitor — next payment</div>
+            {emis.length === 0 ? emptyBox("No vehicles on EMI.") : (() => {
+              const { groups, showHeaders } = kindGroups(emis);
+              return (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {groups.map((g) => (
+                    <div key={g.key} style={{ display: "grid", gap: 8 }}>
+                      {showHeaders && groupHd(g.label)}
+                      {[...g.items]
+                        .map((v) => ({ v, due: nextEmiDue(v.emi_day) }))
+                        .sort((a, b) => (a.due?.iso ?? "9999").localeCompare(b.due?.iso ?? "9999"))
+                        .map(({ v, due }) => {
+                          // Urgency tint: due within 3 days = red, within 7 = amber.
+                          const dueIn = due ? Math.round((Date.UTC(due.y, due.m, due.d) - todayUtc) / 86_400_000) : null;
+                          const tone = dueIn != null && dueIn <= 3 ? RED : dueIn != null && dueIn <= 7 ? AMBER : ACCENT;
+                          return (
+                            <Link key={v.id} href={`/vehicles/${v.kind}`} style={{ display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap", padding: "11px 14px", borderRadius: 11, textDecoration: "none", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderLeft: `4px solid ${tone}` }}>
+                              {/* next-due calendar chip: month over day */}
+                              <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", width: 46, borderRadius: 9, overflow: "hidden", border: `1px solid ${tone}55`, flexShrink: 0, textAlign: "center", lineHeight: 1 }}>
+                                <span style={{ fontSize: 8.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: tone, padding: "2px 0" }}>{due ? MON[due.m] : "—"}</span>
+                                <span style={{ fontSize: 18, fontWeight: 900, color: tone, padding: "3px 0", background: `${tone}18` }}>{due ? due.d : "—"}</span>
+                              </span>
+                              <span style={{ minWidth: 150, flex: "1 1 auto" }}>
+                                <span style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
+                                {v.reg_no && <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{v.name}</span>}
+                                <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
+                              </span>
+                              <span style={{ marginLeft: "auto", textAlign: "right" }}>
+                                <span style={{ display: "block", fontSize: 15, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: tone }}>{inr(v.emi_amount ?? 0)}</span>
+                                <span style={{ display: "block", fontSize: 10.5, fontWeight: 700, color: dueIn != null && dueIn <= 7 ? tone : "var(--muted)" }}>
+                                  {due ? `next EMI · ${fmtD(due.iso)}${dueIn != null ? ` · ${dueIn === 0 ? "TODAY" : `in ${dueIn}d`}` : ""}` : "next EMI"}
+                                </span>
+                              </span>
+                            </Link>
+                          );
+                        })}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </>
       )}

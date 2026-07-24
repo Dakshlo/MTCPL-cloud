@@ -52,8 +52,22 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
   const name = txt(formData, "name").toUpperCase();
   if (!name) backTo(kind, "Give the vehicle a name");
 
-  const emiActive = formData.get("emi_active") === "on" || formData.get("emi_active") === "true";
-  const emiDayRaw = numOrNull(txt(formData, "emi_day"));
+  // EMI is all-or-none (Daksh, Jul 2026 — the on-EMI checkbox is gone): the
+  // fields are always shown; leaving them ALL empty means no loan, filling ANY
+  // of them makes every one of the five mandatory.
+  const emiRaw = {
+    amount: txt(formData, "emi_amount"),
+    day: txt(formData, "emi_day"),
+    lender: txt(formData, "emi_lender"),
+    start: txt(formData, "emi_start"),
+    end: txt(formData, "emi_end"),
+  };
+  const emiFilled = Object.values(emiRaw).filter(Boolean).length;
+  if (emiFilled > 0 && emiFilled < 5) {
+    backTo(kind, "EMI: fill all five fields (amount, due day, lender, loan start, loan ends) — or leave them all empty");
+  }
+  const emiActive = emiFilled === 5;
+  const emiDayRaw = numOrNull(emiRaw.day);
   const row = {
     kind,
     name,
