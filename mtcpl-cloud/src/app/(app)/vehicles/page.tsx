@@ -1,6 +1,7 @@
-// Vehicles → Overview (mig 204). An analytics cockpit over BOTH fleets:
-// fleet-health donut, monthly + remaining EMI liability with per-loan progress,
-// document coverage, and the expiry radar. Pure server render — fast.
+// Vehicles → Overview (mig 204). A compliance cockpit over BOTH fleets:
+// per-fleet counts + how many are on EMI, a fleet-health donut, an expiry
+// radar organised into one column per document type, and the EMI monitor.
+// Pure server render — fast.
 
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
@@ -33,8 +34,6 @@ function loanPct(start: string | null, end: string | null): number | null {
 const fmtD = (d: string) =>
   new Date(`${d.slice(0, 10)}T00:00:00+05:30`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
-const inrShort = (n: number) =>
-  n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(2)} L` : inr(n);
 
 const RED = "#dc2626", AMBER = "#d97706", GREEN = "#16a34a", GREY = "#94a3b8", ACCENT = "#4f6d9c";
 
@@ -42,26 +41,36 @@ export default async function VehiclesOverviewPage() {
   await requireAuth(VEHICLES_ROLES);
   const { rows, migMissing } = await loadVehicles();
 
-  // ── expiry radar (both fleets, next 45 days) ──────────────────────
-  type Alert = { vehicle: string; kind: "commercial" | "personal"; doc: string; date: string; days: number };
-  const alerts: Alert[] = [];
+  const commercial = rows.filter((v) => v.kind === "commercial").length;
+  const personal = rows.length - commercial;
+  const emis = rows.filter((v) => v.emi_active && v.emi_amount != null).sort((a, b) => (a.emi_day ?? 32) - (b.emi_day ?? 32));
+
+  // ── Expiry radar, grouped by document type ────────────────────────
+  // One column per doc type. Fitness only applies to commercial vehicles, so
+  // it only appears when the fleet has any. Order (left→right) per Daksh:
+  // Fitness, PUC, Insurance.
+  type Alert = { vehicle: string; kind: "commercial" | "personal"; date: string; days: number };
+  const docDefs = [
+    { key: "fitness", label: "Fitness", icon: "🛠", applies: commercial > 0, get: (v: (typeof rows)[number]) => (v.kind === "commercial" ? v.fitness_expiry : null) },
+    { key: "puc", label: "PUC", icon: "🌿", applies: true, get: (v: (typeof rows)[number]) => v.puc_expiry },
+    { key: "insurance", label: "Insurance", icon: "📄", applies: true, get: (v: (typeof rows)[number]) => v.insurance_expiry },
+  ] as const;
+  const byDoc: Record<string, Alert[]> = { fitness: [], puc: [], insurance: [] };
   for (const v of rows) {
-    const docs: Array<[string, string | null]> = [
-      ["Insurance", v.insurance_expiry],
-      ["PUC", v.puc_expiry],
-      ...(v.kind === "commercial" ? ([["Fitness", v.fitness_expiry]] as Array<[string, string | null]>) : []),
-    ];
-    for (const [doc, date] of docs) {
-      const d = daysTo(date);
-      if (date && d != null && d <= 45) alerts.push({ vehicle: v.name, kind: v.kind, doc, date, days: d });
+    for (const d of docDefs) {
+      const date = d.get(v);
+      const dd = daysTo(date);
+      if (date && dd != null && dd <= 45) byDoc[d.key].push({ vehicle: v.reg_no || v.name, kind: v.kind, date, days: dd });
     }
   }
-  alerts.sort((a, b) => a.days - b.days);
-  const expired = alerts.filter((a) => a.days < 0).length;
-  const soon = alerts.filter((a) => a.days >= 0 && a.days <= 30).length;
+  for (const k of Object.keys(byDoc)) byDoc[k].sort((a, b) => a.days - b.days);
+  const allAlerts = [...byDoc.fitness, ...byDoc.puc, ...byDoc.insurance];
+  const expired = allAlerts.filter((a) => a.days < 0).length;
+  const soon = allAlerts.filter((a) => a.days >= 0 && a.days <= 30).length;
+  const radarCols = docDefs.filter((d) => d.applies);
 
   // ── fleet health: worst applicable-doc status per vehicle ─────────
-  let health = { ok: 0, warn: 0, crit: 0, none: 0 };
+  const health = { ok: 0, warn: 0, crit: 0, none: 0 };
   for (const v of rows) {
     const ds = [v.insurance_expiry, v.puc_expiry, ...(v.kind === "commercial" ? [v.fitness_expiry] : [])]
       .map(daysTo).filter((d): d is number => d != null);
@@ -71,18 +80,9 @@ export default async function VehiclesOverviewPage() {
     else health.ok++;
   }
 
-  // ── EMI analytics ─────────────────────────────────────────────────
-  const emis = rows.filter((v) => v.emi_active && v.emi_amount != null).sort((a, b) => (a.emi_day ?? 32) - (b.emi_day ?? 32));
-  const emiTotal = emis.reduce((s, v) => s + (v.emi_amount ?? 0), 0);
-  const liability = emis.reduce((s, v) => s + (v.emi_amount ?? 0) * (monthsLeft(v.emi_end) ?? 0), 0);
-
-  const commercial = rows.filter((v) => v.kind === "commercial").length;
-  const personal = rows.length - commercial;
-  const docsOnFile = rows.reduce((s, v) => s + v.docs.length, 0);
-
   // ── little presentational helpers (server) ────────────────────────
   const Tile = (icon: string, value: string | number, label: string, sub?: string, color?: string): React.ReactNode => (
-    <div style={{ flex: "1 1 160px", minWidth: 150, border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "15px 16px" }}>
+    <div style={{ flex: "1 1 150px", minWidth: 140, border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "15px 16px" }}>
       <div style={{ fontSize: 12.5 }}>{icon}</div>
       <div style={{ fontSize: 23, fontWeight: 900, color: color ?? "var(--text)", marginTop: 3, lineHeight: 1.1 }}>{value}</div>
       <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginTop: 4 }}>{label}</div>
@@ -105,9 +105,9 @@ export default async function VehiclesOverviewPage() {
     });
     const ring = stops.length ? stops.join(", ") : `${GREY} 0% 100%`;
     return (
-      <div style={{ flex: "1 1 260px", border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px" }}>
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px", marginTop: 14 }}>
         <div style={{ fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 12 }}>🩺 Fleet health</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap" }}>
           <div style={{ position: "relative", width: 132, height: 132, flexShrink: 0 }}>
             <div style={{ width: 132, height: 132, borderRadius: "50%", background: `conic-gradient(${ring})` }} />
             <div style={{ position: "absolute", inset: 17, borderRadius: "50%", background: "var(--surface)", display: "grid", placeItems: "center" }}>
@@ -115,7 +115,7 @@ export default async function VehiclesOverviewPage() {
               <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>vehicles</div>
             </div>
           </div>
-          <div style={{ display: "grid", gap: 7, flex: "1 1 140px" }}>
+          <div style={{ display: "grid", gap: 7, flex: "1 1 180px", minWidth: 180 }}>
             {segs.map((s) => (
               <div key={s.l} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: s.c, flexShrink: 0 }} />
@@ -123,34 +123,6 @@ export default async function VehiclesOverviewPage() {
                 <span style={{ marginLeft: "auto", fontWeight: 900 }}>{s.v}</span>
               </div>
             ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const split = () => {
-    const total = rows.length || 1;
-    const cPct = Math.round((commercial / total) * 100);
-    return (
-      <div style={{ flex: "1 1 260px", border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px" }}>
-        <div style={{ fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 14 }}>🚦 Fleet split &amp; documents</div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 800, marginBottom: 6 }}>
-          <span>🚛 Commercial · {commercial}</span>
-          <span>🚗 Personal · {personal}</span>
-        </div>
-        <div style={{ display: "flex", height: 12, borderRadius: 999, overflow: "hidden", background: "var(--bg)", border: "1px solid var(--border)" }}>
-          <div style={{ width: `${cPct}%`, background: ACCENT }} />
-          <div style={{ width: `${100 - cPct}%`, background: "#c9a15a" }} />
-        </div>
-        <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>📄 Documents on file</span>
-            <span style={{ fontSize: 17, fontWeight: 900 }}>{docsOnFile}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>💳 On EMI / loan</span>
-            <span style={{ fontSize: 17, fontWeight: 900 }}>{emis.length}<span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}> / {rows.length}</span></span>
           </div>
         </div>
       </div>
@@ -168,7 +140,7 @@ export default async function VehiclesOverviewPage() {
     <section className="page-card">
       <div className="page-header">
         <h1>🚚 Vehicles</h1>
-        <p className="muted">Fleet cockpit — compliance at a glance, EMI load and liability, and what expires next.</p>
+        <p className="muted">Fleet cockpit — compliance at a glance and what expires next.</p>
       </div>
 
       {migMissing ? (
@@ -177,42 +149,57 @@ export default async function VehiclesOverviewPage() {
         <div style={{ marginTop: 18, border: "1px dashed var(--border)", borderRadius: 16, background: "var(--surface)", padding: "44px 22px", textAlign: "center" }}>
           <div style={{ fontSize: 40 }}>🚚</div>
           <div style={{ fontSize: 16, fontWeight: 900, marginTop: 8 }}>No vehicles yet</div>
-          <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>Open <strong>Commercial</strong> or <strong>Personal</strong> from the menu and add your first vehicle.<br />This cockpit fills in automatically — expiries, EMI load and document coverage.</p>
+          <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>Open <strong>Commercial</strong> or <strong>Personal</strong> from the menu and add your first vehicle.<br />This cockpit fills in automatically — expiries, compliance and EMI load.</p>
         </div>
       ) : (
         <>
-          {/* KPI strip */}
+          {/* KPI strip — fleet counts, EMI coverage, and what needs attention */}
           <div style={{ display: "flex", gap: 11, flexWrap: "wrap", marginTop: 16 }}>
-            {Tile("🚚", rows.length, "Fleet size", `${commercial} commercial · ${personal} personal`)}
-            {Tile("💳", emis.length ? inrShort(emiTotal) : "—", "Monthly EMI", `${emis.length} active loan${emis.length === 1 ? "" : "s"}`, ACCENT)}
-            {Tile("🏦", liability ? inrShort(liability) : "—", "EMI liability left", "sum of remaining EMIs", ACCENT)}
+            {Tile("🚛", commercial, "Commercial", `vehicle${commercial === 1 ? "" : "s"}`)}
+            {Tile("🚗", personal, "Personal", `vehicle${personal === 1 ? "" : "s"}`)}
+            {Tile("💳", `${emis.length} / ${rows.length}`, "On EMI / loan", "of all vehicles", ACCENT)}
             {Tile("⛔", expired, "Expired documents", expired ? "renew now" : "none overdue", expired ? RED : undefined)}
             {Tile("⏳", soon, "Expiring ≤ 30 days", soon ? "coming due" : "nothing soon", soon ? AMBER : undefined)}
           </div>
 
-          {/* analytics row */}
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
-            {donut()}
-            {split()}
-          </div>
+          {/* Fleet health donut */}
+          {donut()}
 
-          {/* Expiry radar */}
+          {/* Expiry radar — one column per document type */}
           <div style={{ marginTop: 22 }}>
             {sectionHd("📅 Expiry radar — next 45 days")}
-            {alerts.length === 0 ? emptyBox("✅ Nothing expiring in the next 45 days.") : (
-              <div style={{ display: "grid", gap: 7 }}>
-                {alerts.map((a, i) => {
-                  const exp = a.days < 0;
+            {allAlerts.length === 0 ? emptyBox("✅ Nothing expiring in the next 45 days.") : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, alignItems: "start" }}>
+                {radarCols.map((col) => {
+                  const items = byDoc[col.key];
                   return (
-                    <Link key={i} href={`/vehicles/${a.kind}`} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 14px", borderRadius: 11, textDecoration: "none", color: "var(--text)", background: exp ? "rgba(220,38,38,0.05)" : "rgba(217,119,6,0.05)", border: `1px solid ${exp ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${exp ? RED : AMBER}` }}>
-                      <span style={{ fontSize: 16 }}>{a.kind === "commercial" ? "🚛" : "🚗"}</span>
-                      <span style={{ fontWeight: 900, fontSize: 13.5, minWidth: 120 }}>{a.vehicle}</span>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: exp ? "#b91c1c" : "#b45309", background: exp ? "rgba(220,38,38,0.1)" : "rgba(217,119,6,0.12)", borderRadius: 999, padding: "2px 10px" }}>{a.doc.toUpperCase()}</span>
-                      <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{fmtD(a.date)}</span>
-                      <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 900, color: exp ? "#b91c1c" : "#b45309" }}>
-                        {exp ? `EXPIRED ${Math.abs(a.days)}d ago` : a.days === 0 ? "expires TODAY" : `${a.days} days left`}
-                      </span>
-                    </Link>
+                    <div key={col.key} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)", overflow: "hidden" }}>
+                      <div style={{ padding: "9px 12px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: 11.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {col.icon} {col.label}
+                        <span style={{ color: "var(--muted)", fontWeight: 800 }}>{items.length ? ` · ${items.length}` : ""}</span>
+                      </div>
+                      {items.length === 0 ? (
+                        <div style={{ padding: "16px 12px", textAlign: "center", color: GREEN, fontSize: 12, fontWeight: 700 }}>✓ all valid</div>
+                      ) : (
+                        <div style={{ display: "grid", gap: 6, padding: 8 }}>
+                          {items.map((a, i) => {
+                            const exp = a.days < 0;
+                            return (
+                              <Link key={i} href={`/vehicles/${a.kind}`} style={{ display: "block", textDecoration: "none", color: "var(--text)", padding: "7px 9px", borderRadius: 9, background: exp ? "rgba(220,38,38,0.05)" : "rgba(217,119,6,0.05)", border: `1px solid ${exp ? "#fecaca" : "#fde68a"}`, borderLeft: `4px solid ${exp ? RED : AMBER}` }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                                  <span style={{ fontSize: 13 }}>{a.kind === "commercial" ? "🚛" : "🚗"}</span>
+                                  <span style={{ fontWeight: 800, fontSize: 12.5, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.vehicle}</span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 3 }}>
+                                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{fmtD(a.date)}</span>
+                                  <span style={{ fontSize: 11, fontWeight: 900, color: exp ? "#b91c1c" : "#b45309" }}>{exp ? `expired ${Math.abs(a.days)}d` : a.days === 0 ? "TODAY" : `${a.days}d left`}</span>
+                                </div>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -235,7 +222,7 @@ export default async function VehiclesOverviewPage() {
                           <span style={{ fontSize: 7.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>day</span>
                         </span>
                         <span style={{ minWidth: 130 }}>
-                          <span style={{ display: "block", fontSize: 13.5, fontWeight: 900 }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.name}</span>
+                          <span style={{ display: "block", fontSize: 13.5, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
                           <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
                         </span>
                         <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: ACCENT }}>{inr(v.emi_amount ?? 0)}</span>
@@ -254,10 +241,6 @@ export default async function VehiclesOverviewPage() {
                     </Link>
                   );
                 })}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 18, fontSize: 12.5, fontWeight: 900, padding: "4px 14px" }}>
-                  <span>Monthly outgo <span style={{ fontFamily: "ui-monospace, monospace", color: ACCENT, marginLeft: 6 }}>{inr(emiTotal)}</span></span>
-                  <span>Liability left <span style={{ fontFamily: "ui-monospace, monospace", color: ACCENT, marginLeft: 6 }}>{inr(liability)}</span></span>
-                </div>
               </div>
             )}
           </div>

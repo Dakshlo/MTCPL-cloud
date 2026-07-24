@@ -59,6 +59,8 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
     name,
     reg_no: upNull(txt(formData, "reg_no")),
     make_model: upNull(txt(formData, "make_model")),
+    // Mig 210 — registered owner. Stripped by the retry below pre-migration.
+    owner_name: upNull(txt(formData, "owner_name")),
     emi_active: emiActive,
     emi_amount: emiActive ? numOrNull(txt(formData, "emi_amount")) : null,
     emi_day: emiActive && emiDayRaw != null ? Math.min(31, Math.max(1, Math.round(emiDayRaw))) : null,
@@ -74,14 +76,26 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
     notes: upNull(txt(formData, "notes")),
   };
 
+  // owner_name arrived with mig 210 — if that hasn't run yet the write fails
+  // on the unknown column, so retry once without it rather than erroring out.
+  const missingOwnerCol = (msg: string) => /owner_name/i.test(msg);
+
   if (id) {
-    const { error } = await admin.from("vehicles").update(row as never).eq("id", id);
+    let { error } = await admin.from("vehicles").update(row as never).eq("id", id);
+    if (error && missingOwnerCol(error.message)) {
+      const { owner_name: _drop, ...noOwner } = row;
+      ({ error } = await admin.from("vehicles").update(noOwner as never).eq("id", id));
+    }
     if (error) backTo(kind, error.message);
     void logAudit(profile.id, "vehicle_updated", "vehicle", id, { name });
     refresh();
     backTo(kind, "Vehicle updated");
   } else {
-    const { error } = await admin.from("vehicles").insert({ ...row, created_by: profile.id } as never);
+    let { error } = await admin.from("vehicles").insert({ ...row, created_by: profile.id } as never);
+    if (error && missingOwnerCol(error.message)) {
+      const { owner_name: _drop, ...noOwner } = row;
+      ({ error } = await admin.from("vehicles").insert({ ...noOwner, created_by: profile.id } as never));
+    }
     if (error) backTo(kind, error.message);
     void logAudit(profile.id, "vehicle_added", "vehicle", name, { kind });
     refresh();

@@ -16,6 +16,7 @@ import { upsertVehicleAction, deleteVehicleAction, prepareVehicleDocUploadsActio
 export type VehicleDoc = { id: string; name: string; url: string; doc_type: string | null; created_at: string };
 export type VehicleRow = {
   id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; make_model: string | null;
+  owner_name: string | null;
   emi_active: boolean; emi_amount: number | null; emi_day: number | null; emi_lender: string | null; emi_start: string | null; emi_end: string | null;
   insurance_company: string | null; insurance_policy_no: string | null; insurance_expiry: string | null;
   puc_expiry: string | null; fitness_expiry: string | null; notes: string | null;
@@ -86,20 +87,28 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
         </div>
         <div style={{ height: 1, background: "var(--border)", margin: "14px 0 16px" }} />
 
-        {/* identity */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label style={{ ...label, gridColumn: "1 / -1" }}>
-            Vehicle name *
-            <input name="name" required defaultValue={v?.name ?? ""} autoFocus style={input} {...textFill} />
-          </label>
-          <label style={label}>
-            Registration no.
-            <input name="reg_no" defaultValue={v?.reg_no ?? ""} style={input} {...textFill} />
-          </label>
-          <label style={label}>
-            Make / model
-            <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
-          </label>
+        {/* identity — registration number leads (that's how a vehicle is
+            identified); name + make/model + registered owner follow. */}
+        <div style={card}>
+          <div style={sectionHd}>{kind === "commercial" ? "🚛" : "🚗"} Vehicle details</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={{ ...label, gridColumn: "1 / -1" }}>
+              Registration no.
+              <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
+            </label>
+            <label style={label}>
+              Vehicle name *
+              <input name="name" required defaultValue={v?.name ?? ""} style={input} {...textFill} />
+            </label>
+            <label style={label}>
+              Make / model
+              <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
+            </label>
+            <label style={{ ...label, gridColumn: "1 / -1" }}>
+              Owner / registered to
+              <input name="owner_name" defaultValue={v?.owner_name ?? ""} style={input} {...textFill} />
+            </label>
+          </div>
         </div>
 
         {/* EMI */}
@@ -269,12 +278,21 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderLeft: `4px solid ${rail}`, borderRadius: 14, background: "var(--surface)", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-      {/* header */}
+      {/* header — REGISTRATION NUMBER leads (Daksh: names are hard to tell
+          apart; the reg no is how people actually identify a vehicle). */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "13px 15px 11px" }}>
         <span style={{ fontSize: 26, lineHeight: 1 }}>{icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 900, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</div>
-          <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.reg_no || "no reg. no"}{v.make_model ? ` · ${v.make_model}` : ""}</div>
+          <div style={{ fontSize: 16, fontWeight: 900, lineHeight: 1.2, fontFamily: "ui-monospace, monospace", letterSpacing: "0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {v.reg_no || v.name}
+          </div>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {v.reg_no ? v.name : ""}{v.reg_no && v.make_model ? " · " : ""}{v.make_model ?? ""}
+            {!v.reg_no && !v.make_model ? "no reg. no" : ""}
+          </div>
+          {v.owner_name && (
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>👤 {v.owner_name}</div>
+          )}
         </div>
         <button type="button" onClick={onEdit} title="Edit" style={{ border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 13, flexShrink: 0, lineHeight: 1 }}>✎</button>
       </div>
@@ -309,8 +327,10 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
 
       {v.notes && <div style={{ margin: "9px 15px 0", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}><span style={{ fontWeight: 700 }}>Note:</span> {v.notes}</div>}
 
-      {/* footer — docs toggle + remove, pinned to card bottom */}
-      <div style={{ marginTop: "auto", padding: "11px 15px 0" }}>
+      {/* footer — docs toggle + remove, pinned to card bottom. Bottom padding
+          matters: without it the buttons sit flush on the card edge and look
+          like they spill out (Daksh flagged). */}
+      <div style={{ marginTop: "auto", padding: "11px 15px 13px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
           <button type="button" onClick={() => setShowDocs((s) => !s)} style={{ ...btn, padding: "6px 11px", fontSize: 12 }}>
             📎 {v.docs.length} doc{v.docs.length === 1 ? "" : "s"} {showDocs ? "▴" : "▾"}
@@ -324,7 +344,7 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
 
       {/* documents drawer */}
       {showDocs && (
-        <div style={{ padding: "10px 15px 14px" }}>
+        <div style={{ padding: "0 15px 14px" }}>
           {err && <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>⚠ {err}</div>}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: v.docs.length ? 9 : 0 }}>
             <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", color: "var(--muted)" }}>Tag next upload:</span>
@@ -375,13 +395,13 @@ export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "person
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return vehicles;
-    return vehicles.filter((v) => [v.name, v.reg_no ?? "", v.make_model ?? "", v.emi_lender ?? ""].join(" ").toLowerCase().includes(s));
+    return vehicles.filter((v) => [v.name, v.reg_no ?? "", v.make_model ?? "", v.owner_name ?? "", v.emi_lender ?? ""].join(" ").toLowerCase().includes(s));
   }, [vehicles, q]);
 
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search name, reg no, lender…" style={{ ...input, maxWidth: 320 }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Search reg no, name, owner…" style={{ ...input, maxWidth: 320 }} />
         <span style={{ flex: 1 }} />
         <button type="button" onClick={() => setModal({ v: null })} style={{ ...btn, background: "#4f6d9c", borderColor: "#415980", color: "#fff", padding: "9px 16px" }}>
           ➕ Add vehicle
