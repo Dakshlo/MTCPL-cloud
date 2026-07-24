@@ -49,6 +49,13 @@ const VIEW: Record<DprSectionKey, { title: string; shortUnit: string; longUnit: 
   },
 };
 
+/** Day-of-month (1–31) of an instant, in IST — the ÷N for the daily average. */
+function istDayOfMonth(iso: string): number {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return new Date(t + 5.5 * 3_600_000).getUTCDate();
+}
+
 export function DprTabs({ initialKey, initialReport }: { initialKey: DprSectionKey; initialReport: DprSection }) {
   const [active, setActive] = useState<DprSectionKey>(initialKey);
   const [cache, setCache] = useState<Partial<Record<DprSectionKey, DprSection>>>({ [initialKey]: initialReport });
@@ -84,6 +91,13 @@ export function DprTabs({ initialKey, initialReport }: { initialKey: DprSectionK
   const report = cache[active];
   const view = VIEW[active];
 
+  // DAILY AVG column — trial on Block Cutted only (Daksh). Basis: this month's
+  // total ÷ days elapsed this month (IST day-of-month of the generated time).
+  const dailyAvg =
+    active === "block_cutted" && report
+      ? { label: "DAILY AVG", divisor: istDayOfMonth(report.generatedAt) }
+      : undefined;
+
   return (
     <>
       {/* Section tabs */}
@@ -116,7 +130,7 @@ export function DprTabs({ initialKey, initialReport }: { initialKey: DprSectionK
       </div>
 
       {report ? (
-        <DprGrid report={report} title={view.title} shortUnit={view.shortUnit} longUnit={view.longUnit} />
+        <DprGrid report={report} title={view.title} shortUnit={view.shortUnit} longUnit={view.longUnit} dailyAvg={dailyAvg} />
       ) : (
         <div style={{ border: "1px solid #b6b6b6", borderRadius: 8, background: "#fff", padding: "28px 18px", fontSize: 13, color: "#777", textAlign: "center" }}>
           Loading {VIEW[active].title.toLowerCase()}…
@@ -126,6 +140,7 @@ export function DprTabs({ initialKey, initialReport }: { initialKey: DprSectionK
       <div style={{ marginTop: 12, fontSize: 11, color: "var(--muted)" }}>
         {report ? <>Generated {new Date(report.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} · </> : null}
         {view.note} · Daily = today, 7 Days = last 7 days, Month = this calendar month (IST).
+        {dailyAvg ? ` · Daily avg = this month ÷ ${dailyAvg.divisor} day${dailyAvg.divisor === 1 ? "" : "s"} so far` : ""}
       </div>
     </>
   );

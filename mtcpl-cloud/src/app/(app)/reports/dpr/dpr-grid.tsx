@@ -33,7 +33,7 @@ function fmt(n: number): string {
 }
 
 export function DprGrid({
-  report, title, shortUnit, longUnit, hideTotal,
+  report, title, shortUnit, longUnit, hideTotal, dailyAvg,
 }: {
   report: DprSection;
   /** Cell A2 text, e.g. "BLOCK CUTTED". */
@@ -45,7 +45,13 @@ export function DprGrid({
   /** Site-wise per-temple grids stack 3 sections in one grid (each section's
    *  orange group row IS its total), so the grand TOTAL row is suppressed. */
   hideTotal?: boolean;
+  /** When set, adds a derived "DAILY AVG" column after ALL TIME: the MONTH
+   *  value ÷ `divisor` (days elapsed this month). Trial on Block Cutted only. */
+  dailyAvg?: { label: string; divisor: number };
 }) {
+  const hasAvg = !!dailyAvg && dailyAvg.divisor > 0;
+  // Extra letter for the avg column (it takes G, the trailing spacer moves to H).
+  const COLS = hasAvg ? [...COL_LETTERS, "H"] : COL_LETTERS;
   // Per-cell toggle — keys (`${rowId}:${win}`) currently flipped from default.
   const [asCount, setAsCount] = useState<Set<string>>(new Set());
   const flip = (key: string) =>
@@ -89,13 +95,14 @@ export function DprGrid({
           <col style={{ width: 96 }} />
           <col style={{ width: 96 }} />
           <col style={{ width: 100 }} />
+          {hasAvg && <col style={{ width: 104 }} />}
           <col style={{ width: 58 }} />
         </colgroup>
-        {/* Column-letter header (A–G) */}
+        {/* Column-letter header (A–G, or A–H with the daily-avg column) */}
         <thead>
           <tr>
             <th style={cornerCell} />
-            {COL_LETTERS.map((c) => (
+            {COLS.map((c) => (
               <th key={c} style={colHeadCell}>{c}</th>
             ))}
           </tr>
@@ -109,12 +116,13 @@ export function DprGrid({
                 {/* Row number gutter — match the TOTAL row's heavy top rule. The
                     header row's gutter is sticky too so the frozen line is whole. */}
                 <td style={isTotal ? { ...rowNumCell, borderTop: "2px solid #404040" } : isHeader ? { ...rowNumCell, position: "sticky", top: 0, zIndex: 2 } : rowNumCell}>{i + 1}</td>
-                {r.kind === "blank" && COL_LETTERS.map((c) => <td key={c} style={blankCell} />)}
+                {r.kind === "blank" && COLS.map((c) => <td key={c} style={blankCell} />)}
                 {r.kind === "header" && (
                   <>
                     <td style={headerLabelCell}>{title}</td>
                     <td style={headerCell} />
                     {WIN_ORDER.map((w) => <td key={w} style={headerColCell}>{WIN_LABELS[w]}</td>)}
+                    {hasAvg && <td style={headerColCell}>{dailyAvg!.label}</td>}
                     <td style={headerCell} />
                   </>
                 )}
@@ -125,6 +133,7 @@ export function DprGrid({
                     {WIN_ORDER.map((w) => (
                       <DataCell key={w} rowId={r.id} tone={r.tone} win={w} data={r.windows[w]} shortUnit={shortUnit} longUnit={longUnit} asCount={asCount} flip={flip} />
                     ))}
+                    {hasAvg && <AvgCell tone={r.tone} month={r.windows.month} divisor={dailyAvg!.divisor} />}
                     <td style={bodyCell(r.tone)} />
                   </>
                 )}
@@ -171,6 +180,26 @@ function DataCell({
       ) : (
         value
       )}
+    </td>
+  );
+}
+
+/** Derived daily-average cell: the row's MONTH value ÷ divisor (days elapsed
+ *  this month). Not clickable — it's a computed rate, not a count. Blank when
+ *  there was no cutting this month. Tinted so it reads as a derived column. */
+function AvgCell({ tone, month, divisor }: { tone: Tone; month: DprWin; divisor: number }) {
+  const cft = divisor > 0 ? month.cft / divisor : 0;
+  const tonnes = divisor > 0 ? month.tonnes / divisor : 0;
+  const parts: string[] = [];
+  if (cft > 0) parts.push(fmt(cft));
+  if (tonnes > 0) parts.push(`${fmt(tonnes)} T`);
+  const value = parts.length ? parts.join(" + ") : "";
+  return (
+    <td
+      title={value ? `${value} per day — this month's total ÷ ${divisor} day${divisor === 1 ? "" : "s"} so far` : undefined}
+      style={{ ...numCell(tone), ...(tone === "item" ? { background: "#eef4ec" } : {}), color: value ? "#166534" : "#1a1a1a" }}
+    >
+      {value}
     </td>
   );
 }
