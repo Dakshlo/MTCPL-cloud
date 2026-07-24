@@ -40,6 +40,15 @@ function nextEmiDue(day: number | null | undefined): { y: number; m: number; d: 
   return { y, m, d, iso: `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}` };
 }
 
+/** Whole months of EMIs still to pay until the loan end date. */
+function monthsLeft(end: string | null): number | null {
+  if (!end) return null;
+  const now = new Date();
+  const e = new Date(`${end.slice(0, 10)}T00:00:00+05:30`);
+  const m = (e.getFullYear() - now.getFullYear()) * 12 + (e.getMonth() - now.getMonth());
+  return Math.max(0, m + (e.getDate() >= now.getDate() ? 1 : 0));
+}
+
 const RED = "#dc2626", AMBER = "#d97706", GREEN = "#16a34a", GREY = "#94a3b8", ACCENT = "#4f6d9c";
 
 export default async function VehiclesOverviewPage() {
@@ -222,8 +231,24 @@ export default async function VehiclesOverviewPage() {
             <div style={cardHd}>💳 EMI monitor — next payment</div>
             {emis.length === 0 ? emptyBox("No vehicles on EMI.") : (() => {
               const { groups, showHeaders } = kindGroups(emis);
+              // The two numbers Daksh wants at a glance: this month's total
+              // EMI outgo, and how much loan is still left to pay overall
+              // (Σ EMI × months remaining).
+              const emiTotal = emis.reduce((s, v) => s + (v.emi_amount ?? 0), 0);
+              const liability = emis.reduce((s, v) => s + (v.emi_amount ?? 0) * (monthsLeft(v.emi_end) ?? 0), 0);
+              const stat = (label: string, value: string, sub: string): React.ReactNode => (
+                <div style={{ flex: "1 1 200px", border: "1px solid rgba(79,109,156,0.3)", background: "rgba(79,109,156,0.07)", borderRadius: 11, padding: "10px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>{label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: ACCENT, marginTop: 2 }}>{value}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{sub}</div>
+                </div>
+              );
               return (
                 <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {stat("Monthly EMI", inr(emiTotal), `${emis.length} active loan${emis.length === 1 ? "" : "s"} / month`)}
+                    {stat("Total liability left", inr(liability), "sum of all remaining EMIs")}
+                  </div>
                   {groups.map((g) => (
                     <div key={g.key} style={{ display: "grid", gap: 8 }}>
                       {showHeaders && groupHd(g.label)}
