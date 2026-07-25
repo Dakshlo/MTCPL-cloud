@@ -307,6 +307,14 @@ export default async function VehiclesOverviewPage() {
                                 <span style={{ display: "block", fontSize: 14, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{v.kind === "commercial" ? "🚛" : "🚗"} {v.reg_no || v.name}</span>
                                 {v.reg_no && <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{v.name}</span>}
                                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{v.emi_lender || "—"}</span>
+                                {(() => {
+                                  const mLeft = monthsLeft(v.emi_end);
+                                  return mLeft != null ? (
+                                    <span style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--muted)", marginTop: 1 }}>
+                                      {mLeft} EMI{mLeft === 1 ? "" : "s"} left · <span style={{ fontWeight: 900, color: ACCENT, fontFamily: "ui-monospace, monospace" }}>{inr((v.emi_amount ?? 0) * mLeft)}</span>
+                                    </span>
+                                  ) : null;
+                                })()}
                               </span>
                               <span style={{ marginLeft: "auto", textAlign: "right" }}>
                                 <span style={{ display: "block", fontSize: 15, fontWeight: 900, fontFamily: "ui-monospace, monospace", color: tone }}>{inr(v.emi_amount ?? 0)}</span>

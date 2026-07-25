@@ -77,6 +77,11 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
     temples.sort((a, b) => volOf(b) - volOf(a) || a.localeCompare(b));
 
     const generatedAt = cut.generatedAt;
+    // Same DAILY AVG column as the MTCPL tabs: this month ÷ days elapsed this
+    // month (IST day-of-month of the generated time). Local helper — do NOT
+    // import from the "use client" dpr-tabs module.
+    const avgDivisor = new Date(new Date(generatedAt).getTime() + 5.5 * 3_600_000).getUTCDate();
+    const dailyAvg = { label: "DAILY AVG", divisor: avgDivisor };
     return (
       <section style={{ paddingBottom: 24 }}>
         {header}
@@ -110,7 +115,7 @@ export default async function DprPage({ searchParams }: { searchParams: Search }
                     </span>
                   </summary>
                   <div style={{ padding: "0 12px 12px" }}>
-                    <DprGrid report={section} title={temple} shortUnit="slab" longUnit="slab" hideTotal />
+                    <DprGrid report={section} title={temple} shortUnit="slab" longUnit="slab" hideTotal dailyAvg={dailyAvg} />
                   </div>
                 </details>
               );

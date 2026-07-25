@@ -91,12 +91,12 @@ export function DprTabs({ initialKey, initialReport }: { initialKey: DprSectionK
   const report = cache[active];
   const view = VIEW[active];
 
-  // DAILY AVG column — trial on Block Cutted only (Daksh). Basis: this month's
-  // total ÷ days elapsed this month (IST day-of-month of the generated time).
-  const dailyAvg =
-    active === "block_cutted" && report
-      ? { label: "DAILY AVG", divisor: istDayOfMonth(report.generatedAt) }
-      : undefined;
+  // DAILY AVG column — on EVERY section now (Daksh liked the Block Cutted
+  // trial). Basis: this month's total ÷ days elapsed this month (IST
+  // day-of-month of the generated time).
+  const dailyAvg = report
+    ? { label: "DAILY AVG", divisor: istDayOfMonth(report.generatedAt) }
+    : undefined;
 
   return (
     <>
