@@ -25,6 +25,7 @@ export type VehicleRow = {
   id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; make_model: string | null;
   owner_name: string | null;
   engine_no: string | null; chassis_no: string | null;
+  rc_no: string | null; rc_expiry: string | null;
   emi_active: boolean; emi_amount: number | null; emi_day: number | null; emi_lender: string | null; emi_start: string | null; emi_end: string | null;
   insurance_company: string | null; insurance_policy_no: string | null; insurance_expiry: string | null;
   puc_expiry: string | null; fitness_expiry: string | null; notes: string | null;
@@ -81,10 +82,7 @@ function evVal(field: string, v: string | null): string {
   return v;
 }
 
-function VehicleModal({ kind, v, canEditIdentity, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; canEditIdentity: boolean; onClose: () => void }) {
-  // Identity lock (mig 211): after creation, only the developer can change
-  // vehicle details — everyone else sees them read-only (server enforces too).
-  const lockId = !!v && !canEditIdentity;
+function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v: VehicleRow | null; onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   // EMI is all-or-none: fields are always visible; filling ANY makes all five
   // mandatory (server enforces the same rule).
@@ -127,36 +125,36 @@ function VehicleModal({ kind, v, canEditIdentity, onClose }: { kind: "commercial
             identified); name + make/model + registered owner follow. */}
         <div style={card}>
           <div style={sectionHd}>{kind === "commercial" ? "🚛" : "🚗"} Vehicle details</div>
-          {lockId && (
-            <div style={{ fontSize: 11, color: "var(--muted)", margin: "-5px 0 11px", lineHeight: 1.4 }}>
-              🔒 Locked after creation — only the developer can change these. EMI &amp; expiry dates stay editable; every change lands on the timeline below.
-            </div>
-          )}
-          {/* One wide row: Reg no → Name → Make/model; owner underneath. */}
+          {/* All fields editable by any vehicle-department user (owner /
+              accountant / developer); every change is recorded on the timeline. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
             <label style={label}>
               Registration no.
-              <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus={!lockId} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="reg_no" defaultValue={v?.reg_no ?? ""} autoFocus style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
             </label>
             <label style={label}>
               Vehicle name *
-              <input name="name" required defaultValue={v?.name ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="name" required defaultValue={v?.name ?? ""} style={input} {...textFill} />
             </label>
             <label style={label}>
               Make / model
-              <input name="make_model" defaultValue={v?.make_model ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
             </label>
             <label style={label}>
               Engine no.
-              <input name="engine_no" defaultValue={v?.engine_no ?? ""} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="engine_no" defaultValue={v?.engine_no ?? ""} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
             </label>
             <label style={label}>
               Chassis no.
-              <input name="chassis_no" defaultValue={v?.chassis_no ?? ""} readOnly={lockId} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em", ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="chassis_no" defaultValue={v?.chassis_no ?? ""} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
+            </label>
+            <label style={label}>
+              RC no.
+              <input name="rc_no" defaultValue={v?.rc_no ?? ""} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
             </label>
             <label style={{ ...label, gridColumn: "1 / -1" }}>
               Owner / registered to
-              <input name="owner_name" defaultValue={v?.owner_name ?? ""} readOnly={lockId} style={{ ...input, ...(lockId ? { opacity: 0.6, background: "var(--bg)" } : {}) }} {...textFill} />
+              <input name="owner_name" defaultValue={v?.owner_name ?? ""} style={input} {...textFill} />
             </label>
           </div>
         </div>
@@ -218,6 +216,10 @@ function VehicleModal({ kind, v, canEditIdentity, onClose }: { kind: "commercial
               <label style={label}>
                 PUC expiry
                 <input name="puc_expiry" type="date" defaultValue={v?.puc_expiry ?? ""} style={input} {...noFill} />
+              </label>
+              <label style={label}>
+                RC expiry
+                <input name="rc_expiry" type="date" defaultValue={v?.rc_expiry ?? ""} style={input} {...noFill} />
               </label>
               {kind === "commercial" && (
                 <label style={label}>
@@ -491,7 +493,7 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
 }
 
 // ── the page board ──────────────────────────────────────────────────
-export function VehiclesBoard({ kind, vehicles, canEditIdentity = false }: { kind: "commercial" | "personal"; vehicles: VehicleRow[]; canEditIdentity?: boolean }) {
+export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "personal"; vehicles: VehicleRow[] }) {
   const [modal, setModal] = useState<null | { v: VehicleRow | null }>(null);
   const [q, setQ] = useState("");
   const shown = useMemo(() => {
@@ -520,7 +522,7 @@ export function VehiclesBoard({ kind, vehicles, canEditIdentity = false }: { kin
         </div>
       )}
 
-      {modal && <VehicleModal kind={kind} v={modal.v} canEditIdentity={canEditIdentity} onClose={() => setModal(null)} />}
+      {modal && <VehicleModal kind={kind} v={modal.v} onClose={() => setModal(null)} />}
     </div>
   );
 }

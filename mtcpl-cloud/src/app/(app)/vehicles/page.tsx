@@ -67,8 +67,9 @@ export default async function VehiclesOverviewPage() {
     { key: "fitness", label: "Fitness", icon: "🛠", applies: commercial > 0, get: (v: (typeof rows)[number]) => (v.kind === "commercial" ? v.fitness_expiry : null) },
     { key: "puc", label: "PUC", icon: "🌿", applies: true, get: (v: (typeof rows)[number]) => v.puc_expiry },
     { key: "insurance", label: "Insurance", icon: "📄", applies: true, get: (v: (typeof rows)[number]) => v.insurance_expiry },
+    { key: "rc", label: "RC", icon: "📘", applies: true, get: (v: (typeof rows)[number]) => v.rc_expiry },
   ] as const;
-  const byDoc: Record<string, Alert[]> = { fitness: [], puc: [], insurance: [] };
+  const byDoc: Record<string, Alert[]> = { fitness: [], puc: [], insurance: [], rc: [] };
   for (const v of rows) {
     for (const d of docDefs) {
       const date = d.get(v);
@@ -77,13 +78,13 @@ export default async function VehiclesOverviewPage() {
     }
   }
   for (const k of Object.keys(byDoc)) byDoc[k].sort((a, b) => a.days - b.days);
-  const allAlerts = [...byDoc.fitness, ...byDoc.puc, ...byDoc.insurance];
+  const allAlerts = [...byDoc.fitness, ...byDoc.puc, ...byDoc.insurance, ...byDoc.rc];
   const radarCols = docDefs.filter((d) => d.applies);
 
   // ── fleet health: worst applicable-doc status per vehicle ─────────
   const health = { ok: 0, warn: 0, crit: 0, none: 0 };
   for (const v of rows) {
-    const ds = [v.insurance_expiry, v.puc_expiry, ...(v.kind === "commercial" ? [v.fitness_expiry] : [])]
+    const ds = [v.insurance_expiry, v.puc_expiry, v.rc_expiry, ...(v.kind === "commercial" ? [v.fitness_expiry] : [])]
       .map(daysTo).filter((d): d is number => d != null);
     if (ds.length === 0) health.none++;
     else if (ds.some((d) => d < 0)) health.crit++;
