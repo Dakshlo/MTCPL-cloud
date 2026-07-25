@@ -63,6 +63,15 @@ async function gate() {
   return { profile };
 }
 
+/** The caller's idle-logout window in minutes — same rule as the app shell
+ *  (layout.tsx): developer is exempt (0 = never), everyone else uses their
+ *  idle_logout_minutes or the 10-minute default. The static /parkota tab has
+ *  no IdleLogout component, so it fetches this to run its own idle lock. */
+function idleMinutesFor(profile: { role?: string; idle_logout_minutes?: number | null }): number {
+  if (profile.role === "developer") return 0;
+  return profile.idle_logout_minutes == null ? 10 : Number(profile.idle_logout_minutes);
+}
+
 /**
  * Turn a thrown DB error into a response. The one case worth naming explicitly
  * is "table isn't there yet" — otherwise the tracker just says it can't reach
@@ -101,6 +110,7 @@ async function nameOf(admin: ReturnType<typeof createAdminSupabaseClient>, id: s
 export async function GET(request: NextRequest) {
   const g = await gate();
   if (g.error) return g.error;
+  const idleMinutes = idleMinutesFor(g.profile!);
 
   try {
     const admin = createAdminSupabaseClient();
@@ -111,7 +121,7 @@ export async function GET(request: NextRequest) {
     // Poll fast-path: nothing changed since the client last looked, so skip
     // shipping the whole document back.
     if (known >= 0 && known === rev) {
-      return NextResponse.json({ ok: true, rev, unchanged: true });
+      return NextResponse.json({ ok: true, rev, unchanged: true, idleMinutes });
     }
 
     return NextResponse.json({
@@ -120,6 +130,7 @@ export async function GET(request: NextRequest) {
       state: row?.state ?? {},
       updatedAt: row?.updated_at ?? null,
       updatedBy: await nameOf(admin, row?.updated_by ?? null),
+      idleMinutes,
     });
   } catch (e) {
     return failure(e);

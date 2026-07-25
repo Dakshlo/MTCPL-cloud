@@ -1163,6 +1163,55 @@ let netQueued = false;  /* a save was asked for while one was in flight */
 let netDown   = false;
 let lastSavedBy = null;
 
+/* ---- idle / auth lock (mig 213) -----------------------------------------
+   This tab has no app-shell IdleLogout. So: keep-alive (write the shared
+   activity stamp so the app tab doesn't log us out mid-work) + a blocking
+   lockout overlay if the session ends anyway. */
+const IDLE_ACT_KEY = "mtcpl:lastActivity";
+const IDLE_OUT_KEY = "mtcpl:idleLogout";
+let idleMinutes = 0;          /* 0 = never, until the GET tells us the window */
+let idleLastAct = Date.now();
+let idleStampTs = 0;
+let lockedOut = false;
+
+function idleSetMinutes(m){ const n = Number(m); if(Number.isFinite(n) && n>=0) idleMinutes = n; }
+function idleNote(){
+  idleLastAct = Date.now();
+  const now = Date.now();
+  if(now - idleStampTs > 4000){ idleStampTs = now; try{ localStorage.setItem(IDLE_ACT_KEY, String(now)); }catch(e){} }
+}
+function lockOut(reason){
+  if(lockedOut) return; lockedOut = true;
+  try{ localStorage.setItem(IDLE_OUT_KEY, String(Date.now())); }catch(e){}   /* sign the app tabs out too */
+  let o = document.getElementById("lockout");
+  if(!o){
+    o = document.createElement("div"); o.id = "lockout";
+    o.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,12,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px";
+    o.innerHTML = '<div style="max-width:400px;background:#fff;border-radius:16px;padding:26px 24px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.4)">'
+      + '<div style="font-size:34px">&#128274;</div>'
+      + '<div style="font-size:18px;font-weight:800;margin:8px 0 6px;color:#161410">Signed out</div>'
+      + '<div id="lockmsg" style="font-size:13px;color:#544f47;line-height:1.5;margin-bottom:16px"></div>'
+      + '<button id="lockre" style="width:100%;padding:12px 16px;font-size:15px;font-weight:800;color:#fff;background:#a8431c;border:none;border-radius:12px;cursor:pointer">Reopen tracker</button></div>';
+    document.body.appendChild(o);
+    o.querySelector("#lockre").addEventListener("click", function(){ location.href = "/parkota"; });
+  }
+  o.querySelector("#lockmsg").textContent = reason === "idle"
+    ? "You were signed out for inactivity. Anything you changed since is NOT saved. Reopen to continue."
+    : "Your session ended. Any recent changes are NOT saved. Reopen to continue.";
+  o.style.display = "flex";
+}
+["pointerdown","keydown","wheel","touchstart","mousemove"].forEach(function(ev){
+  document.addEventListener(ev, idleNote, { passive:true });
+});
+window.addEventListener("storage", function(e){
+  if(e.key === IDLE_OUT_KEY){ lockOut("logout"); }
+  else if(e.key === IDLE_ACT_KEY && e.newValue){ const t = Number(e.newValue); if(t > idleLastAct) idleLastAct = t; }
+});
+setInterval(function(){   /* covers the case where THIS is the only open tab */
+  if(lockedOut || idleMinutes <= 0) return;
+  if(Date.now() - idleLastAct >= idleMinutes * 60000) lockOut("idle");
+}, 1000);
+
 function netBanner(down, msg){
   netDown = down;
   const b = $("#banner");
@@ -1344,6 +1393,7 @@ function isNetworkErr(e){
 }
 
 async function pushToServer(){
+  if(lockedOut) return;
   if(netBusy){ netQueued = true; return; }
   const patch = computePatch();
   if(!patch){ refreshSaved(); return; }
@@ -1356,6 +1406,7 @@ async function pushToServer(){
     });
     if(res.status===401 || res.status===403){
       netBanner(true, "You are signed out, or this board is not shared with your account. Open it again from Temple View.");
+      lockOut("logout");
       return;
     }
     if(!res.ok) throw new Error(await errText(res));
@@ -1385,12 +1436,14 @@ async function loadFromServer(initial){
     const res = await fetch(url, { cache:"no-store" });
     if(res.status===401 || res.status===403){
       netBanner(true, "You are signed out, or this board is not shared with your account. Open it again from Temple View.");
+      lockOut("logout");
       return;
     }
     if(!res.ok) throw new Error(await errText(res));
     const out = await res.json();
     if(!out.ok) throw new Error(out.error||"load rejected");
     netBanner(false);
+    if(out.idleMinutes != null) idleSetMinutes(out.idleMinutes);
     if(out.unchanged){ serverRev = out.rev; return; }
     lastSavedBy = out.updatedBy || null;
     const adopted = adoptServerState(out.state, {initial: !!initial});
