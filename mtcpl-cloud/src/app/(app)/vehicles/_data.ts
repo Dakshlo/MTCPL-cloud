@@ -21,10 +21,11 @@ export async function loadVehicles(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = ((data ?? []) as any[]).map((r) => ({
     id: r.id, kind: r.kind === "personal" ? "personal" : "commercial",
-    name: r.name, reg_no: r.reg_no ?? null, make_model: r.make_model ?? null,
+    name: r.name, reg_no: r.reg_no ?? null,
+    registration_date: r.registration_date ?? null, // mig 214 (replaced make/model)
     owner_name: r.owner_name ?? null, // mig 210; select("*") keeps this pre-mig-safe
     engine_no: r.engine_no ?? null, chassis_no: r.chassis_no ?? null, // mig 212
-    rc_no: r.rc_no ?? null, rc_expiry: r.rc_expiry ?? null, // mig 213
+    rc_expiry: r.rc_expiry ?? null, // mig 213
     emi_active: r.emi_active === true,
     emi_amount: r.emi_amount != null ? Number(r.emi_amount) : null,
     emi_day: r.emi_day != null ? Number(r.emi_day) : null,

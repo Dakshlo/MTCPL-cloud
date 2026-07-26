@@ -72,14 +72,15 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
     kind,
     name,
     reg_no: upNull(txt(formData, "reg_no")),
-    make_model: upNull(txt(formData, "make_model")),
-    // Mig 210/212/213 — owner + engine/chassis + RC. Stripped by the retry
-    // below on a pre-migration deploy.
+    // Mig 210/212/213/214 — owner + engine/chassis + RC expiry + registration
+    // date. Stripped by the retry below on a pre-migration deploy. (make_model
+    // was replaced by registration_date — left out of the row so its legacy
+    // text values are preserved untouched.)
     owner_name: upNull(txt(formData, "owner_name")),
     engine_no: upNull(txt(formData, "engine_no")),
     chassis_no: upNull(txt(formData, "chassis_no")),
-    rc_no: upNull(txt(formData, "rc_no")),
     rc_expiry: orNull(txt(formData, "rc_expiry")),
+    registration_date: orNull(txt(formData, "registration_date")),
     emi_active: emiActive,
     emi_amount: emiActive ? numOrNull(txt(formData, "emi_amount")) : null,
     emi_day: emiActive && emiDayRaw != null ? Math.min(31, Math.max(1, Math.round(emiDayRaw))) : null,
@@ -98,7 +99,7 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
   // owner_name (210) + engine_no/chassis_no (212) + rc_no/rc_expiry (213) — if
   // any of those migrations hasn't run the write fails on the unknown column,
   // so retry once without ALL of them rather than erroring out.
-  const missingOwnerCol = (msg: string) => /owner_name|engine_no|chassis_no|rc_no|rc_expiry/i.test(msg);
+  const missingOwnerCol = (msg: string) => /owner_name|engine_no|chassis_no|rc_expiry|registration_date/i.test(msg);
 
   // Mig 211 — best-effort timeline event. Never blocks a save (pre-migration
   // deploys simply don't record history yet).
@@ -121,7 +122,7 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
 
     let { error } = await admin.from("vehicles").update(row as never).eq("id", id);
     if (error && missingOwnerCol(error.message)) {
-      const { owner_name: _drop, engine_no: _drop2, chassis_no: _drop3, rc_no: _drop4, rc_expiry: _drop5, ...noOwner } = row;
+      const { owner_name: _drop, engine_no: _drop2, chassis_no: _drop3, rc_expiry: _drop4, registration_date: _drop5, ...noOwner } = row;
       ({ error } = await admin.from("vehicles").update(noOwner as never).eq("id", id));
     }
     if (error) backTo(kind, error.message);
@@ -133,7 +134,7 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
   } else {
     let { data: ins, error } = await admin.from("vehicles").insert({ ...row, created_by: profile.id } as never).select("id").single();
     if (error && missingOwnerCol(error.message)) {
-      const { owner_name: _drop, engine_no: _drop2, chassis_no: _drop3, rc_no: _drop4, rc_expiry: _drop5, ...noOwner } = row;
+      const { owner_name: _drop, engine_no: _drop2, chassis_no: _drop3, rc_expiry: _drop4, registration_date: _drop5, ...noOwner } = row;
       ({ data: ins, error } = await admin.from("vehicles").insert({ ...noOwner, created_by: profile.id } as never).select("id").single());
     }
     if (error) backTo(kind, error.message);
@@ -149,9 +150,9 @@ export async function upsertVehicleAction(formData: FormData): Promise<void> {
 type VehicleChange = { field: string; label: string; from: string | null; to: string | null };
 
 const DIFF_FIELDS: Array<[string, string]> = [
-  ["name", "Vehicle name"], ["reg_no", "Registration no."], ["make_model", "Make/model"],
+  ["name", "Vehicle name"], ["reg_no", "Registration no."], ["registration_date", "Registration date"],
   ["owner_name", "Owner"], ["engine_no", "Engine no."], ["chassis_no", "Chassis no."],
-  ["rc_no", "RC no."], ["rc_expiry", "RC expiry"],
+  ["rc_expiry", "RC expiry"],
   ["emi_active", "EMI status"], ["emi_amount", "EMI amount"],
   ["emi_day", "EMI due day"], ["emi_lender", "Lender"], ["emi_start", "Loan start"],
   ["emi_end", "Loan ends"], ["insurance_company", "Insurance company"],

@@ -22,10 +22,10 @@ export type VehicleEvent = {
   created_at: string;
 };
 export type VehicleRow = {
-  id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; make_model: string | null;
+  id: string; kind: "commercial" | "personal"; name: string; reg_no: string | null; registration_date: string | null;
   owner_name: string | null;
   engine_no: string | null; chassis_no: string | null;
-  rc_no: string | null; rc_expiry: string | null;
+  rc_expiry: string | null;
   emi_active: boolean; emi_amount: number | null; emi_day: number | null; emi_lender: string | null; emi_start: string | null; emi_end: string | null;
   insurance_company: string | null; insurance_policy_no: string | null; insurance_expiry: string | null;
   puc_expiry: string | null; fitness_expiry: string | null; notes: string | null;
@@ -137,8 +137,8 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
               <input name="name" required defaultValue={v?.name ?? ""} style={input} {...textFill} />
             </label>
             <label style={label}>
-              Make / model
-              <input name="make_model" defaultValue={v?.make_model ?? ""} style={input} {...textFill} />
+              Registration date
+              <input name="registration_date" type="date" defaultValue={v?.registration_date ?? ""} style={input} {...noFill} />
             </label>
             <label style={label}>
               Engine no.
@@ -147,10 +147,6 @@ function VehicleModal({ kind, v, onClose }: { kind: "commercial" | "personal"; v
             <label style={label}>
               Chassis no.
               <input name="chassis_no" defaultValue={v?.chassis_no ?? ""} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
-            </label>
-            <label style={label}>
-              RC no.
-              <input name="rc_no" defaultValue={v?.rc_no ?? ""} style={{ ...input, fontFamily: "ui-monospace, monospace", letterSpacing: "0.03em" }} {...textFill} />
             </label>
             <label style={{ ...label, gridColumn: "1 / -1" }}>
               Owner / registered to
@@ -382,8 +378,8 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
             {v.reg_no || v.name}
           </div>
           <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {v.reg_no ? v.name : ""}{v.reg_no && v.make_model ? " · " : ""}{v.make_model ?? ""}
-            {!v.reg_no && !v.make_model ? "no reg. no" : ""}
+            {v.reg_no ? v.name : ""}{v.reg_no && v.registration_date ? " · " : ""}{v.registration_date ? `reg. ${fmtD(v.registration_date)}` : ""}
+            {!v.reg_no && !v.registration_date ? "no reg. no" : ""}
           </div>
           {v.owner_name && (
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>👤 {v.owner_name}</div>
@@ -499,7 +495,7 @@ export function VehiclesBoard({ kind, vehicles }: { kind: "commercial" | "person
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return vehicles;
-    return vehicles.filter((v) => [v.name, v.reg_no ?? "", v.make_model ?? "", v.owner_name ?? "", v.emi_lender ?? ""].join(" ").toLowerCase().includes(s));
+    return vehicles.filter((v) => [v.name, v.reg_no ?? "", v.owner_name ?? "", v.emi_lender ?? ""].join(" ").toLowerCase().includes(s));
   }, [vehicles, q]);
 
   return (
