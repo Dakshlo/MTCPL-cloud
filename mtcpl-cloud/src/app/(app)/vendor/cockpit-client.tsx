@@ -642,6 +642,22 @@ export function VendorCockpitClient({
   stoneTypes: StoneTypeDef[];
 }) {
   const router = useRouter();
+  // Daksh Jul 2026 — self-healing cockpit pick. Every cockpit action
+  // redirects back to a bare /vendor (no ?vendor_id=), so vendor/page.tsx
+  // restores the viewed vendor from the mtcpl_vendor_pick cookie. The
+  // switcher dropdown writes that cookie on change — but a cockpit reached
+  // WITHOUT the dropdown (a restored or bookmarked ?vendor_id= tab, a deep
+  // link) would still carry a stale cookie, and the very first action would
+  // snap the page back to the operator's own (default) cockpit. Manthan
+  // covering Mohit's CNC must never lose his place like that. So whenever
+  // the user can switch cockpits, keep the cookie pinned to whatever vendor
+  // is actually on screen — the invariant becomes "cookie === what you see",
+  // which no post-action redirect can break.
+  useEffect(() => {
+    if (isStaffView && typeof document !== "undefined") {
+      document.cookie = `mtcpl_vendor_pick=${vendor.id}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+    }
+  }, [isStaffView, vendor.id]);
   const [now, setNow] = useState<number>(Date.now());
   // Daksh June 2026 — header carved-output stat shows the current month
   // by default; this flips it to last month.
