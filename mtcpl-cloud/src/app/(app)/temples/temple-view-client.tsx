@@ -576,6 +576,16 @@ export function TempleViewClient({ trees, imagesByNode, canManageImages, canEdit
                 style={{
                   animationDelay: `${Math.min(i * 25, 300)}ms`,
                   display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch",
+                  // The temple list is a flex COLUMN whose content overflows (it
+                  // scrolls), so its items are shrinkable. A flex item is normally
+                  // saved by `min-height: auto` — but that protection only holds
+                  // while the item's overflow is `visible`. The Parkota card sets
+                  // `overflow: hidden` (to clip the hold-progress bar), which
+                  // voided it: that ONE card got squashed from ~53px to 18px, so
+                  // its stage bar and the "hold 2s → Parkota tracker" hint were
+                  // clipped away on laptops (Daksh: "it's not visible"). Cards
+                  // must scroll, never shrink.
+                  flexShrink: 0,
                   padding: "8px 11px", borderRadius: 10, cursor: "pointer", textAlign: "left",
                   border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
                   borderLeft: `3px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
