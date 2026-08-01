@@ -43,6 +43,9 @@ export type DirectSlab = {
   component_section?: string | null;
   component_element?: string | null;
   additional_description?: string | null;
+  /** Mig 215 — planned route. Sending a cnc/outsource-tagged slab direct
+   *  is allowed but the send() confirm calls it out. */
+  carving_method?: string | null;
 };
 
 export type DirectHistoryRow = {
@@ -134,9 +137,20 @@ export function DirectDispatchTab({
 
   function send() {
     if (selected.size === 0 || submitting) return;
+    // Mig 215 — call out slabs whose PLAN was carving. Never blocks.
+    const tagged = slabs.filter(
+      (s) => selected.has(s.id) && (s.carving_method === "cnc" || s.carving_method === "outsource"),
+    );
+    const warnLine =
+      tagged.length > 0
+        ? `\n\n⚠ ${tagged.length} of them ${tagged.length === 1 ? "is" : "are"} planned for ${tagged.length === 1 ? "carving" : "carving"} (${tagged
+            .slice(0, 5)
+            .map((s) => `${s.id} → ${s.carving_method === "cnc" ? "CNC" : "Outsource"}`)
+            .join(", ")}${tagged.length > 5 ? ", …" : ""}) — sending DIRECT skips their planned route.`
+        : "";
     if (
       !confirm(
-        `Send ${selected.size} slab${selected.size === 1 ? "" : "s"} DIRECT to dispatch (skip carving)?\n\nThey will move to Dispatch → Make Dispatch and disappear from carving.`,
+        `Send ${selected.size} slab${selected.size === 1 ? "" : "s"} DIRECT to dispatch (skip carving)?${warnLine}\n\nThey will move to Dispatch → Make Dispatch and disappear from carving.`,
       )
     ) {
       return;

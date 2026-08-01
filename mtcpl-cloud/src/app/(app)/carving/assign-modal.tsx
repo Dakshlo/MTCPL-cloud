@@ -26,6 +26,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { assignCarvingJobAction } from "./actions";
+import { METHOD_BADGE, methodLabel, type CarvingMethod } from "@/lib/carving-method";
 
 /** Same pattern as the vendor cockpit's FormPendingOverlay — when
  *  the parent <form> is submitting, drop the MTCPL spinner overlay
@@ -77,6 +78,9 @@ type Slab = {
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
+  /** Mig 215 — planned route (cnc/outsource/none), null/undefined = nil.
+   *  Guide-not-gate: assigning against it pops a confirm, never blocks. */
+  carving_method?: string | null;
 };
 
 type WorkType = "flat" | "lathe";
@@ -406,6 +410,13 @@ export function AssignModal({
               {" · "}
               {slab.temple} · {slab.label} · {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft}&Prime;
             </p>
+            {/* Mig 215 — the recorded routing decision, right where the
+                assigner is choosing a vendor. Nil shows nothing. */}
+            {slab.carving_method && METHOD_BADGE[slab.carving_method as CarvingMethod] && (
+              <p style={{ fontSize: 11.5, fontWeight: 700, margin: "5px 0 0", color: METHOD_BADGE[slab.carving_method as CarvingMethod].fg }}>
+                Planned route: {methodLabel(slab.carving_method)}
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -425,7 +436,26 @@ export function AssignModal({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px 18px" }}>
-          <form action={assignCarvingJobAction} style={{ position: "relative" }}>
+          <form
+            action={assignCarvingJobAction}
+            style={{ position: "relative" }}
+            // Mig 215 — guide-not-gate: assigning against the slab's planned
+            // route asks for a confirm but never blocks.
+            onSubmit={(e) => {
+              const tag = slab.carving_method;
+              if (!tag || !selectedVendor) return;
+              const vt = selectedVendor.vendor_type;
+              const mismatch =
+                (tag === "cnc" && vt === "Outsource") ||
+                (tag === "outsource" && vt === "CNC") ||
+                tag === "none";
+              if (!mismatch) return;
+              const planned = tag === "none" ? "No carving (direct dispatch)" : tag === "cnc" ? "CNC" : "Outsource";
+              if (!confirm(`Slab ${slab.id} is planned as "${planned}" — you're assigning it to a ${vt} vendor. Continue anyway?`)) {
+                e.preventDefault();
+              }
+            }}
+          >
             <FormPendingOverlay label="Assigning to vendor…" />
             <input type="hidden" name="slab_id" value={slab.id} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />

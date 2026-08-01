@@ -1347,10 +1347,10 @@ export async function assignCarvingJobAction(formData: FormData) {
   // the failure rollback below both restore the RIGHT status.
   const { data: preRow } = await admin
     .from("slab_requirements")
-    .select("cancel_requested_at, status, is_parked")
+    .select("cancel_requested_at, status, is_parked, carving_method")
     .eq("id", slabId)
     .maybeSingle();
-  const pre = preRow as { cancel_requested_at?: string | null; status?: string | null; is_parked?: boolean | null } | null;
+  const pre = preRow as { cancel_requested_at?: string | null; status?: string | null; is_parked?: boolean | null; carving_method?: string | null } | null;
   if (pre?.cancel_requested_at) {
     redirect(`/carving?toast=${encodeURIComponent(`${slabId} has a pending CANCEL request — locked until the owner decides`)}`);
   }
@@ -1507,6 +1507,19 @@ export async function assignCarvingJobAction(formData: FormData) {
       .update({ status: originalStatus, is_parked: originalParked, updated_by: profile.id, updated_at: new Date().toISOString() })
       .eq("id", slabId);
     redirect(`/carving?toast=${encodeURIComponent(itemErr?.message ?? "Failed to create job")}`);
+  }
+
+  // Mig 215 — self-maintaining route tag: a NIL slab gets stamped with the
+  // route that actually happened. Guarded `.is(null)` so a pre-set tag is
+  // NEVER overwritten (a mismatch stays visible as off-plan on /carving/plan).
+  // Deliberately AFTER the carving_items insert + rollback block so a failed
+  // assignment never stamps anything.
+  if (pre?.carving_method == null) {
+    await admin
+      .from("slab_requirements")
+      .update({ carving_method: vendorType === "Outsource" ? "outsource" : "cnc" })
+      .eq("id", slabId)
+      .is("carving_method", null);
   }
 
   const eta = estimatedMinutes ? `${estimatedMinutes}min` : "no eta";
@@ -1724,6 +1737,9 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
       }
     : {};
   const successes: string[] = [];
+  // Mig 215 — slab ids that actually got a carving_item, for the one-shot
+  // route auto-stamp after the loop (successes holds ITEM ids).
+  const successSlabIds: string[] = [];
   const failures: Array<{ slab: string; reason: string }> = [];
 
   // Both types wait at carving_assigned (In Transit) until receipt.
@@ -1807,7 +1823,19 @@ export async function assignCarvingJobsBatchAction(formData: FormData) {
       `Queued for ${(vendor as { name: string }).name} · ${eta}${urgencyTag}${typeTag}${batchTag}`,
     );
     successes.push(item.id);
+    successSlabIds.push(slabId);
     if (isPendingStockBatch) pendingStockSlabs.push(slabId);
+  }
+
+  // Mig 215 — auto-stamp the actual route on every NIL slab in this batch.
+  // Guarded `.is(null)` so pre-set tags survive (mismatches stay visible as
+  // off-plan on /carving/plan). One batched update, after all inserts.
+  if (successSlabIds.length > 0) {
+    await admin
+      .from("slab_requirements")
+      .update({ carving_method: isOutsourceBatch ? "outsource" : "cnc" })
+      .in("id", successSlabIds)
+      .is("carving_method", null);
   }
 
   // Pending stock → ping the transfer runner for each waiting slab.
@@ -6909,6 +6937,13 @@ async function sendSlabToOutsourceVendor(
     opts.profileId,
     `Work-order send → ${opts.vendorName} (sent for transfer) · 🏭 outsource`,
   );
+  // Mig 215 — auto-stamp 'outsource' on a NIL slab (guarded: a pre-set tag
+  // survives and shows as off-plan on /carving/plan instead).
+  await admin
+    .from("slab_requirements")
+    .update({ carving_method: "outsource" })
+    .eq("id", opts.slabId)
+    .is("carving_method", null);
   // Ping the transfer runner — the slab is waiting to be carried to the vendor.
   await notifySlabTransferWaiting(admin, opts.slabId, opts.vendorName);
   return { ok: true, id: item.id };
@@ -8074,6 +8109,15 @@ export async function directDispatchSlabsAction(
         "Nothing moved — the selected slabs are no longer cut-&-ready (already assigned, parked or pending a cancel request). Refresh and retry.",
       );
     }
+
+    // Mig 215 — auto-stamp 'none' (no carving) on every NIL slab that just
+    // went direct. Guarded: a cnc/outsource tag survives and shows as
+    // off-plan on /carving/plan instead of being silently rewritten.
+    await admin
+      .from("slab_requirements")
+      .update({ carving_method: "none" })
+      .in("id", rows.map((r) => r.id))
+      .is("carving_method", null);
 
     const temples = [...new Set(rows.map((r) => r.temple))];
     void Promise.all([

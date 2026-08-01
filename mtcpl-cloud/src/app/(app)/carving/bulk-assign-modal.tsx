@@ -51,6 +51,8 @@ export type BulkAssignSlab = {
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
+  /** Mig 215 — planned route; drives the batch mismatch confirm. */
+  carving_method?: string | null;
 };
 
 type WorkType = "flat" | "lathe";
@@ -359,7 +361,26 @@ export function BulkAssignModal({
             ))}
           </div>
 
-          <form action={assignCarvingJobsBatchAction} style={{ position: "relative" }}>
+          <form
+            action={assignCarvingJobsBatchAction}
+            style={{ position: "relative" }}
+            // Mig 215 — guide-not-gate: summarize any planned-route
+            // mismatches in one confirm; proceeding is always allowed.
+            onSubmit={(e) => {
+              if (!selectedVendor) return;
+              const vt = selectedVendor.vendor_type;
+              const off = slabs.filter((s) => {
+                const tag = s.carving_method;
+                if (!tag) return false;
+                return (tag === "cnc" && vt === "Outsource") || (tag === "outsource" && vt === "CNC") || tag === "none";
+              });
+              if (off.length === 0) return;
+              const sample = off.slice(0, 5).map((s) => s.id).join(", ");
+              if (!confirm(`${off.length} of ${slabs.length} selected slab${off.length === 1 ? " is" : "s are"} planned for a DIFFERENT route than this ${vt} vendor (${sample}${off.length > 5 ? ", …" : ""}). Continue anyway?`)) {
+                e.preventDefault();
+              }
+            }}
+          >
             <FormPendingOverlay label="Assigning batch…" />
             <input type="hidden" name="slab_ids" value={JSON.stringify(slabs.map((s) => s.id))} />
             <input type="hidden" name="requires_machine_type" value={requiresMachineType} />

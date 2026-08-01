@@ -43,13 +43,14 @@ export default async function NewWorkOrderPage() {
     component_section: string | null;
     component_element: string | null;
     additional_description: string | null;
+    carving_method: string | null; // mig 215
   };
   const sRows: SRow[] = [];
   for (let off = 0; off < 50000; off += 1000) {
     const { data } = await admin
       .from("slab_requirements")
       .select(
-        "id, label, temple, stone, status, length_ft, width_ft, thickness_ft, stock_location, updated_at, description, component_section, component_element, additional_description",
+        "id, label, temple, stone, status, length_ft, width_ft, thickness_ft, stock_location, updated_at, description, component_section, component_element, additional_description, carving_method",
       )
       .in("status", ["open", "planned", "cut_done"])
       // Mig 132 — slabs with a pending cancel request are locked: they
@@ -136,6 +137,7 @@ export default async function NewWorkOrderPage() {
       component_section: s.component_section,
       component_element: s.component_element,
       additional_description: s.additional_description,
+      carving_method: s.carving_method, // mig 215 — badge on the picker card
     }));
 
   return (

@@ -6,6 +6,7 @@ import { SlabThumb } from "@/components/slab-thumb";
 import type { StoneTypeDef } from "@/lib/stone-utils";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
 import { TabletSearchInput } from "@/components/tablet-keyboard";
+import { METHOD_BADGE, type CarvingMethod } from "@/lib/carving-method";
 
 export type VendorOpt = { id: string; name: string };
 export type PickableSlab = {
@@ -23,6 +24,9 @@ export type PickableSlab = {
   component_section?: string | null;
   component_element?: string | null;
   additional_description?: string | null;
+  /** Mig 215 — planned route badge. This picker is the OUTSOURCE send
+   *  path, so a CNC / No-carving tag is the visible caution. */
+  carving_method?: string | null;
 };
 
 const STATUS = {
@@ -369,6 +373,15 @@ export function NewWorkOrderForm({
                         <div style={{ fontSize: 10, color: "var(--muted-light)", fontFamily: "ui-monospace, monospace" }}>{s.length_ft}×{s.width_ft}×{s.thickness_ft}&Prime;</div>
                         {s.stock_location && (
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#7c2d12", background: "rgba(180,115,51,0.08)", border: "1px solid rgba(180,115,51,0.25)", padding: "3px 7px", borderRadius: 5, alignSelf: "flex-start", fontFamily: "ui-monospace, monospace" }}>📍 {s.stock_location}</div>
+                        )}
+                        {/* Mig 215 — planned route pill (nil renders nothing). */}
+                        {s.carving_method && METHOD_BADGE[s.carving_method as CarvingMethod] && (
+                          <div
+                            title="Planned carving route"
+                            style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.3, color: METHOD_BADGE[s.carving_method as CarvingMethod].fg, background: METHOD_BADGE[s.carving_method as CarvingMethod].bg, border: `1px solid ${METHOD_BADGE[s.carving_method as CarvingMethod].border}`, padding: "2px 7px", borderRadius: 999, alignSelf: "flex-start" }}
+                          >
+                            {METHOD_BADGE[s.carving_method as CarvingMethod].label}
+                          </div>
                         )}
                         <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: t.fg, background: t.bg, borderRadius: 999, padding: "3px 9px", alignSelf: "flex-start" }}>
                           {t.icon} {ago ? `ready ${ago}` : t.label}

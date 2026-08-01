@@ -49,6 +49,7 @@ import { ImageAnnotateModal } from "@/components/image-annotate-modal";
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 import { requestSlabCancelAction } from "@/app/(app)/slabs/cancel-actions";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
+import { METHOD_BADGE, type CarvingMethod } from "@/lib/carving-method";
 
 type UnassignedSlab = {
   id: string;
@@ -89,6 +90,9 @@ type UnassignedSlab = {
    *  surfaced on the Unassigned tab only when "Include storage" is on.
    *  Renders a 📦 STORAGE badge; assigning it un-parks it (actions.ts). */
   fromStorage?: boolean;
+  /** Mig 215 — planned carving route (cnc/outsource/none), null/undefined =
+   *  nil. Badge on the card + the method filter chips + mismatch warns. */
+  carving_method?: string | null;
 };
 
 type JobRow = {
@@ -310,6 +314,9 @@ export function CarvingDashboardClient({
   // stone, vendor name, status. Lower-cased compare.
   const [query, setQuery] = useState("");
   const [priorityOnly, setPriorityOnly] = useState(false);
+  // Mig 215 — planned-route filter for the Unassigned tab. "all" shows
+  // everything; "nil" = only undecided slabs (no tag yet).
+  const [methodFilter, setMethodFilter] = useState<"all" | "cnc" | "outsource" | "none" | "nil">("all");
   // Daksh June 2026 — fold parked carving-STORAGE slabs into the
   // Unassigned pool. Off by default; assigning one un-parks it.
   const [inclStorage, setInclStorage] = useState(false);
@@ -537,14 +544,21 @@ export function CarvingDashboardClient({
     () => (inclStorage ? [...unassignedSlabs, ...storageSlabs] : unassignedSlabs),
     [unassignedSlabs, storageSlabs, inclStorage],
   );
+  // Mig 215 — planned-route chip filter (Unassigned only).
+  function passesMethod(m: string | null | undefined): boolean {
+    if (methodFilter === "all") return true;
+    if (methodFilter === "nil") return m == null || m === "";
+    return m === methodFilter;
+  }
   const filteredUnassigned = useMemo(
     () =>
       unassignedPool.filter(
         (s) =>
-          matches(s) && passesDate(s.updated_at) && passesUnassignedFrom(s.updated_at),
+          matches(s) && passesDate(s.updated_at) && passesUnassignedFrom(s.updated_at) &&
+          passesMethod(s.carving_method),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [unassignedPool, priorityOnly, queryNorm, dateFilter, unassignedFromDate],
+    [unassignedPool, priorityOnly, queryNorm, dateFilter, unassignedFromDate, methodFilter],
   );
   // Keep bulk selection ⊆ the visible pool. If "Include storage" is turned
   // off after a storage slab was ticked, drop it — otherwise the count + the
@@ -579,12 +593,13 @@ export function CarvingDashboardClient({
     [doneJobs, priorityOnly, queryNorm, dateFilter],
   );
 
-  const hasAnyFilter = queryNorm.length > 0 || priorityOnly || dateFilter !== "all";
+  const hasAnyFilter = queryNorm.length > 0 || priorityOnly || dateFilter !== "all" || methodFilter !== "all";
 
   function clearAllFilters() {
     setQuery("");
     setPriorityOnly(false);
     setDateFilter("all");
+    setMethodFilter("all");
   }
 
   // Label for the date pill row depends on which tab is active.
@@ -721,6 +736,43 @@ export function CarvingDashboardClient({
         >
           ⚡ Priority
         </button>
+
+        {/* Mig 215 — planned-route chips (Unassigned only). "Nil" = the
+            undecided pile someone still needs to route. */}
+        {tab === "unassigned" && (
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            {([
+              ["all", "All"],
+              ["cnc", "CNC"],
+              ["outsource", "Outsource"],
+              ["none", "No carving"],
+              ["nil", "Nil"],
+            ] as const).map(([val, lab]) => {
+              const on = methodFilter === val;
+              return (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setMethodFilter(val)}
+                  title={val === "nil" ? "Only slabs with no planned route yet" : `Only slabs planned for ${lab}`}
+                  style={{
+                    padding: "7px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`,
+                    background: on ? "rgba(180,140,40,0.10)" : "var(--surface)",
+                    color: on ? "var(--gold-dark)" : "var(--muted)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {lab}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Daksh June 2026 — fold parked carving-STORAGE slabs into the
             Unassigned list (badged 📦 STORAGE). Assigning one un-parks it. */}
@@ -1183,6 +1235,7 @@ export function CarvingDashboardClient({
               length_ft: Number(s.length_ft) || 0,
               width_ft: Number(s.width_ft) || 0,
               thickness_ft: Number(s.thickness_ft) || 0,
+              carving_method: s.carving_method ?? null, // mig 215 — mismatch warn
             }))}
           vendors={vendors.filter(
             (v) => v.vendor_type === (mode === "outsource" ? "Outsource" : "CNC"),
@@ -1501,6 +1554,25 @@ function UnassignedByTemple({
         {s.stone && (
           <span className="role-pill" style={{ fontSize: 9, padding: "1px 6px", flexShrink: 0 }}>
             {s.stone}
+          </span>
+        )}
+        {/* Mig 215 — planned route pill (nil renders nothing). */}
+        {s.carving_method && METHOD_BADGE[s.carving_method as CarvingMethod] && (
+          <span
+            title="Planned carving route"
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              padding: "1px 6px",
+              borderRadius: 999,
+              flexShrink: 0,
+              letterSpacing: 0.3,
+              color: METHOD_BADGE[s.carving_method as CarvingMethod].fg,
+              background: METHOD_BADGE[s.carving_method as CarvingMethod].bg,
+              border: `1px solid ${METHOD_BADGE[s.carving_method as CarvingMethod].border}`,
+            }}
+          >
+            {METHOD_BADGE[s.carving_method as CarvingMethod].label}
           </span>
         )}
       </div>

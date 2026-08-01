@@ -158,6 +158,10 @@ export default async function CarvingDashboardPage({
     component_section: string | null;
     component_element: string | null;
     additional_description: string | null;
+    /** Mig 215 — planned carving route (cnc/outsource/none), null = nil.
+     *  Badge + filter chips on the Unassigned board; mismatch warns in
+     *  the assign modals. */
+    carving_method: string | null;
   };
   async function fetchAllUnassignedSlabs(): Promise<UnassignedRow[]> {
     const PAGE = 1000;
@@ -166,7 +170,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description, carving_method",
         )
         .eq("status", "cut_done")
         // Mig 125 — parked (temporary storage) slabs are hidden from Unassigned.
@@ -194,7 +198,7 @@ export default async function CarvingDashboardPage({
       const { data, error } = await admin
         .from("slab_requirements")
         .select(
-          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description",
+          "id, label, temple, stone, length_ft, width_ft, thickness_ft, status, priority, source_block_id, updated_at, stock_location, precut_at, cancel_requested_at, description, component_section, component_element, additional_description, carving_method",
         )
         .in("status", ["cut_done", "completed"])
         .eq("is_parked", true)
