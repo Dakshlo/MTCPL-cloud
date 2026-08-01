@@ -84,6 +84,13 @@ function TileBody({ icon, accent, kicker, title, cta }: {
         flexDirection: "column",
         gap: 12,
         height: "100%",
+        // Fill the grid cell. Without this the tile is only as wide as its
+        // own text, so "Carving floor on the wall" made a fat card and
+        // "MTCPL-AI" a thin one — the leftover space in each equal-width
+        // column read as random gaps between the cards (Daksh).
+        width: "100%",
+        flex: 1,
+        minWidth: 0,
         minHeight: 118,
         background: GLASS_BG,
         border: GLASS_BORDER,
@@ -176,7 +183,13 @@ export function DashboardV2({
         .dv2-tile:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.09); box-shadow: 0 10px 34px rgba(0,0,0,.45); }
         .dv2-desk { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
         @media (max-width: 1020px) { .dv2-desk { grid-template-columns: 1fr; } }
-        .dv2-launch { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 13px; align-items: stretch; }
+        /* Explicit column counts instead of auto-fit: there are 6 tiles, and
+           auto-fit happily produced a 5 + 1 orphan row. 6/3/2/1 all divide
+           evenly, so every row is always full and the grid stays square. */
+        .dv2-launch { display: grid; grid-template-columns: 1fr; gap: 13px; align-items: stretch; }
+        @media (min-width: 660px)  { .dv2-launch { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (min-width: 1040px) { .dv2-launch { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (min-width: 1620px) { .dv2-launch { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 
         /* ── dark shell: no cream bezel around the dark panel ── */
         body { background: #080b12; }
@@ -194,26 +207,9 @@ export function DashboardV2({
           color: rgba(255,255,255,0.78);
         }
 
-        /* Email snapshot is a shared component (owner's v1 uses it too), so
-           instead of editing it we re-point the CSS variables it themes from.
-           Scoped to this wrapper — nothing else in the app sees these. */
-        .dv2-email {
-          --surface: rgba(255,255,255,0.055);
-          --surface-alt: rgba(255,255,255,0.03);
-          --bg: rgba(255,255,255,0.03);
-          --border: rgba(255,255,255,0.12);
-          --border-light: rgba(255,255,255,0.08);
-          --text: #eef1f7;
-          --muted: rgba(255,255,255,0.55);
-          --muted-light: rgba(255,255,255,0.4);
-          color: #eef1f7;
-        }
-        .dv2-email select, .dv2-email input, .dv2-email button { color: inherit; }
-        .dv2-email select option { color: #10131c; }
-        /* The FYI / category chip hardcodes slate-600 text (not a variable),
-           which turns unreadable on the dark desk. Matched on that literal
-           colour so the shared component still needs no edit. */
-        .dv2-email [style*="#475569"] { color: #cbd5e1 !important; }
+        /* Email snapshot stays LIGHT on purpose (Daksh) — it reads as a sheet
+           of paper on the dark desk, and it's the one panel you actually read
+           word-by-word. No variable overrides here. */
       `}</style>
 
       {/* Ambient glow blobs behind everything. */}
@@ -291,10 +287,9 @@ export function DashboardV2({
         {/* ── DESK: email left · action rail right ── */}
         <SectionLabel>Today&apos;s desk</SectionLabel>
         <div className="dv2-desk">
-          {/* Email snapshot themes dark via the .dv2-email variable overrides
-              in the <style> above — the component itself is shared with v1
-              and stays untouched. */}
-          <div className="dv2-email" style={{ minWidth: 0 }}>
+          {/* Email snapshot keeps its own light panel — paper on the dark
+              desk. Component is shared with v1 and stays untouched. */}
+          <div style={{ minWidth: 0 }}>
             <EmailSnapshotCard />
           </div>
 
