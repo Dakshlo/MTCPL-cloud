@@ -1,6 +1,6 @@
 // ──────────────────────────────────────────────────────────────────
 // /api/whatsapp-report/preview — owner/developer preview of the daily
-// work-report PDF. Builds the SAME PDF the 6 PM cron sends, with real
+// work-report PDF. Builds the SAME PDF the 10 AM cron sends, with real
 // data, but returns it inline in the browser and sends NOTHING to
 // WhatsApp (no upload, no MSG91 call). Use it to review the design.
 // ──────────────────────────────────────────────────────────────────

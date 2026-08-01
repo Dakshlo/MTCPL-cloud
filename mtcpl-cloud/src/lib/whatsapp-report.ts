@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────
 // Daily WhatsApp work-report (MSG91 → Meta) — Daksh, June 2026.
 //
-// Every evening (6 PM IST cron) we:
+// Every morning (10 AM IST cron — vercel.json `30 4 * * *` UTC) we:
 //   1. aggregate the day's work  → buildDailyReportData()
 //   2. render it as a PDF        → buildDailyReportPdf()  (colourful, with logo)
 //   3. upload to a public bucket → public url
@@ -10,6 +10,17 @@
 //
 // Reuses the existing MSG91 account auth key (MSG91_AUTH_KEY) — one key
 // serves SMS + WhatsApp. No new secrets.
+//
+// Jul 2026 insight pass (Daksh, "redesign + bug check"):
+//   • Month figures anchor to the REPORT day's month, not "now" — the 10 AM
+//     run on the 1st covers the last day of the OLD month, and used to print
+//     "Aug · 0 slabs (+19 in 24 h)" while the header said 31 Jul.
+//   • vs-last-month-same-day comparison + month-end pace on every card.
+//   • In-card 10-day sparklines, live pipeline page, dispatch trend chart,
+//     billing strip, month-to-date payments.
+//   • Lifetime queries paginated — blocks(Fresh)=1,307 and
+//     cut_session_slabs=1,180 rows were already past PostgREST's silent
+//     1000-row cap, so the recovery card was computed on truncated data.
 // ──────────────────────────────────────────────────────────────────
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -55,7 +66,11 @@ const inr = (n: number) => `Rs ${Math.round(n).toLocaleString("en-IN")}`;
 // 2-decimal money — for per-unit rates (e.g. "Rs 148.25 / unit") where the
 // paise matter and rounding to whole rupees would look wrong.
 const inr2 = (n: number) => `Rs ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Indian-grouped plain numbers — "32,372" reads far better than "32372".
+const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
+const fmt1 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // The report PDF uses the standard Helvetica font (WinAnsi/CP1252). pdf-lib
 // THROWS on any character it can't encode — e.g. "↳" (0x21B3) once crashed the
@@ -71,7 +86,7 @@ function winSafe(s: string): string {
     .replace(/…/g, "...")
     .replace(/[←-⇿•‣⁃▪●]/g, ">") // arrows + bullets
     .replace(/₹/g, "Rs ")
-    .replace(/[^\x20-\x7E -ÿ]/g, "");
+    .replace(/[^\x20-\x7E -ÿ]/g, "");
 }
 
 /** IST day window [startUTC, endUTC] + a human label. offset 0 = today, -1 = yesterday. */
@@ -92,10 +107,11 @@ function istDay(offset = 0) {
 const REPORT_HOUR_IST = 10;
 
 /** 24-hour window ending at 10:00 IST on (today + dayOffset).
- *  dayOffset 0  → [10:00 yesterday, 10:00 today]        — the main report
- *  dayOffset -1 → [10:00 day-before, 10:00 yesterday]   — the comparison
- *  The label is the date the window STARTS on — the day the work belongs to
- *  (so the morning report reads as "<yesterday>'s report"). */
+ *  dayOffset 0  → [10:00 yesterday, 10:00 today)        — the main report
+ *  dayOffset -1 → [10:00 day-before, 10:00 yesterday)   — the comparison
+ *  Half-open: a row stamped exactly 10:00:00.000 belongs to the NEXT window,
+ *  never both. The label is the date the window STARTS on — the day the work
+ *  belongs to (so the morning report reads as "<yesterday>'s report"). */
 function window24(dayOffset = 0) {
   const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
   const y = ist.getUTCFullYear();
@@ -106,7 +122,17 @@ function window24(dayOffset = 0) {
   const startUTC = new Date(startIstMs - 5.5 * 3600 * 1000).toISOString();
   const endUTC = new Date(endIstMs - 5.5 * 3600 * 1000).toISOString();
   const s = new Date(startIstMs); // label off the window's start day
-  return { startUTC, endUTC, label: `${s.getUTCDate()} ${MONTHS[s.getUTCMonth()]} ${s.getUTCFullYear()}` };
+  return {
+    startUTC,
+    endUTC,
+    label: `${s.getUTCDate()} ${MONTHS[s.getUTCMonth()]} ${s.getUTCFullYear()}`,
+    weekday: WEEKDAYS[s.getUTCDay()],
+    // Label-day parts — everything month-anchored derives from THESE, not
+    // from "now" (see reportMonthFor).
+    y: s.getUTCFullYear(),
+    m: s.getUTCMonth(),
+    d: s.getUTCDate(),
+  };
 }
 
 /** IST "today" as YYYY-MM-DD (for clamping the cutter report to month-to-date). */
@@ -115,14 +141,39 @@ function istDateKey(): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
 }
 
-/** Start of the current IST month (UTC ISO) + a short label + days elapsed.
- *  Powers the month-to-date production cards (cutting / carving / dispatch). */
-function istMonthStart() {
-  const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
-  const y = ist.getUTCFullYear();
-  const m = ist.getUTCMonth();
-  const startUTC = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0) - 5.5 * 3600 * 1000).toISOString();
-  return { startUTC, label: `${MONTHS[m]} ${y}`, daysElapsed: ist.getUTCDate() };
+/** Month framing for the REPORT day (window24's label day), NOT for "now".
+ *
+ *  The 10 AM run on the 1st of a month reports the LAST day of the previous
+ *  month — anchoring to "now" made every month card read "new month · 0
+ *  (+19 in 24 h)" that morning, contradicting the 31-Jul header (real bug,
+ *  seen in production on 1 Aug 2026). Anchoring to the label day instead
+ *  turns that same run into the previous month's complete final report.
+ *
+ *  Also computes the same-point window of the month BEFORE (1st → same
+ *  day-of-month, clamped to shorter months, ending 10:00 IST) so every card
+ *  can answer "are we ahead of last month?". */
+function reportMonthFor(y: number, m: number, d: number) {
+  const IST = 5.5 * 3600 * 1000;
+  const startUTC = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0) - IST).toISOString();
+  const monthLen = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const pRef = new Date(Date.UTC(y, m - 1, 1)); // rolls the year over safely
+  const py = pRef.getUTCFullYear(), pm = pRef.getUTCMonth();
+  const prevLen = new Date(Date.UTC(py, pm + 1, 0)).getUTCDate();
+  const prevDays = Math.min(d, prevLen); // 31 Jul vs 30-day June → day 30
+  const prevStartUTC = new Date(Date.UTC(py, pm, 1, 0, 0, 0, 0) - IST).toISOString();
+  // Mirror the MTD window's shape exactly: through day-N + the 10-hour
+  // morning sliver of day-N+1 (same sliver the live month carries).
+  const prevEndUTC = new Date(Date.UTC(py, pm, prevDays + 1, REPORT_HOUR_IST, 0, 0, 0) - IST).toISOString();
+  return {
+    startUTC,
+    label: `${MONTHS[m]} ${y}`,
+    monthName: MONTHS[m],
+    daysElapsed: d,
+    monthLen,
+    year: y,
+    monthIndex: m,
+    prev: { startUTC: prevStartUTC, endUTC: prevEndUTC, monthName: MONTHS[pm], days: prevDays },
+  };
 }
 
 // ── Data ────────────────────────────────────────────────────────────
@@ -136,13 +187,17 @@ type DayTotals = {
 
 export type DailyReport = {
   label: string;
+  weekday: string;
   prevLabel: string;
   today: DayTotals;
   prev: DayTotals;
-  /** Month-to-date totals — cutting / carving / dispatch headline the
-   *  cards now (with the last-24 h figure shown in brackets). */
+  /** Month-to-date totals for the REPORT month — cutting / carving /
+   *  dispatch headline the cards (last-24 h figure in the pill). */
   mtd: DayTotals;
-  month: { label: string; days: number };
+  /** Same-point totals for the month BEFORE the report month (1st → same
+   *  day-of-month, clamped) — powers the "vs Jun same day" line. */
+  mtdPrev: DayTotals;
+  month: { label: string; monthName: string; days: number; monthLen: number; prevMonthName: string; prevDays: number };
   /** Current usable raw-block stock (status available/reserved), CFT by
    *  category. null if it couldn't be computed. */
   stock: {
@@ -159,11 +214,24 @@ export type DailyReport = {
     sandstone: { recoveredPct: number; originalCft: number; slabCft: number; lineages: number };
     marble: { cftPerTonne: number; tonnes: number; slabCft: number; lineages: number };
   } | null;
+  /** Live pipeline snapshot — where material stands RIGHT NOW (counts, not
+   *  window-bound). null if it couldn't be computed. */
+  pipeline: {
+    cutWaiting: number;      // cut_done, not parked — waiting to enter carving
+    queue: number;           // carving_assigned
+    onMachine: number;       // carving_in_progress
+    onHold: number;          // carving_items parked mid-carve
+    readyDispatch: number;   // completed, not parked
+    storageCut: number;      // cut_done + parked (main storage, cut kind)
+    storageReady: number;    // completed + parked (main storage, ready kind)
+  } | null;
   blocksByStone: Array<{ stone: string; count: number; cft: number; vendors: Array<{ vendor: string; count: number; cft: number }> }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
   dispatchByTemple: Array<{ temple: string; slabs: number; cft: number; tonnes: number }>;
   payments: { total: number; byVendor: Array<{ vendor: string; amount: number }> };
+  /** Supplier payments for the report month to date (total only). */
+  paymentsMtd: number;
   /** Month-to-date CNC costing snapshot (elapsed days only). null if the
    *  report couldn't be built — never blocks the daily report. */
   cnc: {
@@ -194,8 +262,9 @@ export type DailyReport = {
     costPerCft: number;   // may be NaN when no production
     slabs: number;
   } | null;
-  /** Last 10 IST days of activity for the trend chart — counts per day. */
-  trend: Array<{ label: string; short: string; blocks: number; cutting: number; carving: number }>;
+  /** Last 10 IST days of activity for the trend charts + the page-1 card
+   *  sparklines — counts per day. */
+  trend: Array<{ label: string; short: string; blocks: number; cutting: number; carving: number; dispatch: number }>;
   /** Last-24 h challans raised + invoices issued (summary + attached detail).
    *  null if it couldn't be built — never blocks the daily report. */
   recent: { challans: RecentDoc[]; invoices: RecentDoc[] } | null;
@@ -225,7 +294,10 @@ const emptyTotals = (): DayTotals => ({
   dispatch: { slabs: 0, cft: 0, tonnes: 0, trucks: 0 },
 });
 
-/** Aggregate one IST day. `detail` also returns the per-group breakdowns. */
+/** Aggregate one window [startUTC, endUTC). `detail` also returns the
+ *  per-group breakdowns. Serves 24 h windows AND month windows, so every
+ *  query here is paginated — a busy month's carving approvals alone can
+ *  cross PostgREST's silent 1000-row cap. */
 async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string, detail: boolean) {
   const totals = emptyTotals();
   const det = {
@@ -235,15 +307,19 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
     dispatchByTemple: [] as DailyReport["dispatchByTemple"],
   };
 
-  // 1. BLOCKS added today (raw stone blocks created today).
+  // 1. BLOCKS added in the window (raw stone blocks created).
   {
-    const { data } = await admin
-      .from("blocks")
-      .select("stone, length_ft, width_ft, height_ft, created_at, vendor_name")
-      .gte("created_at", startUTC)
-      .lte("created_at", endUTC);
+    const data = await fetchAllPaged<{ stone: string | null; length_ft: number; width_ft: number; height_ft: number; vendor_name: string | null }>((from, to) =>
+      admin
+        .from("blocks")
+        .select("stone, length_ft, width_ft, height_ft, created_at, vendor_name")
+        .gte("created_at", startUTC)
+        .lt("created_at", endUTC)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
     const byStone = new Map<string, { count: number; cft: number; vendors: Map<string, { count: number; cft: number }> }>();
-    for (const b of (data ?? []) as Array<{ stone: string | null; length_ft: number; width_ft: number; height_ft: number; vendor_name: string | null }>) {
+    for (const b of data) {
       const c = cft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
       totals.blocks.count += 1; totals.blocks.cft += c;
       const k = stoneLabel(b.stone);
@@ -257,15 +333,19 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
     if (detail) det.blocksByStone = [...byStone.entries()].map(([stone, v]) => ({ stone, count: v.count, cft: v.cft, vendors: [...v.vendors.entries()].map(([vendor, vv]) => ({ vendor, ...vv })).sort((a, b) => b.cft - a.cft) })).sort((a, b) => b.cft - a.cft);
   }
 
-  // 2. CUTTING done today — blocks that became 'done' today; their cut slabs by stone.
+  // 2. CUTTING done in the window — blocks that became 'done'; their cut slabs by stone.
   {
-    const { data: doneBlocks } = await admin
-      .from("cut_session_blocks")
-      .select("block_id, status, updated_at")
-      .eq("status", "done")
-      .gte("updated_at", startUTC)
-      .lte("updated_at", endUTC);
-    const blockIds = [...new Set(((doneBlocks ?? []) as Array<{ block_id: string }>).map((b) => b.block_id).filter(Boolean))];
+    const doneBlocks = await fetchAllPaged<{ block_id: string }>((from, to) =>
+      admin
+        .from("cut_session_blocks")
+        .select("block_id, status, updated_at")
+        .eq("status", "done")
+        .gte("updated_at", startUTC)
+        .lt("updated_at", endUTC)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    const blockIds = [...new Set(doneBlocks.map((b) => b.block_id).filter(Boolean))];
     if (blockIds.length > 0) {
       const slabs: Array<{ stone: string | null; length_ft: number; width_ft: number; thickness_ft: number }> = [];
       // Each 200-block chunk can yield FAR more than 1000 slabs, so the result
@@ -295,15 +375,18 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
     }
   }
 
-  // 3. CARVING done today — carving_items approved today, by vendor.
+  // 3. CARVING done in the window — carving_items approved, by vendor.
   {
-    const { data: items } = await admin
-      .from("carving_items")
-      .select("slab_requirement_id, vendor_name, review_approved_at")
-      .not("review_approved_at", "is", null)
-      .gte("review_approved_at", startUTC)
-      .lte("review_approved_at", endUTC);
-    const rows = (items ?? []) as Array<{ slab_requirement_id: string | null; vendor_name: string | null }>;
+    const rows = await fetchAllPaged<{ slab_requirement_id: string | null; vendor_name: string | null }>((from, to) =>
+      admin
+        .from("carving_items")
+        .select("slab_requirement_id, vendor_name, review_approved_at")
+        .not("review_approved_at", "is", null)
+        .gte("review_approved_at", startUTC)
+        .lt("review_approved_at", endUTC)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
     const dims = await cftBySlab(admin, rows.map((r) => r.slab_requirement_id).filter(Boolean) as string[]);
     const byVendor = new Map<string, { slabs: number; cft: number }>();
     for (const r of rows) {
@@ -316,14 +399,14 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
     if (detail) det.carvingByVendor = [...byVendor.entries()].map(([vendor, v]) => ({ vendor, ...v })).sort((a, b) => b.cft - a.cft);
   }
 
-  // 4. DISPATCH today — trucks sent today; slabs + tonnes by temple.
+  // 4. DISPATCH in the window — trucks sent; slabs + tonnes by temple.
   {
     const dispatches = await fetchAllPaged<{ id: string; temple: string }>((from, to) =>
       admin
         .from("dispatches")
         .select("id, temple, dispatched_at")
         .gte("dispatched_at", startUTC)
-        .lte("dispatched_at", endUTC)
+        .lt("dispatched_at", endUTC)
         .order("id", { ascending: true })
         .range(from, to),
     );
@@ -366,16 +449,22 @@ async function aggregateDay(admin: AdminClient, startUTC: string, endUTC: string
   return { totals, det };
 }
 
-/** Supplier bill payments marked paid in the window (carving-vendor payouts
- *  aren't tracked in the system yet). Grouped by vendor name when `detail`. */
+/** Supplier bill payments marked paid in [startUTC, endUTC) (carving-vendor
+ *  payouts aren't tracked in the system yet). Grouped by vendor name when
+ *  `detail`. Paginated — this also serves month windows now, and lifetime
+ *  paid rows already exceed 1000. */
 async function paymentsForWindow(admin: AdminClient, startUTC: string, endUTC: string, detail: boolean) {
-  const { data } = await admin
-    .from("bill_payments")
-    .select("paid_amount, bill_id, paid_at, status")
-    .eq("status", "paid")
-    .gte("paid_at", startUTC)
-    .lte("paid_at", endUTC);
-  const rows = ((data ?? []) as Array<{ paid_amount: number | null; bill_id: string | null }>).filter((p) => p.paid_amount != null);
+  const rowsAll = await fetchAllPaged<{ paid_amount: number | null; bill_id: string | null }>((from, to) =>
+    admin
+      .from("bill_payments")
+      .select("paid_amount, bill_id, paid_at, status")
+      .eq("status", "paid")
+      .gte("paid_at", startUTC)
+      .lt("paid_at", endUTC)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const rows = rowsAll.filter((p) => p.paid_amount != null);
   const total = rows.reduce((s, p) => s + Number(p.paid_amount), 0);
   if (!detail) return { total, byVendor: [] as Array<{ vendor: string; amount: number }> };
 
@@ -404,13 +493,14 @@ async function paymentsForWindow(admin: AdminClient, startUTC: string, endUTC: s
 /** Per-day activity counts for the last `days` IST days (oldest → newest).
  *  One windowed query per metric + bucket in JS — cheap, no N×day fan-out.
  *  blocks = blocks added, cutting = slabs cut (block became done), carving =
- *  slabs approved. Counts (not CFT) so the three series share a clean scale. */
+ *  slabs approved, dispatch = slabs sent. Counts (not CFT) so the series
+ *  share a clean scale. */
 async function trendForDays(admin: AdminClient, days = 10) {
   const list = Array.from({ length: days }, (_, i) => {
     // End on yesterday (the last COMPLETE calendar day) — the report runs at
     // 10 AM, so including today would plot a misleading half-day dip.
     const d = istDay(i - days); // -days … -1
-    return { ...d, startMs: Date.parse(d.startUTC), endMs: Date.parse(d.endUTC), blocks: 0, cutting: 0, carving: 0 };
+    return { ...d, startMs: Date.parse(d.startUTC), endMs: Date.parse(d.endUTC), blocks: 0, cutting: 0, carving: 0, dispatch: 0 };
   });
   const windowStart = list[0].startUTC;
   const windowEnd = list[list.length - 1].endUTC;
@@ -435,14 +525,19 @@ async function trendForDays(admin: AdminClient, days = 10) {
       const i = bucketOf(r.updated_at);
       if (i >= 0) blockBucket.set(r.block_id, i);
     }
-    const blockIds = [...blockBucket.keys()];
-    for (let k = 0; k < blockIds.length; k += 200) {
-      const { data: slabs } = await admin
-        .from("slab_requirements")
-        .select("source_block_id, status")
-        .in("source_block_id", blockIds.slice(k, k + 200))
-        .not("status", "in", "(open,rejected,cancelled)");
-      for (const s of (slabs ?? []) as Array<{ source_block_id: string | null }>) {
+    // A 200-block chunk can produce >1000 slabs — paginate each chunk (same
+    // fix the main cutting card got; this chart silently under-counted too).
+    for (const chunk of chunkIds([...blockBucket.keys()], 200)) {
+      const slabs = await fetchAllPaged<{ source_block_id: string | null }>((from, to) =>
+        admin
+          .from("slab_requirements")
+          .select("source_block_id, status")
+          .in("source_block_id", chunk)
+          .not("status", "in", "(open,rejected,cancelled)")
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
+      for (const s of slabs) {
         const i = s.source_block_id != null ? blockBucket.get(s.source_block_id) : undefined;
         if (i != null) list[i].cutting += 1;
       }
@@ -453,8 +548,25 @@ async function trendForDays(admin: AdminClient, days = 10) {
     const { data } = await admin.from("carving_items").select("review_approved_at").not("review_approved_at", "is", null).gte("review_approved_at", windowStart).lte("review_approved_at", windowEnd);
     for (const r of (data ?? []) as Array<{ review_approved_at: string }>) { const i = bucketOf(r.review_approved_at); if (i >= 0) list[i].carving += 1; }
   }
+  // Dispatched — slabs on trucks sent in the window (dispatch_logs per dispatch).
+  {
+    const disp = await fetchAllPaged<{ id: string; dispatched_at: string }>((from, to) =>
+      admin.from("dispatches").select("id, dispatched_at").gte("dispatched_at", windowStart).lte("dispatched_at", windowEnd).order("id", { ascending: true }).range(from, to),
+    );
+    const dBucket = new Map<string, number>();
+    for (const r of disp) { const i = bucketOf(r.dispatched_at); if (i >= 0) dBucket.set(r.id, i); }
+    for (const chunk of chunkIds([...dBucket.keys()], 100)) {
+      const logs = await fetchAllPaged<{ dispatch_id: string | null }>((from, to) =>
+        admin.from("dispatch_logs").select("dispatch_id").in("dispatch_id", chunk).order("id", { ascending: true }).range(from, to),
+      );
+      for (const l of logs) {
+        const i = l.dispatch_id ? dBucket.get(l.dispatch_id) : undefined;
+        if (i != null) list[i].dispatch += 1;
+      }
+    }
+  }
 
-  return list.map((d) => ({ label: d.label, short: d.label.split(" ")[0], blocks: d.blocks, cutting: d.cutting, carving: d.carving }));
+  return list.map((d) => ({ label: d.label, short: d.label.split(" ")[0], blocks: d.blocks, cutting: d.cutting, carving: d.carving, dispatch: d.dispatch }));
 }
 
 /** Stone-name → category map (marble vs sandstone) from stone_types. */
@@ -469,20 +581,25 @@ async function stoneCategoryMapFor(admin: AdminClient): Promise<Record<string, S
 
 /** Current USABLE raw-block stock — blocks still available/reserved (i.e. not
  *  cut, consumed or discarded), CFT by category. Sandstone = L×W×H; marble =
- *  tonnes × 8 CFT-equiv (falls back to dims if a marble block lacks weight). */
+ *  tonnes × 8 CFT-equiv (falls back to dims if a marble block lacks weight).
+ *  Paginated — live stock is 584 blocks and growing toward the 1000 cap. */
 async function blockStock(
   admin: AdminClient,
   categoryMap: Record<string, StoneCategory>,
 ): Promise<DailyReport["stock"]> {
   try {
-    const { data } = await admin
-      .from("blocks")
-      .select("stone, length_ft, width_ft, height_ft, tonnes, status")
-      .in("status", ["available", "reserved"]);
-    let marbleCft = 0, marbleTonnes = 0, sandstoneCft = 0, marbleCount = 0, sandstoneCount = 0;
-    for (const b of (data ?? []) as Array<{
+    const data = await fetchAllPaged<{
       stone: string | null; length_ft: number; width_ft: number; height_ft: number; tonnes: number | null;
-    }>) {
+    }>((from, to) =>
+      admin
+        .from("blocks")
+        .select("stone, length_ft, width_ft, height_ft, tonnes, status")
+        .in("status", ["available", "reserved"])
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    let marbleCft = 0, marbleTonnes = 0, sandstoneCft = 0, marbleCount = 0, sandstoneCount = 0;
+    for (const b of data) {
       const dimsCft = cft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
       if (isMarble(b.stone, categoryMap)) {
         const tonnes = Number(b.tonnes) || 0;
@@ -502,7 +619,10 @@ async function blockStock(
 
 /** Block recovery split by category — reuses the Block Journey lineage engine
  *  so the numbers match that page exactly. Sandstone yields a recovered %,
- *  marble a CFT-per-tonne. Wrapped so a hiccup never blocks the daily report. */
+ *  marble a CFT-per-tonne. Wrapped so a hiccup never blocks the daily report.
+ *  Every source query is paginated: Fresh blocks (1,307) and cut_session_slabs
+ *  (1,180) are ALREADY past the 1000-row cap, so the unpaged version was
+ *  silently computing recovery on truncated data. */
 async function buildRecoveryByCategory(
   admin: AdminClient,
   categoryMap: Record<string, StoneCategory>,
@@ -524,30 +644,35 @@ async function buildRecoveryByCategory(
     }
     const blockCols =
       "id, stone, yard, quality, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, created_at, created_by, updated_at";
-    const [freshR, reusedR, doneCsbR, trucksR, cssR] = await Promise.all([
-      admin.from("blocks").select(blockCols).eq("category", "Fresh"),
-      admin.from("blocks").select(blockCols).eq("category", "Reused"),
-      admin.from("cut_session_blocks").select("block_id, status, updated_at").eq("status", "done"),
-      admin.from("marble_truck_entries").select("id, stone, truck_no, vendor_name, total_tonnes, num_blocks, created_at"),
-      admin.from("cut_session_slabs").select("slab_requirement_id, is_filler, cut_session_blocks!inner(block_id)"),
+    const [freshRows, reusedRows, doneCsbRows, truckRows, cssRaw] = await Promise.all([
+      fetchAllPaged<BjBlockRow>((from, to) =>
+        admin.from("blocks").select(blockCols).eq("category", "Fresh").order("id", { ascending: true }).range(from, to)),
+      fetchAllPaged<BjBlockRow>((from, to) =>
+        admin.from("blocks").select(blockCols).eq("category", "Reused").order("id", { ascending: true }).range(from, to)),
+      fetchAllPaged<BjCsbRow>((from, to) =>
+        admin.from("cut_session_blocks").select("block_id, status, updated_at").eq("status", "done").order("id", { ascending: true }).range(from, to)),
+      fetchAllPaged<BjMarbleTruckRow>((from, to) =>
+        admin.from("marble_truck_entries").select("id, stone, truck_no, vendor_name, total_tonnes, num_blocks, created_at").order("id", { ascending: true }).range(from, to)),
+      fetchAllPaged<{
+        slab_requirement_id: string;
+        is_filler: boolean | null;
+        cut_session_blocks: { block_id: string } | { block_id: string }[] | null;
+      }>((from, to) =>
+        admin.from("cut_session_slabs").select("slab_requirement_id, is_filler, cut_session_blocks!inner(block_id)").order("id", { ascending: true }).range(from, to)),
     ]);
     const cutSessionSlabs: BjCutSessionSlabRow[] = [];
-    for (const r of (cssR.data ?? []) as Array<{
-      slab_requirement_id: string;
-      is_filler: boolean | null;
-      cut_session_blocks: { block_id: string } | { block_id: string }[] | null;
-    }>) {
+    for (const r of cssRaw) {
       const csb = Array.isArray(r.cut_session_blocks) ? r.cut_session_blocks[0] : r.cut_session_blocks;
       if (!csb?.block_id) continue;
       cutSessionSlabs.push({ slab_requirement_id: r.slab_requirement_id, is_filler: r.is_filler ?? null, block_id: csb.block_id });
     }
     const lineages = buildLineages(
-      (freshR.data ?? []) as unknown as BjBlockRow[],
-      (reusedR.data ?? []) as unknown as BjBlockRow[],
+      freshRows,
+      reusedRows,
       postCut,
-      (doneCsbR.data ?? []) as unknown as BjCsbRow[],
+      doneCsbRows,
       categoryMap,
-      (trucksR.data ?? []) as unknown as BjMarbleTruckRow[],
+      truckRows,
       cutSessionSlabs,
     );
     const agg = aggregateLineages(lineages);
@@ -564,6 +689,45 @@ async function buildRecoveryByCategory(
         slabCft: agg.marble.totalSlabCft,
         lineages: agg.marble.lineageCount,
       },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Live pipeline snapshot — cheap HEAD counts, no rows transferred. Answers
+ *  "where does material stand right now?" (the owner's follow-up to every
+ *  production number). Wrapped so a hiccup never blocks the report. */
+async function buildPipeline(admin: AdminClient): Promise<DailyReport["pipeline"]> {
+  try {
+    const slabCount = async (status: string, parkedOnly = false): Promise<number> => {
+      let q = admin.from("slab_requirements").select("id", { count: "exact", head: true }).eq("status", status);
+      if (parkedOnly) q = q.eq("is_parked", true);
+      const { count, error } = await q;
+      if (error) throw error;
+      return count ?? 0;
+    };
+    const [cutAll, cutParked, queue, onMachine, doneAll, doneParked] = await Promise.all([
+      slabCount("cut_done"),
+      slabCount("cut_done", true),
+      slabCount("carving_assigned"),
+      slabCount("carving_in_progress"),
+      slabCount("completed"),
+      slabCount("completed", true),
+    ]);
+    const { count: holdCount, error: holdErr } = await admin
+      .from("carving_items")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "carving_on_hold");
+    if (holdErr) throw holdErr;
+    return {
+      cutWaiting: Math.max(0, cutAll - cutParked),
+      queue,
+      onMachine,
+      onHold: holdCount ?? 0,
+      readyDispatch: Math.max(0, doneAll - doneParked),
+      storageCut: cutParked,
+      storageReady: doneParked,
     };
   } catch {
     return null;
@@ -726,21 +890,26 @@ export async function buildDailyReportData(): Promise<DailyReport> {
   const prev = await aggregateDay(admin, p.startUTC, p.endUTC, false);
   const payToday = await paymentsForWindow(admin, t.startUTC, t.endUTC, true);
 
-  // Month-to-date production (cutting / carving / dispatch) — from the 1st of
-  // the IST month through the report window end. Plus current usable block
-  // stock and block recovery, both wrapped so they never block the report.
-  const mStart = istMonthStart();
+  // Month framing anchored to the REPORT day, plus the same-point window of
+  // the month before it — see reportMonthFor. Current usable block stock,
+  // block recovery and the live pipeline are wrapped so they never block
+  // the report.
+  const mo = reportMonthFor(t.y, t.m, t.d);
   const categoryMap = await stoneCategoryMapFor(admin);
-  const mtd = await aggregateDay(admin, mStart.startUTC, t.endUTC, false);
+  const mtd = await aggregateDay(admin, mo.startUTC, t.endUTC, false);
+  const mtdPrev = await aggregateDay(admin, mo.prev.startUTC, mo.prev.endUTC, false);
+  const paymentsMtd = (await paymentsForWindow(admin, mo.startUTC, t.endUTC, false)).total;
   const stock = await blockStock(admin, categoryMap);
   const recovery = await buildRecoveryByCategory(admin, categoryMap);
+  const pipeline = await buildPipeline(admin);
 
-  // Month-to-date CNC costing — same prorated-to-elapsed-days engine as the
-  // /reports/various-costing/cnc page. Wrapped so a CNC hiccup never blocks
-  // the daily report.
+  // Report-month CNC costing — same prorated-to-elapsed-days engine as the
+  // /reports/various-costing/cnc page (it self-clamps current months to
+  // "today"; a past report month yields its complete final figures).
+  // Wrapped so a CNC hiccup never blocks the daily report.
   let cnc: DailyReport["cnc"] = null;
   try {
-    const period = cncPeriodFromSearch({}); // defaults to the current month
+    const period = cncPeriodFromSearch({ year: String(mo.year), month: String(mo.monthIndex + 1) });
     const rep = await buildCncVariousCostReport(period);
     const monthLen = Number(period.endDate.slice(8, 10)) || 30;
     const machines = rep.perVendor.reduce((s, v) => s + (v.machineCount || 0), 0);
@@ -765,16 +934,18 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     cnc = null;
   }
 
-  // Month-to-date cutter costing. The cutter report doesn't self-clamp to
-  // "today" like the CNC one, so we hand it a period whose end is today —
-  // its day-weighted proration then counts only the elapsed days.
+  // Report-month cutter costing. The cutter report doesn't self-clamp to
+  // "today" like the CNC one, so clamp its end ourselves: min(today, month
+  // end) — a current month counts elapsed days only, a past report month
+  // keeps its full length.
   let cutter: DailyReport["cutter"] = null;
   try {
-    const period = cutterPeriodFromSearch({}); // current month, full
+    const period = cutterPeriodFromSearch({ year: String(mo.year), month: String(mo.monthIndex + 1) });
     const todayKey = istDateKey();
+    const endUsed = todayKey < period.endDate ? todayKey : period.endDate;
     const monthLen = Number(period.endDate.slice(8, 10)) || 30;
-    const days = Number(todayKey.slice(8, 10)) || monthLen;
-    const rep = await buildCutterCostReport({ ...period, endDate: todayKey });
+    const days = Number(endUsed.slice(8, 10)) || monthLen;
+    const rep = await buildCutterCostReport({ ...period, endDate: endUsed });
     cutter = {
       label: period.label,
       days,
@@ -798,18 +969,22 @@ export async function buildDailyReportData(): Promise<DailyReport> {
 
   return {
     label: t.label,
+    weekday: t.weekday,
     prevLabel: p.label,
     today: today.totals,
     prev: prev.totals,
     mtd: mtd.totals,
-    month: { label: mStart.label, days: mStart.daysElapsed },
+    mtdPrev: mtdPrev.totals,
+    month: { label: mo.label, monthName: mo.monthName, days: mo.daysElapsed, monthLen: mo.monthLen, prevMonthName: mo.prev.monthName, prevDays: mo.prev.days },
     stock,
     recovery,
+    pipeline,
     blocksByStone: today.det.blocksByStone,
     cuttingByStone: today.det.cuttingByStone,
     carvingByVendor: today.det.carvingByVendor,
     dispatchByTemple: today.det.dispatchByTemple,
     payments: { total: payToday.total, byVendor: payToday.byVendor },
+    paymentsMtd,
     cnc,
     cutter,
     trend,
@@ -831,7 +1006,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   // Dark "liquid glass" theme — light text on a deep slate gradient, with
   // frosted colour-tinted cards. logo-light.png reads on the dark backdrop.
   const white = rgb(1, 1, 1), ink = rgb(0.93, 0.95, 0.98), muted = rgb(0.62, 0.66, 0.74), line = rgb(0.32, 0.36, 0.44), brown = rgb(0.87, 0.66, 0.34);
-  const paper = rgb(0.07, 0.085, 0.125), rowTint = rgb(0.15, 0.18, 0.24);
+  const rowTint = rgb(0.15, 0.18, 0.24);
   const bgTop = rgb(0.05, 0.065, 0.10), bgBot = rgb(0.10, 0.12, 0.17);
   const COL = {
     blue: rgb(0.29, 0.56, 0.98), cyan: rgb(0.12, 0.67, 0.82), amber: rgb(0.96, 0.62, 0.16),
@@ -881,14 +1056,14 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const header = (P: ReturnType<typeof mk>, top: number, withSubtitle: boolean) => {
     if (logo) { const lh = 20, lw = (logo.width / logo.height) * lh; P.pg.drawImage(logo, { x: M, y: top - lh, width: lw, height: lh }); }
     const dpw = bold.widthOfTextAtSize(data.label, 11) + 18;
-    P.card(W - M - dpw, top, dpw, 20, 5, brown);
+    P.card(W - M - dpw, top, dpw, 20, 6, brown);
     P.ctr(data.label, W - M - dpw / 2, top - 13, 11, bold, white);
-    P.r(`vs ${data.prevLabel}`, W - M, top - 30, 8, font, muted);
-    P.t("Daily Work Report", M, top - 42, 16, bold, ink);
-    P.t("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, top - 55, 7.5, bold, ink);
-    let y = top - 55;
-    if (withSubtitle) { P.t("Month-to-date production · last 24 h shown in brackets", M, y - 12, 8, font, muted); y -= 12; }
-    y -= 8;
+    P.r(`${data.weekday} · vs ${data.prevLabel}`, W - M, top - 30, 8, font, muted);
+    P.t("Daily Work Report", M, top - 44, 17, bold, ink);
+    P.t("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, top - 57, 7.5, bold, brown);
+    let y = top - 57;
+    if (withSubtitle) { P.t(`${data.month.label} to date · (+n) pill = last 24 h · trend = last 10 days`, M, y - 12, 8, font, muted); y -= 12; }
+    y -= 9;
     P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 2.5, color: COL.gold });
     P.pg.drawLine({ start: { x: M, y: y - 2 }, end: { x: W - M, y: y - 2 }, thickness: 0.5, color: brown });
     return y - 16;
@@ -912,7 +1087,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const detailDocs = [...recChallans, ...recInvoices].slice(0, RECENT_CAP);
   const hasRecent = detailDocs.length > 0;
   const detailPages = Math.ceil(detailDocs.length / DOCS_PER_PAGE);
-  const PAGES = 4 + (hasRecent ? 1 + detailPages : 0);
+  const PAGES = 5 + (hasRecent ? 1 + detailPages : 0);
   const newPage = () => {
     const pg = pdf.addPage([W, H]);
     // Vertical slate gradient (banded — pdf-lib has no native gradients).
@@ -935,49 +1110,95 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     return mk(pg);
   };
 
-  // ── Page 1 — headline metrics, one big card each ──
+  // ── Page 1 — headline metrics: month total, 24 h pill, vs-last-month,
+  //    month-end pace and a 10-day sparkline on every card ──
   {
     const P = newPage();
     let y = header(P, H - 26, true);
-    const delta = (cur: number, prev: number) => { const d = cur - prev; return `Prev day ${prev}  (${d > 0 ? "+" : ""}${d})`; };
-    const mLabel = data.month.label;
-    // Blocks = added in the last 24 h + a live in-stock line. Cutting /
-    // Carving / Dispatch headline the MONTH-TO-DATE total, with the last
-    // 24 h shown in the bracket pill (Daksh's dad wants the running month).
-    const cards: Array<{ c: ReturnType<typeof rgb>; label: string; caption?: string; big: string; unit: string; sub: string; pill: string; extra?: string }> = [
+    const mo = data.month;
+    const delta = (cur: number, prevC: number) => { const d = cur - prevC; return `Prev day ${prevC}  (${d > 0 ? "+" : ""}${d})`; };
+    // "(+5%)" vs the previous month at the same day-of-month; omitted when
+    // last month had nothing to compare against.
+    const pctTxt = (cur: number, prevV: number) => (prevV > 0 ? ` (${cur >= prevV ? "+" : ""}${Math.round(((cur - prevV) / prevV) * 100)}%)` : "");
+    const pace = (v: number) => (mo.days > 0 ? Math.round((v / mo.days) * mo.monthLen) : 0);
+    const vsLine = (cur: number, prevV: number) => `vs ${mo.prevMonthName} same day: ${fmt0(prevV)} slabs${pctTxt(cur, prevV)}`;
+    const spark = (vals: number[], xs: number, xe: number, yBot: number, hgt: number) => {
+      const n = vals.length; if (n < 2) return;
+      const peak = Math.max(...vals, 1);
+      const xAt = (i: number) => xs + ((xe - xs) * i) / (n - 1);
+      const yAt = (v: number) => yBot + hgt * Math.min(1, v / peak);
+      P.pg.drawLine({ start: { x: xs, y: yBot }, end: { x: xe, y: yBot }, thickness: 0.5, color: white, opacity: 0.25 });
+      for (let i = 0; i < n - 1; i++)
+        P.pg.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 1.6, color: white, opacity: 0.9 });
+      P.pg.drawCircle({ x: xAt(n - 1), y: yAt(vals[n - 1]), size: 2.2, color: white });
+    };
+    // Blocks = the last 24 h intake + month + live stock. Cutting / Carving /
+    // Dispatch headline the REPORT-MONTH total (Daksh's dad wants the running
+    // month), with the last-24 h figure in the pill and two insight lines.
+    const monthCap = `${mo.label} · day ${mo.days} of ${mo.monthLen}`;
+    const cards: Array<{ c: ReturnType<typeof rgb>; label: string; caption: string; big: string; unit: string; sub: string; pill: string; line1: string; line2: string; spark: number[] }> = [
       {
-        c: COL.blue, label: "BLOCKS ADDED",
-        big: String(data.today.blocks.count), unit: "blocks", sub: `${data.today.blocks.cft.toFixed(1)} CFT added (24h)`,
+        c: COL.blue, label: "BLOCKS ADDED", caption: "Last 24 hours",
+        big: String(data.today.blocks.count), unit: "blocks", sub: `${fmt1(data.today.blocks.cft)} CFT received`,
         pill: delta(data.today.blocks.count, data.prev.blocks.count),
-        extra: data.stock
-          ? `In stock — Sandstone ${data.stock.sandstoneCft.toFixed(0)} CFT  ·  Marble ${data.stock.marbleTonnes.toFixed(1)} T`
-          : undefined,
+        line1: `${mo.monthName} so far: ${fmt0(data.mtd.blocks.count)} blocks · ${fmt0(data.mtd.blocks.cft)} CFT`,
+        line2: data.stock ? `In stock: Sandstone ${fmt0(data.stock.sandstoneCft)} CFT · Marble ${fmt1(data.stock.marbleTonnes)} T` : "",
+        spark: data.trend.map((d) => d.blocks),
       },
-      { c: COL.cyan, label: "CUTTING DONE", caption: `Month to date · ${mLabel}`, big: String(data.mtd.cutting.slabs), unit: "slabs", sub: `${data.mtd.cutting.cft.toFixed(1)} CFT cut`, pill: `+${data.today.cutting.slabs} in 24h` },
-      { c: COL.amber, label: "CARVING DONE", caption: `Month to date · ${mLabel}`, big: String(data.mtd.carving.slabs), unit: "slabs", sub: `${data.mtd.carving.cft.toFixed(1)} CFT carved`, pill: `+${data.today.carving.slabs} in 24h` },
-      { c: COL.green, label: "DISPATCHED", caption: `Month to date · ${mLabel}`, big: String(data.mtd.dispatch.slabs), unit: "slabs", sub: `${data.mtd.dispatch.cft.toFixed(1)} CFT · ${data.mtd.dispatch.tonnes.toFixed(1)} T · ${data.mtd.dispatch.trucks} trucks`, pill: `+${data.today.dispatch.slabs} in 24h` },
+      {
+        c: COL.cyan, label: "CUTTING DONE", caption: monthCap,
+        big: fmt0(data.mtd.cutting.slabs), unit: "slabs", sub: `${fmt1(data.mtd.cutting.cft)} CFT cut`,
+        pill: `+${data.today.cutting.slabs} in 24 h`,
+        line1: vsLine(data.mtd.cutting.slabs, data.mtdPrev.cutting.slabs),
+        line2: `Pace: ~${fmt0(pace(data.mtd.cutting.slabs))} slabs by ${mo.monthName} end`,
+        spark: data.trend.map((d) => d.cutting),
+      },
+      {
+        c: COL.amber, label: "CARVING DONE", caption: monthCap,
+        big: fmt0(data.mtd.carving.slabs), unit: "slabs", sub: `${fmt1(data.mtd.carving.cft)} CFT carved`,
+        pill: `+${data.today.carving.slabs} in 24 h`,
+        line1: vsLine(data.mtd.carving.slabs, data.mtdPrev.carving.slabs),
+        line2: `Pace: ~${fmt0(pace(data.mtd.carving.slabs))} slabs by ${mo.monthName} end`,
+        spark: data.trend.map((d) => d.carving),
+      },
+      {
+        c: COL.green, label: "DISPATCHED", caption: monthCap,
+        // Tonnes only when meaningfully recorded — near-zero would print as
+        // "0.0 T", which is just noise on sandstone-heavy months.
+        big: fmt0(data.mtd.dispatch.slabs), unit: "slabs",
+        sub: [`${fmt1(data.mtd.dispatch.cft)} CFT`, data.mtd.dispatch.tonnes >= 0.05 ? `${fmt1(data.mtd.dispatch.tonnes)} T` : "", `${data.mtd.dispatch.trucks} trucks`].filter(Boolean).join(" · "),
+        pill: `+${data.today.dispatch.slabs} in 24 h`,
+        line1: vsLine(data.mtd.dispatch.slabs, data.mtdPrev.dispatch.slabs),
+        line2: `Pace: ~${fmt0(pace(data.mtd.dispatch.slabs))} slabs by ${mo.monthName} end`,
+        spark: data.trend.map((d) => d.dispatch),
+      },
     ];
-    const ch = 150, gap = 13;
+    const ch = 178, gap = 13;
     for (const k of cards) {
       P.glass(M, y, cw, ch, 18, k.c);
       P.card(M + 20, y - 15, 32, 5, 2.5, white, { opacity: 0.55 });
       P.t(k.label, M + 20, y - 34, 13, bold, white);
-      if (k.caption) P.t(k.caption, M + 20, y - 48, 9, font, white);
-      P.t(k.big, M + 18, y - 104, 50, bold, white);
+      P.t(k.caption, M + 20, y - 48, 9, font, white);
+      const pw = font.widthOfTextAtSize(k.pill, 9) + 18;
+      P.card(W - M - pw - 14, y - 26, pw, 19, 7, white, { opacity: 0.22 });
+      P.t(k.pill, W - M - pw - 5, y - 38.5, 9, font, white);
+      // 10-day sparkline, right side — the shape of the last stretch at a
+      // glance; the trends page carries the full charts.
+      spark(k.spark, W - M - 146, W - M - 22, y - 96, 30);
+      P.r("last 10 days", W - M - 22, y - 107, 6.5, font, white);
+      P.t(k.big, M + 18, y - 106, 44, bold, white);
       // Unit label sits to the right of the big number, baseline-aligned, so
       // "506" reads unambiguously as "506 slabs".
-      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.big, 50) + 9, y - 104, 15, bold, white);
-      P.t(k.sub, M + 20, y - 128, 12, font, white);
-      if (k.extra) P.t(k.extra, M + 20, y - 143, 9.5, font, white);
-      const pw = font.widthOfTextAtSize(k.pill, 9) + 18;
-      P.card(W - M - pw - 14, y - 40, pw, 19, 7, white, { opacity: 0.20 });
-      P.t(k.pill, W - M - pw - 5, y - 52.5, 9, font, white);
+      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.big, 44) + 8, y - 106, 14, bold, white);
+      P.t(k.sub, M + 20, y - 128, 11.5, font, white);
+      P.t(k.line1, M + 20, y - 148, 9.5, font, white);
+      if (k.line2) P.t(k.line2, M + 20, y - 164, 9.5, font, white);
       y -= ch + gap;
     }
     footer(P, 1, PAGES);
   }
 
-  // ── Page 2 — month-to-date costing + supplier payments ──
+  // ── Page 2 — money: costing, billing, supplier payments ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
@@ -1009,15 +1230,31 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       y -= hh + 12;
     }
     {
+      // Billing pulse — how much paper went out in the same 24 h window. The
+      // full lists + itemised copies follow on the billing pages.
+      const hh = 78;
+      const bv = recChallans.reduce((s, d) => s + d.total, 0);
+      const iv = recInvoices.reduce((s, d) => s + d.total, 0);
+      P.glass(M, y, cw, hh, 18, COL.blue);
+      P.t("BILLING · LAST 24 H", M + 18, y - 22, 10.5, bold, white);
+      const half = cw / 2;
+      P.t("Challans raised", M + 18, y - 44, 8.5, font, white);
+      P.t(data.recent ? `${recChallans.length} · ${inr(bv)}` : "n/a", M + 18, y - 64, 14, bold, white);
+      P.pg.drawLine({ start: { x: M + half, y: y - 36 }, end: { x: M + half, y: y - 70 }, thickness: 0.5, color: white, opacity: 0.35 });
+      P.t("Invoices issued", M + half + 16, y - 44, 8.5, font, white);
+      P.t(data.recent ? `${recInvoices.length} · ${inr(iv)}` : "n/a", M + half + 16, y - 64, 14, bold, white);
+      y -= hh + 12;
+    }
+    {
       // Show EVERY supplier paid in the window (Daksh: the old top-6 cap
       // silently dropped vendors while the total stayed correct). Two columns
       // fit ~40; only an extreme tail collapses into a "+N more" line so the
       // page can never overflow. Capacity is computed from the space left
-      // under the costing cards above.
+      // under the cards above.
       const all = data.payments.byVendor;
       const hasRows = all.length > 0;
-      const lineH = 16, headH = 64, padBot = 12, footMargin = 46;
-      const maxLines = Math.max(1, Math.floor((y - footMargin - headH) / lineH));
+      const lineH = 16, headH = 78, padBot = 12, footMargin = 46;
+      const maxLines = Math.max(1, Math.floor((y - footMargin - headH - padBot) / lineH));
       const cap = maxLines * 2;
       let shown = all, ovN = 0, ovAmt = 0;
       if (all.length > cap) {
@@ -1030,13 +1267,17 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       const bodyLines = hasRows ? Math.ceil(shown.length / 2) + (ovN > 0 ? 1 : 0) : 1;
       const payH = headH + bodyLines * lineH + padBot;
       P.glass(M, y, cw, payH, 18, COL.gold);
-      P.t("PAYMENTS TO SUPPLIERS · 24 H", M + 18, y - 24, 11, bold, white);
-      P.t(inr(data.payments.total), M + 18, y - 50, 24, bold, white);
-      let py = y - 64;
+      P.t("PAYMENTS TO SUPPLIERS", M + 18, y - 22, 11, bold, white);
+      P.t(inr(data.payments.total), M + 18, y - 48, 24, bold, white);
+      P.t("last 24 h", M + 20, y - 61, 8, font, white);
+      // Month framing on the right — the running spend this month.
+      P.r(inr(data.paymentsMtd), W - M - 18, y - 48, 13, bold, white);
+      P.r(`${data.month.monthName} to date`, W - M - 18, y - 61, 8, font, white);
+      let py = y - 78;
       if (!hasRows) { P.t("No supplier payments in this 24 h window.", M + 18, py - 2, 9.5, font, white); }
       else {
-        P.pg.drawLine({ start: { x: M + 18, y: py }, end: { x: W - M - 18, y: py }, thickness: 0.5, color: white, opacity: 0.32 });
-        py -= 18;
+        P.pg.drawLine({ start: { x: M + 18, y: py + 8 }, end: { x: W - M - 18, y: py + 8 }, thickness: 0.5, color: white, opacity: 0.32 });
+        py -= 10;
         const colGap = 16, innerW = cw - 36;
         const colX = [M + 18, M + 18 + (innerW + colGap) / 2];
         const colR = [M + 18 + (innerW - colGap) / 2, W - M - 18];
@@ -1056,21 +1297,60 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     footer(P, 2, PAGES);
   }
 
-  // ── Page 3 — breakdowns (blocks / cutting / carving / dispatch) ──
+  // ── Page 3 — live pipeline + stock + recovery ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
-    const section = (title: string, color: ReturnType<typeof rgb>, rows: Array<{ n: string; v: string }>) => {
-      P.pg.drawRectangle({ x: M, y: y - 1, width: 7, height: 7, color });
-      P.t(title, M + 11, y, 9.5, bold, color); y -= 6;
-      P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.9, color }); y -= 16;
-      if (rows.length === 0) { P.t("None", M, y, 10, font, muted); y -= 16; }
-      else rows.slice(0, 5).forEach((rw, i) => {
-        if (i % 2 === 1) P.pg.drawRectangle({ x: M - 4, y: y - 4, width: cw + 8, height: 15, color: rowTint });
-        P.t(P.clip(rw.n, 30), M, y, 10.5, font, ink); P.r(rw.v, W - M, y, 10, font, muted); y -= 16;
-      });
-      y -= 12;
-    };
+    if (data.pipeline) {
+      const pl = data.pipeline;
+      const rows: Array<{ label: string; val: number; unit: string; sub: string }> = [
+        {
+          label: "Raw blocks in stock",
+          val: data.stock ? data.stock.sandstoneCount + data.stock.marbleCount : 0,
+          unit: "blocks",
+          sub: data.stock ? `${fmt0(data.stock.totalCft)} CFT usable` : "",
+        },
+        { label: "Cut · waiting for carving", val: pl.cutWaiting, unit: "slabs", sub: "" },
+        { label: "At CNC now", val: pl.queue + pl.onMachine, unit: "slabs", sub: `queue ${pl.queue} · on machines ${pl.onMachine} · on hold ${pl.onHold}` },
+        { label: "Ready to dispatch", val: pl.readyDispatch, unit: "slabs", sub: "" },
+        { label: "Parked in storage", val: pl.storageCut + pl.storageReady, unit: "slabs", sub: `cut ${pl.storageCut} · ready ${pl.storageReady}` },
+      ];
+      const rowH = 40, headH = 52, ph = headH + rows.length * rowH + 8;
+      P.glass(M, y, cw, ph, 18, COL.indigo);
+      P.t("LIVE PIPELINE", M + 18, y - 24, 11, bold, white);
+      P.t("Where material stands right now (not the 24 h window)", M + 18, y - 38, 8, font, white);
+      const maxV = Math.max(...rows.map((r) => r.val), 1);
+      let ry = y - headH - 12;
+      for (const r of rows) {
+        P.t(r.label, M + 18, ry, 10.5, bold, white);
+        P.r(`${fmt0(r.val)} ${r.unit}`, W - M - 18, ry, 11, bold, white);
+        if (r.sub) P.t(r.sub, M + 18, ry - 12, 8, font, white);
+        const bw = Math.max(3, (cw - 36) * (r.val / maxV));
+        // Bar hugs its own label — without a sub-line it sits higher so it
+        // never reads as belonging to the next row.
+        const barY = r.sub ? ry - 17 : ry - 12;
+        P.card(M + 18, barY, cw - 36, 4.5, 2, white, { opacity: 0.14 });
+        P.card(M + 18, barY, bw, 4.5, 2, white, { opacity: 0.6 });
+        ry -= rowH;
+      }
+      y -= ph + 13;
+    }
+    if (data.stock) {
+      const s = data.stock, hh = 100;
+      P.glass(M, y, cw, hh, 16, COL.cyan);
+      P.t("RAW BLOCK STOCK", M + 16, y - 22, 11, bold, white);
+      P.t("Usable blocks (available + reserved)", M + 16, y - 35, 8, font, white);
+      const colW = (cw - 32) / 2;
+      P.t("SANDSTONE", M + 16, y - 54, 8.5, bold, white);
+      P.t(`${fmt0(s.sandstoneCft)} CFT`, M + 16, y - 76, 20, bold, white);
+      P.t(`${s.sandstoneCount} blocks`, M + 16, y - 90, 8, font, white);
+      const mx = M + 16 + colW;
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 48 }, end: { x: mx - 8, y: y - 92 }, thickness: 0.5, color: white, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 54, 8.5, bold, white);
+      P.t(`${fmt1(s.marbleTonnes)} T`, mx, y - 76, 20, bold, white);
+      P.t(`${s.marbleCount} blocks · ~${fmt0(s.marbleCft)} CFT eq`, mx, y - 90, 8, font, white);
+      y -= hh + 13;
+    }
     // Block recovery split by stone category (matches the Block Journey
     // page): sandstone as a yield %, marble as CFT per tonne.
     if (data.recovery) {
@@ -1081,39 +1361,62 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       const colW = (cw - 32) / 2;
       P.t("SANDSTONE", M + 16, y - 54, 8.5, bold, white);
       P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 16, y - 78, 22, bold, white);
-      P.t(`${rec.sandstone.slabCft.toFixed(0)} / ${rec.sandstone.originalCft.toFixed(0)} CFT · ${rec.sandstone.lineages} blocks`, M + 16, y - 90, 8, font, white);
+      P.t(`${fmt0(rec.sandstone.slabCft)} / ${fmt0(rec.sandstone.originalCft)} CFT · ${rec.sandstone.lineages} blocks`, M + 16, y - 90, 8, font, white);
       const mx = M + 16 + colW;
       P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 92 }, thickness: 0.5, color: white, opacity: 0.3 });
       P.t("MARBLE", mx, y - 54, 8.5, bold, white);
       P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 78, 22, bold, white);
-      P.t(`${rec.marble.slabCft.toFixed(0)} CFT from ${rec.marble.tonnes.toFixed(1)} T · ${rec.marble.lineages} blocks`, mx, y - 90, 8, font, white);
-      y -= rh + 14;
+      P.t(`${fmt0(rec.marble.slabCft)} CFT from ${fmt1(rec.marble.tonnes)} T · ${rec.marble.lineages} blocks`, mx, y - 90, 8, font, white);
+      y -= rh + 13;
     }
-    section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.flatMap((rw) => [
-      { n: rw.stone, v: `${rw.count} · ${rw.cft.toFixed(0)} CFT` },
-      ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `   ↳ ${vd.vendor}`, v: `${vd.count} · ${vd.cft.toFixed(0)} CFT` })),
-    ]));
-    section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
-    section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${rw.cft.toFixed(0)} CFT` })));
-    section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} slabs · ${rw.cft.toFixed(1)} CFT` })));
     footer(P, 3, PAGES);
   }
 
-  // ── Page 4 — 10-day trend, one chart per metric (own scale) ──
+  // ── Page 4 — last-24 h breakdowns (blocks / cutting / carving / dispatch) ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
+    P.t("LAST 24 H · DETAIL", M, y, 10, bold, ink); y -= 18;
+    const section = (title: string, color: ReturnType<typeof rgb>, rows: Array<{ n: string; v: string }>) => {
+      P.pg.drawRectangle({ x: M, y: y - 1, width: 7, height: 7, color });
+      P.t(title, M + 11, y, 9.5, bold, color); y -= 6;
+      P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.9, color }); y -= 16;
+      if (rows.length === 0) { P.t("None", M, y, 10, font, muted); y -= 16; }
+      else {
+        rows.slice(0, 8).forEach((rw, i) => {
+          if (i % 2 === 1) P.pg.drawRectangle({ x: M - 4, y: y - 4, width: cw + 8, height: 15, color: rowTint });
+          P.t(P.clip(rw.n, 30), M, y, 10.5, font, ink); P.r(rw.v, W - M, y, 10, font, muted); y -= 16;
+        });
+        // No silent caps — a long tail collapses into an explicit count.
+        if (rows.length > 8) { P.t(`+ ${rows.length - 8} more`, M, y, 9, font, muted); y -= 16; }
+      }
+      y -= 12;
+    };
+    section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.flatMap((rw) => [
+      { n: rw.stone, v: `${rw.count} · ${fmt0(rw.cft)} CFT` },
+      ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `    -  ${vd.vendor}`, v: `${vd.count} · ${fmt0(vd.cft)} CFT` })),
+    ]));
+    section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${rw.slabs} · ${fmt0(rw.cft)} CFT` })));
+    section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${rw.slabs} · ${fmt0(rw.cft)} CFT` })));
+    section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${rw.slabs} slabs · ${fmt1(rw.cft)} CFT` })));
+    footer(P, 4, PAGES);
+  }
+
+  // ── Page 5 — 10-day trend, one chart per metric (own scale) ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
     P.t("10-DAY ACTIVITY TRENDS", M, y, 10, bold, ink); y -= 18;
     const tr = data.trend, n = tr.length;
-    const drawMini = (title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving") => {
+    const drawMini = (title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving" | "dispatch") => {
       const vals = tr.map((d) => d[key]);
       const peak = vals.length ? Math.max(...vals) : 0;
       const total = vals.reduce((a, b) => a + b, 0);
-      const lastV = vals.length ? vals[vals.length - 1] : 0;
+      const avg = n > 0 ? total / n : 0;
       P.pg.drawCircle({ x: M + 4, y: y - 3, size: 3.4, color });
       P.t(title, M + 13, y - 6, 11.5, bold, ink);
-      P.r(`latest ${lastV} · peak ${peak} · total ${total}`, W - M, y - 6, 8, font, muted);
-      const left = M + 26, rightX = W - M - 4, pT = y - 20, pB = pT - 120;
+      P.r(`avg ${avg.toFixed(1)}/day · peak ${peak} · total ${total}`, W - M, y - 6, 8, font, muted);
+      const left = M + 26, rightX = W - M - 4, pT = y - 20, pB = pT - 100;
       const niceMax = Math.max(5, Math.ceil(peak / 5) * 5);
       for (let g = 0; g <= 4; g++) {
         const yy = pB + ((pT - pB) * g) / 4;
@@ -1125,21 +1428,22 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       for (let i = 0; i < n; i++) P.ctr(tr[i].short, xAt(i), pB - 12, 7.5, font, muted);
       for (let i = 0; i < n - 1; i++) P.pg.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 2.2, color });
       for (let i = 0; i < n; i++) P.pg.drawCircle({ x: xAt(i), y: yAt(vals[i]), size: 2.4, color });
-      y = pB - 12 - 24;
+      y = pB - 12 - 22;
     };
     drawMini("Blocks added", COL.blue, "blocks");
     drawMini("Cutting done", COL.cyan, "cutting");
     drawMini("Carving done", COL.amber, "carving");
-    footer(P, 4, PAGES);
+    drawMini("Dispatched", COL.green, "dispatch");
+    footer(P, 5, PAGES);
   }
 
-  // ── Pages 5+ — last-24 h challans & invoices (summary + copies) ──
+  // ── Pages 6+ — last-24 h challans & invoices (summary + copies) ──
   if (hasRecent) {
     const money = (d: RecentDoc) => (d.priced ? inr(d.total) : "not priced");
     const qline = (d: { cft: number; sft: number; nos: number }) =>
       [d.cft ? `${d.cft.toFixed(0)} CFT` : "", d.sft ? `${d.sft.toFixed(0)} SFT` : "", d.nos ? `${d.nos.toFixed(0)} NOS` : ""].filter(Boolean).join(" - ") || "-";
 
-    // Page 5 — SUMMARY (both lists + section totals).
+    // Page 6 — SUMMARY (both lists + section totals).
     {
       const P = newPage();
       let y = header(P, H - 26, false);
@@ -1170,7 +1474,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       listBlock("CHALLANS RAISED", COL.blue, recChallans);
       listBlock("INVOICES ISSUED", COL.green, recInvoices);
       P.t("Full itemised copies of each document on the following pages.", M, y, 8.5, font, muted);
-      footer(P, 5, PAGES);
+      footer(P, 6, PAGES);
     }
 
     // Detail pages — one itemised block per document (fixed slot).
@@ -1224,7 +1528,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
           P.t("Not priced yet - value will appear once this challan is priced.", M + 6, ty + 1, 8, font, muted);
         }
       });
-      footer(P, 6 + pageIdx, PAGES);
+      footer(P, 7 + pageIdx, PAGES);
     }
   }
 

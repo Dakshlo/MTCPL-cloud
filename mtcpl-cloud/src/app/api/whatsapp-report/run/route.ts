@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────
 // /api/whatsapp-report/run — send the daily WhatsApp work-report PDF.
 //
-//   • GET  — Vercel Cron (6 PM IST, see vercel.json). Verified via the
+//   • GET  — Vercel Cron (10 AM IST, see vercel.json). Verified via the
 //            Authorization: Bearer ${CRON_SECRET} header (same scheme as
 //            the email-snapshot cron).
 //   • POST — owner/developer manual trigger (a "test send now" so we can
