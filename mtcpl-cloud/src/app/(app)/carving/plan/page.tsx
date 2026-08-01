@@ -50,11 +50,15 @@ export default async function CarvingPlanPage() {
     thickness_ft: number | string;
     priority: boolean | null;
     label: string | null;
+    stone: string | null;
+    description: string | null;
+    component_section: string | null;
+    component_element: string | null;
   };
   const slabs = await fetchAllPaged<SlabRow>((from, to) =>
     admin
       .from("slab_requirements")
-      .select("id, temple, status, carving_method, length_ft, width_ft, thickness_ft, priority, label")
+      .select("id, temple, status, carving_method, length_ft, width_ft, thickness_ft, priority, label, stone, description, component_section, component_element")
       .order("temple", { ascending: true })
       .order("id", { ascending: true })
       .range(from, to),
@@ -160,6 +164,10 @@ export default async function CarvingPlanPage() {
         temple: s.temple,
         status: s.status,
         label: s.label,
+        stone: s.stone,
+        description: s.description,
+        section: s.component_section,
+        element: s.component_element,
         l: Number(s.length_ft) || 0,
         w: Number(s.width_ft) || 0,
         t: Number(s.thickness_ft) || 0,
@@ -176,44 +184,22 @@ export default async function CarvingPlanPage() {
         (a.methods.cnc.total.cft + a.methods.outsource.total.cft + a.methods.none.total.cft + a.methods.nil.total.cft),
     );
 
-  // ── Forecast — last-30-day approved throughput per vendor type, with the
+  // ── CNC forecast — last-30-day approved CNC throughput, with the
   // carving_sides multiplier (a 2-side slab is twice the carved output).
   const thirtyAgo = Date.now() - 30 * 24 * 3600 * 1000;
-  let cncDoneCft30 = 0, cncDoneSlabs30 = 0, outDoneCft30 = 0, outDoneSlabs30 = 0;
-  // Off-plan: an item whose vendor_type contradicts the slab's tag.
-  const offPlanIds: string[] = [];
-  const seenOffPlan = new Set<string>();
+  let cncDoneCft30 = 0, cncDoneSlabs30 = 0;
   for (const it of items) {
     const sid = it.slab_requirement_id;
     if (!sid) continue;
-    const meta = slabMeta.get(sid);
-    if (meta) {
-      const tag = meta.method;
-      const vt = it.vendor_type;
-      const mismatch =
-        (tag === "cnc" && vt === "Outsource") ||
-        (tag === "outsource" && vt === "CNC") ||
-        tag === "none"; // a no-carving slab with a carving job is off-plan by definition
-      if (mismatch && !seenOffPlan.has(sid)) {
-        seenOffPlan.add(sid);
-        offPlanIds.push(sid);
-      }
-    }
-    if (it.review_approved_at && Date.parse(it.review_approved_at) >= thirtyAgo) {
+    if (it.vendor_type === "CNC" && it.review_approved_at && Date.parse(it.review_approved_at) >= thirtyAgo) {
       const sides = it.carving_sides === 2 ? 2 : 1;
-      const c = (dimsById.get(sid) ?? 0) * sides;
-      if (it.vendor_type === "CNC") {
-        cncDoneCft30 += c;
-        cncDoneSlabs30 += 1;
-      } else if (it.vendor_type === "Outsource") {
-        outDoneCft30 += c;
-        outDoneSlabs30 += 1;
-      }
+      cncDoneCft30 += (dimsById.get(sid) ?? 0) * sides;
+      cncDoneSlabs30 += 1;
     }
   }
+  void slabMeta; // kept for future off-plan needs; not surfaced on the page
 
-  // Pending CNC work = cnc-tagged slabs not yet done (raw CFT — sides are
-  // unknown before assignment; the client notes the asymmetry).
+  // Pending CNC work = cnc-tagged slabs not yet done.
   const cncPending = {
     slabs:
       summaries.cnc.stages.notCut.slabs +
@@ -224,23 +210,11 @@ export default async function CarvingPlanPage() {
       summaries.cnc.stages.cutWaiting.cft +
       summaries.cnc.stages.inCarving.cft,
   };
-  const outPending = {
-    slabs:
-      summaries.outsource.stages.notCut.slabs +
-      summaries.outsource.stages.cutWaiting.slabs +
-      summaries.outsource.stages.inCarving.slabs,
-    cft:
-      summaries.outsource.stages.notCut.cft +
-      summaries.outsource.stages.cutWaiting.cft +
-      summaries.outsource.stages.inCarving.cft,
-  };
 
   const forecast: CncForecast = {
     machineCount,
     cncPending,
     cncDone30: { slabs: cncDoneSlabs30, cft: cncDoneCft30 },
-    outPending,
-    outDone30: { slabs: outDoneSlabs30, cft: outDoneCft30 },
   };
 
   return (
@@ -249,7 +223,6 @@ export default async function CarvingPlanPage() {
       temples={temples}
       undecided={undecided}
       forecast={forecast}
-      offPlanIds={offPlanIds}
     />
   );
 }
