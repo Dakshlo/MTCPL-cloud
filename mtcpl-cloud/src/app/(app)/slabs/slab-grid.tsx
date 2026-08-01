@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { updateSlabAction, deleteSlabAction, bulkDeleteSlabsAction, bulkUpdateSlabsAction } from "./actions";
 import { LabelSelect } from "./label-select";
+import { METHOD_BADGE, type CarvingMethod } from "@/lib/carving-method";
 
 const STATUSES = ["open", "planned", "cutting", "cut_done", "completed", "rejected"] as const;
 
@@ -13,6 +14,7 @@ type Slab = {
   temple: string;
   stone: string | null;
   quality: string | null;
+  carving_method: string | null; // mig 215
   length_ft: number;
   width_ft: number;
   thickness_ft: number;
@@ -23,6 +25,38 @@ type Slab = {
   updated_at: string | null;
   created_by: string | null;
 };
+
+/** Mig 215 — carving-route select, shared by both edit drawers. Module-level
+ *  on purpose (a component defined inside SlabGrid would remount per render —
+ *  the known focus-loss trap). */
+function CarvingMethodSelect({ defaultValue }: { defaultValue: string | null | undefined }) {
+  return (
+    <label className="stack">
+      <span>Carving method</span>
+      <select name="carving_method" defaultValue={defaultValue ?? ""}>
+        <option value="">Nil — any</option>
+        <option value="cnc">CNC</option>
+        <option value="outsource">Outsource</option>
+        <option value="none">No carving</option>
+      </select>
+    </label>
+  );
+}
+
+/** Tiny route pill for the grid cards — nil renders nothing. */
+function methodPill(m: string | null | undefined) {
+  const meta = m ? METHOD_BADGE[m as CarvingMethod] : undefined;
+  if (!meta) return null;
+  return (
+    <span
+      className="role-pill"
+      style={{ color: meta.fg, background: meta.bg, border: `1px solid ${meta.border}` }}
+      title="Carving method"
+    >
+      {meta.label}
+    </span>
+  );
+}
 
 type Temple = { id: string; name: string; code_prefix: string };
 type StoneType = { id: string; name: string };
@@ -332,6 +366,7 @@ export function SlabGrid({
                             Grade {slab.quality}
                           </span>
                         )}
+                        {methodPill(slab.carving_method)}
                         <span className={`role-pill ${statusBadge(slab.status)}`}>{slab.status}</span>
                         <span className="slab-card-area">{cft} CFT</span>
                       </div>
@@ -506,6 +541,8 @@ export function SlabGrid({
                   </select>
                 </label>
 
+                <CarvingMethodSelect defaultValue={bulkSeed.carving_method} />
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label className="stack">
                     <span>Status</span>
@@ -602,6 +639,8 @@ export function SlabGrid({
                     <option value="B">Grade B</option>
                   </select>
                 </label>
+
+                <CarvingMethodSelect defaultValue={selected.carving_method} />
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label className="stack">

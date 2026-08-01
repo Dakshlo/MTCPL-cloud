@@ -262,7 +262,7 @@ export async function decideCancelledSlabAction(
     const { data: slab, error: slabErr } = await admin
       .from("slab_requirements")
       .select(
-        "id, temple, status, cancel_resolution, label, description, additional_description, stone, quality, length_ft, width_ft, thickness_ft, priority, component_section, component_element",
+        "id, temple, status, cancel_resolution, label, description, additional_description, stone, quality, carving_method, length_ft, width_ft, thickness_ft, priority, component_section, component_element",
       )
       .eq("id", slabId)
       .maybeSingle();
@@ -317,6 +317,7 @@ export async function decideCancelledSlabAction(
         temple: slab.temple,
         stone: slab.stone,
         quality: slab.quality,
+        carving_method: slab.carving_method, // mig 215 — the plan survives the replacement
         length_ft: slab.length_ft,
         width_ft: slab.width_ft,
         thickness_ft: slab.thickness_ft,

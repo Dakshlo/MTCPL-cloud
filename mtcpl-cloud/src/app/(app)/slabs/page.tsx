@@ -38,6 +38,7 @@ export default async function SlabsPage() {
   type SlabRow = {
     id: string; label: string; description?: string | null;
     temple: string; stone: string | null; quality: string | null;
+    carving_method: string | null; // mig 215
     length_ft: number; width_ft: number; thickness_ft: number;
     status: string; priority: boolean; batch_id?: string | null;
     created_at: string | null; updated_at: string | null; created_by: string | null;
@@ -48,7 +49,7 @@ export default async function SlabsPage() {
     for (let offset = 0; offset < SLAB_QUERY_LIMIT; offset += PAGE) {
       let q = admin
         .from("slab_requirements")
-        .select("id, label, description, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
+        .select("id, label, description, temple, stone, quality, carving_method, length_ft, width_ft, thickness_ft, status, priority, batch_id, created_at, updated_at, created_by")
         .in("status", ["open", "planned"])
         .order("priority", { ascending: false })
         .order("created_at", { ascending: false })

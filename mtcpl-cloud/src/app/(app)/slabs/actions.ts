@@ -11,6 +11,7 @@ import { notify } from "@/lib/notifications";
 import { fetchUncategorizedOpenSlabs } from "@/lib/uncategorized-slabs";
 import { getProfilesMap } from "@/lib/profiles";
 import { fetchAllPaged } from "@/lib/paginate";
+import { parseCarvingMethodInput } from "@/lib/carving-method";
 import type { AppRole } from "@/lib/types";
 import type { ImportBatch, ImportBatchRowPreview, BatchSlab } from "./import-batches-button";
 
@@ -56,6 +57,8 @@ export async function addSlabAction(formData: FormData) {
     temple,
     stone,
     quality: text(formData, "quality") || null,
+    // Mig 215 — carving route decision, recorded at entry (null = nil/any).
+    carving_method: parseCarvingMethodInput(text(formData, "carving_method")),
     length_ft: num(formData, "length_in"),
     width_ft: num(formData, "width_in"),
     thickness_ft: num(formData, "thickness_in"),
@@ -230,6 +233,8 @@ type CleanImportRow = {
   // (where the externally-cut slab physically sits). Null for Required
   // Sizes imports, which don't collect it.
   stockLocation: string | null;
+  // Mig 215 — carving route decision (cnc/outsource/none), null = nil/any.
+  carvingMethod: "cnc" | "outsource" | "none" | null;
 };
 
 function cleanImportRows(rows: unknown): CleanImportRow[] {
@@ -239,6 +244,7 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
     quantity?: number | string | null; quality?: string | null; priority?: boolean | null;
     componentSection?: string | null; componentElement?: string | null;
     stockLocation?: string | null;
+    carvingMethod?: string | null;
   };
   // Label + Category 1/2 are stored UPPERCASE so they group consistently
   // no matter how they were typed in Excel ("floor-1" → "FLOOR-1").
@@ -259,6 +265,8 @@ function cleanImportRows(rows: unknown): CleanImportRow[] {
       componentSection: upOrNull(r.componentSection),
       componentElement: upOrNull(r.componentElement),
       stockLocation: (r.stockLocation ?? "").toString().trim() || null,
+      // Forgiving parse — an unknown value lands nil, never rejects a row.
+      carvingMethod: parseCarvingMethodInput(r.carvingMethod),
     }))
     // Every slab needs all three dimensions (stored as inches in *_ft).
     .filter((r) => r.length > 0 && r.width > 0 && r.height > 0);
@@ -308,6 +316,7 @@ async function insertApprovedSlabRows(
           temple,
           stone,
           quality: r.quality,
+          carving_method: r.carvingMethod, // mig 215
           length_ft: r.length,
           width_ft: r.width,
           thickness_ft: r.height,
@@ -394,6 +403,9 @@ async function insertApprovedExternalSlabRows(
           temple,
           stone,
           quality: r.quality,
+          // Mig 215 — a to_dispatch batch factually skips carving, so the
+          // route is 'none' regardless of the row's tag (actual wins).
+          carving_method: toDispatch ? "none" : r.carvingMethod,
           length_ft: r.length,
           width_ft: r.width,
           thickness_ft: r.height,
@@ -929,6 +941,8 @@ export async function bulkUpdateSlabsAction(formData: FormData) {
     temple: text(formData, "temple"),
     stone,
     quality: text(formData, "quality") || null,
+    // Mig 215 — "" clears back to nil (null).
+    carving_method: parseCarvingMethodInput(text(formData, "carving_method")),
     length_ft: num(formData, "length_in"),
     width_ft: num(formData, "width_in"),
     thickness_ft: num(formData, "thickness_in"),
