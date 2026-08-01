@@ -13,6 +13,7 @@ import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { DprEntryCard } from "@/components/dpr-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
+import { DashboardV2 } from "./dashboard-v2";
 
 /**
  * IST midnight today / start / end — used to scope Screen Time pings.
@@ -217,6 +218,28 @@ export default async function DashboardPage() {
   // (no derived value needed here).
   void prioritySlabs;
 
+  // Computed BEFORE the v2 early-return so the v1 JSX below can keep its
+  // exact owner/developer gates without TS narrowing them to never-true.
+  const isOwnerOrDev = profile.role === "owner" || profile.role === "developer";
+
+  // ── Dashboard v2 — DEVELOPER-ONLY preview (Daksh, Aug 2026) ──────
+  // Same data, brand-new "command center" skin. Every other role keeps
+  // the v1 layout below untouched until Daksh approves the redesign;
+  // then this gate widens to the applicable roles.
+  if (profile.role === "developer") {
+    return (
+      <DashboardV2
+        greeting={greeting}
+        name={ownerName}
+        dateDisplay={dateDisplay}
+        onlineNames={onlineList.map((u) => u.full_name || "—")}
+        pushCount={pushList.length}
+        screenTime={screenTimeRows}
+        showMarketNews={canSeeMarketNews(profile)}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
 
@@ -273,7 +296,7 @@ export default async function DashboardPage() {
         <AskAiEntryCard />
         <BlockJourneyEntryCard />
         {/* Production DPR — owner/developer only. */}
-        {(profile.role === "owner" || profile.role === "developer") && <DprEntryCard />}
+        {isOwnerOrDev && <DprEntryCard />}
         <VariousCostingEntryCard />
         <TvModeEntryCard />
         {/* Owner-only market-news brief + chat (liquid-glass page). */}
@@ -283,7 +306,7 @@ export default async function DashboardPage() {
       {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked
           important emails from the owner's Gmail, summarized. The
           mailbox link is read-only (IMAP, no SMTP in the codebase). */}
-      {(profile.role === "owner" || profile.role === "developer") && (
+      {isOwnerOrDev && (
         <EmailSnapshotCard />
       )}
 
@@ -406,7 +429,7 @@ export default async function DashboardPage() {
           dot + type "aadesh", or long-press on a tablet), which navigates to
           the passphrase-gated summary page. Owner / developer only. See
           royalty-secret-dot.tsx. */}
-      {(profile.role === "owner" || profile.role === "developer") && (
+      {isOwnerOrDev && (
         <div
           style={{
             marginTop: 24,
