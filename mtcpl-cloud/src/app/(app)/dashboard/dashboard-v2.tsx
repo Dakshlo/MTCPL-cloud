@@ -1,31 +1,24 @@
 // ──────────────────────────────────────────────────────────────────
 // Dashboard v2 — "command center" redesign (Daksh, Aug 2026).
 //
-// DEVELOPER-ONLY PREVIEW for now: page.tsx renders this when
-// profile.role === "developer" and the untouched v1 layout for every
-// other role. Once Daksh approves, the gate widens to the applicable
-// roles and v1 retires.
+// DEVELOPER-ONLY PREVIEW: page.tsx renders this when profile.role ===
+// "developer"; every other role keeps the v1 layout until Daksh
+// approves, then the gate widens.
 //
-// Design: one dark liquid-glass cockpit (same family as the WhatsApp
-// daily report + market-news page) instead of v1's stack of mixed
-// light/dark cards. Same features, same links, same secrets — new
-// skin + layout:
-//   • Hero — date, greeting, live IST clock, online users as pills.
-//   • Launch grid — the six destination tiles, one uniform glass
-//     language with per-destination accent colours.
-//   • Desk — email snapshot on the left; a right rail with the two
-//     report peeks, the urgent-push entry and the screen-time board.
-//   • RoyaltySecretDot stays at the bottom (hover + "aadesh").
+// THEMED (Daksh: "how light version will look") — the board follows the
+// app's existing theme toggle ([data-theme="dark"] on <html>, sidebar
+// "Dark mode"). Every colour flows through --dv2-* custom properties:
+// the light skin matches the app's cream/white language, the dark skin
+// is the original liquid-glass cockpit. The server can't know the
+// client's theme, so ALL theming is CSS — no JS branches.
 //
 // IMPORTANT CSS constraint: PeekIframe's modal is position:fixed and
-// NOT portaled, so no `transform` / `backdrop-filter` / `filter` on
-// any ancestor of its triggers (they'd become the containing block
-// and pin the modal inside the tile — the known nested-modal bug).
-// Hover feedback is border + glow only, app-wide here.
+// NOT portaled, so no `transform` / `backdrop-filter` / `filter` on any
+// ancestor of its triggers (containing-block bug). Hover is border+glow.
 // ──────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { PeekIframe } from "@/components/peek-iframe";
 import { EmailSnapshotCard } from "./email-snapshot-card";
 import { RoyaltySecretDot } from "./royalty-secret-dot";
@@ -33,25 +26,21 @@ import { LiveClock } from "./live-clock";
 
 type ScreenTimeRow = { name: string; minutes: number; isOnline: boolean };
 
-const INK = "#eef1f7";
-const MUTED = "rgba(255,255,255,0.55)";
-const FAINT = "rgba(255,255,255,0.38)";
-const GOLD = "#E8C572";
-const GLASS_BG = "rgba(255,255,255,0.055)";
-const GLASS_BORDER = "1px solid rgba(255,255,255,0.12)";
+// Theme-var aliases — every usage below resolves per-theme via the
+// .dv2-root variable blocks in the <style> tag.
+const INK = "var(--dv2-ink)";
+const MUTED = "var(--dv2-muted)";
+const FAINT = "var(--dv2-faint)";
+const GOLD = "var(--dv2-gold)";
+const CARD_BG = "var(--dv2-card-bg)";
+const CARD_BORDER = "1px solid var(--dv2-card-border)";
 
-/** Shared glass-panel shell. */
-function Panel({ children, pad = 18, style }: { children: ReactNode; pad?: number; style?: React.CSSProperties }) {
+/** Shared panel shell. */
+function Panel({ children, pad = 18, style }: { children: ReactNode; pad?: number; style?: CSSProperties }) {
   return (
     <div
       className="dv2-panel"
-      style={{
-        background: GLASS_BG,
-        border: GLASS_BORDER,
-        borderRadius: 16,
-        padding: pad,
-        ...style,
-      }}
+      style={{ background: CARD_BG, border: CARD_BORDER, borderRadius: 16, padding: pad, ...style }}
     >
       {children}
     </div>
@@ -71,10 +60,10 @@ function SectionLabel({ children }: { children: ReactNode }) {
 }
 
 /** One launch tile body — used inside a Link or a PeekIframe trigger.
- *  Daksh Aug 2026: no description line — the kicker + title already say what
- *  it is, and six paragraphs of explanation made the grid noisy. */
-function TileBody({ icon, accent, kicker, title, cta }: {
-  icon: string; accent: string; kicker: string; title: string; cta: string;
+ *  `accent` = dark-skin colour, `accentLight` = readable-on-white twin;
+ *  the .dv2-acc/.dv2-icon rules pick the right one per theme. */
+function TileBody({ icon, accent, accentLight, kicker, title, cta }: {
+  icon: string; accent: string; accentLight: string; kicker: string; title: string; cta: string;
 }) {
   return (
     <div
@@ -84,60 +73,62 @@ function TileBody({ icon, accent, kicker, title, cta }: {
         flexDirection: "column",
         gap: 12,
         height: "100%",
-        // Fill the grid cell. Without this the tile is only as wide as its
-        // own text, so "Carving floor on the wall" made a fat card and
-        // "MTCPL-AI" a thin one — the leftover space in each equal-width
-        // column read as random gaps between the cards (Daksh).
+        // Fill the grid cell — content-width tiles made uneven gaps (Daksh).
         width: "100%",
         flex: 1,
         minWidth: 0,
         minHeight: 118,
-        background: GLASS_BG,
-        border: GLASS_BORDER,
-        borderLeft: `3px solid ${accent}`,
+        background: CARD_BG,
+        border: CARD_BORDER,
+        borderLeft: `3px solid ${accentLight}`,
         borderRadius: 16,
         padding: "16px 18px",
         cursor: "pointer",
         position: "relative",
         overflow: "hidden",
+        // Per-tile accent pair consumed by the themed CSS rules.
+        ["--ta" as never]: accent,
+        ["--tal" as never]: accentLight,
       }}
     >
-      {/* soft accent glow in the corner */}
-      <div aria-hidden style={{ position: "absolute", top: -46, right: -46, width: 130, height: 130, borderRadius: "50%", background: `radial-gradient(circle, ${accent}33 0%, transparent 70%)`, pointerEvents: "none" }} />
+      {/* corner glow — dark skin only (see .dv2-glow rule) */}
+      <div className="dv2-glow" aria-hidden style={{ position: "absolute", top: -46, right: -46, width: 130, height: 130, borderRadius: "50%", pointerEvents: "none" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-        <span style={{ width: 40, height: 40, borderRadius: 12, background: `${accent}22`, border: `1px solid ${accent}55`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 }}>
+        <span className="dv2-icon" style={{ width: 40, height: 40, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 }}>
           {icon}
         </span>
-        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: accent }}>
+        <span className="dv2-acc" style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase" }}>
           {kicker}
         </span>
       </div>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 17.5, fontWeight: 750, color: INK, letterSpacing: "-0.2px" }}>{title}</div>
       </div>
-      <div style={{ marginTop: "auto", fontSize: 12, fontWeight: 700, color: accent }}>{cta}</div>
+      <div className="dv2-acc" style={{ marginTop: "auto", fontSize: 12, fontWeight: 700 }}>{cta}</div>
     </div>
   );
 }
 
-/** Compact dark trigger row for the two embedded reports. */
-function ReportRowBody({ icon, title, accent }: { icon: string; title: string; accent: string }) {
+/** Compact trigger row for the two embedded reports. */
+function ReportRowBody({ icon, title, accent, accentLight }: { icon: string; title: string; accent: string; accentLight: string }) {
   return (
     <div
       className="dv2-tile"
       style={{
         display: "flex", alignItems: "center", gap: 12,
-        background: GLASS_BG, border: GLASS_BORDER, borderLeft: `3px solid ${accent}`,
+        background: CARD_BG, border: CARD_BORDER, borderLeft: `3px solid ${accentLight}`,
         borderRadius: 14, padding: "13px 15px", cursor: "pointer",
+        ["--ta" as never]: accent,
+        ["--tal" as never]: accentLight,
       }}
     >
-      <span style={{ width: 36, height: 36, borderRadius: 10, background: `${accent}22`, border: `1px solid ${accent}55`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+      <span className="dv2-icon" style={{ width: 36, height: 36, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
         {icon}
       </span>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>{title}</div>
       </div>
-      <span style={{ fontSize: 13, fontWeight: 800, color: accent }}>→</span>
+      <span className="dv2-acc" style={{ fontSize: 13, fontWeight: 800 }}>→</span>
     </div>
   );
 }
@@ -163,59 +154,103 @@ export function DashboardV2({
         overflow: "hidden",
         borderRadius: 22,
         padding: "clamp(16px, 2.4vw, 30px)",
-        background: "linear-gradient(160deg, #0b0e16 0%, #121726 55%, #191f31 100%)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
+        background: "var(--dv2-root-bg)",
+        border: "1px solid var(--dv2-root-border)",
+        boxShadow: "var(--dv2-root-shadow)",
         marginBottom: 32,
       }}
     >
-      {/* Hover language is border+glow ONLY — see the containing-block note
-          at the top of this file before adding transforms here.
-
-          The shell rules below are GLOBAL on purpose: .page-content and
-          .topbar belong to the (app) layout, and a dark dashboard framed by
-          the cream shell looked like a window with white bezels (Daksh).
-          Because this <style> lives inside the v2 tree it is mounted only
-          while the v2 dashboard is on screen — navigating away unmounts it
-          and the rest of the app stays light. */}
+      {/* Theme system: light = the app's cream/white language (default);
+          [data-theme="dark"] = the liquid-glass cockpit. Shell recolours
+          (body/topbar) apply in DARK ONLY — the light board sits happily in
+          the stock shell. These rules mount only while v2 is on screen.
+          Hover = border+glow only (PeekIframe containing-block bug). */}
       <style>{`
+        .dv2-root {
+          --dv2-root-bg: var(--surface);
+          --dv2-root-border: var(--border);
+          --dv2-root-shadow: 0 4px 20px rgba(45,36,16,0.06);
+          --dv2-ink: var(--text);
+          --dv2-muted: var(--muted);
+          --dv2-faint: var(--muted-light);
+          --dv2-gold: var(--gold-dark);
+          --dv2-badge-ink: #ffffff;
+          --dv2-card-bg: var(--surface-alt, #FAF8F5);
+          --dv2-card-border: var(--border);
+          --dv2-track: var(--border);
+          --dv2-push-bg: linear-gradient(135deg, rgba(180,140,40,0.10) 0%, rgba(180,140,40,0.03) 100%);
+          --dv2-push-border: rgba(180,140,40,0.45);
+          --dv2-name-grad: linear-gradient(100deg, #a16207 0%, #c98a2a 55%, #a16207 100%);
+          --dv2-divider: linear-gradient(90deg, rgba(180,140,40,0.55) 0%, rgba(45,36,16,0.10) 55%, transparent 100%);
+        }
+        [data-theme="dark"] .dv2-root {
+          --dv2-root-bg: linear-gradient(160deg, #0b0e16 0%, #121726 55%, #191f31 100%);
+          --dv2-root-border: rgba(255,255,255,0.08);
+          --dv2-root-shadow: 0 18px 60px rgba(0,0,0,0.35);
+          --dv2-ink: #eef1f7;
+          --dv2-muted: rgba(255,255,255,0.55);
+          --dv2-faint: rgba(255,255,255,0.38);
+          --dv2-gold: #E8C572;
+          --dv2-badge-ink: #0b0e16;
+          --dv2-card-bg: rgba(255,255,255,0.055);
+          --dv2-card-border: rgba(255,255,255,0.12);
+          --dv2-track: rgba(255,255,255,0.10);
+          --dv2-push-bg: linear-gradient(135deg, rgba(232,197,114,0.14) 0%, rgba(232,197,114,0.05) 100%);
+          --dv2-push-border: rgba(232,197,114,0.35);
+          --dv2-name-grad: linear-gradient(100deg, #E8C572 0%, #f6e3b4 55%, #E8C572 100%);
+          --dv2-divider: linear-gradient(90deg, rgba(232,197,114,0.5) 0%, rgba(255,255,255,0.08) 55%, transparent 100%);
+        }
+
+        /* Per-tile accent: light uses the darker twin (--tal), dark the neon (--ta). */
+        .dv2-root .dv2-acc { color: var(--tal); }
+        [data-theme="dark"] .dv2-root .dv2-acc { color: var(--ta); }
+        .dv2-root .dv2-icon {
+          background: color-mix(in srgb, var(--tal) 12%, transparent);
+          border: 1px solid color-mix(in srgb, var(--tal) 38%, transparent);
+        }
+        [data-theme="dark"] .dv2-root .dv2-icon {
+          background: color-mix(in srgb, var(--ta) 14%, transparent);
+          border: 1px solid color-mix(in srgb, var(--ta) 34%, transparent);
+        }
+        .dv2-root .dv2-glow { display: none; }
+        [data-theme="dark"] .dv2-root .dv2-glow {
+          display: block;
+          background: radial-gradient(circle, color-mix(in srgb, var(--ta) 20%, transparent) 0%, transparent 70%);
+        }
+        .dv2-root .dv2-blob { display: none; }
+        [data-theme="dark"] .dv2-root .dv2-blob { display: block; }
+
         .dv2-tile { transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-        .dv2-tile:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.09); box-shadow: 0 10px 34px rgba(0,0,0,.45); }
+        .dv2-tile:hover { border-color: var(--gold-border, #d8c49a); background: var(--surface); box-shadow: 0 8px 24px rgba(45,36,16,0.10); }
+        [data-theme="dark"] .dv2-tile:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.09); box-shadow: 0 10px 34px rgba(0,0,0,.45); }
+
         .dv2-desk { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
         @media (max-width: 1020px) { .dv2-desk { grid-template-columns: 1fr; } }
-        /* Explicit column counts instead of auto-fit: there are 6 tiles, and
-           auto-fit happily produced a 5 + 1 orphan row. 6/3/2/1 all divide
-           evenly, so every row is always full and the grid stays square. */
+        /* 6 tiles: explicit 6/3/2/1 columns so a row is never left half-empty. */
         .dv2-launch { display: grid; grid-template-columns: 1fr; gap: 13px; align-items: stretch; }
         @media (min-width: 660px)  { .dv2-launch { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (min-width: 1040px) { .dv2-launch { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         @media (min-width: 1620px) { .dv2-launch { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 
-        /* ── dark shell: no cream bezel around the dark panel ── */
-        body { background: #080b12; }
+        /* ── shell: full width always; dark recolour only in dark theme ── */
         .page-content { max-width: none; padding: 12px 14px 22px; }
-        .topbar { background: #0f1320; border-bottom: 1px solid rgba(255,255,255,0.08); }
-        .topbar-label { color: rgba(255,255,255,0.42); }
-        .topbar-name { color: #eef1f7; }
-        /* Sign out is a transparent button with dark-brown text — invisible
-           once the bar goes dark. Same for the ⟳ / ⚙ cream circles. */
-        .topbar .secondary-button { color: #eef1f7; border-color: rgba(255,255,255,0.22); }
-        .topbar .secondary-button:hover { background: rgba(255,255,255,0.08); }
-        .topbar .topbar-settings-btn {
+        [data-theme="dark"] body { background: #080b12; }
+        [data-theme="dark"] .topbar { background: #0f1320; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        [data-theme="dark"] .topbar-label { color: rgba(255,255,255,0.42); }
+        [data-theme="dark"] .topbar-name { color: #eef1f7; }
+        [data-theme="dark"] .topbar .secondary-button { color: #eef1f7; border-color: rgba(255,255,255,0.22); }
+        [data-theme="dark"] .topbar .secondary-button:hover { background: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .topbar .topbar-settings-btn {
           background: rgba(255,255,255,0.08);
           border-color: rgba(255,255,255,0.16);
           color: rgba(255,255,255,0.78);
         }
-
-        /* Email snapshot stays LIGHT on purpose (Daksh) — it reads as a sheet
-           of paper on the dark desk, and it's the one panel you actually read
-           word-by-word. No variable overrides here. */
       `}</style>
 
-      {/* Ambient glow blobs behind everything. */}
-      <div aria-hidden style={{ position: "absolute", top: -140, right: -100, width: 420, height: 420, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,197,114,0.13) 0%, transparent 65%)", pointerEvents: "none" }} />
-      <div aria-hidden style={{ position: "absolute", bottom: -180, left: -140, width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.14) 0%, transparent 65%)", pointerEvents: "none" }} />
-      <div aria-hidden style={{ position: "absolute", top: "38%", left: "44%", width: 360, height: 360, borderRadius: "50%", background: "radial-gradient(circle, rgba(14,165,233,0.09) 0%, transparent 65%)", pointerEvents: "none" }} />
+      {/* Ambient glow blobs — dark skin only. */}
+      <div className="dv2-blob" aria-hidden style={{ position: "absolute", top: -140, right: -100, width: 420, height: 420, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,197,114,0.13) 0%, transparent 65%)", pointerEvents: "none" }} />
+      <div className="dv2-blob" aria-hidden style={{ position: "absolute", bottom: -180, left: -140, width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.14) 0%, transparent 65%)", pointerEvents: "none" }} />
+      <div className="dv2-blob" aria-hidden style={{ position: "absolute", top: "38%", left: "44%", width: 360, height: 360, borderRadius: "50%", background: "radial-gradient(circle, rgba(14,165,233,0.09) 0%, transparent 65%)", pointerEvents: "none" }} />
 
       <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -226,13 +261,13 @@ export function DashboardV2({
               <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: FAINT }}>
                 {dateDisplay}
               </span>
-              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", color: "#0b0e16", background: GOLD, borderRadius: 5, padding: "2.5px 7px", textTransform: "uppercase" }}>
+              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", color: "var(--dv2-badge-ink)", background: GOLD, borderRadius: 5, padding: "2.5px 7px", textTransform: "uppercase" }}>
                 V2 preview
               </span>
             </div>
-            <div style={{ fontSize: "clamp(26px, 3.2vw, 36px)", fontWeight: 800, color: "#fff", letterSpacing: "-0.8px", lineHeight: 1.08 }}>
+            <div style={{ fontSize: "clamp(26px, 3.2vw, 36px)", fontWeight: 800, color: INK, letterSpacing: "-0.8px", lineHeight: 1.08 }}>
               {greeting},{" "}
-              <span style={{ background: "linear-gradient(100deg, #E8C572 0%, #f6e3b4 55%, #E8C572 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
+              <span style={{ background: "var(--dv2-name-grad)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
                 {name}
               </span>
             </div>
@@ -240,7 +275,7 @@ export function DashboardV2({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
               {onlineNames.length > 0 ? (
                 onlineNames.map((n, i) => (
-                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 650, color: "#c9f2d9" }}>
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(34,197,94,0.10)", border: "1px solid rgba(34,197,94,0.35)", borderRadius: 999, padding: "4px 11px", fontSize: 11.5, fontWeight: 650, color: "#15803d" }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 0 3px rgba(34,197,94,0.22)", display: "inline-block" }} />
                     {n}
                   </span>
@@ -253,33 +288,33 @@ export function DashboardV2({
           <LiveClock />
         </div>
 
-        <div style={{ height: 1, background: "linear-gradient(90deg, rgba(232,197,114,0.5) 0%, rgba(255,255,255,0.08) 55%, transparent 100%)" }} />
+        <div style={{ height: 1, background: "var(--dv2-divider)" }} />
 
         {/* ── LAUNCH GRID ── */}
         <SectionLabel>Launch</SectionLabel>
         <div className="dv2-launch">
           <Link href="/ask-ai" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="✨" accent="#E8C572" kicker="AI copilot" title="MTCPL-AI" cta="Open chat →" />
+            <TileBody icon="✨" accent="#E8C572" accentLight="#a16207" kicker="AI copilot" title="MTCPL-AI" cta="Open chat →" />
           </Link>
           <PeekIframe
             url="/embed/block-journey"
             modalTitle="Block Journey — Real Efficiency"
             triggerContent={
-              <TileBody icon="🧭" accent="#86AC5B" kicker="Real efficiency" title="Block Journey" cta="Peek report →" />
+              <TileBody icon="🧭" accent="#86AC5B" accentLight="#3f6212" kicker="Real efficiency" title="Block Journey" cta="Peek report →" />
             }
           />
           <Link href="/reports/dpr" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="🏭" accent="#34d399" kicker="Production" title="Production DPR" cta="Open →" />
+            <TileBody icon="🏭" accent="#34d399" accentLight="#047857" kicker="Production" title="Production DPR" cta="Open →" />
           </Link>
           <Link href="/reports/various-costing" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📊" accent="#7dd3fc" kicker="Reports" title="Various Costing" cta="Open →" />
+            <TileBody icon="📊" accent="#7dd3fc" accentLight="#0369a1" kicker="Reports" title="Various Costing" cta="Open →" />
           </Link>
           <Link href="/carving/floor?mode=tv" target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📺" accent="#f59e0b" kicker="TV mode" title="Carving floor on the wall" cta="Open in new tab ↗" />
+            <TileBody icon="📺" accent="#f59e0b" accentLight="#b45309" kicker="TV mode" title="Carving floor on the wall" cta="Open in new tab ↗" />
           </Link>
           {showMarketNews && (
             <Link href="/market-news" style={{ textDecoration: "none", display: "flex" }}>
-              <TileBody icon="📰" accent="#a5b4fc" kicker="Today's news" title="Market brief & chat" cta="Open →" />
+              <TileBody icon="📰" accent="#a5b4fc" accentLight="#4f46e5" kicker="Today's news" title="Market brief & chat" cta="Open →" />
             </Link>
           )}
         </div>
@@ -287,8 +322,8 @@ export function DashboardV2({
         {/* ── DESK: email left · action rail right ── */}
         <SectionLabel>Today&apos;s desk</SectionLabel>
         <div className="dv2-desk">
-          {/* Email snapshot keeps its own light panel — paper on the dark
-              desk. Component is shared with v1 and stays untouched. */}
+          {/* Email snapshot themes itself off the app-wide vars (they flip
+              with [data-theme]), so it matches both skins untouched. */}
           <div style={{ minWidth: 0 }}>
             <EmailSnapshotCard />
           </div>
@@ -297,23 +332,21 @@ export function DashboardV2({
             <PeekIframe
               url="/embed/blocks/report"
               modalTitle="Block Report"
-              triggerContent={<ReportRowBody icon="📊" title="Block Report" accent="#818cf8" />}
+              triggerContent={<ReportRowBody icon="📊" title="Block Report" accent="#818cf8" accentLight="#4f46e5" />}
             />
             <PeekIframe
               url="/embed/slabs/ready"
               modalTitle="Ready Sizes Report"
-              triggerContent={<ReportRowBody icon="📋" title="Ready Sizes Report" accent="#fbbf24" />}
+              triggerContent={<ReportRowBody icon="📋" title="Ready Sizes Report" accent="#fbbf24" accentLight="#b45309" />}
             />
 
             {/* Urgent push — full page entry. */}
             <Link href="/dashboard/push-urgent" id="push" style={{ textDecoration: "none" }}>
-              <div className="dv2-tile" style={{ background: "linear-gradient(135deg, rgba(232,197,114,0.14) 0%, rgba(232,197,114,0.05) 100%)", border: "1px solid rgba(232,197,114,0.35)", borderRadius: 14, padding: "14px 15px", cursor: "pointer" }}>
+              <div className="dv2-tile" style={{ background: "var(--dv2-push-bg)", border: "1px solid var(--dv2-push-border)", borderRadius: 14, padding: "14px 15px", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>🔔 Push urgent alert</div>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: "#0b0e16", background: GOLD, borderRadius: 8, padding: "5px 12px", whiteSpace: "nowrap" }}>Open →</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "var(--dv2-badge-ink)", background: GOLD, borderRadius: 8, padding: "5px 12px", whiteSpace: "nowrap" }}>Open →</span>
                 </div>
-                {/* Only the live number survives — the how-it-works sentence
-                    was noise on a page you open every day. */}
                 <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
                   <b style={{ color: GOLD }}>{pushCount.toLocaleString("en-IN")}</b>{" "}open / planned slabs
                 </div>
@@ -339,8 +372,8 @@ export function DashboardV2({
                           {row.isOnline && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0, boxShadow: "0 0 0 2px rgba(34,197,94,0.25)" }} />}
                           <span style={{ fontSize: 11.5, fontWeight: 650, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name}</span>
                         </div>
-                        <div style={{ flex: 1, height: 5, background: "rgba(255,255,255,0.1)", borderRadius: 3, overflow: "hidden" }}>
-                          <div style={{ width: `${barW}%`, height: "100%", background: `linear-gradient(90deg, ${GOLD} 0%, #b98a3e 100%)`, borderRadius: 3 }} />
+                        <div style={{ flex: 1, height: 5, background: "var(--dv2-track)", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${barW}%`, height: "100%", background: `linear-gradient(90deg, ${"var(--dv2-gold)"} 0%, #b98a3e 100%)`, borderRadius: 3 }} />
                         </div>
                         <span style={{ fontSize: 11.5, fontWeight: 750, color: INK, minWidth: 44, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{label}</span>
                       </div>

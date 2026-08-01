@@ -30,15 +30,17 @@ export function LiveClock() {
 
   return (
     <div style={{ textAlign: "right", lineHeight: 1 }}>
+      {/* Colours flow through the dashboard's --dv2-* theme vars so the
+          clock reads on both the light and dark skins. */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 5, justifyContent: "flex-end" }}>
-        <span style={{ fontSize: 40, fontWeight: 800, color: "#fff", letterSpacing: "-1px", fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ fontSize: 40, fontWeight: 800, color: "var(--dv2-ink, #fff)", letterSpacing: "-1px", fontVariantNumeric: "tabular-nums" }}>
           {hh}:{mm}
         </span>
-        <span style={{ fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.45)", fontVariantNumeric: "tabular-nums", width: 24, display: "inline-block", textAlign: "left" }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--dv2-faint, rgba(255,255,255,0.45))", fontVariantNumeric: "tabular-nums", width: 24, display: "inline-block", textAlign: "left" }}>
           {ss}
         </span>
       </div>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", color: "#E8C572", marginTop: 6, textTransform: "uppercase" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", color: "var(--dv2-gold, #E8C572)", marginTop: 6, textTransform: "uppercase" }}>
         India Standard Time
       </div>
     </div>
