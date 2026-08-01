@@ -44,9 +44,12 @@ export async function GET(req: NextRequest) {
     { header: "Height (in)", width: 11 },
     { header: "Quantity", width: 10 },
     { header: "Quality (A/B/Both)", width: 16 },
+    // Mig 215 — carving route. Appended LAST so old downloaded templates
+    // (13 cols) still parse: a missing cell simply lands "Nil — any".
+    { header: "Carving (CNC/Outsource/No carving)", width: 26 },
   ];
   for (let i = 1; i <= TEMPLATE_ROWS; i++) {
-    ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", "", ""]);
+    ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", "", "", ""]);
   }
 
   // Header band — brand brown, white bold, centred.
@@ -64,13 +67,14 @@ export async function GET(req: NextRequest) {
   for (let r = 2; r <= TEMPLATE_ROWS + 1; r++) {
     const row = ws.getRow(r);
     row.height = 17;
-    for (let col = 1; col <= 13; col++) {
+    for (let col = 1; col <= 14; col++) {
       const c = row.getCell(col);
       const prefilled = col <= 3;
       c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: prefilled ? "FFFDE9C8" : "FFEAF4FF" } };
       c.font = { name: "Calibri", size: 11, bold: col === 2, color: { argb: prefilled ? "FF7C2D12" : "FF1F2937" } };
-      // Numeric columns (Sr.No, Length, Width, Height, Quantity) centred.
-      c.alignment = { horizontal: col === 1 || col >= 9 ? "center" : "left", vertical: "middle" };
+      // Numeric columns (Sr.No, Length, Width, Height, Quantity, Quality)
+      // centred exactly as before; the new Carving col (14) reads left.
+      c.alignment = { horizontal: col === 1 || (col >= 9 && col <= 13) ? "center" : "left", vertical: "middle" };
       c.border = thin(prefilled ? "FFE7C9A0" : "FFC7DEF5");
     }
     // Quality column (col 13) — dropdown so users pick A / B / Both instead
@@ -82,6 +86,15 @@ export async function GET(req: NextRequest) {
       showErrorMessage: true,
       errorTitle: "Quality",
       error: "Pick A, B or Both (or leave blank for Both).",
+    };
+    // Carving method column (col 14, mig 215) — blank = Nil (decide later).
+    row.getCell(14).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: ['"CNC,Outsource,No carving"'],
+      showErrorMessage: true,
+      errorTitle: "Carving method",
+      error: "Pick CNC, Outsource or No carving (or leave blank to decide later).",
     };
   }
 

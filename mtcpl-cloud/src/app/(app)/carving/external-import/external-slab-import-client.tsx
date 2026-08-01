@@ -21,6 +21,7 @@ import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { submitExternalSlabImportBatchAction } from "../../slabs/actions";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { parseCarvingMethodInput } from "@/lib/carving-method";
 
 export type TempleOpt = { name: string; default_stone: string | null };
 
@@ -41,6 +42,8 @@ type Row = {
   height: string;
   quantity: string;
   quality: string;
+  // Mig 215 — carving route: "" (nil) | "cnc" | "outsource" | "none".
+  method: string;
   priority: boolean;
 };
 
@@ -158,8 +161,10 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
         const quantity = cell(12);
         const qRaw = cell(13).toUpperCase().replace(/GRADE/g, "").trim();
         const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
+        // Carving method (col 14, mig 215) — old 14-col files → "" → Nil.
+        const method = parseCarvingMethodInput(cell(14)) ?? "";
         if (!section && !element && !label && !description && !additional && !stockLocation && !length && !width && !height && !quantity) continue;
-        parsed.push({ key: crypto.randomUUID(), section, element, label, description, additional, stockLocation, length, width, height, quantity, quality, priority: false });
+        parsed.push({ key: crypto.randomUUID(), section, element, label, description, additional, stockLocation, length, width, height, quantity, quality, method, priority: false });
       }
       if (parsed.length === 0) {
         setError("No filled rows found — add at least one row with size + quantity, then re-upload.");
@@ -182,7 +187,7 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), section: "", element: "", label: "", description: "", additional: "", stockLocation: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), section: "", element: "", label: "", description: "", additional: "", stockLocation: "", length: "", width: "", height: "", quantity: "", quality: "", method: "", priority: false }]);
   }
 
   const suggest = existingCats[temple] ?? { cat1: [], cat2: [], labels: [] };
@@ -226,6 +231,7 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
           height: Number(r.height) || 0,
           quantity: Number(r.quantity) || 1,
           quality: r.quality,
+          carvingMethod: r.method || null, // mig 215
           priority: r.priority,
           componentSection: r.section,
           componentElement: r.element,
@@ -291,7 +297,7 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · <strong>Stock Location</strong> · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · <strong>Stock Location</strong> · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both) · Carving (CNC/Outsource/No carving — blank = decide later).{" "}
           These are slabs cut <strong>outside</strong> our pipeline. Category 1 → Category 2 → Label → Description organise them in Temple View. Sizes are in <strong>inches</strong>; one row with quantity N becomes N slabs.{" "}
           After approval they land in <strong>Unassigned</strong> (assign to CNC / outsource / direct dispatch later) — or, if you tick <strong>Send straight to dispatch</strong> in the review step, straight onto Dispatch.
         </div>
@@ -363,6 +369,7 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
+                <th style={{ ...th, minWidth: 120 }}>Carving</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -389,6 +396,14 @@ export function ExternalSlabImportClient({ temples, stones, existingCats = {} }:
                         <option value="">Both</option>
                         <option value="A">Grade A</option>
                         <option value="B">Grade B</option>
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select value={r.method} onChange={(e) => patch(r.key, "method", e.target.value)} style={cellInp}>
+                        <option value="">Nil — any</option>
+                        <option value="cnc">CNC</option>
+                        <option value="outsource">Outsource</option>
+                        <option value="none">No carving</option>
                       </select>
                     </td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>

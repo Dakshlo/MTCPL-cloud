@@ -22,6 +22,7 @@ import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { submitSlabImportBatchAction } from "../actions";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { parseCarvingMethodInput } from "@/lib/carving-method";
 
 export type TempleOpt = { name: string; default_stone: string | null };
 
@@ -41,6 +42,8 @@ type Row = {
   height: string;
   quantity: string;
   quality: string;
+  // Mig 215 — carving route: "" (nil) | "cnc" | "outsource" | "none".
+  method: string;
   priority: boolean;
   // Mig 123 — temple-component category (Category 1 / Category 2). Filled
   // from the Excel columns; editable here with suggestions from existing
@@ -189,6 +192,9 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
         // Quality: A / B / Both (blank = Both). Tolerates "Grade A" typing.
         const qRaw = cell(12).toUpperCase().replace(/GRADE/g, "").trim();
         const quality = qRaw === "A" ? "A" : qRaw === "B" ? "B" : "";
+        // Carving method (col 13, mig 215) — old 13-col templates simply
+        // have no cell here → "" → Nil. Never rejects a row.
+        const method = parseCarvingMethodInput(cell(13)) ?? "";
         if (!label && !description && !additional && !length && !width && !height && !quantity && !section && !element) continue; // blank row
         parsed.push({
           key: crypto.randomUUID(),
@@ -202,6 +208,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
           // field in the review step so nothing is added with assumed data.
           quantity,
           quality,
+          method,
           priority: false,
           section,
           element,
@@ -228,7 +235,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
     setRows((prev) => prev.filter((r) => r.key !== key));
   }
   function addRow() {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", additional: "", length: "", width: "", height: "", quantity: "", quality: "", priority: false, section: "", element: "" }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), label: "", description: "", additional: "", length: "", width: "", height: "", quantity: "", quality: "", method: "", priority: false, section: "", element: "" }]);
   }
 
   // Suggestion lists for the selected temple — fed to the <datalist>s so the
@@ -277,6 +284,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
           height: Number(r.height) || 0,
           quantity: Number(r.quantity) || 1,
           quality: r.quality,
+          carvingMethod: r.method || null, // mig 215
           priority: r.priority,
           componentSection: r.section,
           componentElement: r.element,
@@ -344,7 +352,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both).{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both) · Carving (CNC/Outsource/No carving — blank = decide later).{" "}
           Category 1 → Category 2 → Label → Description → Additional Description organise the slabs in <strong>Temple View</strong>. In the review step you can pick from categories already used for this temple.{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
           {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
@@ -422,6 +430,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
+                <th style={{ ...th, minWidth: 120 }}>Carving</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -448,6 +457,14 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
                         <option value="">Both</option>
                         <option value="A">Grade A</option>
                         <option value="B">Grade B</option>
+                      </select>
+                    </td>
+                    <td style={td}>
+                      <select value={r.method} onChange={(e) => patch(r.key, "method", e.target.value)} style={cellInp}>
+                        <option value="">Nil — any</option>
+                        <option value="cnc">CNC</option>
+                        <option value="outsource">Outsource</option>
+                        <option value="none">No carving</option>
                       </select>
                     </td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>

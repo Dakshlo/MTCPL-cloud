@@ -9,6 +9,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
 import { approveSlabImportBatchAction, rejectSlabImportBatchAction } from "../../slabs/actions";
+import { methodLabel } from "@/lib/carving-method";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ type BatchRow = {
     quantity: number; quality: string | null; priority: boolean;
     componentSection?: string | null; componentElement?: string | null;
     stockLocation?: string | null;
+    carvingMethod?: string | null; // mig 215 — absent on pre-feature batches
   }> | null;
   row_count: number | null;
   slab_count: number | null;
@@ -120,14 +122,14 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
                         <th style={th}>📍 Stock Location</th>
                         <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
-                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
+                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>Carving</th><th style={th}>⚡</th>
                       </tr>
                     ) : (
                       <tr style={{ borderBottom: "1px solid var(--border)" }}>
                         <th style={th}>#</th><th style={th}>Cat 1</th><th style={th}>Cat 2</th>
                         <th style={th}>Label</th><th style={th}>Description</th><th style={th}>Add&apos;l Desc</th>
                         <th style={th}>L (in)</th><th style={th}>W (in)</th><th style={th}>H (in)</th>
-                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>⚡</th>
+                        <th style={th}>Qty</th><th style={th}>Quality</th><th style={th}>Carving</th><th style={th}>⚡</th>
                       </tr>
                     )}
                   </thead>
@@ -158,6 +160,7 @@ export default async function SlabImportApprovalsPage({ searchParams }: { search
                         <td style={td}>{r.height}</td>
                         <td style={{ ...td, fontWeight: 700 }}>{r.quantity}</td>
                         <td style={td}>{r.quality || "Both"}</td>
+                        <td style={td}>{methodLabel(r.carvingMethod)}</td>
                         <td style={td}>{r.priority ? "⚡" : ""}</td>
                       </tr>
                     ))}

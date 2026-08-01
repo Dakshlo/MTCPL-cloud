@@ -27,9 +27,11 @@ export async function GET(req: NextRequest) {
   const TEMPLATE_ROWS = 30;
   // Total columns (keep parse + template in lockstep — see the external
   // import client's onFile cell-index map).
-  const COLS = 14;
-  // 1-based column index of the Quality column (last).
+  const COLS = 15;
+  // 1-based column indices of the dropdown columns.
   const QUALITY_COL = 14;
+  // Mig 215 — carving route, appended LAST so old 14-col files still parse.
+  const METHOD_COL = 15;
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("External Slabs");
@@ -48,9 +50,10 @@ export async function GET(req: NextRequest) {
     { header: "Height (in)", width: 11 },
     { header: "Quantity", width: 10 },
     { header: "Quality (A/B/Both)", width: 16 },
+    { header: "Carving (CNC/Outsource/No carving)", width: 26 },
   ];
   for (let i = 1; i <= TEMPLATE_ROWS; i++) {
-    ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", "", "", ""]);
+    ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", "", "", "", ""]);
   }
 
   // Header band — brand brown, white bold, centred.
@@ -86,6 +89,16 @@ export async function GET(req: NextRequest) {
       showErrorMessage: true,
       errorTitle: "Quality",
       error: "Pick A, B or Both (or leave blank for Both).",
+    };
+    // Carving method (mig 215) — blank = Nil (decide later). Note: a
+    // to_dispatch batch overrides this to 'No carving' on approval.
+    row.getCell(METHOD_COL).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: ['"CNC,Outsource,No carving"'],
+      showErrorMessage: true,
+      errorTitle: "Carving method",
+      error: "Pick CNC, Outsource or No carving (or leave blank to decide later).",
     };
   }
 
