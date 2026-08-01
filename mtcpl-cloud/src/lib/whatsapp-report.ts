@@ -1120,7 +1120,13 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     // "(+5%)" vs the previous month at the same day-of-month; omitted when
     // last month had nothing to compare against.
     const pctTxt = (cur: number, prevV: number) => (prevV > 0 ? ` (${cur >= prevV ? "+" : ""}${Math.round(((cur - prevV) / prevV) * 100)}%)` : "");
-    const pace = (v: number) => (mo.days > 0 ? Math.round((v / mo.days) * mo.monthLen) : 0);
+    // Month-end projection only once the month has some shape. On the 2nd/3rd
+    // (day 1-2 of the new month) one day extrapolated across 31 would print a
+    // wild number, so show the honest running average until day 5.
+    const paceLine = (v: number) =>
+      mo.days >= 5
+        ? `Pace: ~${fmt0((v / mo.days) * mo.monthLen)} slabs by ${mo.monthName} end`
+        : `Avg ${(v / Math.max(1, mo.days)).toFixed(1)} slabs/day so far`;
     const vsLine = (cur: number, prevV: number) => `vs ${mo.prevMonthName} same day: ${fmt0(prevV)} slabs${pctTxt(cur, prevV)}`;
     const spark = (vals: number[], xs: number, xe: number, yBot: number, hgt: number) => {
       const n = vals.length; if (n < 2) return;
@@ -1150,7 +1156,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         big: fmt0(data.mtd.cutting.slabs), unit: "slabs", sub: `${fmt1(data.mtd.cutting.cft)} CFT cut`,
         pill: `+${data.today.cutting.slabs} in 24 h`,
         line1: vsLine(data.mtd.cutting.slabs, data.mtdPrev.cutting.slabs),
-        line2: `Pace: ~${fmt0(pace(data.mtd.cutting.slabs))} slabs by ${mo.monthName} end`,
+        line2: paceLine(data.mtd.cutting.slabs),
         spark: data.trend.map((d) => d.cutting),
       },
       {
@@ -1158,7 +1164,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         big: fmt0(data.mtd.carving.slabs), unit: "slabs", sub: `${fmt1(data.mtd.carving.cft)} CFT carved`,
         pill: `+${data.today.carving.slabs} in 24 h`,
         line1: vsLine(data.mtd.carving.slabs, data.mtdPrev.carving.slabs),
-        line2: `Pace: ~${fmt0(pace(data.mtd.carving.slabs))} slabs by ${mo.monthName} end`,
+        line2: paceLine(data.mtd.carving.slabs),
         spark: data.trend.map((d) => d.carving),
       },
       {
@@ -1169,7 +1175,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         sub: [`${fmt1(data.mtd.dispatch.cft)} CFT`, data.mtd.dispatch.tonnes >= 0.05 ? `${fmt1(data.mtd.dispatch.tonnes)} T` : "", `${data.mtd.dispatch.trucks} trucks`].filter(Boolean).join(" · "),
         pill: `+${data.today.dispatch.slabs} in 24 h`,
         line1: vsLine(data.mtd.dispatch.slabs, data.mtdPrev.dispatch.slabs),
-        line2: `Pace: ~${fmt0(pace(data.mtd.dispatch.slabs))} slabs by ${mo.monthName} end`,
+        line2: paceLine(data.mtd.dispatch.slabs),
         spark: data.trend.map((d) => d.dispatch),
       },
     ];
