@@ -267,6 +267,17 @@ const navEntries: NavEntry[] = [
     department: "production",
   },
   {
+    // Mig 215 — Carving Plan: per-route load (CNC / Outsource / No
+    // carving), the undecided queue + quick-tag, and the CNC capacity
+    // forecast. The office roles that route slabs (same set as Ready
+    // Sizes Stock).
+    href: "/carving/plan",
+    label: "Carving Plan",
+    icon: "🗺️",
+    roles: ["developer", "owner", "carving_head", "senior_incharge", "tender_manager"],
+    department: "production",
+  },
+  {
     // Mig 060 follow-on (Daksh): CNC Expenses, like Cutter Expenses,
     // is the data-entry user's work surface only. Owner / carving_head
     // reach the report via the dashboard's Various Costing card. Dev
@@ -899,6 +910,7 @@ export function Sidebar({
     // are sub-routes that should NOT light up the parent (Floor View
     // gets its own pill, detail pages don't need either lit).
     if (href === "/carving") return pathname === "/carving";
+    if (href === "/carving/plan") return pathname.startsWith("/carving/plan"); // mig 215
     if (href === "/carving/floor") return pathname.startsWith("/carving/floor");
     if (href === "/carving/reports") return pathname.startsWith("/carving/reports");
     if (href === "/carving/transfer") return pathname.startsWith("/carving/transfer");
