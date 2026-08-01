@@ -70,9 +70,11 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-/** One launch tile body — used inside a Link or a PeekIframe trigger. */
-function TileBody({ icon, accent, kicker, title, desc, cta }: {
-  icon: string; accent: string; kicker: string; title: string; desc: string; cta: string;
+/** One launch tile body — used inside a Link or a PeekIframe trigger.
+ *  Daksh Aug 2026: no description line — the kicker + title already say what
+ *  it is, and six paragraphs of explanation made the grid noisy. */
+function TileBody({ icon, accent, kicker, title, cta }: {
+  icon: string; accent: string; kicker: string; title: string; cta: string;
 }) {
   return (
     <div
@@ -82,7 +84,7 @@ function TileBody({ icon, accent, kicker, title, desc, cta }: {
         flexDirection: "column",
         gap: 12,
         height: "100%",
-        minHeight: 148,
+        minHeight: 118,
         background: GLASS_BG,
         border: GLASS_BORDER,
         borderLeft: `3px solid ${accent}`,
@@ -105,7 +107,6 @@ function TileBody({ icon, accent, kicker, title, desc, cta }: {
       </div>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 17.5, fontWeight: 750, color: INK, letterSpacing: "-0.2px" }}>{title}</div>
-        <div style={{ fontSize: 11.5, color: MUTED, marginTop: 4, lineHeight: 1.45 }}>{desc}</div>
       </div>
       <div style={{ marginTop: "auto", fontSize: 12, fontWeight: 700, color: accent }}>{cta}</div>
     </div>
@@ -113,7 +114,7 @@ function TileBody({ icon, accent, kicker, title, desc, cta }: {
 }
 
 /** Compact dark trigger row for the two embedded reports. */
-function ReportRowBody({ icon, title, sub, accent }: { icon: string; title: string; sub: string; accent: string }) {
+function ReportRowBody({ icon, title, accent }: { icon: string; title: string; accent: string }) {
   return (
     <div
       className="dv2-tile"
@@ -128,7 +129,6 @@ function ReportRowBody({ icon, title, sub, accent }: { icon: string; title: stri
       </span>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>{title}</div>
-        <div style={{ fontSize: 10.5, color: MUTED, marginTop: 2 }}>{sub}</div>
       </div>
       <span style={{ fontSize: 13, fontWeight: 800, color: accent }}>→</span>
     </div>
@@ -163,13 +163,57 @@ export function DashboardV2({
       }}
     >
       {/* Hover language is border+glow ONLY — see the containing-block note
-          at the top of this file before adding transforms here. */}
+          at the top of this file before adding transforms here.
+
+          The shell rules below are GLOBAL on purpose: .page-content and
+          .topbar belong to the (app) layout, and a dark dashboard framed by
+          the cream shell looked like a window with white bezels (Daksh).
+          Because this <style> lives inside the v2 tree it is mounted only
+          while the v2 dashboard is on screen — navigating away unmounts it
+          and the rest of the app stays light. */}
       <style>{`
         .dv2-tile { transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
         .dv2-tile:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.09); box-shadow: 0 10px 34px rgba(0,0,0,.45); }
         .dv2-desk { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
         @media (max-width: 1020px) { .dv2-desk { grid-template-columns: 1fr; } }
         .dv2-launch { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 13px; align-items: stretch; }
+
+        /* ── dark shell: no cream bezel around the dark panel ── */
+        body { background: #080b12; }
+        .page-content { max-width: none; padding: 12px 14px 22px; }
+        .topbar { background: #0f1320; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .topbar-label { color: rgba(255,255,255,0.42); }
+        .topbar-name { color: #eef1f7; }
+        /* Sign out is a transparent button with dark-brown text — invisible
+           once the bar goes dark. Same for the ⟳ / ⚙ cream circles. */
+        .topbar .secondary-button { color: #eef1f7; border-color: rgba(255,255,255,0.22); }
+        .topbar .secondary-button:hover { background: rgba(255,255,255,0.08); }
+        .topbar .topbar-settings-btn {
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.16);
+          color: rgba(255,255,255,0.78);
+        }
+
+        /* Email snapshot is a shared component (owner's v1 uses it too), so
+           instead of editing it we re-point the CSS variables it themes from.
+           Scoped to this wrapper — nothing else in the app sees these. */
+        .dv2-email {
+          --surface: rgba(255,255,255,0.055);
+          --surface-alt: rgba(255,255,255,0.03);
+          --bg: rgba(255,255,255,0.03);
+          --border: rgba(255,255,255,0.12);
+          --border-light: rgba(255,255,255,0.08);
+          --text: #eef1f7;
+          --muted: rgba(255,255,255,0.55);
+          --muted-light: rgba(255,255,255,0.4);
+          color: #eef1f7;
+        }
+        .dv2-email select, .dv2-email input, .dv2-email button { color: inherit; }
+        .dv2-email select option { color: #10131c; }
+        /* The FYI / category chip hardcodes slate-600 text (not a variable),
+           which turns unreadable on the dark desk. Matched on that literal
+           colour so the shared component still needs no edit. */
+        .dv2-email [style*="#475569"] { color: #cbd5e1 !important; }
       `}</style>
 
       {/* Ambient glow blobs behind everything. */}
@@ -196,9 +240,6 @@ export function DashboardV2({
                 {name}
               </span>
             </div>
-            <div style={{ fontSize: 12.5, color: MUTED, marginTop: 8 }}>
-              Operations command center — everything at one glance.
-            </div>
             {/* Online users as pills. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
               {onlineNames.length > 0 ? (
@@ -222,34 +263,27 @@ export function DashboardV2({
         <SectionLabel>Launch</SectionLabel>
         <div className="dv2-launch">
           <Link href="/ask-ai" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="✨" accent="#E8C572" kicker="AI copilot" title="MTCPL-AI"
-              desc="Ask anything across the whole pipeline — blocks to invoices." cta="Open chat →" />
+            <TileBody icon="✨" accent="#E8C572" kicker="AI copilot" title="MTCPL-AI" cta="Open chat →" />
           </Link>
           <PeekIframe
             url="/embed/block-journey"
             modalTitle="Block Journey — Real Efficiency"
-            modalSubtitle="Track every Fresh block end-to-end — true slab yield across the full cutting lineage."
             triggerContent={
-              <TileBody icon="🧭" accent="#86AC5B" kicker="Real efficiency" title="Block Journey"
-                desc="True block → slab yield, followed end to end." cta="Peek report →" />
+              <TileBody icon="🧭" accent="#86AC5B" kicker="Real efficiency" title="Block Journey" cta="Peek report →" />
             }
           />
           <Link href="/reports/dpr" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="🏭" accent="#34d399" kicker="Production" title="Production DPR"
-              desc="Daily production grid — added, cut, site-wise, daily average." cta="Open →" />
+            <TileBody icon="🏭" accent="#34d399" kicker="Production" title="Production DPR" cta="Open →" />
           </Link>
           <Link href="/reports/various-costing" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📊" accent="#7dd3fc" kicker="Reports" title="Various Costing"
-              desc="CNC + cutter plant cost per unit, month by month." cta="Open →" />
+            <TileBody icon="📊" accent="#7dd3fc" kicker="Reports" title="Various Costing" cta="Open →" />
           </Link>
           <Link href="/carving/floor?mode=tv" target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📺" accent="#f59e0b" kicker="TV mode" title="Carving floor on the wall"
-              desc="Full-screen floor board for the workshop TV." cta="Open in new tab ↗" />
+            <TileBody icon="📺" accent="#f59e0b" kicker="TV mode" title="Carving floor on the wall" cta="Open in new tab ↗" />
           </Link>
           {showMarketNews && (
             <Link href="/market-news" style={{ textDecoration: "none", display: "flex" }}>
-              <TileBody icon="📰" accent="#a5b4fc" kicker="Today's news" title="Market brief & chat"
-                desc="Morning brief, stock ideas and a chat over the news." cta="Open →" />
+              <TileBody icon="📰" accent="#a5b4fc" kicker="Today's news" title="Market brief & chat" cta="Open →" />
             </Link>
           )}
         </div>
@@ -257,9 +291,10 @@ export function DashboardV2({
         {/* ── DESK: email left · action rail right ── */}
         <SectionLabel>Today&apos;s desk</SectionLabel>
         <div className="dv2-desk">
-          {/* Email snapshot keeps its own (light) panel — reads as paper on
-              the dark desk. Functionality untouched. */}
-          <div style={{ minWidth: 0 }}>
+          {/* Email snapshot themes dark via the .dv2-email variable overrides
+              in the <style> above — the component itself is shared with v1
+              and stays untouched. */}
+          <div className="dv2-email" style={{ minWidth: 0 }}>
             <EmailSnapshotCard />
           </div>
 
@@ -267,12 +302,12 @@ export function DashboardV2({
             <PeekIframe
               url="/embed/blocks/report"
               modalTitle="Block Report"
-              triggerContent={<ReportRowBody icon="📊" title="Block Report" sub="Stock, added, cut — peek without leaving" accent="#818cf8" />}
+              triggerContent={<ReportRowBody icon="📊" title="Block Report" accent="#818cf8" />}
             />
             <PeekIframe
               url="/embed/slabs/ready"
               modalTitle="Ready Sizes Report"
-              triggerContent={<ReportRowBody icon="📋" title="Ready Sizes Report" sub="Every ready size, live" accent="#fbbf24" />}
+              triggerContent={<ReportRowBody icon="📋" title="Ready Sizes Report" accent="#fbbf24" />}
             />
 
             {/* Urgent push — full page entry. */}
@@ -282,8 +317,10 @@ export function DashboardV2({
                   <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>🔔 Push urgent alert</div>
                   <span style={{ fontSize: 12, fontWeight: 800, color: "#0b0e16", background: GOLD, borderRadius: 8, padding: "5px 12px", whiteSpace: "nowrap" }}>Open →</span>
                 </div>
-                <div style={{ fontSize: 11, color: MUTED, marginTop: 6, lineHeight: 1.5 }}>
-                  <b style={{ color: GOLD }}>{pushCount.toLocaleString("en-IN")}</b>{" "}open / planned slabs — mark urgent, see what&apos;s already in a work order.
+                {/* Only the live number survives — the how-it-works sentence
+                    was noise on a page you open every day. */}
+                <div style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
+                  <b style={{ color: GOLD }}>{pushCount.toLocaleString("en-IN")}</b>{" "}open / planned slabs
                 </div>
               </div>
             </Link>
