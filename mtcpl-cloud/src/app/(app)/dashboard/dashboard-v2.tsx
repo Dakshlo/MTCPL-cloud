@@ -40,7 +40,7 @@ function Panel({ children, pad = 18, style }: { children: ReactNode; pad?: numbe
   return (
     <div
       className="dv2-panel"
-      style={{ background: CARD_BG, border: CARD_BORDER, borderRadius: 16, padding: pad, ...style }}
+      style={{ background: CARD_BG, border: CARD_BORDER, borderRadius: 4, padding: pad, ...style }}
     >
       {children}
     </div>
@@ -59,11 +59,12 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-/** One launch tile body — used inside a Link or a PeekIframe trigger.
- *  `accent` = dark-skin colour, `accentLight` = readable-on-white twin;
- *  the .dv2-acc/.dv2-icon rules pick the right one per theme. */
-function TileBody({ icon, accent, accentLight, kicker, title, cta }: {
-  icon: string; accent: string; accentLight: string; kicker: string; title: string; cta: string;
+/** One launch tile — ledger-entry style (Daksh: the icon-squircle +
+ *  kicker-label card read as generic AI dashboard). Sharp corners, a
+ *  mono index number, title, arrow. `accent`/`accentLight` = per-theme
+ *  left-rule + arrow colours via the .dv2-acc rule. */
+function TileBody({ index, icon, accent, accentLight, title, cta }: {
+  index: string; icon: string; accent: string; accentLight: string; title: string; cta: string;
 }) {
   return (
     <div
@@ -71,18 +72,19 @@ function TileBody({ icon, accent, accentLight, kicker, title, cta }: {
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        justifyContent: "space-between",
+        gap: 8,
         height: "100%",
         // Fill the grid cell — content-width tiles made uneven gaps (Daksh).
         width: "100%",
         flex: 1,
         minWidth: 0,
-        minHeight: 118,
+        minHeight: 84,
         background: CARD_BG,
         border: CARD_BORDER,
         borderLeft: `3px solid ${accentLight}`,
-        borderRadius: 16,
-        padding: "16px 18px",
+        borderRadius: 4,
+        padding: "12px 14px",
         cursor: "pointer",
         position: "relative",
         overflow: "hidden",
@@ -91,42 +93,36 @@ function TileBody({ icon, accent, accentLight, kicker, title, cta }: {
         ["--tal" as never]: accentLight,
       }}
     >
-      {/* corner glow — dark skin only (see .dv2-glow rule) */}
-      <div className="dv2-glow" aria-hidden style={{ position: "absolute", top: -46, right: -46, width: 130, height: 130, borderRadius: "50%", pointerEvents: "none" }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-        <span className="dv2-icon" style={{ width: 40, height: 40, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 }}>
-          {icon}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 10.5, fontWeight: 700, color: FAINT, letterSpacing: "0.08em" }}>
+          {index}
         </span>
-        <span className="dv2-acc" style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase" }}>
-          {kicker}
-        </span>
+        <span className="dv2-acc" style={{ fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{cta}</span>
       </div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 17.5, fontWeight: 750, color: INK, letterSpacing: "-0.2px" }}>{title}</div>
+      <div style={{ minWidth: 0, fontSize: 15.5, fontWeight: 750, color: INK, letterSpacing: "-0.2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span aria-hidden style={{ marginRight: 7 }}>{icon}</span>
+        {title}
       </div>
-      <div className="dv2-acc" style={{ marginTop: "auto", fontSize: 12, fontWeight: 700 }}>{cta}</div>
     </div>
   );
 }
 
-/** Compact trigger row for the two embedded reports. */
+/** Compact trigger row for the two embedded reports — same ledger style. */
 function ReportRowBody({ icon, title, accent, accentLight }: { icon: string; title: string; accent: string; accentLight: string }) {
   return (
     <div
       className="dv2-tile"
       style={{
-        display: "flex", alignItems: "center", gap: 12,
+        display: "flex", alignItems: "center", gap: 10,
         background: CARD_BG, border: CARD_BORDER, borderLeft: `3px solid ${accentLight}`,
-        borderRadius: 14, padding: "13px 15px", cursor: "pointer",
+        borderRadius: 4, padding: "12px 14px", cursor: "pointer",
         ["--ta" as never]: accent,
         ["--tal" as never]: accentLight,
       }}
     >
-      <span className="dv2-icon" style={{ width: 36, height: 36, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-        {icon}
-      </span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>{title}</div>
+      <div style={{ minWidth: 0, flex: 1, fontSize: 13.5, fontWeight: 750, color: INK }}>
+        <span aria-hidden style={{ marginRight: 7 }}>{icon}</span>
+        {title}
       </div>
       <span className="dv2-acc" style={{ fontSize: 13, fontWeight: 800 }}>→</span>
     </div>
@@ -152,7 +148,7 @@ export function DashboardV2({
       style={{
         position: "relative",
         overflow: "hidden",
-        borderRadius: 22,
+        borderRadius: 6,
         padding: "clamp(16px, 2.4vw, 30px)",
         background: "var(--dv2-root-bg)",
         border: "1px solid var(--dv2-root-border)",
@@ -180,7 +176,6 @@ export function DashboardV2({
           --dv2-track: var(--border);
           --dv2-push-bg: linear-gradient(135deg, rgba(180,140,40,0.10) 0%, rgba(180,140,40,0.03) 100%);
           --dv2-push-border: rgba(180,140,40,0.45);
-          --dv2-name-grad: linear-gradient(100deg, #a16207 0%, #c98a2a 55%, #a16207 100%);
           --dv2-divider: linear-gradient(90deg, rgba(180,140,40,0.55) 0%, rgba(45,36,16,0.10) 55%, transparent 100%);
         }
         [data-theme="dark"] .dv2-root {
@@ -197,26 +192,12 @@ export function DashboardV2({
           --dv2-track: rgba(255,255,255,0.10);
           --dv2-push-bg: linear-gradient(135deg, rgba(232,197,114,0.14) 0%, rgba(232,197,114,0.05) 100%);
           --dv2-push-border: rgba(232,197,114,0.35);
-          --dv2-name-grad: linear-gradient(100deg, #E8C572 0%, #f6e3b4 55%, #E8C572 100%);
           --dv2-divider: linear-gradient(90deg, rgba(232,197,114,0.5) 0%, rgba(255,255,255,0.08) 55%, transparent 100%);
         }
 
         /* Per-tile accent: light uses the darker twin (--tal), dark the neon (--ta). */
         .dv2-root .dv2-acc { color: var(--tal); }
         [data-theme="dark"] .dv2-root .dv2-acc { color: var(--ta); }
-        .dv2-root .dv2-icon {
-          background: color-mix(in srgb, var(--tal) 12%, transparent);
-          border: 1px solid color-mix(in srgb, var(--tal) 38%, transparent);
-        }
-        [data-theme="dark"] .dv2-root .dv2-icon {
-          background: color-mix(in srgb, var(--ta) 14%, transparent);
-          border: 1px solid color-mix(in srgb, var(--ta) 34%, transparent);
-        }
-        .dv2-root .dv2-glow { display: none; }
-        [data-theme="dark"] .dv2-root .dv2-glow {
-          display: block;
-          background: radial-gradient(circle, color-mix(in srgb, var(--ta) 20%, transparent) 0%, transparent 70%);
-        }
         .dv2-root .dv2-blob { display: none; }
         [data-theme="dark"] .dv2-root .dv2-blob { display: block; }
 
@@ -261,15 +242,12 @@ export function DashboardV2({
               <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: FAINT }}>
                 {dateDisplay}
               </span>
-              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", color: "var(--dv2-badge-ink)", background: GOLD, borderRadius: 5, padding: "2.5px 7px", textTransform: "uppercase" }}>
+              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", color: "var(--dv2-badge-ink)", background: GOLD, borderRadius: 2, padding: "2.5px 7px", textTransform: "uppercase" }}>
                 V2 preview
               </span>
             </div>
             <div style={{ fontSize: "clamp(26px, 3.2vw, 36px)", fontWeight: 800, color: INK, letterSpacing: "-0.8px", lineHeight: 1.08 }}>
-              {greeting},{" "}
-              <span style={{ background: "var(--dv2-name-grad)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
-                {name}
-              </span>
+              {greeting}, <span style={{ color: GOLD }}>{name}</span>
             </div>
             {/* Online users as pills. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
@@ -294,27 +272,27 @@ export function DashboardV2({
         <SectionLabel>Launch</SectionLabel>
         <div className="dv2-launch">
           <Link href="/ask-ai" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="✨" accent="#E8C572" accentLight="#a16207" kicker="AI copilot" title="MTCPL-AI" cta="Open chat →" />
+            <TileBody index="01" icon="✨" accent="#E8C572" accentLight="#a16207" title="MTCPL-AI" cta="→" />
           </Link>
           <PeekIframe
             url="/embed/block-journey"
             modalTitle="Block Journey — Real Efficiency"
             triggerContent={
-              <TileBody icon="🧭" accent="#86AC5B" accentLight="#3f6212" kicker="Real efficiency" title="Block Journey" cta="Peek report →" />
+              <TileBody index="02" icon="🧭" accent="#86AC5B" accentLight="#3f6212" title="Block Journey" cta="→" />
             }
           />
           <Link href="/reports/dpr" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="🏭" accent="#34d399" accentLight="#047857" kicker="Production" title="Production DPR" cta="Open →" />
+            <TileBody index="03" icon="🏭" accent="#34d399" accentLight="#047857" title="Production DPR" cta="→" />
           </Link>
           <Link href="/reports/various-costing" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📊" accent="#7dd3fc" accentLight="#0369a1" kicker="Reports" title="Various Costing" cta="Open →" />
+            <TileBody index="04" icon="📊" accent="#7dd3fc" accentLight="#0369a1" title="Various Costing" cta="→" />
           </Link>
           <Link href="/carving/floor?mode=tv" target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody icon="📺" accent="#f59e0b" accentLight="#b45309" kicker="TV mode" title="Carving floor on the wall" cta="Open in new tab ↗" />
+            <TileBody index="05" icon="📺" accent="#f59e0b" accentLight="#b45309" title="Carving floor on the wall" cta="↗" />
           </Link>
           {showMarketNews && (
             <Link href="/market-news" style={{ textDecoration: "none", display: "flex" }}>
-              <TileBody icon="📰" accent="#a5b4fc" accentLight="#4f46e5" kicker="Today's news" title="Market brief & chat" cta="Open →" />
+              <TileBody index="06" icon="📰" accent="#a5b4fc" accentLight="#4f46e5" title="Market brief & chat" cta="→" />
             </Link>
           )}
         </div>
@@ -342,7 +320,7 @@ export function DashboardV2({
 
             {/* Urgent push — full page entry. */}
             <Link href="/dashboard/push-urgent" id="push" style={{ textDecoration: "none" }}>
-              <div className="dv2-tile" style={{ background: "var(--dv2-push-bg)", border: "1px solid var(--dv2-push-border)", borderRadius: 14, padding: "14px 15px", cursor: "pointer" }}>
+              <div className="dv2-tile" style={{ background: "var(--dv2-push-bg)", border: "1px solid var(--dv2-push-border)", borderRadius: 4, padding: "13px 14px", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 750, color: INK }}>🔔 Push urgent alert</div>
                   <span style={{ fontSize: 12, fontWeight: 800, color: "var(--dv2-badge-ink)", background: GOLD, borderRadius: 8, padding: "5px 12px", whiteSpace: "nowrap" }}>Open →</span>
