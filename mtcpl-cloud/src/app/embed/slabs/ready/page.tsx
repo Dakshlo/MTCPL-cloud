@@ -11,6 +11,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged } from "@/lib/paginate";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { cutDoneDateByBlock } from "@/lib/cut-done-date";
 import { dispatchStateBySlab } from "@/lib/dispatch-state";
@@ -26,16 +27,40 @@ export default async function EmbedReadySlabsPage() {
   await requireAuth(["owner", "team_head", "block_slab_entry"]);
   const admin = createAdminSupabaseClient();
 
-  const [{ data, error }, { data: stoneTypeRows }] = await Promise.all([
-    admin
-      .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id")
-      .in("status", POST_CUT_STATUSES)
-      .order("updated_at", { ascending: false }),
+  // Paginated (Daksh, Aug 2026): this embed copy ran an uncapped .select()
+  // while the standalone page already paged, so the kiosk/modal view silently
+  // stopped at PostgREST's 1000-row cap and showed FEWER ready slabs than the
+  // in-app page — exactly the kiosk-vs-page mismatch POST_CUT_STATUSES was
+  // introduced to prevent. `id` is the unique tiebreaker: `updated_at` alone
+  // isn't unique, and a tie group straddling a page boundary drops rows.
+  const [data, { data: stoneTypeRows }] = await Promise.all([
+    fetchAllPaged<{
+      id: string;
+      // `label` matches the standalone page's ReadySlabRow (non-null) — the
+      // client's Slab type requires it and every post-cut slab carries one.
+      label: string;
+      temple: string;
+      stone: string | null;
+      quality: string | null;
+      length_ft: number;
+      width_ft: number;
+      thickness_ft: number;
+      status: string;
+      priority: boolean;
+      created_at: string | null;
+      updated_at: string | null;
+      source_block_id: string | null;
+    }>((from, to) =>
+      admin
+        .from("slab_requirements")
+        .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id")
+        .in("status", POST_CUT_STATUSES)
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     admin.from("stone_types").select("name").order("name"),
   ]);
-
-  if (error) throw new Error(error.message);
 
   // Real cut-done date (NOT updated_at) — same as the standalone page.
   const cutDates = await cutDoneDateByBlock(admin, (data ?? []).map((s) => s.source_block_id));

@@ -61,6 +61,9 @@ export default async function ReadySlabsPage() {
         )
         .in("status", POST_CUT_STATUSES)
         .order("updated_at", { ascending: false })
+        // Unique tiebreaker — `updated_at` is NOT unique, and a tie group
+        // straddling a page boundary silently drops/duplicates rows.
+        .order("id", { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) break;
