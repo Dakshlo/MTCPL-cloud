@@ -305,22 +305,25 @@ export function PlanClient({
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
+  // Undecided is ALWAYS temple-scoped (Daksh) — nothing renders until a
+  // temple is picked, so the page never dumps all 5.9k slabs at once.
   const templeUndecided = useMemo(
     () => (temple ? undecided.filter((s) => s.temple === temple) : []),
     [undecided, temple],
   );
 
+  // Search inside the selected temple's undecided pile.
   const filteredUndecided = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return undecided;
-    return undecided.filter((s) => {
+    if (!needle) return templeUndecided;
+    return templeUndecided.filter((s) => {
       const hay = [
         s.id, s.temple, s.label, s.stone, s.description, s.section, s.element,
         s.status.replace(/_/g, " "), `${s.l}x${s.w}x${s.t}`, `${s.l}×${s.w}×${s.t}`,
       ].filter(Boolean).join(" · ").toLowerCase();
       return hay.includes(needle);
     });
-  }, [undecided, q]);
+  }, [templeUndecided, q]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -504,7 +507,9 @@ export function PlanClient({
       <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, overflow: "visible" }}>
         <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", borderBottom: templeRow ? "1px solid var(--border)" : "none" }}>
           <span style={{ fontSize: 13.5, fontWeight: 800, flexShrink: 0 }}>🏛 Temple-wise</span>
-          <TemplePicker temples={temples} value={temple} onPick={setTemple} />
+          {/* Clear the slab search on temple change — a stale query would
+              make the new temple's undecided list look empty. */}
+          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); }} />
         </div>
 
         {templeRow && tAgg && (
@@ -561,42 +566,33 @@ export function PlanClient({
 
             {/* this temple's undecided, right where the decision is made */}
             {templeUndecided.length > 0 && (
-              <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 10 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 2 }}>
-                  ❓ Undecided in this temple — {fmt0(templeUndecided.length)} slab{templeUndecided.length === 1 ? "" : "s"}
+              <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 800 }}>
+                    ❓ Undecided in this temple — {fmt0(filteredUndecided.length)}
+                    {q ? ` of ${fmt0(templeUndecided.length)}` : ""} slab{filteredUndecided.length === 1 ? "" : "s"}
+                  </span>
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="🔎 Search code, category, label, stone, size…"
+                    style={{
+                      flex: "1 1 300px", maxWidth: 440, padding: "9px 13px", fontSize: 13,
+                      border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
+                    }}
+                  />
                 </div>
-                <StatusGroups rows={templeUndecided} selected={selected} toggle={toggle} toggleAll={toggleAll} />
+                {filteredUndecided.length === 0 ? (
+                  <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
+                    No undecided slabs in this temple match “{q}”.
+                  </div>
+                ) : (
+                  <StatusGroups rows={filteredUndecided} selected={selected} toggle={toggle} toggleAll={toggleAll} />
+                )}
               </div>
             )}
           </div>
         )}
-      </section>
-
-      {/* ── 4. Global undecided queue — search across all temples ── */}
-      <section style={{ background: "var(--surface)", border: "2px solid var(--gold-border)", borderRadius: 8, overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>
-            ❓ Undecided — {fmt0(filteredUndecided.length)}{q ? ` of ${fmt0(undecided.length)}` : ""} slab{filteredUndecided.length === 1 ? "" : "s"}
-          </span>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="🔎 Search code, temple, category, label, stone, size…"
-            style={{
-              flex: "1 1 320px", maxWidth: 460, padding: "9px 13px", fontSize: 13,
-              border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
-            }}
-          />
-        </div>
-        <div style={{ padding: "4px 16px 12px" }}>
-          {filteredUndecided.length === 0 ? (
-            <div style={{ padding: "12px 0", fontSize: 13, color: "var(--muted)" }}>
-              {q ? "No undecided slabs match this search." : "Nothing undecided — every active slab has a route. 🎉"}
-            </div>
-          ) : (
-            <StatusGroups rows={filteredUndecided} selected={selected} toggle={toggle} toggleAll={toggleAll} />
-          )}
-        </div>
       </section>
 
       {(msg || err) && (
