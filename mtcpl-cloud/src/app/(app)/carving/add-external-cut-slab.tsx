@@ -46,6 +46,8 @@ export type ExternalSlab = {
   description: string | null;
   stock_location: string | null;
   quality: string | null;
+  /** Mig 215 — carving route (cnc/outsource/none), null = nil/any. */
+  carving_method: string | null;
   priority: boolean;
   /** Mig 081 follow-on — non-null when this slab was added as part
    *  of a multi-add. All slabs sharing a batch_id render as a single
@@ -985,6 +987,8 @@ function AddOrEditForm({
   const [quality, setQuality] = useState<"" | "A" | "B">(
     (existing?.quality as "" | "A" | "B") ?? "",
   );
+  // Mig 215 — carving route ("" = nil/any).
+  const [method, setMethod] = useState<string>(existing?.carving_method ?? "");
   const [priority, setPriority] = useState(existing?.priority ?? false);
   // Mig 081 — quantity stepper, only active in add mode. Mirrors the
   // pattern from /slabs Required Sizes add form.
@@ -1151,6 +1155,20 @@ function AddOrEditForm({
               { value: "", label: "—" },
               { value: "A", label: "Grade A" },
               { value: "B", label: "Grade B" },
+            ]}
+          />
+        </Field>
+        <Field label="Carving" flex>
+          <input type="hidden" name="carving_method" value={method} />
+          <StyledSelect
+            placeholder="Nil — any"
+            value={method}
+            onChange={(v) => setMethod(v)}
+            options={[
+              { value: "", label: "Nil — any" },
+              { value: "cnc", label: "CNC" },
+              { value: "outsource", label: "Outsource" },
+              { value: "none", label: "No carving" },
             ]}
           />
         </Field>

@@ -323,7 +323,7 @@ export default async function CarvingDashboardPage({
             // Mig 081 follow-on — include batch_id so the External
             // Cut Slabs panel can group multi-add slabs together
             // and surface batch-level Edit/Delete affordances.
-            "id, temple, stone, length_ft, width_ft, thickness_ft, label, description, stock_location, quality, priority, batch_id",
+            "id, temple, stone, length_ft, width_ft, thickness_ft, label, description, stock_location, quality, carving_method, priority, batch_id",
           )
           .is("source_block_id", null)
           .eq("status", "cut_done")
@@ -358,6 +358,7 @@ export default async function CarvingDashboardPage({
       description: string | null;
       stock_location: string | null;
       quality: string | null;
+      carving_method: string | null;
       priority: boolean | null;
       batch_id: string | null;
     }>
@@ -372,6 +373,7 @@ export default async function CarvingDashboardPage({
     description: s.description,
     stock_location: s.stock_location,
     quality: s.quality,
+    carving_method: s.carving_method, // mig 215
     priority: s.priority === true,
     batch_id: s.batch_id,
   }));

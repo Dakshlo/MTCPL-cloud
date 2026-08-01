@@ -16,6 +16,7 @@ import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
 import { nextSlabCodeFromMaxId } from "../slabs/utils";
 import { jobworkQuantity } from "@/lib/dimensions";
 import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
+import { parseCarvingMethodInput } from "@/lib/carving-method";
 
 /**
  * Daksh May 2026 → re-enabled Jun 2026 → made a Settings toggle Jun 2026.
@@ -225,6 +226,8 @@ export async function addExternalCutSlabAction(formData: FormData) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
   }
   const quality = txt(formData, "quality") || null;
+  // Mig 215 — carving route decision (null = nil/any).
+  const carvingMethod = parseCarvingMethodInput(txt(formData, "carving_method"));
   const priority = txt(formData, "priority") === "true";
 
   // Quantity (default 1, clamp 1-100). On qty > 1 we mint a batch_id
@@ -268,6 +271,7 @@ export async function addExternalCutSlabAction(formData: FormData) {
       temple,
       stone,
       quality,
+      carving_method: carvingMethod, // mig 215
       length_ft: lengthIn,
       width_ft: widthIn,
       thickness_ft: thicknessIn,
@@ -396,6 +400,8 @@ export async function updateExternalCutSlabAction(formData: FormData) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
   }
   const quality = txt(formData, "quality") || null;
+  // Mig 215 — "" clears back to nil (null).
+  const carvingMethod = parseCarvingMethodInput(txt(formData, "carving_method"));
   const priority = txt(formData, "priority") === "true";
 
   const { error } = await admin
@@ -406,6 +412,7 @@ export async function updateExternalCutSlabAction(formData: FormData) {
       temple,
       stone,
       quality,
+      carving_method: carvingMethod,
       length_ft: lengthIn,
       width_ft: widthIn,
       thickness_ft: thicknessIn,
@@ -563,6 +570,8 @@ export async function bulkUpdateExternalCutSlabsAction(formData: FormData) {
     redirect(`${redirectTo}?toast=${encodeURIComponent("Stock location is required")}`);
   }
   const quality = txt(formData, "quality") || null;
+  // Mig 215 — "" clears back to nil (null).
+  const carvingMethod = parseCarvingMethodInput(txt(formData, "carving_method"));
   const priority = txt(formData, "priority") === "true";
 
   // Resolve targets server-side so the caller can't smuggle in ids
@@ -588,6 +597,7 @@ export async function bulkUpdateExternalCutSlabsAction(formData: FormData) {
       temple,
       stone,
       quality,
+      carving_method: carvingMethod,
       length_ft: lengthIn,
       width_ft: widthIn,
       thickness_ft: thicknessIn,
