@@ -571,6 +571,42 @@ function SeatMap({ temple, rows, onClose }: {
               );
             })}
           </div>
+          {/* multi-select sits at the far right of the CONTROLS row */}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {multi && routableShown.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSel((prev) => {
+                  const next = new Set(prev);
+                  if (allShownPicked) { for (const x of routableShown) next.delete(x.id); }
+                  else { for (const x of routableShown) next.add(x.id); }
+                  return next;
+                })}
+                style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
+              >
+                {allShownPicked ? "Untick all" : `Tick all ${fmt0(routableShown.length)} routable`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setMulti((v) => !v); setSel(new Set()); setPinned(null); }}
+              title="Pick several seats, then set one route for all of them"
+              style={{
+                fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                border: `1.5px solid ${multi ? "var(--gold-dark, #b45309)" : "var(--border)"}`,
+                background: multi ? "var(--gold-dark, #b45309)" : "var(--bg)",
+                color: multi ? "#fff" : "var(--text)",
+              }}
+            >
+              {multi ? "\u2611 Multi-select on" : "\u2610 Multi-select"}
+            </button>
+          </span>
+        </div>
+      </div>
+
+      {/* filter strip — route totals double as filters, kept off the busy
+          controls row so the header reads in two calm bands (Daksh). */}
+      <div style={{ flexShrink: 0, background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "8px 20px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {METHOD_ORDER.map((mk) => {
             const st = routeStats[mk];
             const th2 = METHOD_THEME[mk];
@@ -610,39 +646,7 @@ function SeatMap({ temple, rows, onClose }: {
               {fmt0(filtered.length)} of {fmt0(rows.length)} shown
             </span>
           )}
-          {/* multi-select lives at the far right (Daksh) */}
-          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {multi && routableShown.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSel((prev) => {
-                  const next = new Set(prev);
-                  // only slabs that can still be routed
-                  if (allShownPicked) { for (const s of routableShown) next.delete(s.id); }
-                  else { for (const s of routableShown) next.add(s.id); }
-                  return next;
-                })}
-                style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
-              >
-                {allShownPicked ? "Untick all" : `Tick all ${fmt0(routableShown.length)} routable`}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => { setMulti((v) => !v); setSel(new Set()); setPinned(null); }}
-              title="Pick several seats, then set one route for all of them"
-              style={{
-                fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
-                border: `1.5px solid ${multi ? "var(--gold-dark, #b45309)" : "var(--border)"}`,
-                background: multi ? "var(--gold-dark, #b45309)" : "var(--bg)",
-                color: multi ? "#fff" : "var(--text)",
-              }}
-            >
-              {multi ? "☑ Multi-select on" : "☐ Multi-select"}
-            </button>
-          </span>
         </div>
-      </div>
 
       {/* seats — full window width, small bezel, so big temples scroll less.
           Clicking empty space dismisses the pinned card (seat clicks stop
