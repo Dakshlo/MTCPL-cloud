@@ -290,6 +290,10 @@ const seatCode = (id: string) => id.replace(/^[^-]+-/, "");
  *  server action enforces. */
 const canRoute = (s: PlanSlab) => s.stage === "notCut" || s.stage === "cutWaiting";
 
+/** Journey order for seats inside a mixed group: not cut → cutted waiting
+ *  → in carving → done (Daksh). */
+const STAGE_RANK: Record<keyof StageTotals, number> = { notCut: 0, cutWaiting: 1, inCarving: 2, done: 3 };
+
 function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
@@ -398,11 +402,14 @@ function SeatMap({ temple, rows, onClose }: {
       const arr = subs.get(c2);
       if (arr) arr.push(s); else subs.set(c2, [s]);
     }
-    const byId = (a: PlanSlab, b: PlanSlab) => a.id.localeCompare(b.id, undefined, { numeric: true });
+    // not cut → cutted waiting → in carving, then by code inside each
+    const byStageThenId = (a: PlanSlab, b: PlanSlab) =>
+      STAGE_RANK[a.stage] - STAGE_RANK[b.stage] ||
+      a.id.localeCompare(b.id, undefined, { numeric: true });
     return [...m.entries()]
       .map(([cat1, subMap]) => {
         const subs = [...subMap.entries()]
-          .map(([cat2, r]) => ({ cat2, rows: [...r].sort(byId), cft: r.reduce((a, s) => a + cftOf(s), 0) }))
+          .map(([cat2, r]) => ({ cat2, rows: [...r].sort(byStageThenId), cft: r.reduce((a, s) => a + cftOf(s), 0) }))
           .sort((a, b) => b.rows.length - a.rows.length);
         const slabs = subs.reduce((a, s) => a + s.rows.length, 0);
         return { cat1, subs, slabs, cft: subs.reduce((a, s) => a + s.cft, 0) };
@@ -483,7 +490,7 @@ function SeatMap({ temple, rows, onClose }: {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover for details, click a seat to change its route</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Seat colour = carving route · corner dot = stage — click a seat to change its route</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
@@ -670,9 +677,17 @@ function SeatMap({ temple, rows, onClose }: {
                         <span style={{ position: "absolute", inset: 0, background: "rgba(180,140,40,0.22)", pointerEvents: "none" }} />
                       )}
                       {seatCode(s.id)}
-                      {s.priority && (
-                        <span style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />
-                      )}
+                      {/* Two facts on one seat (Daksh): the FILL is the
+                          carving route, the corner DOT is the production
+                          stage. White ring so the dot reads on any fill. */}
+                      <span
+                        style={{
+                          position: "absolute", top: 2, right: 2, width: 6.5, height: 6.5, borderRadius: "50%",
+                          background: STAGE_COLOR[s.stage],
+                          boxShadow: "0 0 0 1.5px rgba(255,255,255,0.9)",
+                          pointerEvents: "none",
+                        }}
+                      />
                     </button>
                   );
                 })}
@@ -719,7 +734,7 @@ function SeatMap({ temple, rows, onClose }: {
                         </div>
                         {/* Category 2 rows nested inside */}
                         {g.subs.map((sub, i) => (
-                          <div key={sub.cat2} style={{ padding: "9px 13px 11px", borderTop: i === 0 ? "none" : "1px dashed var(--border)" }}>
+                          <div key={sub.cat2} style={{ padding: "11px 13px 13px", borderTop: i === 0 ? "none" : "10px solid var(--bg)" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
                               <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--text)" }}>{sub.cat2}</span>
                               <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)" }}>{fmt0(sub.rows.length)} slabs</span>
