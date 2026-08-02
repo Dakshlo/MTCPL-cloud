@@ -438,15 +438,26 @@ function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
   const [tip, setTip] = useState<{ s: PlanSlab; x: number; y: number; below: boolean } | null>(null);
+  // Clicked seat — same info card, pinned, with route-change buttons.
+  const [pinned, setPinned] = useState<{ s: PlanSlab; x: number; y: number; below: boolean } | null>(null);
   const [q, setQ] = useState("");
   const [routeFilter, setRouteFilter] = useState<MethodKey | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  // Route edits land here instantly (seat recolours, chips recount) while
+  // router.refresh() reconciles in the background — search, filter and
+  // scroll all survive because client state is untouched.
+  const [overrides, setOverrides] = useState<Map<string, MethodKey>>(new Map());
   const qRef = useRef("");
+  const pinnedRef = useRef(false);
+  pinnedRef.current = pinned !== null;
+  const router = useRouter();
 
-  // Esc clears an active search first, then closes the map; the page
-  // behind must not scroll while it is open.
+  // Esc: close the pinned card first, then clear the search, then the map.
+  // The page behind must not scroll while the map is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (pinnedRef.current) { setPinned(null); return; }
       if (qRef.current) { qRef.current = ""; setQ(""); return; }
       onClose();
     };
@@ -456,10 +467,29 @@ function SeatMap({ temple, rows, onClose }: {
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
   }, [onClose]);
 
+  const effRows = useMemo(
+    () => (overrides.size === 0 ? rows : rows.map((s) => { const o = overrides.get(s.id); return o ? { ...s, method: o } : s; })),
+    [rows, overrides],
+  );
+
+  const applyRoute = async (s: PlanSlab, m: CarvingMethod | null) => {
+    if (busy) return;
+    setBusy(m ?? "nil");
+    const fd = new FormData();
+    fd.set("ids", JSON.stringify([s.id]));
+    fd.set("method", m ?? "");
+    const res = await setCarvingMethodBulkAction(fd);
+    setBusy(null);
+    if (!res.ok) { alert(res.error); return; }
+    setOverrides((prev) => new Map(prev).set(s.id, (m ?? "nil") as MethodKey));
+    setPinned(null);
+    router.refresh();
+  };
+
   // Search across everything the tooltip shows + route name; the route
   // chips narrow further. Groups keep their status order underneath.
   const filtered = useMemo(() => {
-    let r = rows;
+    let r = effRows;
     if (routeFilter) r = r.filter((s) => s.method === routeFilter);
     const needle = q.trim().toLowerCase();
     if (needle) {
@@ -473,7 +503,7 @@ function SeatMap({ temple, rows, onClose }: {
       });
     }
     return r;
-  }, [rows, q, routeFilter]);
+  }, [effRows, q, routeFilter]);
 
   const byStage = useMemo(() => {
     const m = new Map<keyof StageTotals, PlanSlab[]>();
@@ -484,23 +514,37 @@ function SeatMap({ temple, rows, onClose }: {
   }, [filtered]);
 
   // Chip totals stay whole-temple (slabs + CFT per route) so the legend
-  // keeps meaning while a filter or search is active.
+  // keeps meaning while a filter or search is active; effRows so a route
+  // change moves the counts instantly.
   const routeStats = useMemo(() => {
     const c: Record<MethodKey, { slabs: number; cft: number }> = {
       cnc: { slabs: 0, cft: 0 }, outsource: { slabs: 0, cft: 0 }, none: { slabs: 0, cft: 0 }, nil: { slabs: 0, cft: 0 },
     };
-    for (const s of rows) { c[s.method].slabs += 1; c[s.method].cft += cftOf(s); }
+    for (const s of effRows) { c[s.method].slabs += 1; c[s.method].cft += cftOf(s); }
     return c;
-  }, [rows]);
+  }, [effRows]);
   const totalCft = useMemo(() => rows.reduce((a, s) => a + cftOf(s), 0), [rows]);
   const narrowed = q.trim() !== "" || routeFilter !== null;
 
   const showTip = (s: PlanSlab, el: HTMLElement) => {
+    if (pinnedRef.current) return; // one card at a time — the pinned one wins
     const r = el.getBoundingClientRect();
     const below = r.bottom + 210 < window.innerHeight;
     setTip({
       s,
       x: Math.min(Math.max(r.left + r.width / 2, 145), window.innerWidth - 145),
+      y: below ? r.bottom + 8 : r.top - 8,
+      below,
+    });
+  };
+
+  const pinSeat = (s: PlanSlab, el: HTMLElement) => {
+    setTip(null);
+    const r = el.getBoundingClientRect();
+    const below = r.bottom + 320 < window.innerHeight;
+    setPinned({
+      s,
+      x: Math.min(Math.max(r.left + r.width / 2, 165), window.innerWidth - 165),
       y: below ? r.bottom + 8 : r.top - 8,
       below,
     });
@@ -514,15 +558,16 @@ function SeatMap({ temple, rows, onClose }: {
   );
 
   return (
-    // Content-column page, same convention as the sticky quick-tag bar —
-    // the sidebar stays visible and usable beside it.
-    <div style={{ position: "fixed", left: "var(--content-left)", right: 0, top: 0, bottom: 0, zIndex: 80, background: "var(--bg)", display: "flex", flexDirection: "column", animation: "planFadeUp .18s ease both", borderLeft: "1px solid var(--border)" }}>
+    // TRUE full screen (Daksh) — covers the sidebar (z 100) and mobile
+    // drawer (z 301) so every pixel goes to seats; NavigationProgress
+    // (z 10000) stays above.
+    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "var(--bg)", display: "flex", flexDirection: "column", animation: "planFadeUp .18s ease both" }}>
       {/* header — row 1: temple + totals + close */}
       <div style={{ flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "10px 20px 11px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover a seat for full details</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover for details, click a seat to change its route</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
@@ -583,8 +628,10 @@ function SeatMap({ temple, rows, onClose }: {
         </div>
       </div>
 
-      {/* seats — full window width, small bezel, so big temples scroll less */}
-      <div onScroll={() => setTip(null)} style={{ flex: 1, overflowY: "auto", padding: "16px 22px 26px" }}>
+      {/* seats — full window width, small bezel, so big temples scroll less.
+          Clicking empty space dismisses the pinned card (seat clicks stop
+          propagation). */}
+      <div onScroll={() => { setTip(null); setPinned(null); }} onClick={() => setPinned(null)} style={{ flex: 1, overflowY: "auto", padding: "16px 22px 26px" }}>
         <div>
           {filtered.length === 0 && (
             <div style={{ textAlign: "center", padding: "48px 0", fontSize: 13.5, fontWeight: 700, color: "var(--muted)" }}>
@@ -625,11 +672,12 @@ function SeatMap({ temple, rows, onClose }: {
                         onMouseLeave={() => setTip(null)}
                         onFocus={(e) => showTip(s, e.currentTarget)}
                         onBlur={() => setTip(null)}
+                        onClick={(e) => { e.stopPropagation(); pinSeat(s, e.currentTarget); }}
                         style={{
                           position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
                           fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          overflow: "hidden", whiteSpace: "nowrap", cursor: "default",
+                          overflow: "hidden", whiteSpace: "nowrap", cursor: "pointer",
                           background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
                           border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
                           color: routed ? "#fff" : "var(--muted)",
@@ -658,10 +706,10 @@ function SeatMap({ temple, rows, onClose }: {
       </div>
 
       {/* hover card — fixed at overlay root, never inside a transformed seat */}
-      {tip && (
+      {tip && !pinned && (
         <div
           style={{
-            position: "fixed", left: tip.x, top: tip.y, zIndex: 95, pointerEvents: "none",
+            position: "fixed", left: tip.x, top: tip.y, zIndex: 510, pointerEvents: "none",
             transform: `translate(-50%, ${tip.below ? "0" : "-100%"})`,
             width: 280, background: "var(--surface)", border: "1.5px solid var(--gold-border, #d8c49a)",
             borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.22)", padding: "11px 13px",
@@ -681,8 +729,78 @@ function SeatMap({ temple, rows, onClose }: {
           {tipRow("Label", tip.s.label)}
           {tipRow("Descr.", tip.s.description)}
           {tipRow("Stone", tip.s.stone)}
+          <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px dashed var(--border)", fontSize: 10, fontWeight: 700, color: "var(--gold-dark, #b45309)" }}>
+            Click the seat to change its route
+          </div>
         </div>
       )}
+
+      {/* clicked card — same info, pinned, with route-change buttons */}
+      {pinned && (() => {
+        const cur = overrides.get(pinned.s.id) ?? pinned.s.method;
+        return (
+          <div
+            style={{
+              position: "fixed", left: pinned.x, top: pinned.y, zIndex: 520,
+              transform: `translate(-50%, ${pinned.below ? "0" : "-100%"})`,
+              width: 310, background: "var(--surface)", border: "1.5px solid var(--gold-border, #d8c49a)",
+              borderRadius: 10, boxShadow: "0 16px 44px rgba(0,0,0,0.3)", padding: "12px 14px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 7 }}>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>
+                {pinned.s.priority && <span style={{ color: "#f59e0b" }}>⚡ </span>}{pinned.s.id}
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", borderRadius: 4, padding: "2px 8px", color: cur === "nil" ? "var(--muted)" : "#fff", background: cur === "nil" ? "var(--surface-alt, rgba(0,0,0,0.05))" : METHOD_THEME[cur].fg, border: `1px solid ${cur === "nil" ? "var(--border)" : METHOD_THEME[cur].fg}` }}>
+                  {METHOD_THEME[cur].label}
+                </span>
+                <button type="button" onClick={() => setPinned(null)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, fontWeight: 800, color: "var(--muted)", padding: 2, lineHeight: 1 }}>✕</button>
+              </span>
+            </div>
+            {tipRow("Status", pinned.s.status.replace(/_/g, " "))}
+            {tipRow("Size", `${pinned.s.l}×${pinned.s.w}×${pinned.s.t}″ · ${fmt1(cftOf(pinned.s))} CFT`)}
+            {tipRow("Category", [pinned.s.section, pinned.s.element].filter(Boolean).join(" › ") || null)}
+            {tipRow("Label", pinned.s.label)}
+            {tipRow("Descr.", pinned.s.description)}
+            {tipRow("Stone", pinned.s.stone)}
+            <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
+              <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
+                Change route
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(["cnc", "outsource", "none"] as CarvingMethod[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={busy !== null || cur === m}
+                    onClick={() => applyRoute(pinned.s, m)}
+                    style={{
+                      fontSize: 11.5, fontWeight: 800, padding: "6px 11px", borderRadius: 6,
+                      border: `1.5px solid ${METHOD_BADGE[m].border}`,
+                      background: METHOD_BADGE[m].bg, color: METHOD_BADGE[m].fg,
+                      cursor: busy !== null || cur === m ? "default" : "pointer",
+                      opacity: cur === m ? 0.45 : 1,
+                    }}
+                  >
+                    {busy === m ? "Saving…" : `${methodLabel(m)}${cur === m ? " ✓" : ""}`}
+                  </button>
+                ))}
+                {cur !== "nil" && (
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => applyRoute(pinned.s, null)}
+                    style={{ fontSize: 11.5, fontWeight: 800, padding: "6px 11px", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: busy !== null ? "default" : "pointer" }}
+                  >
+                    {busy === "nil" ? "Saving…" : "Clear — Nil (any)"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
