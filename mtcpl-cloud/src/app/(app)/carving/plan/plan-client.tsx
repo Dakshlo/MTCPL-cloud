@@ -384,21 +384,36 @@ function SeatMap({ temple, rows, onClose }: {
     return m;
   }, [filtered]);
 
-  // Category view — "Cat 1 › Cat 2", biggest group first, uncategorised last.
+  // Category view — nested: ONE box per Category 1, with each Category 2
+  // as a row inside it (Daksh), and carved slabs left out entirely since
+  // nothing there can be acted on.
   const byCategory = useMemo(() => {
-    const m = new Map<string, PlanSlab[]>();
-    for (const s of filtered) {
-      const key = [s.section, s.element].filter(Boolean).join(" › ") || "— No category —";
-      const arr = m.get(key);
-      if (arr) arr.push(s); else m.set(key, [s]);
+    const pending = filtered.filter((s) => s.stage !== "done");
+    const m = new Map<string, Map<string, PlanSlab[]>>();
+    for (const s of pending) {
+      const c1 = (s.section || "").trim() || "— No category —";
+      const c2 = (s.element || "").trim() || "—";
+      let subs = m.get(c1);
+      if (!subs) { subs = new Map(); m.set(c1, subs); }
+      const arr = subs.get(c2);
+      if (arr) arr.push(s); else subs.set(c2, [s]);
     }
-    for (const arr of m.values()) arr.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-    return [...m.entries()].sort((a, b) => {
-      if (a[0].startsWith("—")) return 1;
-      if (b[0].startsWith("—")) return -1;
-      return b[1].length - a[1].length;
-    });
+    const byId = (a: PlanSlab, b: PlanSlab) => a.id.localeCompare(b.id, undefined, { numeric: true });
+    return [...m.entries()]
+      .map(([cat1, subMap]) => {
+        const subs = [...subMap.entries()]
+          .map(([cat2, r]) => ({ cat2, rows: [...r].sort(byId), cft: r.reduce((a, s) => a + cftOf(s), 0) }))
+          .sort((a, b) => b.rows.length - a.rows.length);
+        const slabs = subs.reduce((a, s) => a + s.rows.length, 0);
+        return { cat1, subs, slabs, cft: subs.reduce((a, s) => a + s.cft, 0) };
+      })
+      .sort((a, b) => {
+        if (a.cat1.startsWith("—")) return 1;
+        if (b.cat1.startsWith("—")) return -1;
+        return b.slabs - a.slabs;
+      });
   }, [filtered]);
+  const categoryTotal = useMemo(() => byCategory.reduce((a, g) => a + g.slabs, 0), [byCategory]);
 
   // Chip totals stay whole-temple (slabs + CFT per route) so the legend
   // keeps meaning while a filter or search is active; effRows so a route
@@ -665,33 +680,59 @@ function SeatMap({ temple, rows, onClose }: {
             );
 
             if (groupBy === "category") {
-              return byCategory.map(([cat, catRows]) => {
-                const catCft = catRows.reduce((a, s) => a + cftOf(s), 0);
-                // per-stage tally so a category shows how far along it is
-                const tally = SEAT_SECTIONS.map((sec) => ({
-                  ...sec, n: catRows.filter((s) => s.stage === sec.key).length,
-                })).filter((t) => t.n > 0);
+              if (categoryTotal === 0) {
                 return (
-                  <div key={cat} style={{ marginBottom: 20, border: "1px solid var(--border)", borderRadius: 10, padding: "11px 13px 13px", background: "var(--surface)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--gold-dark, #b45309)", letterSpacing: "0.03em" }}>{cat}</span>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
-                        {fmt0(catRows.length)} slabs
-                      </span>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(catCft)} CFT</span>
-                      <span style={{ flex: 1 }} />
-                      {tally.map((t) => (
-                        <span key={t.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 2, background: STAGE_COLOR[t.key] }} />
-                          <span style={{ color: "var(--muted)", fontWeight: 700 }}>{t.label}</span>
-                          <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(t.n)}</b>
-                        </span>
-                      ))}
-                    </div>
-                    {seatsOf(catRows)}
+                  <div style={{ textAlign: "center", padding: "40px 0", fontSize: 13, fontWeight: 700, color: "var(--muted)" }}>
+                    Nothing pending in this view — every slab here is already carved.
                   </div>
                 );
-              });
+              }
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
+                    Carved slabs are not listed here — only work still to be done.
+                  </div>
+                  {byCategory.map((g) => {
+                    // per-stage tally for the whole Category 1
+                    const rows2 = g.subs.flatMap((s) => s.rows);
+                    const tally = SEAT_SECTIONS.filter((sec) => sec.key !== "done")
+                      .map((sec) => ({ ...sec, n: rows2.filter((s) => s.stage === sec.key).length }))
+                      .filter((t) => t.n > 0);
+                    return (
+                      <div key={g.cat1} style={{ marginBottom: 18, border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", overflow: "hidden" }}>
+                        {/* Category 1 band */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 13px", background: "rgba(180,140,40,0.07)", borderBottom: "1px solid var(--border)" }}>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--gold-dark, #b45309)", letterSpacing: "0.04em" }}>{g.cat1}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
+                            {fmt0(g.slabs)} slabs
+                          </span>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(g.cft)} CFT</span>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>· {fmt0(g.subs.length)} section{g.subs.length === 1 ? "" : "s"}</span>
+                          <span style={{ flex: 1 }} />
+                          {tally.map((t) => (
+                            <span key={t.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: 2, background: STAGE_COLOR[t.key] }} />
+                              <span style={{ color: "var(--muted)", fontWeight: 700 }}>{t.label}</span>
+                              <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(t.n)}</b>
+                            </span>
+                          ))}
+                        </div>
+                        {/* Category 2 rows nested inside */}
+                        {g.subs.map((sub, i) => (
+                          <div key={sub.cat2} style={{ padding: "9px 13px 11px", borderTop: i === 0 ? "none" : "1px dashed var(--border)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
+                              <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--text)" }}>{sub.cat2}</span>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)" }}>{fmt0(sub.rows.length)} slabs</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>{fmt0(sub.cft)} CFT</span>
+                            </div>
+                            {seatsOf(sub.rows)}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </>
+              );
             }
 
             return (
