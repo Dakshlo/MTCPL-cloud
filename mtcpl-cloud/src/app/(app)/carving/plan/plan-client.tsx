@@ -133,6 +133,9 @@ function Ring({ value, size = 86, stroke = 9, color, label, sub }: {
   );
 }
 
+/** Height of the folder tab that carries a card's carving route. */
+const TAB_H = 19;
+
 /** One ring split into all four stages, total slab count in the middle.
  *  Drawn done → in-carving → cut-waiting → not-cut clockwise from the top,
  *  so the finished share always starts at 12 o'clock. */
@@ -282,12 +285,19 @@ function TemplePicker({ temples, value, onPick }: {
 }
 
 /** One undecided slab card — shared by the temple-scoped and global lists. */
-function SlabCard({ s, on, onToggle, i }: { s: PlanSlab; on: boolean; onToggle: () => void; i: number }) {
+function SlabCard({ s, on, onToggle, i, reserveTab }: {
+  s: PlanSlab; on: boolean; onToggle: () => void; i: number; reserveTab: boolean;
+}) {
   const cats = [s.section, s.element].filter(Boolean).join(" › ");
+  const route = s.method !== "nil" ? METHOD_THEME[s.method] : null;
   return (
     <label
       className="plan-card"
       style={{
+        position: "relative",
+        // Space for the folder tab. Reserved for every card in a list that
+        // has any routed slab, so tops stay aligned across the grid.
+        marginTop: reserveTab ? TAB_H : 0,
         display: "flex", alignItems: "flex-start", gap: 9,
         border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`,
         background: on ? "rgba(180,140,40,0.10)" : "var(--bg)",
@@ -296,6 +306,22 @@ function SlabCard({ s, on, onToggle, i }: { s: PlanSlab; on: boolean; onToggle: 
         animationDelay: `${Math.min(i * 14, 280)}ms`,
       }}
     >
+      {/* Route rides ABOVE the card like a file-folder tab, so it can never
+          be confused with the category chip inside the body (Daksh). */}
+      {route && (
+        <span
+          style={{
+            position: "absolute", left: 10, top: -TAB_H, zIndex: 1,
+            padding: "2px 10px 4px", lineHeight: 1.35,
+            fontSize: 9.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase",
+            color: route.fg, background: `${route.fg}1f`,
+            border: `1.5px solid ${route.fg}66`, borderBottom: "none",
+            borderRadius: "6px 6px 0 0",
+          }}
+        >
+          {route.label}
+        </span>
+      )}
       <input type="checkbox" checked={on} onChange={onToggle} style={{ cursor: "pointer", marginTop: 2 }} />
       <span style={{ minWidth: 0, flex: 1 }}>
         <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
@@ -306,13 +332,6 @@ function SlabCard({ s, on, onToggle, i }: { s: PlanSlab; on: boolean; onToggle: 
             {s.l}×{s.w}×{s.t}″ · {fmt1(cftOf(s))} CFT
           </span>
         </span>
-        {/* Current route — so View all / Already routed show what a slab is
-            set to before you change it. Undecided cards stay clean. */}
-        {s.method !== "nil" && (
-          <span style={{ display: "inline-block", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: METHOD_THEME[s.method].fg, background: `${METHOD_THEME[s.method].fg}14`, border: `1px solid ${METHOD_THEME[s.method].fg}55`, borderRadius: 4, padding: "1px 7px", marginTop: 4, marginRight: 5 }}>
-            {METHOD_THEME[s.method].label}
-          </span>
-        )}
         {/* Category as a chip so it can't be mistaken for the label. */}
         {cats && (
           <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", color: "var(--gold-dark)", background: "rgba(180,140,40,0.10)", border: "1px solid rgba(180,140,40,0.30)", borderRadius: 4, padding: "1px 6px", marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -357,6 +376,10 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
     return [...known, ...extras];
   }, [rows]);
 
+  // Reserve tab space for the whole list (not per card) so a mixed row of
+  // routed + undecided cards still lines up along the top.
+  const reserveTab = useMemo(() => rows.some((r) => r.method !== "nil"), [rows]);
+
   if (groups.length === 0) return null;
   return (
     <>
@@ -389,7 +412,7 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8, paddingBottom: 10 }}>
               {g.rows.map((s, i) => (
-                <SlabCard key={s.id} s={s} i={i} on={selected.has(s.id)} onToggle={() => toggle(s.id)} />
+                <SlabCard key={s.id} s={s} i={i} on={selected.has(s.id)} onToggle={() => toggle(s.id)} reserveTab={reserveTab} />
               ))}
             </div>
           </div>
