@@ -43,9 +43,9 @@ const METHOD_THEME: Record<MethodKey, { label: string; fg: string }> = {
 };
 const STAGE_LABELS: Array<{ key: keyof StageTotals; label: string }> = [
   { key: "notCut", label: "Not cut yet" },
-  { key: "cutWaiting", label: "Cut · waiting" },
+  { key: "cutWaiting", label: "Cutted waiting" },
   { key: "inCarving", label: "In carving" },
-  { key: "done", label: "Done" },
+  { key: "done", label: "Carving done" },
 ];
 const STAGE_COLOR: Record<keyof StageTotals, string> = {
   notCut: "#6b7280",
@@ -270,11 +270,13 @@ function TemplePicker({ temples, value, onPick }: {
 // ── Slab seat map — every slab of the temple as one "cinema seat" ──
 // Sections top→bottom follow the journey; carved slabs sit nearest the
 // temple "screen" at the bottom. Seat colour = route, hover = full info.
-const SEAT_SECTIONS: Array<{ key: keyof StageTotals; label: string }> = [
-  { key: "notCut", label: "Not cut yet" },
-  { key: "cutWaiting", label: "Cut · waiting" },
-  { key: "inCarving", label: "In carving" },
-  { key: "done", label: "Carved / done" },
+// Hindi beside every English label — the floor reads these, not the office
+// (Daksh).
+const SEAT_SECTIONS: Array<{ key: keyof StageTotals; label: string; hi: string }> = [
+  { key: "notCut", label: "Not cut yet", hi: "कटाई बाकी" },
+  { key: "cutWaiting", label: "Cutted waiting", hi: "कट गया — वेटिंग" },
+  { key: "inCarving", label: "In carving", hi: "कार्विंग चालू" },
+  { key: "done", label: "Carving done", hi: "कार्विंग पूरी" },
 ];
 
 /** "PALI-0010-2" → "0010-2" — the temple prefix is the map's title. */
@@ -293,6 +295,9 @@ function SeatMap({ temple, rows, onClose }: {
   // then one route change applies to the whole selection.
   const [multi, setMulti] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  // Same seats, two groupings: by production stage (cinema rows) or by
+  // component category, the way Temple View reads.
+  const [groupBy, setGroupBy] = useState<"stage" | "category">("stage");
   // Route edits land here instantly (seat recolours, chips recount) while
   // router.refresh() reconciles in the background — search, filter and
   // scroll all survive because client state is untouched.
@@ -369,6 +374,22 @@ function SeatMap({ temple, rows, onClose }: {
     for (const s of filtered) m.get(s.stage)!.push(s);
     for (const arr of m.values()) arr.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
     return m;
+  }, [filtered]);
+
+  // Category view — "Cat 1 › Cat 2", biggest group first, uncategorised last.
+  const byCategory = useMemo(() => {
+    const m = new Map<string, PlanSlab[]>();
+    for (const s of filtered) {
+      const key = [s.section, s.element].filter(Boolean).join(" › ") || "— No category —";
+      const arr = m.get(key);
+      if (arr) arr.push(s); else m.set(key, [s]);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    return [...m.entries()].sort((a, b) => {
+      if (a[0].startsWith("—")) return 1;
+      if (b[0].startsWith("—")) return -1;
+      return b[1].length - a[1].length;
+    });
   }, [filtered]);
 
   // Chip totals stay whole-temple (slabs + CFT per route) so the legend
@@ -465,33 +486,30 @@ function SeatMap({ temple, rows, onClose }: {
             placeholder="🔎 Search code, category, label, description, stone, size…"
             style={{ flex: "1 1 220px", maxWidth: 380, padding: "8px 13px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }}
           />
-          <button
-            type="button"
-            onClick={() => { setMulti((v) => !v); setSel(new Set()); setPinned(null); }}
-            title="Pick several seats, then set one route for all of them"
-            style={{
-              fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
-              border: `1.5px solid ${multi ? "var(--gold-dark, #b45309)" : "var(--border)"}`,
-              background: multi ? "var(--gold-dark, #b45309)" : "var(--bg)",
-              color: multi ? "#fff" : "var(--text)",
-            }}
-          >
-            {multi ? "☑ Multi-select on" : "☐ Multi-select"}
-          </button>
-          {multi && filtered.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSel((prev) => {
-                const next = new Set(prev);
-                if (allShownPicked) { for (const s of filtered) next.delete(s.id); }
-                else { for (const s of filtered) next.add(s.id); }
-                return next;
-              })}
-              style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
-            >
-              {allShownPicked ? "Untick all shown" : `Tick all ${fmt0(filtered.length)} shown`}
-            </button>
-          )}
+          {/* view switch — same slabs, cinema rows or category cards */}
+          <div style={{ display: "flex", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)", flexShrink: 0 }}>
+            {([
+              { key: "stage", label: "🎬 Cinema" },
+              { key: "category", label: "🗂 Category" },
+            ] as Array<{ key: "stage" | "category"; label: string }>).map((v, i) => {
+              const on = groupBy === v.key;
+              return (
+                <button
+                  key={v.key}
+                  type="button"
+                  onClick={() => setGroupBy(v.key)}
+                  style={{
+                    fontSize: 12, fontWeight: 800, padding: "8px 13px", cursor: "pointer", border: "none",
+                    borderLeft: i === 0 ? "none" : "1px solid var(--border)",
+                    background: on ? "var(--gold-dark, #b45309)" : "transparent",
+                    color: on ? "#fff" : "var(--muted)",
+                  }}
+                >
+                  {v.label}
+                </button>
+              );
+            })}
+          </div>
           {METHOD_ORDER.map((mk) => {
             const st = routeStats[mk];
             const th2 = METHOD_THEME[mk];
@@ -531,6 +549,36 @@ function SeatMap({ temple, rows, onClose }: {
               {fmt0(filtered.length)} of {fmt0(rows.length)} shown
             </span>
           )}
+          {/* multi-select lives at the far right (Daksh) */}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {multi && filtered.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSel((prev) => {
+                  const next = new Set(prev);
+                  if (allShownPicked) { for (const s of filtered) next.delete(s.id); }
+                  else { for (const s of filtered) next.add(s.id); }
+                  return next;
+                })}
+                style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
+              >
+                {allShownPicked ? "Untick all shown" : `Tick all ${fmt0(filtered.length)} shown`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setMulti((v) => !v); setSel(new Set()); setPinned(null); }}
+              title="Pick several seats, then set one route for all of them"
+              style={{
+                fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                border: `1.5px solid ${multi ? "var(--gold-dark, #b45309)" : "var(--border)"}`,
+                background: multi ? "var(--gold-dark, #b45309)" : "var(--bg)",
+                color: multi ? "#fff" : "var(--text)",
+              }}
+            >
+              {multi ? "☑ Multi-select on" : "☐ Multi-select"}
+            </button>
+          </span>
         </div>
       </div>
 
@@ -551,77 +599,120 @@ function SeatMap({ temple, rows, onClose }: {
               </button>
             </div>
           )}
-          {SEAT_SECTIONS.map(({ key, label }) => {
-            const secRows = byStage.get(key)!;
-            if (secRows.length === 0) return null;
-            const secCft = secRows.reduce((a, s) => a + cftOf(s), 0);
-            return (
-              <div key={key} style={{ marginBottom: 22 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: STAGE_COLOR[key] }}>{label}</span>
-                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
-                    {fmt0(secRows.length)} slabs
-                  </span>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(secCft)} CFT</span>
-                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 5 }}>
-                  {secRows.map((s) => {
-                    const routed = s.method !== "nil";
-                    const picked = sel.has(s.id);
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className="plan-seat"
-                        onMouseEnter={(e) => showTip(s, e.currentTarget)}
-                        onMouseLeave={() => setTip(null)}
-                        onFocus={(e) => showTip(s, e.currentTarget)}
-                        onBlur={() => setTip(null)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!multi) { pinSeat(s, e.currentTarget); return; }
-                          setSel((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
-                            return next;
-                          });
-                        }}
-                        style={{
-                          position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
-                          fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          overflow: "hidden", whiteSpace: "nowrap", cursor: "pointer",
-                          background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
-                          border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
-                          color: routed ? "#fff" : "var(--muted)",
-                          outline: picked ? "2.5px solid var(--gold-dark, #b45309)" : "none",
-                          outlineOffset: picked ? 1 : 0,
-                        }}
-                      >
-                        {picked && (
-                          <span style={{ position: "absolute", inset: 0, background: "rgba(180,140,40,0.22)", pointerEvents: "none" }} />
-                        )}
-                        {seatCode(s.id)}
-                        {s.priority && (
-                          <span style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+          {(() => {
+            // One seat renderer, two groupings — the section header is the
+            // only thing that differs between cinema and category view.
+            const seatsOf = (rows2: PlanSlab[]) => (
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: groupBy === "stage" ? "center" : "flex-start", gap: 5 }}>
+                {rows2.map((s) => {
+                  const routed = s.method !== "nil";
+                  const picked = sel.has(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="plan-seat"
+                      onMouseEnter={(e) => showTip(s, e.currentTarget)}
+                      onMouseLeave={() => setTip(null)}
+                      onFocus={(e) => showTip(s, e.currentTarget)}
+                      onBlur={() => setTip(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!multi) { pinSeat(s, e.currentTarget); return; }
+                        setSel((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                          return next;
+                        });
+                      }}
+                      style={{
+                        position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
+                        fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        overflow: "hidden", whiteSpace: "nowrap", cursor: "pointer",
+                        background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
+                        border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
+                        color: routed ? "#fff" : "var(--muted)",
+                        outline: picked ? "2.5px solid var(--gold-dark, #b45309)" : "none",
+                        outlineOffset: picked ? 1 : 0,
+                      }}
+                    >
+                      {picked && (
+                        <span style={{ position: "absolute", inset: 0, background: "rgba(180,140,40,0.22)", pointerEvents: "none" }} />
+                      )}
+                      {seatCode(s.id)}
+                      {s.priority && (
+                        <span style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             );
-          })}
 
-          {/* the "screen" — carved slabs end up here */}
-          <div style={{ maxWidth: 560, margin: "26px auto 4px", textAlign: "center" }}>
-            <div style={{ height: 12, borderRadius: "50% 50% 0 0 / 100% 100% 0 0", background: "linear-gradient(to bottom, var(--gold-dark, #b45309), transparent)", opacity: 0.45 }} />
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--muted)", marginTop: 7 }}>
-              🏛 Temple — carved slabs head this way
-            </div>
-          </div>
+            if (groupBy === "category") {
+              return byCategory.map(([cat, catRows]) => {
+                const catCft = catRows.reduce((a, s) => a + cftOf(s), 0);
+                // per-stage tally so a category shows how far along it is
+                const tally = SEAT_SECTIONS.map((sec) => ({
+                  ...sec, n: catRows.filter((s) => s.stage === sec.key).length,
+                })).filter((t) => t.n > 0);
+                return (
+                  <div key={cat} style={{ marginBottom: 20, border: "1px solid var(--border)", borderRadius: 10, padding: "11px 13px 13px", background: "var(--surface)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--gold-dark, #b45309)", letterSpacing: "0.03em" }}>{cat}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
+                        {fmt0(catRows.length)} slabs
+                      </span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(catCft)} CFT</span>
+                      <span style={{ flex: 1 }} />
+                      {tally.map((t) => (
+                        <span key={t.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 2, background: STAGE_COLOR[t.key] }} />
+                          <span style={{ color: "var(--muted)", fontWeight: 700 }}>{t.label}</span>
+                          <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(t.n)}</b>
+                        </span>
+                      ))}
+                    </div>
+                    {seatsOf(catRows)}
+                  </div>
+                );
+              });
+            }
+
+            return (
+              <>
+                {SEAT_SECTIONS.map(({ key, label, hi }) => {
+                  const secRows = byStage.get(key)!;
+                  if (secRows.length === 0) return null;
+                  const secCft = secRows.reduce((a, s) => a + cftOf(s), 0);
+                  return (
+                    <div key={key} style={{ marginBottom: 22 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                        <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: STAGE_COLOR[key] }}>{label}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>/ {hi}</span>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
+                          {fmt0(secRows.length)} slabs
+                        </span>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(secCft)} CFT</span>
+                        <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                      </div>
+                      {seatsOf(secRows)}
+                    </div>
+                  );
+                })}
+
+                {/* the "screen" — carved slabs end up here */}
+                <div style={{ maxWidth: 560, margin: "26px auto 4px", textAlign: "center" }}>
+                  <div style={{ height: 12, borderRadius: "50% 50% 0 0 / 100% 100% 0 0", background: "linear-gradient(to bottom, var(--gold-dark, #b45309), transparent)", opacity: 0.45 }} />
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--muted)", marginTop: 7 }}>
+                    🏛 Temple — carved slabs head this way
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
       </div>
 
