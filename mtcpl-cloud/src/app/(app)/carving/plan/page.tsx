@@ -21,7 +21,7 @@ import {
   type StageTotals,
   type MethodSummary,
   type TempleMethodRow,
-  type UndecidedSlab,
+  type PlanSlab,
   type CncForecast,
 } from "./plan-client";
 
@@ -126,7 +126,9 @@ export default async function CarvingPlanPage() {
   const templeMap = new Map<string, Record<MethodKey, MethodSummary>>();
   const dimsById = new Map<string, number>(); // slab id → raw cft (forecast join)
   const slabMeta = new Map<string, { method: MethodKey; stage: keyof StageTotals | null }>();
-  const undecided: UndecidedSlab[] = [];
+  // Every non-excluded slab — the temple section switches between
+  // Undecided / View all / Already routed entirely on the client.
+  const planSlabs: PlanSlab[] = [];
 
   for (const s of slabs) {
     const stage = stageOf(s.status);
@@ -156,24 +158,22 @@ export default async function CarvingPlanPage() {
     t[m].stages[stage].slabs += 1;
     t[m].stages[stage].cft += c;
 
-    // Undecided queue = nil slabs that still have a routing decision to make
-    // (once a slab is done/dispatched the question is moot).
-    if (m === "nil" && stage !== "done") {
-      undecided.push({
-        id: s.id,
-        temple: s.temple,
-        status: s.status,
-        label: s.label,
-        stone: s.stone,
-        description: s.description,
-        section: s.component_section,
-        element: s.component_element,
-        l: Number(s.length_ft) || 0,
-        w: Number(s.width_ft) || 0,
-        t: Number(s.thickness_ft) || 0,
-        priority: s.priority === true,
-      });
-    }
+    planSlabs.push({
+      id: s.id,
+      temple: s.temple,
+      status: s.status,
+      label: s.label,
+      stone: s.stone,
+      description: s.description,
+      section: s.component_section,
+      element: s.component_element,
+      l: Number(s.length_ft) || 0,
+      w: Number(s.width_ft) || 0,
+      t: Number(s.thickness_ft) || 0,
+      priority: s.priority === true,
+      method: m,
+      stage,
+    });
   }
 
   const temples: TempleMethodRow[] = [...templeMap.entries()]
@@ -228,7 +228,7 @@ export default async function CarvingPlanPage() {
     <PlanClient
       summaries={summaries}
       temples={temples}
-      undecided={undecided}
+      slabs={planSlabs}
       forecast={forecast}
     />
   );

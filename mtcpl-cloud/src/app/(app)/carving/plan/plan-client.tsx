@@ -23,11 +23,12 @@ export type Tot = { slabs: number; cft: number };
 export type StageTotals = { notCut: Tot; cutWaiting: Tot; inCarving: Tot; done: Tot };
 export type MethodSummary = { total: Tot; stages: StageTotals };
 export type TempleMethodRow = { temple: string; methods: Record<MethodKey, MethodSummary> };
-export type UndecidedSlab = {
+export type PlanSlab = {
   id: string; temple: string; status: string; label: string | null;
   stone: string | null; description: string | null;
   section: string | null; element: string | null;
   l: number; w: number; t: number; priority: boolean;
+  method: MethodKey; stage: keyof StageTotals;
 };
 // daily = carved CFT per day, index 0 = 30 days ago … 29 = today.
 export type CncForecast = { machineCount: number; cncPending: Tot; cncDone30: Tot; daily: number[] };
@@ -58,6 +59,13 @@ const STATUS_GROUPS: Array<{ key: string; label: string; color: string }> = [
   { key: "cutting", label: "Cutting", color: "#b45309" },
   { key: "planned", label: "Planned for cutting", color: "#7c3aed" },
   { key: "open", label: "Not cut yet", color: "#6b7280" },
+  // Reached only by the View all / Already routed modes — undecided slabs
+  // never sit in a carving or finished status.
+  { key: "carving_assigned", label: "Carving assigned", color: "#b45309" },
+  { key: "carving_in_progress", label: "Carving in progress", color: "#b45309" },
+  { key: "carving_on_hold", label: "Carving on hold", color: "#b91c1c" },
+  { key: "completed", label: "Carved · done", color: "#15803d" },
+  { key: "dispatched", label: "Dispatched", color: "#15803d" },
 ];
 
 /** Number + unit as one visually distinct stat. `tone` separates a COUNT
@@ -93,7 +101,7 @@ function Stat({ label, value, unit, tone = "count", size = 26 }: {
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 const fmt1 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const cftOf = (s: UndecidedSlab) => (s.l * s.w * s.t) / 1728;
+const cftOf = (s: PlanSlab) => (s.l * s.w * s.t) / 1728;
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 /** SVG progress ring. */
@@ -130,8 +138,9 @@ function Ring({ value, size = 86, stroke = 9, color, label, sub }: {
  *  so the finished share always starts at 12 o'clock. */
 const DONUT_ORDER: Array<keyof StageTotals> = ["done", "inCarving", "cutWaiting", "notCut"];
 
-function StageDonut({ stages, total, size = 96, stroke = 12 }: {
-  stages: StageTotals; total: number; size?: number; stroke?: number;
+function StageDonut({ stages, total, centerValue, centerUnit, size = 96, stroke = 12 }: {
+  stages: StageTotals; total: number; centerValue: string; centerUnit: string;
+  size?: number; stroke?: number;
 }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
@@ -164,11 +173,11 @@ function StageDonut({ stages, total, size = 96, stroke = 12 }: {
         ))}
       </svg>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-        <span style={{ fontSize: total >= 10000 ? 17 : 20, fontWeight: 800, lineHeight: 1, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
-          {fmt0(total)}
+        <span style={{ fontSize: centerValue.length > 4 ? 17 : 21, fontWeight: 800, lineHeight: 1, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+          {centerValue}
         </span>
         <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", marginTop: 3 }}>
-          slabs
+          {centerUnit}
         </span>
       </div>
     </div>
@@ -273,7 +282,7 @@ function TemplePicker({ temples, value, onPick }: {
 }
 
 /** One undecided slab card — shared by the temple-scoped and global lists. */
-function SlabCard({ s, on, onToggle, i }: { s: UndecidedSlab; on: boolean; onToggle: () => void; i: number }) {
+function SlabCard({ s, on, onToggle, i }: { s: PlanSlab; on: boolean; onToggle: () => void; i: number }) {
   const cats = [s.section, s.element].filter(Boolean).join(" › ");
   return (
     <label
@@ -297,6 +306,13 @@ function SlabCard({ s, on, onToggle, i }: { s: UndecidedSlab; on: boolean; onTog
             {s.l}×{s.w}×{s.t}″ · {fmt1(cftOf(s))} CFT
           </span>
         </span>
+        {/* Current route — so View all / Already routed show what a slab is
+            set to before you change it. Undecided cards stay clean. */}
+        {s.method !== "nil" && (
+          <span style={{ display: "inline-block", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: METHOD_THEME[s.method].fg, background: `${METHOD_THEME[s.method].fg}14`, border: `1px solid ${METHOD_THEME[s.method].fg}55`, borderRadius: 4, padding: "1px 7px", marginTop: 4, marginRight: 5 }}>
+            {METHOD_THEME[s.method].label}
+          </span>
+        )}
         {/* Category as a chip so it can't be mistaken for the label. */}
         {cats && (
           <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", color: "var(--gold-dark)", background: "rgba(180,140,40,0.10)", border: "1px solid rgba(180,140,40,0.30)", borderRadius: 4, padding: "1px 6px", marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -322,13 +338,13 @@ function SlabCard({ s, on, onToggle, i }: { s: UndecidedSlab; on: boolean; onTog
 
 /** Status-grouped card list (used scoped-to-temple and globally). */
 function StatusGroups({ rows, selected, toggle, toggleAll }: {
-  rows: UndecidedSlab[];
+  rows: PlanSlab[];
   selected: Set<string>;
   toggle: (id: string) => void;
-  toggleAll: (rows: UndecidedSlab[]) => void;
+  toggleAll: (rows: PlanSlab[]) => void;
 }) {
   const groups = useMemo(() => {
-    const m = new Map<string, UndecidedSlab[]>();
+    const m = new Map<string, PlanSlab[]>();
     for (const s of rows) {
       const arr = m.get(s.status) ?? [];
       arr.push(s);
@@ -383,12 +399,14 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
   );
 }
 
+type ViewMode = "undecided" | "all" | "routed";
+
 export function PlanClient({
-  summaries, temples, undecided, forecast,
+  summaries, temples, slabs, forecast,
 }: {
   summaries: Record<MethodKey, MethodSummary>;
   temples: TempleMethodRow[];
-  undecided: UndecidedSlab[];
+  slabs: PlanSlab[];
   forecast: CncForecast;
 }) {
   const router = useRouter();
@@ -397,28 +415,47 @@ export function PlanClient({
   const [err, setErr] = useState<string | null>(null);
   const [temple, setTemple] = useState<string>("");
   const [q, setQ] = useState("");
+  const [mode, setMode] = useState<ViewMode>("undecided");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
-  // Undecided is ALWAYS temple-scoped (Daksh) — nothing renders until a
-  // temple is picked, so the page never dumps all 5.9k slabs at once.
-  const templeUndecided = useMemo(
-    () => (temple ? undecided.filter((s) => s.temple === temple) : []),
-    [undecided, temple],
+  // The slab list is ALWAYS temple-scoped (Daksh) — nothing renders until a
+  // temple is picked, so the page never dumps all 9.4k slabs at once.
+  const templeSlabs = useMemo(
+    () => (temple ? slabs.filter((s) => s.temple === temple) : []),
+    [slabs, temple],
   );
 
-  // Search inside the selected temple's undecided pile.
-  const filteredUndecided = useMemo(() => {
+  // Undecided = no route yet AND still has a decision worth making (once a
+  // slab is carved/dispatched the question is moot). Routed = anything with
+  // a route on it. All = everything of this temple bar cancelled/rejected,
+  // which the server already dropped.
+  const modeCounts = useMemo(() => ({
+    undecided: templeSlabs.filter((s) => s.method === "nil" && s.stage !== "done").length,
+    all: templeSlabs.length,
+    routed: templeSlabs.filter((s) => s.method !== "nil").length,
+  }), [templeSlabs]);
+
+  const modeRows = useMemo(() => {
+    if (mode === "all") return templeSlabs;
+    if (mode === "routed") return templeSlabs.filter((s) => s.method !== "nil");
+    return templeSlabs.filter((s) => s.method === "nil" && s.stage !== "done");
+  }, [templeSlabs, mode]);
+
+  // One search across every field the card shows — plus the route name, so
+  // "cnc" or "no carving" narrows the list in View all / Already routed.
+  const filteredRows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return templeUndecided;
-    return templeUndecided.filter((s) => {
+    if (!needle) return modeRows;
+    return modeRows.filter((s) => {
       const hay = [
         s.id, s.temple, s.label, s.stone, s.description, s.section, s.element,
-        s.status.replace(/_/g, " "), `${s.l}x${s.w}x${s.t}`, `${s.l}×${s.w}×${s.t}`,
+        s.status.replace(/_/g, " "), METHOD_THEME[s.method].label,
+        `${s.l}x${s.w}x${s.t}`, `${s.l}×${s.w}×${s.t}`,
       ].filter(Boolean).join(" · ").toLowerCase();
       return hay.includes(needle);
     });
-  }, [templeUndecided, q]);
+  }, [modeRows, q]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -428,7 +465,7 @@ export function PlanClient({
       return next;
     });
   }
-  function toggleAll(rows: UndecidedSlab[]) {
+  function toggleAll(rows: PlanSlab[]) {
     setSelected((prev) => {
       const next = new Set(prev);
       const allIn = rows.every((r) => next.has(r.id));
@@ -524,13 +561,18 @@ export function PlanClient({
                   {th2.label}
                 </span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                  {pct(done.slabs, s.total.slabs)}% done
+                  {fmt0(done.slabs)} done
                 </span>
               </div>
-              {/* Ring carries the slab total + the whole stage split; the
-                  legend beside it names each slice. */}
+              {/* Ring shows the stage split (% carved in the middle); both
+                  totals live together in the footer row below. */}
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
-                <StageDonut stages={s.stages} total={s.total.slabs} />
+                <StageDonut
+                  stages={s.stages}
+                  total={s.total.slabs}
+                  centerValue={`${pct(done.slabs, s.total.slabs)}%`}
+                  centerUnit="done"
+                />
                 <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
                   {DONUT_ORDER.map((key) => {
                     const label = STAGE_LABELS.find((x) => x.key === key)!.label;
@@ -545,12 +587,23 @@ export function PlanClient({
                   })}
                 </div>
               </div>
-              {/* Volume stays visually separate from every slab count. */}
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 12, paddingTop: 9, borderTop: "1px solid var(--border)" }}>
-                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Volume</span>
-                <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                  <b style={{ fontSize: 15, fontWeight: 800, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(s.total.cft)}</b>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>cft</span>
+              {/* Both totals together in one footer — count in ink on the
+                  left, volume muted in its own box on the right, so the two
+                  kinds of number never read alike. */}
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                <span>
+                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Total slabs</span>
+                  <span style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 2 }}>
+                    <b style={{ fontSize: 21, fontWeight: 800, lineHeight: 1, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{fmt0(s.total.slabs)}</b>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>slabs</span>
+                  </span>
+                </span>
+                <span style={{ padding: "5px 11px", borderRadius: 8, background: "var(--surface-alt, rgba(0,0,0,0.035))", border: "1px solid var(--border)" }}>
+                  <span style={{ display: "block", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Volume</span>
+                  <span style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 1 }}>
+                    <b style={{ fontSize: 16, fontWeight: 800, lineHeight: 1, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(s.total.cft)}</b>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>cft</span>
+                  </span>
                 </span>
               </div>
             </div>
@@ -771,9 +824,11 @@ export function PlanClient({
                   <Stat label="Volume left" value={fmt0(tAgg.remaining.cft)} unit="cft" tone="volume" size={19} />
                 </div>
               </div>
-              {tAgg.perRouteRemaining.length > 0 && (
+              {/* Undecided is dropped here — the section right below is
+                  entirely about it, so repeating the chip was noise (Daksh). */}
+              {tAgg.perRouteRemaining.filter((r) => r.mk !== "nil").length > 0 && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                  {tAgg.perRouteRemaining.map((r) => (
+                  {tAgg.perRouteRemaining.filter((r) => r.mk !== "nil").map((r) => (
                     <span key={r.mk} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, fontSize: 11.5, color: METHOD_THEME[r.mk].fg, background: "var(--surface)", border: `1.5px solid ${METHOD_THEME[r.mk].fg}44`, borderRadius: 999, padding: "4px 12px" }}>
                       <b style={{ fontWeight: 800 }}>{METHOD_THEME[r.mk].label}</b>
                       <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(r.slabs)}</b>
@@ -785,33 +840,67 @@ export function PlanClient({
               )}
             </div>
 
-            {/* this temple's undecided, right where the decision is made */}
-            {templeUndecided.length > 0 && (
-              <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 800 }}>
-                    ❓ Undecided in this temple — {fmt0(filteredUndecided.length)}
-                    {q ? ` of ${fmt0(templeUndecided.length)}` : ""} slab{filteredUndecided.length === 1 ? "" : "s"}
-                  </span>
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="🔎 Search code, category, label, stone, size…"
-                    style={{
-                      flex: "1 1 300px", maxWidth: 440, padding: "9px 13px", fontSize: 13,
-                      border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
-                    }}
-                  />
+            {/* This temple's slabs — undecided by default, but you can flip
+                to every slab or only the already-routed ones and re-route
+                from the same cards. */}
+            <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                <div style={{ display: "flex", gap: 0, border: "1.5px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)" }}>
+                  {([
+                    { key: "undecided", label: "Undecided", n: modeCounts.undecided },
+                    { key: "all", label: "View all", n: modeCounts.all },
+                    { key: "routed", label: "Already routed", n: modeCounts.routed },
+                  ] as Array<{ key: ViewMode; label: string; n: number }>).map((t, i) => {
+                    const on = mode === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => { setMode(t.key); setQ(""); }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 7,
+                          padding: "8px 15px", fontSize: 12.5, fontWeight: 800, cursor: "pointer",
+                          border: "none", borderLeft: i === 0 ? "none" : "1px solid var(--border)",
+                          background: on ? "var(--gold-dark, #b45309)" : "transparent",
+                          color: on ? "#fff" : "var(--muted)",
+                          transition: "background .15s ease, color .15s ease",
+                        }}
+                      >
+                        {t.label}
+                        <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums", padding: "1px 7px", borderRadius: 999, background: on ? "rgba(255,255,255,0.22)" : "var(--surface-alt, rgba(0,0,0,0.05))", color: on ? "#fff" : "var(--text)" }}>
+                          {fmt0(t.n)}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-                {filteredUndecided.length === 0 ? (
-                  <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
-                    No undecided slabs in this temple match “{q}”.
-                  </div>
-                ) : (
-                  <StatusGroups rows={filteredUndecided} selected={selected} toggle={toggle} toggleAll={toggleAll} />
-                )}
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="🔎 Search code, category, label, stone, route, size…"
+                  style={{
+                    flex: "1 1 280px", maxWidth: 420, padding: "9px 13px", fontSize: 13,
+                    border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
+                  }}
+                />
               </div>
-            )}
+              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 4 }}>
+                {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All slabs in this temple"}
+                {" — "}{fmt0(filteredRows.length)}
+                {q ? ` of ${fmt0(modeRows.length)}` : ""} slab{filteredRows.length === 1 ? "" : "s"}
+              </div>
+              {filteredRows.length === 0 ? (
+                <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
+                  {q
+                    ? `No slabs in this view match “${q}”.`
+                    : mode === "undecided"
+                      ? "Every slab in this temple already has a route — nothing left to decide."
+                      : "Nothing to show in this view."}
+                </div>
+              ) : (
+                <StatusGroups rows={filteredRows} selected={selected} toggle={toggle} toggleAll={toggleAll} />
+              )}
+            </div>
           </div>
         )}
       </section>
