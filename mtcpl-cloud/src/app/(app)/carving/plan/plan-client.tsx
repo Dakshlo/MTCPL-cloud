@@ -924,6 +924,34 @@ export function PlanClient({
     return { total, done, inCarving: stage("inCarving"), cutWaiting: stage("cutWaiting"), notCut: stage("notCut"), remaining, perRouteRemaining };
   }, [templeRow]);
 
+  // Keep the picked temple + open seat map in the URL, so a refresh (or a
+  // shared link) lands exactly where you were instead of resetting to the
+  // empty logbook (Daksh). Read on mount rather than in a useState
+  // initialiser — the server renders this component too, and reading
+  // window there would produce a hydration mismatch. history.replaceState
+  // keeps it out of the back-stack and skips a router round-trip.
+  const urlReadRef = useRef(false);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get("temple");
+    // Ignore a temple that no longer exists so a stale link can't wedge
+    // the page on an empty selection.
+    if (t && temples.some((x) => x.temple === t)) {
+      setTemple(t);
+      if (p.get("map") === "1") setSeatOpen(true);
+    }
+    urlReadRef.current = true;
+  }, [temples]);
+
+  useEffect(() => {
+    if (!urlReadRef.current) return;
+    const p = new URLSearchParams(window.location.search);
+    if (temple) p.set("temple", temple); else p.delete("temple");
+    if (temple && seatOpen) p.set("map", "1"); else p.delete("map");
+    const qs = p.toString();
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, [temple, seatOpen]);
+
   // CNC forecast derived figures.
   const cftPerDay = forecast.cncDone30.cft / 30;
   const slabsPerDay = forecast.cncDone30.slabs / 30;
