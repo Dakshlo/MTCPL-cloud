@@ -60,12 +60,11 @@ const STATUS_GROUPS: Array<{ key: string; label: string; color: string }> = [
   { key: "planned", label: "Planned for cutting", color: "#7c3aed" },
   { key: "open", label: "Not cut yet", color: "#6b7280" },
   // Reached only by the View all / Already routed modes — undecided slabs
-  // never sit in a carving or finished status.
+  // never sit in a carving status. Carved/dispatched slabs are filtered out
+  // of every mode, so they need no group here.
   { key: "carving_assigned", label: "Carving assigned", color: "#b45309" },
   { key: "carving_in_progress", label: "Carving in progress", color: "#b45309" },
   { key: "carving_on_hold", label: "Carving on hold", color: "#b91c1c" },
-  { key: "completed", label: "Carved · done", color: "#15803d" },
-  { key: "dispatched", label: "Dispatched", color: "#15803d" },
 ];
 
 /** Number + unit as one visually distinct stat. `tone` separates a COUNT
@@ -449,21 +448,24 @@ export function PlanClient({
     [slabs, temple],
   );
 
-  // Undecided = no route yet AND still has a decision worth making (once a
-  // slab is carved/dispatched the question is moot). Routed = anything with
-  // a route on it. All = everything of this temple bar cancelled/rejected,
-  // which the server already dropped.
+  // Every mode lists PENDING work only. A carved or dispatched slab has no
+  // routing decision left — showing it in "Already routed" just filled the
+  // view with history you can't act on (Daksh). The finished count is
+  // surfaced under the header instead of silently dropped.
+  const pendingSlabs = useMemo(() => templeSlabs.filter((s) => s.stage !== "done"), [templeSlabs]);
+  const finishedCount = templeSlabs.length - pendingSlabs.length;
+
   const modeCounts = useMemo(() => ({
-    undecided: templeSlabs.filter((s) => s.method === "nil" && s.stage !== "done").length,
-    all: templeSlabs.length,
-    routed: templeSlabs.filter((s) => s.method !== "nil").length,
-  }), [templeSlabs]);
+    undecided: pendingSlabs.filter((s) => s.method === "nil").length,
+    all: pendingSlabs.length,
+    routed: pendingSlabs.filter((s) => s.method !== "nil").length,
+  }), [pendingSlabs]);
 
   const modeRows = useMemo(() => {
-    if (mode === "all") return templeSlabs;
-    if (mode === "routed") return templeSlabs.filter((s) => s.method !== "nil");
-    return templeSlabs.filter((s) => s.method === "nil" && s.stage !== "done");
-  }, [templeSlabs, mode]);
+    if (mode === "all") return pendingSlabs;
+    if (mode === "routed") return pendingSlabs.filter((s) => s.method !== "nil");
+    return pendingSlabs.filter((s) => s.method === "nil");
+  }, [pendingSlabs, mode]);
 
   // One search across every field the card shows — plus the route name, so
   // "cnc" or "no carving" narrows the list in View all / Already routed.
@@ -907,18 +909,25 @@ export function PlanClient({
                   }}
                 />
               </div>
-              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 4 }}>
-                {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All slabs in this temple"}
+              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 2 }}>
+                {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All pending slabs in this temple"}
                 {" — "}{fmt0(filteredRows.length)}
                 {q ? ` of ${fmt0(modeRows.length)}` : ""} slab{filteredRows.length === 1 ? "" : "s"}
               </div>
+              {finishedCount > 0 && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                  {fmt0(finishedCount)} carved / dispatched slab{finishedCount === 1 ? "" : "s"} not listed — nothing left to route on them.
+                </div>
+              )}
               {filteredRows.length === 0 ? (
                 <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
                   {q
                     ? `No slabs in this view match “${q}”.`
                     : mode === "undecided"
-                      ? "Every slab in this temple already has a route — nothing left to decide."
-                      : "Nothing to show in this view."}
+                      ? "Every pending slab in this temple already has a route — nothing left to decide."
+                      : mode === "routed"
+                        ? "No pending slab here carries a route yet — everything routed has already been carved or dispatched."
+                        : "No pending slabs in this temple."}
                 </div>
               ) : (
                 <StatusGroups rows={filteredRows} selected={selected} toggle={toggle} toggleAll={toggleAll} />
