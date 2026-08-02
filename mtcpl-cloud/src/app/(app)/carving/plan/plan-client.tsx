@@ -437,7 +437,9 @@ export function PlanClient({
   const [err, setErr] = useState<string | null>(null);
   const [temple, setTemple] = useState<string>("");
   const [q, setQ] = useState("");
-  const [mode, setMode] = useState<ViewMode>("undecided");
+  // No view is open until you tap one — picking a temple shows the numbers
+  // first, and tapping the open tab again drops the list (Daksh).
+  const [mode, setMode] = useState<ViewMode | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
@@ -462,6 +464,7 @@ export function PlanClient({
   }), [pendingSlabs]);
 
   const modeRows = useMemo(() => {
+    if (mode === null) return [];
     if (mode === "all") return pendingSlabs;
     if (mode === "routed") return pendingSlabs.filter((s) => s.method !== "nil");
     return pendingSlabs.filter((s) => s.method === "nil");
@@ -800,69 +803,113 @@ export function PlanClient({
       <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, overflow: "visible" }}>
         <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", borderBottom: templeRow ? "1px solid var(--border)" : "none" }}>
           <span style={{ fontSize: 13.5, fontWeight: 800, flexShrink: 0 }}>🏛 Temple-wise</span>
-          {/* Clear the slab search on temple change — a stale query would
-              make the new temple's undecided list look empty. */}
-          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); }} />
+          {/* Reset to the collapsed state on temple change — a stale query or
+              open view would misrepresent the temple you just picked. */}
+          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); setMode(null); }} />
         </div>
 
         {templeRow && tAgg && (
-          <div style={{ padding: "16px 16px 6px" }}>
-            {/* rings row */}
-            <div style={{ display: "flex", alignItems: "center", gap: "18px 26px", flexWrap: "wrap" }}>
-              <Ring
-                value={pct(tAgg.done.slabs, tAgg.total.slabs)}
-                size={116} stroke={12} color={STAGE_COLOR.done}
-                label="Carved / done" sub={`${fmt0(tAgg.done.slabs)} of ${fmt0(tAgg.total.slabs)}`}
-              />
-              <Ring value={pct(tAgg.inCarving.slabs, tAgg.total.slabs)} color={STAGE_COLOR.inCarving} label="In carving" sub={`${fmt0(tAgg.inCarving.slabs)} slabs`} />
-              <Ring value={pct(tAgg.cutWaiting.slabs, tAgg.total.slabs)} color={STAGE_COLOR.cutWaiting} label="Cut · waiting" sub={`${fmt0(tAgg.cutWaiting.slabs)} slabs`} />
-              <Ring value={pct(tAgg.notCut.slabs, tAgg.total.slabs)} color={STAGE_COLOR.notCut} label="Not cut yet" sub={`${fmt0(tAgg.notCut.slabs)} slabs`} />
-              <div style={{ flex: "1 1 260px", minWidth: 260 }}>
+          <div style={{ padding: "0 0 6px" }}>
+            {/* Two panels (Daksh): LEFT = progress of the whole temple,
+                RIGHT = the same work split by carving route. */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+              {/* ── LEFT: rings + totals + work remaining ── */}
+              <div style={{ flex: "1.35 1 480px", minWidth: 340, padding: "16px 18px" }}>
                 <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text)" }}>
                   {templeRow.temple}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
                   All routes — CNC + Outsource + No carving + Undecided
                 </div>
-                <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap" }}>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "16px 20px", flexWrap: "wrap", marginTop: 12 }}>
+                  <Ring
+                    value={pct(tAgg.done.slabs, tAgg.total.slabs)}
+                    size={116} stroke={12} color={STAGE_COLOR.done}
+                    label="Carved / done" sub={`${fmt0(tAgg.done.slabs)} of ${fmt0(tAgg.total.slabs)}`}
+                  />
+                  <Ring value={pct(tAgg.inCarving.slabs, tAgg.total.slabs)} color={STAGE_COLOR.inCarving} label="In carving" sub={`${fmt0(tAgg.inCarving.slabs)} slabs`} />
+                  <Ring value={pct(tAgg.cutWaiting.slabs, tAgg.total.slabs)} color={STAGE_COLOR.cutWaiting} label="Cut · waiting" sub={`${fmt0(tAgg.cutWaiting.slabs)} slabs`} />
+                  <Ring value={pct(tAgg.notCut.slabs, tAgg.total.slabs)} color={STAGE_COLOR.notCut} label="Not cut yet" sub={`${fmt0(tAgg.notCut.slabs)} slabs`} />
+                </div>
+
+                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
                   <Stat label="Total slabs" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
                   <Stat label="Volume" value={fmt0(tAgg.total.cft)} unit="cft" tone="volume" size={22} />
                 </div>
                 {/* stacked stage bar */}
-                <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", marginTop: 10, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", marginTop: 11, border: "1px solid var(--border)" }}>
                   {(["done", "inCarving", "cutWaiting", "notCut"] as Array<keyof StageTotals>).map((k) => {
                     const w = pct(tAgg[k].slabs, tAgg.total.slabs);
                     return w > 0 ? <div key={k} title={`${STAGE_LABELS.find((x) => x.key === k)?.label}`} style={{ width: `${w}%`, background: STAGE_COLOR[k] }} /> : null;
                   })}
                 </div>
-              </div>
-            </div>
 
-            {/* work remaining — excludes carved */}
-            <div style={{ marginTop: 16, border: "1px solid var(--gold-border, #d8c49a)", background: "rgba(180,140,40,0.06)", borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--gold-dark)" }}>
-                  Work remaining — carved excluded
-                </span>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Stat label="Slabs left" value={fmt0(tAgg.remaining.slabs)} unit="slabs" tone="count" size={22} />
-                  <Stat label="Volume left" value={fmt0(tAgg.remaining.cft)} unit="cft" tone="volume" size={19} />
+                {/* work remaining — excludes carved */}
+                <div style={{ marginTop: 14, border: "1px solid var(--gold-border, #d8c49a)", background: "rgba(180,140,40,0.06)", borderRadius: 8, padding: "12px 14px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--gold-dark)" }}>
+                    Work remaining — carved excluded
+                  </span>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <Stat label="Slabs left" value={fmt0(tAgg.remaining.slabs)} unit="slabs" tone="count" size={22} />
+                    <Stat label="Volume left" value={fmt0(tAgg.remaining.cft)} unit="cft" tone="volume" size={19} />
+                  </div>
                 </div>
               </div>
-              {/* Undecided is dropped here — the section right below is
-                  entirely about it, so repeating the chip was noise (Daksh). */}
-              {tAgg.perRouteRemaining.filter((r) => r.mk !== "nil").length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                  {tAgg.perRouteRemaining.filter((r) => r.mk !== "nil").map((r) => (
-                    <span key={r.mk} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, fontSize: 11.5, color: METHOD_THEME[r.mk].fg, background: "var(--surface)", border: `1.5px solid ${METHOD_THEME[r.mk].fg}44`, borderRadius: 999, padding: "4px 12px" }}>
-                      <b style={{ fontWeight: 800 }}>{METHOD_THEME[r.mk].label}</b>
-                      <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(r.slabs)}</b>
-                      <span style={{ color: "var(--muted)", fontWeight: 700 }}>slabs</span>
-                      <span style={{ color: "var(--muted)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>· {fmt0(r.cft)} CFT</span>
-                    </span>
-                  ))}
+
+              {/* ── RIGHT: the same temple split by route ── */}
+              <div style={{ flex: "1 1 330px", minWidth: 300, padding: "16px 18px", borderLeft: "1px solid var(--border)", background: "var(--surface-alt, rgba(0,0,0,0.015))" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text)" }}>
+                  Split by route
                 </div>
-              )}
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                  How much of this temple each route carries, and what is still left on it
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "0 14px", marginTop: 12, alignItems: "center" }}>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--muted)" }}>Route</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--muted)", textAlign: "right" }}>Total</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--muted)", textAlign: "right" }}>Remaining</span>
+
+                  {METHOD_ORDER.map((mk) => {
+                    const m = templeRow.methods[mk];
+                    const remain = { slabs: m.total.slabs - m.stages.done.slabs, cft: m.total.cft - m.stages.done.cft };
+                    const th2 = METHOD_THEME[mk];
+                    const idle = m.total.slabs === 0;
+                    return (
+                      <div key={mk} style={{ display: "contents" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 0", borderTop: "1px solid var(--border)", minWidth: 0 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 2, background: th2.fg, flexShrink: 0, opacity: idle ? 0.3 : 1 }} />
+                          <span style={{ fontSize: 12, fontWeight: 800, color: idle ? "var(--muted)" : th2.fg, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {th2.label}
+                          </span>
+                        </span>
+                        <span style={{ padding: "9px 0", borderTop: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" }}>
+                          <b style={{ fontSize: 14, fontWeight: 800, color: idle ? "var(--muted)" : "var(--text)", fontVariantNumeric: "tabular-nums" }}>{fmt0(m.total.slabs)}</b>
+                          <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(m.total.cft)} CFT</span>
+                        </span>
+                        <span style={{ padding: "9px 0", borderTop: "1px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" }}>
+                          <b style={{ fontSize: 14, fontWeight: 800, color: remain.slabs > 0 ? "var(--gold-dark, #b45309)" : "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(remain.slabs)}</b>
+                          <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(remain.cft)} CFT</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* grand total row */}
+                  <span style={{ padding: "9px 0", borderTop: "2px solid var(--border)", fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)" }}>
+                    All routes
+                  </span>
+                  <span style={{ padding: "9px 0", borderTop: "2px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <b style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(tAgg.total.slabs)}</b>
+                    <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(tAgg.total.cft)} CFT</span>
+                  </span>
+                  <span style={{ padding: "9px 0", borderTop: "2px solid var(--border)", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <b style={{ fontSize: 15, fontWeight: 800, color: "var(--gold-dark, #b45309)", fontVariantNumeric: "tabular-nums" }}>{fmt0(tAgg.remaining.slabs)}</b>
+                    <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(tAgg.remaining.cft)} CFT</span>
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* This temple's slabs — undecided by default, but you can flip
@@ -881,7 +928,7 @@ export function PlanClient({
                       <button
                         key={t.key}
                         type="button"
-                        onClick={() => { setMode(t.key); setQ(""); }}
+                        onClick={() => { setMode(mode === t.key ? null : t.key); setQ(""); }}
                         style={{
                           display: "flex", alignItems: "center", gap: 7,
                           padding: "8px 15px", fontSize: 12.5, fontWeight: 800, cursor: "pointer",
@@ -899,38 +946,48 @@ export function PlanClient({
                     );
                   })}
                 </div>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="🔎 Search code, category, label, stone, route, size…"
-                  style={{
-                    flex: "1 1 280px", maxWidth: 420, padding: "9px 13px", fontSize: 13,
-                    border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
-                  }}
-                />
+                {mode !== null && (
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="🔎 Search code, category, label, stone, route, size…"
+                    style={{
+                      flex: "1 1 280px", maxWidth: 420, padding: "9px 13px", fontSize: 13,
+                      border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
+                    }}
+                  />
+                )}
               </div>
-              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 2 }}>
-                {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All pending slabs in this temple"}
-                {" — "}{fmt0(filteredRows.length)}
-                {q ? ` of ${fmt0(modeRows.length)}` : ""} slab{filteredRows.length === 1 ? "" : "s"}
-              </div>
-              {finishedCount > 0 && (
-                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-                  {fmt0(finishedCount)} carved / dispatched slab{finishedCount === 1 ? "" : "s"} not listed — nothing left to route on them.
-                </div>
-              )}
-              {filteredRows.length === 0 ? (
-                <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
-                  {q
-                    ? `No slabs in this view match “${q}”.`
-                    : mode === "undecided"
-                      ? "Every pending slab in this temple already has a route — nothing left to decide."
-                      : mode === "routed"
-                        ? "No pending slab here carries a route yet — everything routed has already been carved or dispatched."
-                        : "No pending slabs in this temple."}
+              {mode === null ? (
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Tap a view above to list the slabs — tap it again to close.
                 </div>
               ) : (
-                <StatusGroups rows={filteredRows} selected={selected} toggle={toggle} toggleAll={toggleAll} />
+                <>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 2 }}>
+                    {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All pending slabs in this temple"}
+                    {" — "}{fmt0(filteredRows.length)}
+                    {q ? ` of ${fmt0(modeRows.length)}` : ""} slab{filteredRows.length === 1 ? "" : "s"}
+                  </div>
+                  {finishedCount > 0 && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                      {fmt0(finishedCount)} carved / dispatched slab{finishedCount === 1 ? "" : "s"} not listed — nothing left to route on them.
+                    </div>
+                  )}
+                  {filteredRows.length === 0 ? (
+                    <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
+                      {q
+                        ? `No slabs in this view match “${q}”.`
+                        : mode === "undecided"
+                          ? "Every pending slab in this temple already has a route — nothing left to decide."
+                          : mode === "routed"
+                            ? "No pending slab here carries a route yet — everything routed has already been carved or dispatched."
+                            : "No pending slabs in this temple."}
+                    </div>
+                  ) : (
+                    <StatusGroups rows={filteredRows} selected={selected} toggle={toggle} toggleAll={toggleAll} />
+                  )}
+                </>
               )}
             </div>
           </div>
