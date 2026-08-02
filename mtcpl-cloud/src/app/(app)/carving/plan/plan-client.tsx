@@ -421,6 +421,196 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
   );
 }
 
+// ── Slab seat map — every slab of the temple as one "cinema seat" ──
+// Sections top→bottom follow the journey; carved slabs sit nearest the
+// temple "screen" at the bottom. Seat colour = route, hover = full info.
+const SEAT_SECTIONS: Array<{ key: keyof StageTotals; label: string }> = [
+  { key: "notCut", label: "Not cut yet" },
+  { key: "cutWaiting", label: "Cut · waiting" },
+  { key: "inCarving", label: "In carving" },
+  { key: "done", label: "Carved / done" },
+];
+
+/** "PALI-0010-2" → "0010-2" — the temple prefix is the map's title. */
+const seatCode = (id: string) => id.replace(/^[^-]+-/, "");
+
+function SeatMap({ temple, rows, onClose }: {
+  temple: string; rows: PlanSlab[]; onClose: () => void;
+}) {
+  const [tip, setTip] = useState<{ s: PlanSlab; x: number; y: number; below: boolean } | null>(null);
+
+  // Esc closes; the page behind must not scroll while the map is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const byStage = useMemo(() => {
+    const m = new Map<keyof StageTotals, PlanSlab[]>();
+    for (const sec of SEAT_SECTIONS) m.set(sec.key, []);
+    for (const s of rows) m.get(s.stage)!.push(s);
+    for (const arr of m.values()) arr.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    return m;
+  }, [rows]);
+
+  const routeCounts = useMemo(() => {
+    const c: Record<MethodKey, number> = { cnc: 0, outsource: 0, none: 0, nil: 0 };
+    for (const s of rows) c[s.method] += 1;
+    return c;
+  }, [rows]);
+  const totalCft = useMemo(() => rows.reduce((a, s) => a + cftOf(s), 0), [rows]);
+
+  const showTip = (s: PlanSlab, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const below = r.bottom + 210 < window.innerHeight;
+    setTip({
+      s,
+      x: Math.min(Math.max(r.left + r.width / 2, 145), window.innerWidth - 145),
+      y: below ? r.bottom + 8 : r.top - 8,
+      below,
+    });
+  };
+
+  const tipRow = (label: string, value: string | null) => (
+    <div style={{ display: "flex", gap: 8, fontSize: 11, lineHeight: 1.45 }}>
+      <span style={{ flexShrink: 0, width: 62, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", fontSize: 9, color: "var(--muted)", paddingTop: 1.5 }}>{label}</span>
+      <span style={{ minWidth: 0, color: "var(--text)" }}>{value || "—"}</span>
+    </div>
+  );
+
+  return (
+    // Content-column page, same convention as the sticky quick-tag bar —
+    // the sidebar stays visible and usable beside it.
+    <div style={{ position: "fixed", left: "var(--content-left)", right: 0, top: 0, bottom: 0, zIndex: 80, background: "var(--bg)", display: "flex", flexDirection: "column", animation: "planFadeUp .18s ease both", borderLeft: "1px solid var(--border)" }}>
+      {/* header */}
+      <div style={{ flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover a seat for full details</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+            <b style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(rows.length)}</b>
+            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>slabs</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>{fmt0(totalCft)} CFT</span>
+          </span>
+          {/* per-route counts double as the colour legend */}
+          {METHOD_ORDER.map((mk) => {
+            const n = routeCounts[mk];
+            const th2 = METHOD_THEME[mk];
+            return (
+              <span key={mk} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, opacity: n === 0 ? 0.45 : 1 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: mk === "nil" ? "var(--bg)" : th2.fg, border: `1.5px solid ${mk === "nil" ? "var(--muted)" : th2.fg}` }} />
+                <span style={{ fontWeight: 700, color: "var(--muted)" }}>{th2.label}</span>
+                <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(n)}</b>
+              </span>
+            );
+          })}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 16px", borderRadius: 8, border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+          >
+            ✕ Close
+          </button>
+        </div>
+      </div>
+
+      {/* seats */}
+      <div onScroll={() => setTip(null)} style={{ flex: 1, overflowY: "auto", padding: "18px 20px 26px" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+          {SEAT_SECTIONS.map(({ key, label }) => {
+            const secRows = byStage.get(key)!;
+            if (secRows.length === 0) return null;
+            const secCft = secRows.reduce((a, s) => a + cftOf(s), 0);
+            return (
+              <div key={key} style={{ marginBottom: 22 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: STAGE_COLOR[key] }}>{label}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
+                    {fmt0(secRows.length)} slabs
+                  </span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(secCft)} CFT</span>
+                  <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 5 }}>
+                  {secRows.map((s) => {
+                    const routed = s.method !== "nil";
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className="plan-seat"
+                        onMouseEnter={(e) => showTip(s, e.currentTarget)}
+                        onMouseLeave={() => setTip(null)}
+                        onFocus={(e) => showTip(s, e.currentTarget)}
+                        onBlur={() => setTip(null)}
+                        style={{
+                          position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
+                          fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          overflow: "hidden", whiteSpace: "nowrap", cursor: "default",
+                          background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
+                          border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
+                          color: routed ? "#fff" : "var(--muted)",
+                        }}
+                      >
+                        {seatCode(s.id)}
+                        {s.priority && (
+                          <span style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* the "screen" — carved slabs end up here */}
+          <div style={{ maxWidth: 560, margin: "26px auto 4px", textAlign: "center" }}>
+            <div style={{ height: 12, borderRadius: "50% 50% 0 0 / 100% 100% 0 0", background: "linear-gradient(to bottom, var(--gold-dark, #b45309), transparent)", opacity: 0.45 }} />
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--muted)", marginTop: 7 }}>
+              🏛 Temple — carved slabs head this way
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* hover card — fixed at overlay root, never inside a transformed seat */}
+      {tip && (
+        <div
+          style={{
+            position: "fixed", left: tip.x, top: tip.y, zIndex: 95, pointerEvents: "none",
+            transform: `translate(-50%, ${tip.below ? "0" : "-100%"})`,
+            width: 280, background: "var(--surface)", border: "1.5px solid var(--gold-border, #d8c49a)",
+            borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.22)", padding: "11px 13px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 7 }}>
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12.5 }}>
+              {tip.s.priority && <span style={{ color: "#f59e0b" }}>⚡ </span>}{tip.s.id}
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", borderRadius: 4, padding: "2px 8px", color: tip.s.method === "nil" ? "var(--muted)" : "#fff", background: tip.s.method === "nil" ? "var(--surface-alt, rgba(0,0,0,0.05))" : METHOD_THEME[tip.s.method].fg, border: `1px solid ${tip.s.method === "nil" ? "var(--border)" : METHOD_THEME[tip.s.method].fg}` }}>
+              {METHOD_THEME[tip.s.method].label}
+            </span>
+          </div>
+          {tipRow("Status", tip.s.status.replace(/_/g, " "))}
+          {tipRow("Size", `${tip.s.l}×${tip.s.w}×${tip.s.t}″ · ${fmt1(cftOf(tip.s))} CFT`)}
+          {tipRow("Category", [tip.s.section, tip.s.element].filter(Boolean).join(" › ") || null)}
+          {tipRow("Label", tip.s.label)}
+          {tipRow("Descr.", tip.s.description)}
+          {tipRow("Stone", tip.s.stone)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type ViewMode = "undecided" | "all" | "routed";
 
 export function PlanClient({
@@ -440,6 +630,8 @@ export function PlanClient({
   // No view is open until you tap one — picking a temple shows the numbers
   // first, and tapping the open tab again drops the list (Daksh).
   const [mode, setMode] = useState<ViewMode | null>(null);
+  // Cinema-style seat map, opened from the Total-slabs stat.
+  const [seatOpen, setSeatOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
@@ -570,6 +762,10 @@ export function PlanClient({
         .plan-pick-row:hover { background: rgba(180,140,40,0.07) !important; }
         @keyframes planZap { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
         .plan-zap { animation: planZap 1.2s ease-in-out infinite; }
+        .plan-seat-btn { all: unset; display: inline-block; cursor: pointer; border-radius: 8px; }
+        .plan-seat-btn:hover { box-shadow: 0 0 0 2px var(--gold-border, #d8c49a); }
+        .plan-seat { transition: transform .1s ease, box-shadow .1s ease; }
+        .plan-seat:hover { transform: scale(1.15); box-shadow: 0 3px 10px rgba(0,0,0,0.25); z-index: 2; }
       `}</style>
 
       <div className="page-header">
@@ -805,7 +1001,7 @@ export function PlanClient({
           <span style={{ fontSize: 13.5, fontWeight: 800, flexShrink: 0 }}>🏛 Temple-wise</span>
           {/* Reset to the collapsed state on temple change — a stale query or
               open view would misrepresent the temple you just picked. */}
-          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); setMode(null); }} />
+          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); setMode(null); setSeatOpen(false); }} />
         </div>
 
         {templeRow && tAgg && (
@@ -833,8 +1029,11 @@ export function PlanClient({
                   <Ring value={pct(tAgg.notCut.slabs, tAgg.total.slabs)} color={STAGE_COLOR.notCut} label="Not cut yet" sub={`${fmt0(tAgg.notCut.slabs)} slabs`} />
                 </div>
 
-                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                  <Stat label="Total slabs" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
+                <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+                  {/* Total slabs opens the seat map — every slab as a seat. */}
+                  <button type="button" className="plan-seat-btn" title="Open the slab seat map" onClick={() => setSeatOpen(true)}>
+                    <Stat label="Total slabs ⤢" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
+                  </button>
                   <Stat label="Volume" value={fmt0(tAgg.total.cft)} unit="cft" tone="volume" size={22} />
                 </div>
                 {/* stacked stage bar */}
@@ -1044,6 +1243,10 @@ export function PlanClient({
             </button>
           </div>
         </div>
+      )}
+
+      {seatOpen && templeRow && (
+        <SeatMap temple={templeRow.temple} rows={templeSlabs} onClose={() => setSeatOpen(false)} />
       )}
     </div>
   );
