@@ -977,8 +977,8 @@ export function PlanClient({
         /* Total slabs opens the seat map — a soft 2s pulse so it reads as a
            button, not a stat. Stops on hover and for reduced-motion users. */
         @keyframes planTapHint {
-          0%, 78%, 100% { box-shadow: 0 0 0 0 rgba(180,140,40,0); }
-          88% { box-shadow: 0 0 0 3px rgba(180,140,40,0.34); }
+          0%, 58%, 100% { box-shadow: 0 0 0 0 rgba(180,140,40,0); background: transparent; }
+          72%, 86% { box-shadow: 0 0 0 4px rgba(180,140,40,0.45); background: rgba(180,140,40,0.09); }
         }
         .plan-tap-hint { animation: planTapHint 2s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) { .plan-tap-hint { animation: none; } }
