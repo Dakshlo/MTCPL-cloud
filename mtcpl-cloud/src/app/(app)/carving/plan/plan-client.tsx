@@ -916,7 +916,10 @@ export function PlanClient({
                 to every slab or only the already-routed ones and re-route
                 from the same cards. */}
             <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+              {/* 1fr / auto / 1fr keeps the switch dead-centre whether or not
+                  the search box is showing; the search rides the right column. */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                <span />
                 <div style={{ display: "flex", gap: 0, border: "1.5px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)" }}>
                   {([
                     { key: "undecided", label: "Undecided", n: modeCounts.undecided },
@@ -946,20 +949,22 @@ export function PlanClient({
                     );
                   })}
                 </div>
-                {mode !== null && (
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="🔎 Search code, category, label, stone, route, size…"
-                    style={{
-                      flex: "1 1 280px", maxWidth: 420, padding: "9px 13px", fontSize: 13,
-                      border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
-                    }}
-                  />
-                )}
+                <span style={{ justifySelf: "end", minWidth: 0, width: "100%", maxWidth: 420 }}>
+                  {mode !== null && (
+                    <input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="🔎 Search code, category, label, stone, route, size…"
+                      style={{
+                        width: "100%", minWidth: 0, padding: "9px 13px", fontSize: 13,
+                        border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
+                      }}
+                    />
+                  )}
+                </span>
               </div>
               {mode === null ? (
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
                   Tap a view above to list the slabs — tap it again to close.
                 </div>
               ) : (
