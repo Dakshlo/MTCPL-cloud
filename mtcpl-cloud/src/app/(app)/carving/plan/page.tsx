@@ -186,15 +186,21 @@ export default async function CarvingPlanPage() {
 
   // ── CNC forecast — last-30-day approved CNC throughput, with the
   // carving_sides multiplier (a 2-side slab is twice the carved output).
-  const thirtyAgo = Date.now() - 30 * 24 * 3600 * 1000;
+  const dayMs = 24 * 3600 * 1000;
+  const thirtyAgo = Date.now() - 30 * dayMs;
+  // Per-day carved CFT, index 0 = 30 days ago … 29 = today, for the pace chart.
+  const daily = new Array<number>(30).fill(0);
   let cncDoneCft30 = 0, cncDoneSlabs30 = 0;
   for (const it of items) {
     const sid = it.slab_requirement_id;
     if (!sid) continue;
     if (it.vendor_type === "CNC" && it.review_approved_at && Date.parse(it.review_approved_at) >= thirtyAgo) {
       const sides = it.carving_sides === 2 ? 2 : 1;
-      cncDoneCft30 += (dimsById.get(sid) ?? 0) * sides;
+      const c = (dimsById.get(sid) ?? 0) * sides;
+      cncDoneCft30 += c;
       cncDoneSlabs30 += 1;
+      const idx = Math.min(29, Math.max(0, Math.floor((Date.parse(it.review_approved_at) - thirtyAgo) / dayMs)));
+      daily[idx] += c;
     }
   }
   void slabMeta; // kept for future off-plan needs; not surfaced on the page
@@ -215,6 +221,7 @@ export default async function CarvingPlanPage() {
     machineCount,
     cncPending,
     cncDone30: { slabs: cncDoneSlabs30, cft: cncDoneCft30 },
+    daily,
   };
 
   return (

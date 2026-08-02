@@ -29,7 +29,8 @@ export type UndecidedSlab = {
   section: string | null; element: string | null;
   l: number; w: number; t: number; priority: boolean;
 };
-export type CncForecast = { machineCount: number; cncPending: Tot; cncDone30: Tot };
+// daily = carved CFT per day, index 0 = 30 days ago … 29 = today.
+export type CncForecast = { machineCount: number; cncPending: Tot; cncDone30: Tot; daily: number[] };
 
 const METHOD_ORDER: MethodKey[] = ["cnc", "outsource", "none", "nil"];
 const METHOD_THEME: Record<MethodKey, { label: string; fg: string }> = {
@@ -496,52 +497,161 @@ export function PlanClient({
         })}
       </div>
 
-      {/* ── 2. CNC capacity ── */}
+      {/* ── 2. CNC capacity — the cockpit this page exists for ── */}
       <div style={{ ...card, borderLeft: "4px solid #1d4ed8", padding: "16px 18px" }}>
-        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "#1d4ed8" }}>
-          ⚙️ CNC capacity
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "#1d4ed8" }}>
+            CNC capacity
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", background: "rgba(29,78,216,0.08)", border: "1px solid rgba(29,78,216,0.25)", borderRadius: 999, padding: "3px 12px" }}>
+            {forecast.machineCount} machines active
+          </span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px 24px", marginTop: 10 }}>
-          <div>
-            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>Pending CNC work</div>
-            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 3 }}>
-              {fmt0(forecast.cncPending.slabs)} <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>slabs</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginLeft: 7 }}>{fmt0(forecast.cncPending.cft)} CFT</span>
+
+        <div style={{ display: "flex", gap: 22, marginTop: 14, flexWrap: "wrap" }}>
+          {/* Pending — what the machines still owe */}
+          <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>
+              Pending CNC work
             </div>
-            <table style={{ borderCollapse: "collapse", marginTop: 6 }}>
-              <tbody>
-                <tr><td style={miniTd}>Not cut yet</td><td style={miniTdV}>{fmt0(summaries.cnc.stages.notCut.slabs)}</td></tr>
-                <tr><td style={miniTd}>Cut · waiting</td><td style={miniTdV}>{fmt0(summaries.cnc.stages.cutWaiting.slabs)}</td></tr>
-                <tr><td style={miniTd}>On machines</td><td style={miniTdV}>{fmt0(summaries.cnc.stages.inCarving.slabs)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div>
-            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>Pace — last 30 days</div>
-            <div style={{ fontSize: 20, fontWeight: 800, marginTop: 3 }}>
-              {fmt1(cftPerDay)} <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>CFT/day</span>
+            <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap" }}>
+              <Stat label="Slabs" value={fmt0(forecast.cncPending.slabs)} unit="slabs" tone="count" />
+              <Stat label="Volume" value={fmt0(forecast.cncPending.cft)} unit="cft" tone="volume" size={22} />
             </div>
-            <table style={{ borderCollapse: "collapse", marginTop: 6 }}>
-              <tbody>
-                <tr><td style={miniTd}>Approved</td><td style={miniTdV}>{fmt0(forecast.cncDone30.slabs)} slabs · {fmt0(forecast.cncDone30.cft)} CFT</td></tr>
-                <tr><td style={miniTd}>Per day</td><td style={miniTdV}>{fmt1(slabsPerDay)} slabs</td></tr>
-                <tr><td style={miniTd}>Per machine</td><td style={miniTdV}>{fmt1(perMachineDay)} CFT/day · {forecast.machineCount} machines</td></tr>
-              </tbody>
-            </table>
+            {/* Where those pending slabs are, as one stacked bar + legend */}
+            {(() => {
+              const st = summaries.cnc.stages;
+              const segs = [
+                { key: "inCarving", label: "On machines", v: st.inCarving.slabs, color: STAGE_COLOR.inCarving },
+                { key: "cutWaiting", label: "Cut · waiting", v: st.cutWaiting.slabs, color: STAGE_COLOR.cutWaiting },
+                { key: "notCut", label: "Not cut yet", v: st.notCut.slabs, color: STAGE_COLOR.notCut },
+              ];
+              const tot = segs.reduce((a, s) => a + s.v, 0);
+              return (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
+                    {segs.map((s) => (s.v > 0 ? <div key={s.key} style={{ width: `${pct(s.v, tot)}%`, background: s.color }} /> : null))}
+                    {tot === 0 && <div style={{ width: "100%", background: "var(--border)" }} />}
+                  </div>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 7 }}>
+                    {segs.map((s) => (
+                      <span key={s.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
+                        <span style={{ color: "var(--muted)" }}>{s.label}</span>
+                        <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(s.v)}</b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
+
+          {/* Pace — hero rate + live 30-day output chart */}
+          <div style={{ flex: "1.6 1 320px", minWidth: 300 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>
+                Pace — last 30 days
+              </span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>
+                {fmt1(slabsPerDay)} slabs/day · {fmt1(perMachineDay)} CFT/day per machine
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }}>
+              <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: "#1d4ed8", fontVariantNumeric: "tabular-nums" }}>
+                {fmt1(cftPerDay)}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                CFT / day
+              </span>
+            </div>
+            {/* Daily carved CFT — today rightmost. Average as a dashed line. */}
+            {(() => {
+              const max = Math.max(...forecast.daily, 1);
+              const avgH = Math.min(100, (cftPerDay / max) * 100);
+              return (
+                <div style={{ position: "relative", marginTop: 10 }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 58 }}>
+                    {forecast.daily.map((v, i) => (
+                      <div
+                        key={i}
+                        title={`${fmt0(v)} CFT`}
+                        style={{
+                          flex: 1,
+                          height: `${Math.max(v > 0 ? 4 : 1.5, (v / max) * 100)}%`,
+                          background: i === forecast.daily.length - 1 ? "var(--gold-dark, #b45309)" : v > 0 ? "#1d4ed8" : "var(--border)",
+                          opacity: v > 0 ? (0.45 + 0.55 * (v / max)) : 1,
+                          borderRadius: "2px 2px 0 0",
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ position: "absolute", left: 0, right: 0, bottom: `${avgH}%`, borderTop: "1.5px dashed rgba(29,78,216,0.55)", pointerEvents: "none" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 9.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <span>30 days ago</span>
+                    <span>today</span>
+                  </div>
+                </div>
+              );
+            })()}
+            <div style={{ display: "flex", gap: 10, marginTop: 9, flexWrap: "wrap" }}>
+              <Stat label="Carved in 30 days" value={fmt0(forecast.cncDone30.slabs)} unit="slabs" tone="count" size={19} />
+              <Stat label="Volume carved" value={fmt0(forecast.cncDone30.cft)} unit="cft" tone="volume" size={17} />
+            </div>
+          </div>
+
+          {/* Verdict — the answer this card exists to give */}
+          {(() => {
+            const state =
+              daysLeft == null ? "none" : daysLeft < 10 ? "starving" : daysLeft > 60 ? "overload" : "healthy";
+            const tone =
+              state === "starving" ? { fg: "#b45309", bg: "rgba(180,83,9,0.07)", bd: "rgba(180,83,9,0.35)" } :
+              state === "overload" ? { fg: "#b91c1c", bg: "rgba(185,28,28,0.06)", bd: "rgba(185,28,28,0.35)" } :
+              state === "healthy" ? { fg: "#15803d", bg: "rgba(21,128,61,0.06)", bd: "rgba(21,128,61,0.35)" } :
+              { fg: "var(--muted)", bg: "var(--surface-alt, rgba(0,0,0,0.03))", bd: "var(--border)" };
+            return (
+              <div style={{ flex: "1 1 220px", minWidth: 220, background: tone.bg, border: `1.5px solid ${tone.bd}`, borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                {daysLeft == null ? (
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>
+                    No CNC approvals in the last 30 days — no pace to forecast from.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ fontSize: 46, fontWeight: 800, lineHeight: 1, color: tone.fg, fontVariantNumeric: "tabular-nums" }}>
+                        {fmt0(daysLeft)}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: tone.fg, textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.25 }}>
+                        days of<br />work left
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginTop: 8 }}>
+                      Clears around <b>{clearDate}</b>{" "}at today&apos;s pace.
+                    </div>
+                    {/* Runway vs one month */}
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ height: 8, borderRadius: 4, background: "var(--border)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.min(100, (daysLeft / 30) * 100)}%`, height: "100%", background: tone.fg, transition: "width .6s ease" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        <span>today</span>
+                        <span>{daysLeft > 30 ? `${fmt1(daysLeft / 30)} months` : "1 month"}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: 14.5, fontWeight: 800, color: daysLeft != null && daysLeft > 60 ? "#b91c1c" : "#15803d" }}>
-          {daysLeft == null
-            ? "No CNC approvals in the last 30 days — no pace to forecast from."
-            : `≈ ${fmt0(daysLeft)} days of CNC work left — clears around ${clearDate}.`}
-        </div>
+
         {daysLeft != null && daysLeft < 10 && undecidedCutReady > 0 && (
-          <div style={{ marginTop: 5, fontSize: 12.5, fontWeight: 700, color: "#b45309" }}>
+          <div style={{ marginTop: 13, borderRadius: 8, border: "1px solid rgba(180,83,9,0.35)", background: "rgba(180,83,9,0.06)", padding: "9px 13px", fontSize: 12.5, fontWeight: 700, color: "#b45309" }}>
             ⚠ Machines run dry in under {fmt0(Math.max(1, daysLeft))} days — {fmt0(undecidedCutReady)} cut slabs are still undecided; route some to CNC to keep them fed.
           </div>
         )}
         {daysLeft != null && daysLeft > 60 && (
-          <div style={{ marginTop: 5, fontSize: 12.5, fontWeight: 700, color: "#b45309" }}>
+          <div style={{ marginTop: 13, borderRadius: 8, border: "1px solid rgba(185,28,28,0.35)", background: "rgba(185,28,28,0.05)", padding: "9px 13px", fontSize: 12.5, fontWeight: 700, color: "#b91c1c" }}>
             ⚠ Over {fmt1(daysLeft / 30)} months of CNC backlog — consider moving load to outsource.
           </div>
         )}
@@ -695,5 +805,3 @@ export function PlanClient({
   );
 }
 
-const miniTd: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", padding: "1px 14px 1px 0" };
-const miniTdV: React.CSSProperties = { fontSize: 11.5, fontWeight: 700, padding: "1px 0", fontVariantNumeric: "tabular-nums" };
