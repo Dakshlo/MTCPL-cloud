@@ -294,6 +294,16 @@ const canRoute = (s: PlanSlab) => s.stage === "notCut" || s.stage === "cutWaitin
  *  → in carving → done (Daksh). */
 const STAGE_RANK: Record<keyof StageTotals, number> = { notCut: 0, cutWaiting: 1, inCarving: 2, done: 3 };
 
+/** Bright variants for the seat dots — they sit on saturated route fills
+ *  and on white undecided seats, so they need more punch than the muted
+ *  STAGE_COLOR used by section headers, rings and bars (Daksh). */
+const STAGE_DOT: Record<keyof StageTotals, string> = {
+  notCut: "#a855f7",     // violet
+  cutWaiting: "#0ea5e9", // sky
+  inCarving: "#f59e0b",  // amber
+  done: "#22c55e",       // green
+};
+
 function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
@@ -490,7 +500,9 @@ function SeatMap({ temple, rows, onClose }: {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Seat colour = carving route · corner dot = stage — click a seat to change its route</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>
+              Seat colour = carving route{groupBy === "category" ? " · corner dot = stage" : ""} — click a seat to change its route
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
@@ -677,17 +689,20 @@ function SeatMap({ temple, rows, onClose }: {
                         <span style={{ position: "absolute", inset: 0, background: "rgba(180,140,40,0.22)", pointerEvents: "none" }} />
                       )}
                       {seatCode(s.id)}
-                      {/* Two facts on one seat (Daksh): the FILL is the
-                          carving route, the corner DOT is the production
-                          stage. White ring so the dot reads on any fill. */}
-                      <span
-                        style={{
-                          position: "absolute", top: 2, right: 2, width: 6.5, height: 6.5, borderRadius: "50%",
-                          background: STAGE_COLOR[s.stage],
-                          boxShadow: "0 0 0 1.5px rgba(255,255,255,0.9)",
-                          pointerEvents: "none",
-                        }}
-                      />
+                      {/* Two facts on one seat: the FILL is the carving
+                          route, the corner DOT is the stage. Only in the
+                          category view — by stage the section already says
+                          it, so the dot would be noise (Daksh). */}
+                      {groupBy === "category" && (
+                        <span
+                          style={{
+                            position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%",
+                            background: STAGE_DOT[s.stage],
+                            boxShadow: "0 0 0 1.5px rgba(255,255,255,0.95)",
+                            pointerEvents: "none",
+                          }}
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -726,7 +741,7 @@ function SeatMap({ temple, rows, onClose }: {
                           <span style={{ flex: 1 }} />
                           {tally.map((t) => (
                             <span key={t.key} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
-                              <span style={{ width: 8, height: 8, borderRadius: 2, background: STAGE_COLOR[t.key] }} />
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: STAGE_DOT[t.key] }} />
                               <span style={{ color: "var(--muted)", fontWeight: 700 }}>{t.label}</span>
                               <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(t.n)}</b>
                             </span>
