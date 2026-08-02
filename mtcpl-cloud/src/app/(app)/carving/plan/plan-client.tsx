@@ -403,30 +403,48 @@ function SeatMap({ temple, rows, onClose }: {
   // nothing there can be acted on.
   const byCategory = useMemo(() => {
     const pending = filtered.filter((s) => s.stage !== "done");
-    const m = new Map<string, Map<string, PlanSlab[]>>();
+    // Full Temple-View hierarchy: Cat 1 > Cat 2 > Label > Description.
+    const m = new Map<string, Map<string, Map<string, Map<string, PlanSlab[]>>>>();
     for (const s of pending) {
-      const c1 = (s.section || "").trim() || "— No category —";
-      const c2 = (s.element || "").trim() || "—";
-      let subs = m.get(c1);
-      if (!subs) { subs = new Map(); m.set(c1, subs); }
-      const arr = subs.get(c2);
-      if (arr) arr.push(s); else subs.set(c2, [s]);
+      const c1 = (s.section || "").trim() || "\u2014 No category \u2014";
+      const c2 = (s.element || "").trim() || "\u2014";
+      const lab = (s.label || "").trim() || "\u2014";
+      const des = (s.description || "").trim() || "\u2014";
+      let l2 = m.get(c1); if (!l2) { l2 = new Map(); m.set(c1, l2); }
+      let l3 = l2.get(c2); if (!l3) { l3 = new Map(); l2.set(c2, l3); }
+      let l4 = l3.get(lab); if (!l4) { l4 = new Map(); l3.set(lab, l4); }
+      const arr = l4.get(des);
+      if (arr) arr.push(s); else l4.set(des, [s]);
     }
-    // not cut → cutted waiting → in carving, then by code inside each
+    // not cut -> cutted waiting -> in carving, then by code inside each
     const byStageThenId = (a: PlanSlab, b: PlanSlab) =>
       STAGE_RANK[a.stage] - STAGE_RANK[b.stage] ||
       a.id.localeCompare(b.id, undefined, { numeric: true });
+    const sumCft = (r: PlanSlab[]) => r.reduce((a, x) => a + cftOf(x), 0);
+
     return [...m.entries()]
-      .map(([cat1, subMap]) => {
-        const subs = [...subMap.entries()]
-          .map(([cat2, r]) => ({ cat2, rows: [...r].sort(byStageThenId), cft: r.reduce((a, s) => a + cftOf(s), 0) }))
-          .sort((a, b) => b.rows.length - a.rows.length);
-        const slabs = subs.reduce((a, s) => a + s.rows.length, 0);
-        return { cat1, subs, slabs, cft: subs.reduce((a, s) => a + s.cft, 0) };
+      .map(([cat1, l2]) => {
+        const subs = [...l2.entries()]
+          .map(([cat2, l3]) => {
+            const labels = [...l3.entries()]
+              .map(([label, l4]) => {
+                const descs = [...l4.entries()]
+                  .map(([desc, r]) => ({ desc, rows: [...r].sort(byStageThenId), cft: sumCft(r) }))
+                  .sort((a, b) => b.rows.length - a.rows.length);
+                const slabs = descs.reduce((a, d) => a + d.rows.length, 0);
+                return { label, descs, slabs, cft: descs.reduce((a, d) => a + d.cft, 0) };
+              })
+              .sort((a, b) => b.slabs - a.slabs);
+            const slabs = labels.reduce((a, l) => a + l.slabs, 0);
+            return { cat2, labels, slabs, cft: labels.reduce((a, l) => a + l.cft, 0) };
+          })
+          .sort((a, b) => b.slabs - a.slabs);
+        const slabs = subs.reduce((a, x) => a + x.slabs, 0);
+        return { cat1, subs, slabs, cft: subs.reduce((a, x) => a + x.cft, 0) };
       })
       .sort((a, b) => {
-        if (a.cat1.startsWith("—")) return 1;
-        if (b.cat1.startsWith("—")) return -1;
+        if (a.cat1.startsWith("\u2014")) return 1;
+        if (b.cat1.startsWith("\u2014")) return -1;
         return b.slabs - a.slabs;
       });
   }, [filtered]);
@@ -726,7 +744,7 @@ function SeatMap({ temple, rows, onClose }: {
                   </div>
                   {byCategory.map((g) => {
                     // per-stage tally for the whole Category 1
-                    const rows2 = g.subs.flatMap((s) => s.rows);
+                    const rows2 = g.subs.flatMap((x) => x.labels.flatMap((l) => l.descs.flatMap((d) => d.rows)));
                     const tally = SEAT_SECTIONS.filter((sec) => sec.key !== "done")
                       .map((sec) => ({ ...sec, n: rows2.filter((s) => s.stage === sec.key).length }))
                       .filter((t) => t.n > 0);
@@ -752,12 +770,29 @@ function SeatMap({ temple, rows, onClose }: {
                         {/* Category 2 rows nested inside */}
                         {g.subs.map((sub, i) => (
                           <div key={sub.cat2} style={{ padding: "11px 13px 13px", borderTop: i === 0 ? "none" : "10px solid var(--bg)" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 7 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 8 }}>
                               <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--text)" }}>{sub.cat2}</span>
-                              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)" }}>{fmt0(sub.rows.length)} slabs</span>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)" }}>{fmt0(sub.slabs)} slabs</span>
                               <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)" }}>{fmt0(sub.cft)} CFT</span>
                             </div>
-                            {seatsOf(sub.rows)}
+                            {/* Label > Description, the last two Temple-View
+                                levels. A gold rail marks the label block. */}
+                            {sub.labels.map((lab) => (
+                              <div key={lab.label} style={{ marginBottom: 9, paddingLeft: 9, borderLeft: "2.5px solid rgba(180,140,40,0.45)" }}>
+                                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+                                  <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--gold-dark, #b45309)", letterSpacing: "0.03em" }}>{lab.label}</span>
+                                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(lab.slabs)} slabs · {fmt0(lab.cft)} CFT</span>
+                                </div>
+                                {lab.descs.map((d) => (
+                                  <div key={d.desc} style={{ marginBottom: 6 }}>
+                                    <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)", marginBottom: 3 }}>
+                                      {d.desc} <span style={{ fontWeight: 600 }}>· {fmt0(d.rows.length)}</span>
+                                    </div>
+                                    {seatsOf(d.rows)}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
                           </div>
                         ))}
                       </div>
