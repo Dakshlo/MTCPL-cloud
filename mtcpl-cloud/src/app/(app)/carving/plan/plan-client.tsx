@@ -438,30 +438,62 @@ function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
   const [tip, setTip] = useState<{ s: PlanSlab; x: number; y: number; below: boolean } | null>(null);
+  const [q, setQ] = useState("");
+  const [routeFilter, setRouteFilter] = useState<MethodKey | null>(null);
+  const qRef = useRef("");
 
-  // Esc closes; the page behind must not scroll while the map is open.
+  // Esc clears an active search first, then closes the map; the page
+  // behind must not scroll while it is open.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (qRef.current) { qRef.current = ""; setQ(""); return; }
+      onClose();
+    };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
   }, [onClose]);
 
+  // Search across everything the tooltip shows + route name; the route
+  // chips narrow further. Groups keep their status order underneath.
+  const filtered = useMemo(() => {
+    let r = rows;
+    if (routeFilter) r = r.filter((s) => s.method === routeFilter);
+    const needle = q.trim().toLowerCase();
+    if (needle) {
+      r = r.filter((s) => {
+        const hay = [
+          s.id, s.temple, s.label, s.stone, s.description, s.section, s.element,
+          s.status.replace(/_/g, " "), METHOD_THEME[s.method].label,
+          `${s.l}x${s.w}x${s.t}`, `${s.l}×${s.w}×${s.t}`,
+        ].filter(Boolean).join(" · ").toLowerCase();
+        return hay.includes(needle);
+      });
+    }
+    return r;
+  }, [rows, q, routeFilter]);
+
   const byStage = useMemo(() => {
     const m = new Map<keyof StageTotals, PlanSlab[]>();
     for (const sec of SEAT_SECTIONS) m.set(sec.key, []);
-    for (const s of rows) m.get(s.stage)!.push(s);
+    for (const s of filtered) m.get(s.stage)!.push(s);
     for (const arr of m.values()) arr.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
     return m;
-  }, [rows]);
+  }, [filtered]);
 
-  const routeCounts = useMemo(() => {
-    const c: Record<MethodKey, number> = { cnc: 0, outsource: 0, none: 0, nil: 0 };
-    for (const s of rows) c[s.method] += 1;
+  // Chip totals stay whole-temple (slabs + CFT per route) so the legend
+  // keeps meaning while a filter or search is active.
+  const routeStats = useMemo(() => {
+    const c: Record<MethodKey, { slabs: number; cft: number }> = {
+      cnc: { slabs: 0, cft: 0 }, outsource: { slabs: 0, cft: 0 }, none: { slabs: 0, cft: 0 }, nil: { slabs: 0, cft: 0 },
+    };
+    for (const s of rows) { c[s.method].slabs += 1; c[s.method].cft += cftOf(s); }
     return c;
   }, [rows]);
   const totalCft = useMemo(() => rows.reduce((a, s) => a + cftOf(s), 0), [rows]);
+  const narrowed = q.trim() !== "" || routeFilter !== null;
 
   const showTip = (s: PlanSlab, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
@@ -485,43 +517,87 @@ function SeatMap({ temple, rows, onClose }: {
     // Content-column page, same convention as the sticky quick-tag bar —
     // the sidebar stays visible and usable beside it.
     <div style={{ position: "fixed", left: "var(--content-left)", right: 0, top: 0, bottom: 0, zIndex: 80, background: "var(--bg)", display: "flex", flexDirection: "column", animation: "planFadeUp .18s ease both", borderLeft: "1px solid var(--border)" }}>
-      {/* header */}
-      <div style={{ flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover a seat for full details</div>
+      {/* header — row 1: temple + totals + close */}
+      <div style={{ flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "10px 20px 11px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏛 {temple}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>Slab seat map — hover a seat for full details</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+              <b style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(rows.length)}</b>
+              <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>slabs</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>{fmt0(totalCft)} CFT</span>
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 16px", borderRadius: 8, border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+            >
+              ✕ Close
+            </button>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-          <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-            <b style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(rows.length)}</b>
-            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>slabs</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>{fmt0(totalCft)} CFT</span>
-          </span>
-          {/* per-route counts double as the colour legend */}
+
+        {/* row 2: search + route filter chips (with volume, tap to filter) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => { qRef.current = e.target.value; setQ(e.target.value); }}
+            placeholder="🔎 Search code, category, label, description, stone, size…"
+            style={{ flex: "1 1 260px", maxWidth: 430, padding: "8px 13px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }}
+          />
           {METHOD_ORDER.map((mk) => {
-            const n = routeCounts[mk];
+            const st = routeStats[mk];
             const th2 = METHOD_THEME[mk];
+            const on = routeFilter === mk;
             return (
-              <span key={mk} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, opacity: n === 0 ? 0.45 : 1 }}>
-                <span style={{ width: 11, height: 11, borderRadius: 3, background: mk === "nil" ? "var(--bg)" : th2.fg, border: `1.5px solid ${mk === "nil" ? "var(--muted)" : th2.fg}` }} />
-                <span style={{ fontWeight: 700, color: "var(--muted)" }}>{th2.label}</span>
-                <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(n)}</b>
-              </span>
+              <button
+                key={mk}
+                type="button"
+                onClick={() => setRouteFilter(on ? null : mk)}
+                title={on ? "Show all routes" : `Show only ${th2.label}`}
+                style={{
+                  display: "inline-flex", alignItems: "baseline", gap: 6, fontSize: 11.5, cursor: "pointer",
+                  padding: "5px 11px", borderRadius: 999,
+                  border: `1.5px solid ${on ? th2.fg : "var(--border)"}`,
+                  background: on ? `${mk === "nil" ? "#6b7280" : th2.fg}14` : "var(--bg)",
+                  boxShadow: on ? `0 0 0 1px ${th2.fg}` : "none",
+                  opacity: st.slabs === 0 && !on ? 0.45 : 1,
+                }}
+              >
+                <span style={{ alignSelf: "center", width: 11, height: 11, borderRadius: 3, background: mk === "nil" ? "var(--bg)" : th2.fg, border: `1.5px solid ${mk === "nil" ? "var(--muted)" : th2.fg}` }} />
+                <span style={{ fontWeight: 700, color: on ? th2.fg : "var(--muted)" }}>{th2.label}</span>
+                <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{fmt0(st.slabs)}</b>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(st.cft)} CFT</span>
+              </button>
             );
           })}
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 16px", borderRadius: 8, border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
-          >
-            ✕ Close
-          </button>
+          {narrowed && (
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--gold-dark, #b45309)" }}>
+              {fmt0(filtered.length)} of {fmt0(rows.length)} shown
+            </span>
+          )}
         </div>
       </div>
 
-      {/* seats */}
-      <div onScroll={() => setTip(null)} style={{ flex: 1, overflowY: "auto", padding: "18px 20px 26px" }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+      {/* seats — full window width, small bezel, so big temples scroll less */}
+      <div onScroll={() => setTip(null)} style={{ flex: 1, overflowY: "auto", padding: "16px 22px 26px" }}>
+        <div>
+          {filtered.length === 0 && (
+            <div style={{ textAlign: "center", padding: "48px 0", fontSize: 13.5, fontWeight: 700, color: "var(--muted)" }}>
+              No slabs match{q.trim() ? ` “${q.trim()}”` : ""}{routeFilter ? ` in ${METHOD_THEME[routeFilter].label}` : ""}.
+              <button
+                type="button"
+                onClick={() => { qRef.current = ""; setQ(""); setRouteFilter(null); }}
+                style={{ display: "block", margin: "12px auto 0", fontSize: 12, fontWeight: 800, padding: "7px 16px", borderRadius: 8, border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)", cursor: "pointer" }}
+              >
+                Clear search & filters
+              </button>
+            </div>
+          )}
           {SEAT_SECTIONS.map(({ key, label }) => {
             const secRows = byStage.get(key)!;
             if (secRows.length === 0) return null;
