@@ -59,7 +59,7 @@ const lbl = { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransfor
 // filled. A row counts as "started" once any field has content; a fully
 // blank row (template filler / a stray + Add a row) is ignored. fieldEmpty
 // powers both the per-cell red highlight and the named-field error list.
-type RowField = "label" | "description" | "length" | "width" | "height" | "quantity";
+type RowField = "label" | "description" | "length" | "width" | "height" | "quantity" | "method";
 const REQUIRED_FIELDS: { key: RowField; label: string }[] = [
   { key: "label", label: "Label" },
   { key: "description", label: "Description" },
@@ -67,6 +67,9 @@ const REQUIRED_FIELDS: { key: RowField; label: string }[] = [
   { key: "width", label: "Width" },
   { key: "height", label: "Height" },
   { key: "quantity", label: "Quantity" },
+  // Mandatory since Aug 2026 (Daksh) — every new slab is routed at entry
+  // so nothing lands in the undecided pile.
+  { key: "method", label: "Carving route" },
 ];
 function rowHasContent(r: Row): boolean {
   return !!(
@@ -96,6 +99,8 @@ function fieldEmpty(r: Row, field: RowField): boolean {
       const n = Number(r.quantity);
       return !r.quantity.trim() || !(n >= 1) || !Number.isInteger(n);
     }
+    case "method":
+      return !r.method.trim();
   }
 }
 function rowProblems(r: Row): string[] {
@@ -352,7 +357,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
 
         {!ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Pick a temple and stone first — the template comes with both pre-filled.</div>}
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, background: "var(--surface-alt)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px" }}>
-          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both) · Carving (CNC/Outsource/No carving — blank = decide later).{" "}
+          <strong>Columns:</strong> Sr.No · Temple (filled) · Stone (filled) · <strong>Category 1</strong> · <strong>Category 2</strong> · Label · Description · Additional Description (optional) · Length · Width · Height · Quantity · Quality (A/B/Both — blank = Both) · <strong>Carving route</strong> (CNC/Manual carving/Direct — required).{" "}
           Category 1 → Category 2 → Label → Description → Additional Description organise the slabs in <strong>Temple View</strong>. In the review step you can pick from categories already used for this temple.{" "}
           Sizes are in <strong>inches</strong>. One row with quantity N becomes N slabs. After upload you can fix anything before it&apos;s added.
           {" "}In the file, <span style={{ color: "#7c2d12", fontWeight: 700 }}>gold columns</span> are pre-filled (leave them) and{" "}
@@ -430,7 +435,7 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
                 <th style={{ ...th, width: 80 }}>Hgt (in)</th>
                 <th style={{ ...th, width: 64 }}>Qty</th>
                 <th style={{ ...th, minWidth: 120 }}>Quality</th>
-                <th style={{ ...th, minWidth: 120 }}>Carving</th>
+                <th style={{ ...th, minWidth: 130 }}>Carving route *</th>
                 <th style={{ ...th, width: 60 }}>⚡</th>
                 <th style={{ ...th, width: 40 }}></th>
               </tr>
@@ -460,11 +465,13 @@ export function SlabImportClient({ temples, stones, existingCats = {} }: { templ
                       </select>
                     </td>
                     <td style={td}>
+                      {/* Route is required now — no "Nil" fallback, and the
+                          placeholder can't be chosen back. */}
                       <select value={r.method} onChange={(e) => patch(r.key, "method", e.target.value)} style={cellInp}>
-                        <option value="">Nil — any</option>
+                        <option value="" disabled>Pick route…</option>
                         <option value="cnc">CNC</option>
-                        <option value="outsource">Outsource</option>
-                        <option value="none">No carving</option>
+                        <option value="outsource">Manual carving</option>
+                        <option value="none">Direct</option>
                       </select>
                     </td>
                     <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={r.priority} onChange={(e) => patch(r.key, "priority", e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} /></td>

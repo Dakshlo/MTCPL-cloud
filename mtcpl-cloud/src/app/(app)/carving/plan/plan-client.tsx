@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { METHOD_BADGE, methodLabel, type CarvingMethod } from "@/lib/carving-method";
+import { METHOD_BADGE, type CarvingMethod } from "@/lib/carving-method";
 import { setCarvingMethodBulkAction } from "./actions";
 
 export type MethodKey = CarvingMethod | "nil";
@@ -35,10 +35,12 @@ export type PlanSlab = {
 export type CncForecast = { machineCount: number; cncPending: Tot; cncDone30: Tot; daily: number[] };
 
 const METHOD_ORDER: MethodKey[] = ["cnc", "outsource", "none", "nil"];
+// CNC Logbook wording (Daksh): Outsource reads "Manual carving" and
+// No carving reads "Direct" — the stored values are unchanged.
 const METHOD_THEME: Record<MethodKey, { label: string; fg: string }> = {
   cnc: { label: "CNC", fg: METHOD_BADGE.cnc.fg },
-  outsource: { label: "Outsource", fg: METHOD_BADGE.outsource.fg },
-  none: { label: "No carving", fg: METHOD_BADGE.none.fg },
+  outsource: { label: "Manual carving", fg: METHOD_BADGE.outsource.fg },
+  none: { label: "Direct", fg: METHOD_BADGE.none.fg },
   nil: { label: "Undecided", fg: "#6b7280" },
 };
 const STAGE_LABELS: Array<{ key: keyof StageTotals; label: string }> = [
@@ -738,7 +740,7 @@ function SeatMap({ temple, rows, onClose }: {
                   cursor: busy !== null ? "wait" : "pointer",
                 }}
               >
-                {busy === m ? "Saving…" : methodLabel(m)}
+                {busy === m ? "Saving…" : METHOD_THEME[m].label}
               </button>
             ))}
             <button
@@ -838,7 +840,7 @@ function SeatMap({ temple, rows, onClose }: {
                       opacity: cur === m ? 0.45 : 1,
                     }}
                   >
-                    {busy === m ? "Saving…" : `${methodLabel(m)}${cur === m ? " ✓" : ""}`}
+                    {busy === m ? "Saving…" : `${METHOD_THEME[m].label}${cur === m ? " ✓" : ""}`}
                   </button>
                 ))}
                 {cur !== "nil" && (

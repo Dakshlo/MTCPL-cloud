@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     { header: "Quality (A/B/Both)", width: 16 },
     // Mig 215 — carving route. Appended LAST so old downloaded templates
     // (13 cols) still parse: a missing cell simply lands "Nil — any".
-    { header: "Carving (CNC/Outsource/No carving)", width: 26 },
+    { header: "Carving route (CNC/Manual carving/Direct) *", width: 30 },
   ];
   for (let i = 1; i <= TEMPLATE_ROWS; i++) {
     ws.addRow([i, temple, stone, "", "", "", "", "", "", "", "", "", "", ""]);
@@ -87,14 +87,17 @@ export async function GET(req: NextRequest) {
       errorTitle: "Quality",
       error: "Pick A, B or Both (or leave blank for Both).",
     };
-    // Carving method column (col 14, mig 215) — blank = Nil (decide later).
+    // Carving route (col 14, mig 215) — MANDATORY since Aug 2026 (Daksh):
+    // every new slab must be routed at entry, no "decide later" pile.
+    // Wording follows the CNC Logbook: Manual carving = outsource,
+    // Direct = no carving.
     row.getCell(14).dataValidation = {
       type: "list",
-      allowBlank: true,
-      formulae: ['"CNC,Outsource,No carving"'],
+      allowBlank: false,
+      formulae: ['"CNC,Manual carving,Direct"'],
       showErrorMessage: true,
-      errorTitle: "Carving method",
-      error: "Pick CNC, Outsource or No carving (or leave blank to decide later).",
+      errorTitle: "Carving route (required)",
+      error: "Pick CNC, Manual carving or Direct — every slab needs a route.",
     };
   }
 
