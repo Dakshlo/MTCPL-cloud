@@ -50,12 +50,45 @@ const STAGE_COLOR: Record<keyof StageTotals, string> = {
   inCarving: "#b45309",
   done: "#15803d",
 };
-const STATUS_GROUPS: Array<{ key: string; icon: string; label: string; color: string }> = [
-  { key: "cut_done", icon: "🪨", label: "Cut · ready — needs a route now", color: "#0369a1" },
-  { key: "cutting", icon: "⚙️", label: "Cutting on the machine", color: "#b45309" },
-  { key: "planned", icon: "🗓", label: "Planned for cutting", color: "#7c3aed" },
-  { key: "open", icon: "▫️", label: "Not cut yet", color: "#6b7280" },
+// Everything in this list is undecided by definition — the labels just say
+// WHERE the slab is, no "needs a route" nagging, no emoji (Daksh).
+const STATUS_GROUPS: Array<{ key: string; label: string; color: string }> = [
+  { key: "cut_done", label: "Cut · ready", color: "#0369a1" },
+  { key: "cutting", label: "Cutting", color: "#b45309" },
+  { key: "planned", label: "Planned for cutting", color: "#7c3aed" },
+  { key: "open", label: "Not cut yet", color: "#6b7280" },
 ];
+
+/** Number + unit as one visually distinct stat. `tone` separates a COUNT
+ *  (ink) from a VOLUME (muted/boxed) so "107 slabs" and "313 CFT" can
+ *  never be misread as the same kind of number. */
+function Stat({ label, value, unit, tone = "count", size = 26 }: {
+  label: string; value: string; unit: string; tone?: "count" | "volume"; size?: number;
+}) {
+  const isCount = tone === "count";
+  return (
+    <div
+      style={{
+        padding: "7px 13px",
+        borderRadius: 8,
+        background: isCount ? "transparent" : "var(--surface-alt, rgba(0,0,0,0.035))",
+        border: isCount ? "none" : "1px solid var(--border)",
+      }}
+    >
+      <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 1 }}>
+        <span style={{ fontSize: size, fontWeight: 800, lineHeight: 1.05, color: isCount ? "var(--text)" : "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+          {value}
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          {unit}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 const fmt1 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -118,13 +151,15 @@ function TemplePicker({ temples, value, onPick }: {
   const shown = temples.filter((t) => !q.trim() || t.temple.toLowerCase().includes(q.trim().toLowerCase()));
 
   return (
-    <div ref={boxRef} style={{ position: "relative", flex: "1 1 340px", maxWidth: 520 }}>
+    // Full width — the picker is the gateway to this whole section, and a
+    // 520px box next to 18 long temple names was cramped (Daksh).
+    <div ref={boxRef} style={{ position: "relative", flex: 1, minWidth: 260 }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-          padding: "11px 14px", fontSize: 13.5, fontWeight: 800, textAlign: "left",
+          padding: "13px 16px", fontSize: 14.5, fontWeight: 800, textAlign: "left",
           border: "2px solid var(--gold-border, #d8c49a)", borderRadius: 8,
           background: "var(--bg)", color: value ? "var(--text)" : "var(--muted)", cursor: "pointer",
         }}
@@ -211,16 +246,23 @@ function SlabCard({ s, on, onToggle, i }: { s: UndecidedSlab; on: boolean; onTog
             {s.l}×{s.w}×{s.t}″ · {fmt1(cftOf(s))} CFT
           </span>
         </span>
+        {/* Category as a chip so it can't be mistaken for the label. */}
         {cats && (
-          <span style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--gold-dark)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", color: "var(--gold-dark)", background: "rgba(180,140,40,0.10)", border: "1px solid rgba(180,140,40,0.30)", borderRadius: 4, padding: "1px 6px", marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {cats}
           </span>
         )}
-        <span style={{ display: "block", fontSize: 11, color: "var(--text)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {[s.label, s.description].filter(Boolean).join(" — ") || "—"}
+        {/* Label = bold ink, Description = muted line under it. Always
+            rendered (— when the slab genuinely has none) so the card never
+            silently drops them. */}
+        <span style={{ display: "block", fontSize: 12, fontWeight: 750, color: "var(--text)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.label || "—"}
         </span>
-        <span style={{ display: "block", fontSize: 10.5, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          🏛 {s.temple}{s.stone ? ` · ${s.stone}` : ""}
+        <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.description || "—"}
+        </span>
+        <span style={{ display: "block", fontSize: 10.5, color: "var(--muted-light, var(--muted))", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.temple}{s.stone ? ` · ${s.stone}` : ""}
         </span>
       </span>
     </label>
@@ -244,7 +286,7 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
     const known = STATUS_GROUPS.filter((g) => (m.get(g.key)?.length ?? 0) > 0).map((g) => ({ ...g, rows: m.get(g.key)! }));
     const extras = [...m.entries()]
       .filter(([k]) => !STATUS_GROUPS.some((g) => g.key === k))
-      .map(([k, r]) => ({ key: k, icon: "•", label: k.replace(/_/g, " "), color: "#6b7280", rows: r }));
+      .map(([k, r]) => ({ key: k, label: k.replace(/_/g, " "), color: "#6b7280", rows: r }));
     return [...known, ...extras];
   }, [rows]);
 
@@ -260,12 +302,14 @@ function StatusGroups({ rows, selected, toggle, toggleAll }: {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 0 7px" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 <span style={{ width: 4, alignSelf: "stretch", background: g.color, borderRadius: 2 }} />
-                <span aria-hidden>{g.icon}</span>
                 <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.03em", textTransform: "uppercase", color: g.color }}>
                   {g.label}
                 </span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text)", background: "var(--surface-alt, rgba(0,0,0,0.04))", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
-                  {fmt0(g.rows.length)} · {fmt0(cft)} CFT
+                  {fmt0(g.rows.length)} slabs
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+                  {fmt0(cft)} CFT
                 </span>
               </span>
               <button
@@ -524,18 +568,21 @@ export function PlanClient({
               <Ring value={pct(tAgg.inCarving.slabs, tAgg.total.slabs)} color={STAGE_COLOR.inCarving} label="In carving" sub={`${fmt0(tAgg.inCarving.slabs)} slabs`} />
               <Ring value={pct(tAgg.cutWaiting.slabs, tAgg.total.slabs)} color={STAGE_COLOR.cutWaiting} label="Cut · waiting" sub={`${fmt0(tAgg.cutWaiting.slabs)} slabs`} />
               <Ring value={pct(tAgg.notCut.slabs, tAgg.total.slabs)} color={STAGE_COLOR.notCut} label="Not cut yet" sub={`${fmt0(tAgg.notCut.slabs)} slabs`} />
-              <div style={{ flex: "1 1 220px", minWidth: 220 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>
+              <div style={{ flex: "1 1 260px", minWidth: 260 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text)" }}>
                   {templeRow.temple}
                 </div>
-                <div style={{ fontSize: 26, fontWeight: 800, marginTop: 3 }}>
-                  {fmt0(tAgg.total.slabs)} <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>slabs</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", marginLeft: 8 }}>{fmt0(tAgg.total.cft)} CFT</span>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                  All routes — CNC + Outsource + No carving + Undecided
+                </div>
+                <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap" }}>
+                  <Stat label="Total slabs" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
+                  <Stat label="Volume" value={fmt0(tAgg.total.cft)} unit="cft" tone="volume" size={22} />
                 </div>
                 {/* stacked stage bar */}
-                <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", marginTop: 9, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", marginTop: 10, border: "1px solid var(--border)" }}>
                   {(["done", "inCarving", "cutWaiting", "notCut"] as Array<keyof StageTotals>).map((k) => {
-                    const w = pct(tAgg[k === "done" ? "done" : k === "inCarving" ? "inCarving" : k === "cutWaiting" ? "cutWaiting" : "notCut"].slabs, tAgg.total.slabs);
+                    const w = pct(tAgg[k].slabs, tAgg.total.slabs);
                     return w > 0 ? <div key={k} title={`${STAGE_LABELS.find((x) => x.key === k)?.label}`} style={{ width: `${w}%`, background: STAGE_COLOR[k] }} /> : null;
                   })}
                 </div>
@@ -544,20 +591,23 @@ export function PlanClient({
 
             {/* work remaining — excludes carved */}
             <div style={{ marginTop: 16, border: "1px solid var(--gold-border, #d8c49a)", background: "rgba(180,140,40,0.06)", borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--gold-dark)" }}>
-                  🔨 Work remaining (excl. carved)
+                  Work remaining — carved excluded
                 </span>
-                <span style={{ fontSize: 19, fontWeight: 800 }}>
-                  {fmt0(tAgg.remaining.slabs)} <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>slabs</span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)", marginLeft: 7 }}>{fmt0(tAgg.remaining.cft)} CFT</span>
-                </span>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <Stat label="Slabs left" value={fmt0(tAgg.remaining.slabs)} unit="slabs" tone="count" size={22} />
+                  <Stat label="Volume left" value={fmt0(tAgg.remaining.cft)} unit="cft" tone="volume" size={19} />
+                </div>
               </div>
               {tAgg.perRouteRemaining.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                   {tAgg.perRouteRemaining.map((r) => (
-                    <span key={r.mk} style={{ fontSize: 11.5, fontWeight: 800, color: METHOD_THEME[r.mk].fg, background: "var(--surface)", border: `1.5px solid ${METHOD_THEME[r.mk].fg}44`, borderRadius: 999, padding: "4px 12px" }}>
-                      {METHOD_THEME[r.mk].label}: {fmt0(r.slabs)} · {fmt0(r.cft)} CFT
+                    <span key={r.mk} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, fontSize: 11.5, color: METHOD_THEME[r.mk].fg, background: "var(--surface)", border: `1.5px solid ${METHOD_THEME[r.mk].fg}44`, borderRadius: 999, padding: "4px 12px" }}>
+                      <b style={{ fontWeight: 800 }}>{METHOD_THEME[r.mk].label}</b>
+                      <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt0(r.slabs)}</b>
+                      <span style={{ color: "var(--muted)", fontWeight: 700 }}>slabs</span>
+                      <span style={{ color: "var(--muted)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>· {fmt0(r.cft)} CFT</span>
                     </span>
                   ))}
                 </div>
