@@ -517,10 +517,18 @@ function SeatMap({ temple, rows, onClose }: {
   // keeps meaning while a filter or search is active; effRows so a route
   // change moves the counts instantly.
   const routeStats = useMemo(() => {
-    const c: Record<MethodKey, { slabs: number; cft: number }> = {
-      cnc: { slabs: 0, cft: 0 }, outsource: { slabs: 0, cft: 0 }, none: { slabs: 0, cft: 0 }, nil: { slabs: 0, cft: 0 },
+    const blank = () => ({ slabs: 0, cft: 0, leftSlabs: 0, leftCft: 0 });
+    const c: Record<MethodKey, ReturnType<typeof blank>> = {
+      cnc: blank(), outsource: blank(), none: blank(), nil: blank(),
     };
-    for (const s of effRows) { c[s.method].slabs += 1; c[s.method].cft += cftOf(s); }
+    for (const s of effRows) {
+      const cft = cftOf(s);
+      c[s.method].slabs += 1;
+      c[s.method].cft += cft;
+      // "Left" = still to be carved on this route; carved/dispatched slabs
+      // are done work, not pending load (Daksh).
+      if (s.stage !== "done") { c[s.method].leftSlabs += 1; c[s.method].leftCft += cft; }
+    }
     return c;
   }, [effRows]);
   const totalCft = useMemo(() => rows.reduce((a, s) => a + cftOf(s), 0), [rows]);
@@ -605,18 +613,26 @@ function SeatMap({ temple, rows, onClose }: {
                 onClick={() => setRouteFilter(on ? null : mk)}
                 title={on ? "Show all routes" : `Show only ${th2.label}`}
                 style={{
-                  display: "inline-flex", alignItems: "baseline", gap: 6, fontSize: 11.5, cursor: "pointer",
-                  padding: "5px 11px", borderRadius: 999,
+                  display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 1,
+                  fontSize: 11.5, cursor: "pointer", padding: "5px 12px", borderRadius: 10,
                   border: `1.5px solid ${on ? th2.fg : "var(--border)"}`,
                   background: on ? `${mk === "nil" ? "#6b7280" : th2.fg}14` : "var(--bg)",
                   boxShadow: on ? `0 0 0 1px ${th2.fg}` : "none",
                   opacity: st.slabs === 0 && !on ? 0.45 : 1,
                 }}
               >
-                <span style={{ alignSelf: "center", width: 11, height: 11, borderRadius: 3, background: mk === "nil" ? "var(--bg)" : th2.fg, border: `1.5px solid ${mk === "nil" ? "var(--muted)" : th2.fg}` }} />
-                <span style={{ fontWeight: 700, color: on ? th2.fg : "var(--muted)" }}>{th2.label}</span>
-                <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{fmt0(st.slabs)}</b>
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(st.cft)} CFT</span>
+                <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ alignSelf: "center", width: 11, height: 11, borderRadius: 3, background: mk === "nil" ? "var(--bg)" : th2.fg, border: `1.5px solid ${mk === "nil" ? "var(--muted)" : th2.fg}` }} />
+                  <span style={{ fontWeight: 700, color: on ? th2.fg : "var(--muted)" }}>{th2.label}</span>
+                  <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{fmt0(st.slabs)}</b>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(st.cft)} CFT</span>
+                </span>
+                {/* how much of that load is still to carve */}
+                <span style={{ display: "flex", alignItems: "baseline", gap: 5, paddingLeft: 17, fontSize: 10 }}>
+                  <span style={{ fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Left</span>
+                  <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: st.leftSlabs > 0 ? "var(--gold-dark, #b45309)" : "var(--muted)" }}>{fmt0(st.leftSlabs)}</b>
+                  <span style={{ fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(st.leftCft)} CFT</span>
+                </span>
               </button>
             );
           })}
@@ -957,7 +973,15 @@ export function PlanClient({
         @keyframes planZap { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
         .plan-zap { animation: planZap 1.2s ease-in-out infinite; }
         .plan-seat-btn { all: unset; display: inline-block; cursor: pointer; border-radius: 8px; }
-        .plan-seat-btn:hover { box-shadow: 0 0 0 2px var(--gold-border, #d8c49a); }
+        .plan-seat-btn:hover { box-shadow: 0 0 0 2px var(--gold-border, #d8c49a); animation: none; }
+        /* Total slabs opens the seat map — a soft 2s pulse so it reads as a
+           button, not a stat. Stops on hover and for reduced-motion users. */
+        @keyframes planTapHint {
+          0%, 78%, 100% { box-shadow: 0 0 0 0 rgba(180,140,40,0); }
+          88% { box-shadow: 0 0 0 3px rgba(180,140,40,0.34); }
+        }
+        .plan-tap-hint { animation: planTapHint 2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .plan-tap-hint { animation: none; } }
         .plan-seat { transition: transform .1s ease, box-shadow .1s ease; }
         .plan-seat:hover { transform: scale(1.15); box-shadow: 0 3px 10px rgba(0,0,0,0.25); z-index: 2; }
       `}</style>
@@ -1225,8 +1249,8 @@ export function PlanClient({
 
                 <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
                   {/* Total slabs opens the seat map — every slab as a seat. */}
-                  <button type="button" className="plan-seat-btn" title="Open the slab seat map" onClick={() => setSeatOpen(true)}>
-                    <Stat label="Total slabs ⤢" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
+                  <button type="button" className="plan-seat-btn plan-tap-hint" title="Open the slab seat map" onClick={() => setSeatOpen(true)}>
+                    <Stat label="Total slabs ⤢ tap" value={fmt0(tAgg.total.slabs)} unit="slabs" tone="count" />
                   </button>
                   <Stat label="Volume" value={fmt0(tAgg.total.cft)} unit="cft" tone="volume" size={22} />
                 </div>
