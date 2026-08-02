@@ -672,8 +672,10 @@ function SeatMap({ temple, rows, onClose }: {
                         });
                       }}
                       style={{
-                        position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
-                        fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
+                        position: "relative", width: 58, height: 31, borderRadius: 6, padding: 0,
+                        // code is the thing you actually read on a seat
+                        fontFamily: "ui-monospace, monospace", fontSize: 10, fontWeight: 900,
+                        letterSpacing: "-0.02em",
                         display: "flex", alignItems: "center", justifyContent: "center",
                         overflow: "hidden", whiteSpace: "nowrap",
                         cursor: multi && locked ? "not-allowed" : "pointer",
