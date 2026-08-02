@@ -56,8 +56,12 @@ export async function setCarvingMethodBulkAction(
       .from("slab_requirements")
       .update({ carving_method: method, ...(isUuid ? { updated_by: profile.id } : {}), updated_at: now })
       .in("id", chunk)
-      // Cancelled/rejected slabs are out of every plan total — don't tag them.
-      .not("status", "in", "(cancelled,rejected,carving_rejected)")
+      // A route may only be set BEFORE carving starts. Once a slab is
+      // assigned to a vendor / on a machine / carved / dispatched the
+      // decision is already executed, so re-routing it would only corrupt
+      // the plan totals (Daksh, Aug 2026). Cancelled + rejected stay out
+      // too. Enforced here, not just in the UI.
+      .in("status", ["open", "planned", "cutting", "cut_done"])
       .select("id");
     if (error) return { ok: false, error: error.message };
     count += (data ?? []).length;

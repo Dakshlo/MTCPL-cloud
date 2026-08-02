@@ -284,6 +284,12 @@ const SEAT_SECTIONS: Array<{ key: keyof StageTotals; label: string; hi: string }
 /** "PALI-0010-2" → "0010-2" — the temple prefix is the map's title. */
 const seatCode = (id: string) => id.replace(/^[^-]+-/, "");
 
+/** A route can only be decided BEFORE carving starts. Once a slab is in
+ *  carving or finished, the decision has already been executed — the seat
+ *  stays visible for context but is locked. Mirrors the status list the
+ *  server action enforces. */
+const canRoute = (s: PlanSlab) => s.stage === "notCut" || s.stage === "cutWaiting";
+
 function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
@@ -418,7 +424,8 @@ function SeatMap({ temple, rows, onClose }: {
     () => effRows.reduce((a, s) => (sel.has(s.id) ? a + cftOf(s) : a), 0),
     [effRows, sel],
   );
-  const allShownPicked = filtered.length > 0 && filtered.every((s) => sel.has(s.id));
+  const routableShown = useMemo(() => filtered.filter(canRoute), [filtered]);
+  const allShownPicked = routableShown.length > 0 && routableShown.every((s) => sel.has(s.id));
 
   const showTip = (s: PlanSlab, el: HTMLElement) => {
     if (pinnedRef.current) return; // one card at a time — the pinned one wins
@@ -491,8 +498,8 @@ function SeatMap({ temple, rows, onClose }: {
           {/* view switch — same slabs, cinema rows or category cards */}
           <div style={{ display: "flex", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)", flexShrink: 0 }}>
             {([
-              { key: "stage", label: "🎬 Cinema" },
-              { key: "category", label: "🗂 Category" },
+              { key: "stage", label: "🏗 By stage" },
+              { key: "category", label: "🗂 By category" },
             ] as Array<{ key: "stage" | "category"; label: string }>).map((v, i) => {
               const on = groupBy === v.key;
               return (
@@ -553,18 +560,19 @@ function SeatMap({ temple, rows, onClose }: {
           )}
           {/* multi-select lives at the far right (Daksh) */}
           <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {multi && filtered.length > 0 && (
+            {multi && routableShown.length > 0 && (
               <button
                 type="button"
                 onClick={() => setSel((prev) => {
                   const next = new Set(prev);
-                  if (allShownPicked) { for (const s of filtered) next.delete(s.id); }
-                  else { for (const s of filtered) next.add(s.id); }
+                  // only slabs that can still be routed
+                  if (allShownPicked) { for (const s of routableShown) next.delete(s.id); }
+                  else { for (const s of routableShown) next.add(s.id); }
                   return next;
                 })}
                 style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
               >
-                {allShownPicked ? "Untick all shown" : `Tick all ${fmt0(filtered.length)} shown`}
+                {allShownPicked ? "Untick all" : `Tick all ${fmt0(routableShown.length)} routable`}
               </button>
             )}
             <button
@@ -609,6 +617,7 @@ function SeatMap({ temple, rows, onClose }: {
                 {rows2.map((s) => {
                   const routed = s.method !== "nil";
                   const picked = sel.has(s.id);
+                  const locked = !canRoute(s);
                   return (
                     <button
                       key={s.id}
@@ -621,6 +630,7 @@ function SeatMap({ temple, rows, onClose }: {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!multi) { pinSeat(s, e.currentTarget); return; }
+                        if (locked) return; // route already executed
                         setSel((prev) => {
                           const next = new Set(prev);
                           if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
@@ -631,7 +641,9 @@ function SeatMap({ temple, rows, onClose }: {
                         position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
                         fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        overflow: "hidden", whiteSpace: "nowrap", cursor: "pointer",
+                        overflow: "hidden", whiteSpace: "nowrap",
+                        cursor: multi && locked ? "not-allowed" : "pointer",
+                        opacity: multi && locked ? 0.45 : 1,
                         background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
                         border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
                         color: routed ? "#fff" : "var(--muted)",
@@ -787,7 +799,9 @@ function SeatMap({ temple, rows, onClose }: {
           {tipRow("Descr.", tip.s.description)}
           {tipRow("Stone", tip.s.stone)}
           <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px dashed var(--border)", fontSize: 10, fontWeight: 700, color: "var(--gold-dark, #b45309)" }}>
-            {multi ? "Click to add this slab to the selection" : "Click the seat to change its route"}
+            {!canRoute(tip.s)
+              ? "🔒 Route locked — carving already started"
+              : multi ? "Click to add this slab to the selection" : "Click the seat to change its route"}
           </div>
         </div>
       )}
@@ -821,6 +835,13 @@ function SeatMap({ temple, rows, onClose }: {
             {tipRow("Label", pinned.s.label)}
             {tipRow("Descr.", pinned.s.description)}
             {tipRow("Stone", pinned.s.stone)}
+            {/* Route is decided before carving — once the slab is on a
+                machine or finished, the decision is already executed. */}
+            {!canRoute(pinned.s) ? (
+              <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px dashed var(--border)", fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>
+                🔒 Route locked — this slab is {pinned.s.stage === "inCarving" ? "already in carving" : "already carved / dispatched"}, so it can&apos;t be re-routed.
+              </div>
+            ) : (
             <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px dashed var(--border)" }}>
               <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>
                 Change route
@@ -855,6 +876,7 @@ function SeatMap({ temple, rows, onClose }: {
                 )}
               </div>
             </div>
+            )}
           </div>
         );
       })()}
