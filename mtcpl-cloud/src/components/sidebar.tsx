@@ -272,7 +272,7 @@ const navEntries: NavEntry[] = [
     // forecast. The office roles that route slabs (same set as Ready
     // Sizes Stock).
     href: "/carving/plan",
-    label: "Carving Plan",
+    label: "CNC Logbook",
     icon: "🗺️",
     roles: ["developer", "owner", "carving_head", "senior_incharge", "tender_manager"],
     department: "production",

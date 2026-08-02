@@ -1,19 +1,20 @@
 "use client";
 
 // ──────────────────────────────────────────────────────────────────
-// Carving Plan — client board (mig 215, round 3 per Daksh):
-//   • Method headline cards + ONE deep CNC-capacity card.
-//   • Temple section: OUR OWN dropdown (not the browser select) →
-//     ring UI (big done-ring + stage rings), a "work remaining —
-//     excluding carved" band split by route, and that temple's OWN
-//     undecided slabs right underneath.
-//   • Global undecided queue below: search across every field,
-//     status groups, richer cards, hover-lift life.
-//   Selection is shared — tick anywhere, tag from the sticky bar.
+// CNC Logbook (route: /carving/plan, mig 215) — client board:
+//   • Four route cards (CNC / Outsource / No carving / Undecided):
+//     stage ring + per-stage slabs & CFT + both totals.
+//   • ONE deep CNC-capacity card — pending load, 30-day output chart,
+//     and the days-of-work-left verdict.
+//   • Temple section: our own dropdown → LEFT progress rings + work
+//     remaining, RIGHT the same temple split by route.
+//   • Slab list + every route change lives in the full-screen SEAT MAP
+//     (opened from Total slabs): hover for details, click to re-route,
+//     or turn on multi-select and set one route for many at once.
 //   (No PeekIframe on this page, so hover transforms are safe.)
 // ──────────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { METHOD_BADGE, methodLabel, type CarvingMethod } from "@/lib/carving-method";
 import { setCarvingMethodBulkAction } from "./actions";
@@ -52,20 +53,6 @@ const STAGE_COLOR: Record<keyof StageTotals, string> = {
   inCarving: "#b45309",
   done: "#15803d",
 };
-// Everything in this list is undecided by definition — the labels just say
-// WHERE the slab is, no "needs a route" nagging, no emoji (Daksh).
-const STATUS_GROUPS: Array<{ key: string; label: string; color: string }> = [
-  { key: "cut_done", label: "Cut · ready", color: "#0369a1" },
-  { key: "cutting", label: "Cutting", color: "#b45309" },
-  { key: "planned", label: "Planned for cutting", color: "#7c3aed" },
-  { key: "open", label: "Not cut yet", color: "#6b7280" },
-  // Reached only by the View all / Already routed modes — undecided slabs
-  // never sit in a carving status. Carved/dispatched slabs are filtered out
-  // of every mode, so they need no group here.
-  { key: "carving_assigned", label: "Carving assigned", color: "#b45309" },
-  { key: "carving_in_progress", label: "Carving in progress", color: "#b45309" },
-  { key: "carving_on_hold", label: "Carving on hold", color: "#b91c1c" },
-];
 
 /** Number + unit as one visually distinct stat. `tone` separates a COUNT
  *  (ink) from a VOLUME (muted/boxed) so "107 slabs" and "313 CFT" can
@@ -131,9 +118,6 @@ function Ring({ value, size = 86, stroke = 9, color, label, sub }: {
     </div>
   );
 }
-
-/** Height of the folder tab that carries a card's carving route. */
-const TAB_H = 19;
 
 /** One ring split into all four stages, total slab count in the middle.
  *  Drawn done → in-carving → cut-waiting → not-cut clockwise from the top,
@@ -283,144 +267,6 @@ function TemplePicker({ temples, value, onPick }: {
   );
 }
 
-/** One undecided slab card — shared by the temple-scoped and global lists. */
-function SlabCard({ s, on, onToggle, i, reserveTab }: {
-  s: PlanSlab; on: boolean; onToggle: () => void; i: number; reserveTab: boolean;
-}) {
-  const cats = [s.section, s.element].filter(Boolean).join(" › ");
-  const route = s.method !== "nil" ? METHOD_THEME[s.method] : null;
-  return (
-    <label
-      className="plan-card"
-      style={{
-        position: "relative",
-        // Space for the folder tab. Reserved for every card in a list that
-        // has any routed slab, so tops stay aligned across the grid.
-        marginTop: reserveTab ? TAB_H : 0,
-        display: "flex", alignItems: "flex-start", gap: 9,
-        border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`,
-        background: on ? "rgba(180,140,40,0.10)" : "var(--bg)",
-        boxShadow: on ? "0 0 0 2px rgba(180,140,40,0.18)" : "none",
-        borderRadius: 6, padding: "9px 11px", cursor: "pointer",
-        animationDelay: `${Math.min(i * 14, 280)}ms`,
-      }}
-    >
-      {/* Route rides ABOVE the card like a file-folder tab, so it can never
-          be confused with the category chip inside the body (Daksh). */}
-      {route && (
-        <span
-          style={{
-            position: "absolute", left: 10, top: -TAB_H, zIndex: 1,
-            padding: "2px 10px 4px", lineHeight: 1.35,
-            fontSize: 9.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase",
-            color: route.fg, background: `${route.fg}1f`,
-            border: `1.5px solid ${route.fg}66`, borderBottom: "none",
-            borderRadius: "6px 6px 0 0",
-          }}
-        >
-          {route.label}
-        </span>
-      )}
-      <input type="checkbox" checked={on} onChange={onToggle} style={{ cursor: "pointer", marginTop: 2 }} />
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {s.priority && <span className="plan-zap">⚡ </span>}{s.id}
-          </span>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", flexShrink: 0 }}>
-            {s.l}×{s.w}×{s.t}″ · {fmt1(cftOf(s))} CFT
-          </span>
-        </span>
-        {/* Category as a chip so it can't be mistaken for the label. */}
-        {cats && (
-          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", color: "var(--gold-dark)", background: "rgba(180,140,40,0.10)", border: "1px solid rgba(180,140,40,0.30)", borderRadius: 4, padding: "1px 6px", marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {cats}
-          </span>
-        )}
-        {/* Label = bold ink, Description = muted line under it. Always
-            rendered (— when the slab genuinely has none) so the card never
-            silently drops them. */}
-        <span style={{ display: "block", fontSize: 12, fontWeight: 750, color: "var(--text)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {s.label || "—"}
-        </span>
-        <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {s.description || "—"}
-        </span>
-        <span style={{ display: "block", fontSize: 10.5, color: "var(--muted-light, var(--muted))", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {s.temple}{s.stone ? ` · ${s.stone}` : ""}
-        </span>
-      </span>
-    </label>
-  );
-}
-
-/** Status-grouped card list (used scoped-to-temple and globally). */
-function StatusGroups({ rows, selected, toggle, toggleAll }: {
-  rows: PlanSlab[];
-  selected: Set<string>;
-  toggle: (id: string) => void;
-  toggleAll: (rows: PlanSlab[]) => void;
-}) {
-  const groups = useMemo(() => {
-    const m = new Map<string, PlanSlab[]>();
-    for (const s of rows) {
-      const arr = m.get(s.status) ?? [];
-      arr.push(s);
-      m.set(s.status, arr);
-    }
-    const known = STATUS_GROUPS.filter((g) => (m.get(g.key)?.length ?? 0) > 0).map((g) => ({ ...g, rows: m.get(g.key)! }));
-    const extras = [...m.entries()]
-      .filter(([k]) => !STATUS_GROUPS.some((g) => g.key === k))
-      .map(([k, r]) => ({ key: k, label: k.replace(/_/g, " "), color: "#6b7280", rows: r }));
-    return [...known, ...extras];
-  }, [rows]);
-
-  // Reserve tab space for the whole list (not per card) so a mixed row of
-  // routed + undecided cards still lines up along the top.
-  const reserveTab = useMemo(() => rows.some((r) => r.method !== "nil"), [rows]);
-
-  if (groups.length === 0) return null;
-  return (
-    <>
-      {groups.map((g) => {
-        const ticked = g.rows.filter((r) => selected.has(r.id)).length;
-        const allIn = ticked === g.rows.length;
-        const cft = g.rows.reduce((a, r) => a + cftOf(r), 0);
-        return (
-          <div key={g.key}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 0 7px" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                <span style={{ width: 4, alignSelf: "stretch", background: g.color, borderRadius: 2 }} />
-                <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.03em", textTransform: "uppercase", color: g.color }}>
-                  {g.label}
-                </span>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text)", background: "var(--surface-alt, rgba(0,0,0,0.04))", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
-                  {fmt0(g.rows.length)} slabs
-                </span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                  {fmt0(cft)} CFT
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => toggleAll(g.rows)}
-                style={{ fontSize: 11.5, fontWeight: 800, color: "var(--gold-dark)", background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}
-              >
-                {allIn ? "Untick all" : `Tick all ${fmt0(g.rows.length)}`}{ticked > 0 && !allIn ? ` (${ticked})` : ""}
-              </button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8, paddingBottom: 10 }}>
-              {g.rows.map((s, i) => (
-                <SlabCard key={s.id} s={s} i={i} on={selected.has(s.id)} onToggle={() => toggle(s.id)} reserveTab={reserveTab} />
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
 // ── Slab seat map — every slab of the temple as one "cinema seat" ──
 // Sections top→bottom follow the journey; carved slabs sit nearest the
 // temple "screen" at the bottom. Seat colour = route, hover = full info.
@@ -443,6 +289,10 @@ function SeatMap({ temple, rows, onClose }: {
   const [q, setQ] = useState("");
   const [routeFilter, setRouteFilter] = useState<MethodKey | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Multi-select: clicking seats collects them instead of opening a card,
+  // then one route change applies to the whole selection.
+  const [multi, setMulti] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
   // Route edits land here instantly (seat recolours, chips recount) while
   // router.refresh() reconciles in the background — search, filter and
   // scroll all survive because client state is untouched.
@@ -450,14 +300,17 @@ function SeatMap({ temple, rows, onClose }: {
   const qRef = useRef("");
   const pinnedRef = useRef(false);
   pinnedRef.current = pinned !== null;
+  const selRef = useRef(0);
+  selRef.current = sel.size;
   const router = useRouter();
 
-  // Esc: close the pinned card first, then clear the search, then the map.
-  // The page behind must not scroll while the map is open.
+  // Esc unwinds one step at a time: pinned card → selection → search →
+  // close. The page behind must not scroll while the map is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (pinnedRef.current) { setPinned(null); return; }
+      if (selRef.current > 0) { setSel(new Set()); return; }
       if (qRef.current) { qRef.current = ""; setQ(""); return; }
       onClose();
     };
@@ -472,17 +325,22 @@ function SeatMap({ temple, rows, onClose }: {
     [rows, overrides],
   );
 
-  const applyRoute = async (s: PlanSlab, m: CarvingMethod | null) => {
-    if (busy) return;
+  const applyRouteIds = async (ids: string[], m: CarvingMethod | null) => {
+    if (busy || ids.length === 0) return;
     setBusy(m ?? "nil");
     const fd = new FormData();
-    fd.set("ids", JSON.stringify([s.id]));
+    fd.set("ids", JSON.stringify(ids));
     fd.set("method", m ?? "");
     const res = await setCarvingMethodBulkAction(fd);
     setBusy(null);
     if (!res.ok) { alert(res.error); return; }
-    setOverrides((prev) => new Map(prev).set(s.id, (m ?? "nil") as MethodKey));
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      for (const id of ids) next.set(id, (m ?? "nil") as MethodKey);
+      return next;
+    });
     setPinned(null);
+    setSel(new Set());
     router.refresh();
   };
 
@@ -533,6 +391,11 @@ function SeatMap({ temple, rows, onClose }: {
   }, [effRows]);
   const totalCft = useMemo(() => rows.reduce((a, s) => a + cftOf(s), 0), [rows]);
   const narrowed = q.trim() !== "" || routeFilter !== null;
+  const selCft = useMemo(
+    () => effRows.reduce((a, s) => (sel.has(s.id) ? a + cftOf(s) : a), 0),
+    [effRows, sel],
+  );
+  const allShownPicked = filtered.length > 0 && filtered.every((s) => sel.has(s.id));
 
   const showTip = (s: PlanSlab, el: HTMLElement) => {
     if (pinnedRef.current) return; // one card at a time — the pinned one wins
@@ -600,8 +463,35 @@ function SeatMap({ temple, rows, onClose }: {
             value={q}
             onChange={(e) => { qRef.current = e.target.value; setQ(e.target.value); }}
             placeholder="🔎 Search code, category, label, description, stone, size…"
-            style={{ flex: "1 1 260px", maxWidth: 430, padding: "8px 13px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }}
+            style={{ flex: "1 1 220px", maxWidth: 380, padding: "8px 13px", fontSize: 13, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)" }}
           />
+          <button
+            type="button"
+            onClick={() => { setMulti((v) => !v); setSel(new Set()); setPinned(null); }}
+            title="Pick several seats, then set one route for all of them"
+            style={{
+              fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+              border: `1.5px solid ${multi ? "var(--gold-dark, #b45309)" : "var(--border)"}`,
+              background: multi ? "var(--gold-dark, #b45309)" : "var(--bg)",
+              color: multi ? "#fff" : "var(--text)",
+            }}
+          >
+            {multi ? "☑ Multi-select on" : "☐ Multi-select"}
+          </button>
+          {multi && filtered.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSel((prev) => {
+                const next = new Set(prev);
+                if (allShownPicked) { for (const s of filtered) next.delete(s.id); }
+                else { for (const s of filtered) next.add(s.id); }
+                return next;
+              })}
+              style={{ fontSize: 12, fontWeight: 800, padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
+            >
+              {allShownPicked ? "Untick all shown" : `Tick all ${fmt0(filtered.length)} shown`}
+            </button>
+          )}
           {METHOD_ORDER.map((mk) => {
             const st = routeStats[mk];
             const th2 = METHOD_THEME[mk];
@@ -679,6 +569,7 @@ function SeatMap({ temple, rows, onClose }: {
                 <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 5 }}>
                   {secRows.map((s) => {
                     const routed = s.method !== "nil";
+                    const picked = sel.has(s.id);
                     return (
                       <button
                         key={s.id}
@@ -688,7 +579,15 @@ function SeatMap({ temple, rows, onClose }: {
                         onMouseLeave={() => setTip(null)}
                         onFocus={(e) => showTip(s, e.currentTarget)}
                         onBlur={() => setTip(null)}
-                        onClick={(e) => { e.stopPropagation(); pinSeat(s, e.currentTarget); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!multi) { pinSeat(s, e.currentTarget); return; }
+                          setSel((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                            return next;
+                          });
+                        }}
                         style={{
                           position: "relative", width: 56, height: 30, borderRadius: 6, padding: 0,
                           fontFamily: "ui-monospace, monospace", fontSize: 8.5, fontWeight: 800,
@@ -697,8 +596,13 @@ function SeatMap({ temple, rows, onClose }: {
                           background: routed ? METHOD_THEME[s.method].fg : "var(--surface)",
                           border: `1.5px solid ${routed ? METHOD_THEME[s.method].fg : "var(--border)"}`,
                           color: routed ? "#fff" : "var(--muted)",
+                          outline: picked ? "2.5px solid var(--gold-dark, #b45309)" : "none",
+                          outlineOffset: picked ? 1 : 0,
                         }}
                       >
+                        {picked && (
+                          <span style={{ position: "absolute", inset: 0, background: "rgba(180,140,40,0.22)", pointerEvents: "none" }} />
+                        )}
                         {seatCode(s.id)}
                         {s.priority && (
                           <span style={{ position: "absolute", top: 2, right: 2, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.8)" }} />
@@ -720,6 +624,50 @@ function SeatMap({ temple, rows, onClose }: {
           </div>
         </div>
       </div>
+
+      {/* multi-select action bar — one route for the whole selection */}
+      {multi && sel.size > 0 && (
+        <div style={{ flexShrink: 0, borderTop: "2px solid var(--gold-dark, #b45309)", background: "var(--surface)", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", boxShadow: "0 -4px 14px rgba(0,0,0,0.1)" }}>
+          <span style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13, fontWeight: 800 }}>
+            {fmt0(sel.size)} slab{sel.size === 1 ? "" : "s"} selected
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>{fmt0(selCft)} CFT</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>— set route:</span>
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(["cnc", "outsource", "none"] as CarvingMethod[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                disabled={busy !== null}
+                onClick={() => applyRouteIds([...sel], m)}
+                style={{
+                  fontSize: 12.5, fontWeight: 800, padding: "8px 15px", borderRadius: 6,
+                  border: `1.5px solid ${METHOD_BADGE[m].border}`,
+                  background: METHOD_BADGE[m].bg, color: METHOD_BADGE[m].fg,
+                  cursor: busy !== null ? "wait" : "pointer",
+                }}
+              >
+                {busy === m ? "Saving…" : methodLabel(m)}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => applyRouteIds([...sel], null)}
+              style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 15px", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: busy !== null ? "wait" : "pointer" }}
+            >
+              {busy === "nil" ? "Saving…" : "Clear — Nil (any)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSel(new Set())}
+              style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 13px", borderRadius: 6, border: "none", background: "none", color: "var(--muted)", cursor: "pointer" }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* hover card — fixed at overlay root, never inside a transformed seat */}
       {tip && !pinned && (
@@ -746,7 +694,7 @@ function SeatMap({ temple, rows, onClose }: {
           {tipRow("Descr.", tip.s.description)}
           {tipRow("Stone", tip.s.stone)}
           <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px dashed var(--border)", fontSize: 10, fontWeight: 700, color: "var(--gold-dark, #b45309)" }}>
-            Click the seat to change its route
+            {multi ? "Click to add this slab to the selection" : "Click the seat to change its route"}
           </div>
         </div>
       )}
@@ -790,7 +738,7 @@ function SeatMap({ temple, rows, onClose }: {
                     key={m}
                     type="button"
                     disabled={busy !== null || cur === m}
-                    onClick={() => applyRoute(pinned.s, m)}
+                    onClick={() => applyRouteIds([pinned.s.id], m)}
                     style={{
                       fontSize: 11.5, fontWeight: 800, padding: "6px 11px", borderRadius: 6,
                       border: `1.5px solid ${METHOD_BADGE[m].border}`,
@@ -806,7 +754,7 @@ function SeatMap({ temple, rows, onClose }: {
                   <button
                     type="button"
                     disabled={busy !== null}
-                    onClick={() => applyRoute(pinned.s, null)}
+                    onClick={() => applyRouteIds([pinned.s.id], null)}
                     style={{ fontSize: 11.5, fontWeight: 800, padding: "6px 11px", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: busy !== null ? "default" : "pointer" }}
                   >
                     {busy === "nil" ? "Saving…" : "Clear — Nil (any)"}
@@ -821,8 +769,6 @@ function SeatMap({ temple, rows, onClose }: {
   );
 }
 
-type ViewMode = "undecided" | "all" | "routed";
-
 export function PlanClient({
   summaries, temples, slabs, forecast,
 }: {
@@ -831,18 +777,10 @@ export function PlanClient({
   slabs: PlanSlab[];
   forecast: CncForecast;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [temple, setTemple] = useState<string>("");
-  const [q, setQ] = useState("");
-  // No view is open until you tap one — picking a temple shows the numbers
-  // first, and tapping the open tab again drops the list (Daksh).
-  const [mode, setMode] = useState<ViewMode | null>(null);
-  // Cinema-style seat map, opened from the Total-slabs stat.
+  // Cinema-style seat map, opened from the Total-slabs stat — the one
+  // place slabs are listed and re-routed now.
   const [seatOpen, setSeatOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
   // The slab list is ALWAYS temple-scoped (Daksh) — nothing renders until a
@@ -851,80 +789,6 @@ export function PlanClient({
     () => (temple ? slabs.filter((s) => s.temple === temple) : []),
     [slabs, temple],
   );
-
-  // Every mode lists PENDING work only. A carved or dispatched slab has no
-  // routing decision left — showing it in "Already routed" just filled the
-  // view with history you can't act on (Daksh). The finished count is
-  // surfaced under the header instead of silently dropped.
-  const pendingSlabs = useMemo(() => templeSlabs.filter((s) => s.stage !== "done"), [templeSlabs]);
-  const finishedCount = templeSlabs.length - pendingSlabs.length;
-
-  const modeCounts = useMemo(() => ({
-    undecided: pendingSlabs.filter((s) => s.method === "nil").length,
-    all: pendingSlabs.length,
-    routed: pendingSlabs.filter((s) => s.method !== "nil").length,
-  }), [pendingSlabs]);
-
-  const modeRows = useMemo(() => {
-    if (mode === null) return [];
-    if (mode === "all") return pendingSlabs;
-    if (mode === "routed") return pendingSlabs.filter((s) => s.method !== "nil");
-    return pendingSlabs.filter((s) => s.method === "nil");
-  }, [pendingSlabs, mode]);
-
-  // One search across every field the card shows — plus the route name, so
-  // "cnc" or "no carving" narrows the list in View all / Already routed.
-  const filteredRows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return modeRows;
-    return modeRows.filter((s) => {
-      const hay = [
-        s.id, s.temple, s.label, s.stone, s.description, s.section, s.element,
-        s.status.replace(/_/g, " "), METHOD_THEME[s.method].label,
-        `${s.l}x${s.w}x${s.t}`, `${s.l}×${s.w}×${s.t}`,
-      ].filter(Boolean).join(" · ").toLowerCase();
-      return hay.includes(needle);
-    });
-  }, [modeRows, q]);
-
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-  function toggleAll(rows: PlanSlab[]) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      const allIn = rows.every((r) => next.has(r.id));
-      for (const r of rows) {
-        if (allIn) next.delete(r.id);
-        else next.add(r.id);
-      }
-      return next;
-    });
-  }
-
-  function applyMethod(method: CarvingMethod) {
-    if (selected.size === 0 || pending) return;
-    if (!confirm(`Set "${methodLabel(method)}" on ${selected.size} slab${selected.size === 1 ? "" : "s"}?`)) return;
-    setMsg(null); setErr(null);
-    const fd = new FormData();
-    fd.set("ids", JSON.stringify([...selected]));
-    fd.set("method", method);
-    startTransition(async () => {
-      const res = await setCarvingMethodBulkAction(fd);
-      if (res.ok) {
-        setMsg(`✓ Tagged ${res.count} slab${res.count === 1 ? "" : "s"} as ${methodLabel(method)}`);
-        setSelected(new Set());
-        router.refresh();
-      } else {
-        setErr(res.error);
-      }
-    });
-  }
 
   // Temple aggregates for the ring section.
   const tAgg = useMemo(() => {
@@ -987,11 +851,11 @@ export function PlanClient({
       `}</style>
 
       <div className="page-header">
-        <h1>Carving Plan</h1>
+        <h1>CNC Logbook</h1>
       </div>
 
       {/* ── 1. Per-method headline cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(258px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
         {METHOD_ORDER.map((mk) => {
           const s = summaries[mk];
           const th2 = METHOD_THEME[mk];
@@ -1020,10 +884,15 @@ export function PlanClient({
                     const label = STAGE_LABELS.find((x) => x.key === key)!.label;
                     const v = s.stages[key].slabs;
                     return (
-                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5 }} title={`${fmt1(s.stages[key].cft)} CFT`}>
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5 }}>
                         <span style={{ width: 9, height: 9, borderRadius: 2, background: STAGE_COLOR[key], flexShrink: 0, opacity: v > 0 ? 1 : 0.3 }} />
                         <span style={{ color: "var(--muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                        {/* volume printed beside every stage count, not just
+                            hidden in a hover title */}
                         <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: v > 0 ? "var(--text)" : "var(--muted)" }}>{fmt0(v)}</b>
+                        <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums", minWidth: 54, textAlign: "right", flexShrink: 0 }}>
+                          {fmt0(s.stages[key].cft)} CFT
+                        </span>
                       </div>
                     );
                   })}
@@ -1217,9 +1086,9 @@ export function PlanClient({
       <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, overflow: "visible" }}>
         <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", borderBottom: templeRow ? "1px solid var(--border)" : "none" }}>
           <span style={{ fontSize: 13.5, fontWeight: 800, flexShrink: 0 }}>🏛 Temple-wise</span>
-          {/* Reset to the collapsed state on temple change — a stale query or
-              open view would misrepresent the temple you just picked. */}
-          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setQ(""); setMode(null); setSeatOpen(false); }} />
+          {/* Close the seat map on temple change so it can never show the
+              previous temple's slabs. */}
+          <TemplePicker temples={temples} value={temple} onPick={(t) => { setTemple(t); setSeatOpen(false); }} />
         </div>
 
         {templeRow && tAgg && (
@@ -1329,139 +1198,9 @@ export function PlanClient({
               </div>
             </div>
 
-            {/* This temple's slabs — undecided by default, but you can flip
-                to every slab or only the already-routed ones and re-route
-                from the same cards. */}
-            <div style={{ marginTop: 14, borderTop: "1px dashed var(--border)", paddingTop: 12 }}>
-              {/* 1fr / auto / 1fr keeps the switch dead-centre whether or not
-                  the search box is showing; the search rides the right column. */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 12, marginBottom: 10 }}>
-                <span />
-                <div style={{ display: "flex", gap: 0, border: "1.5px solid var(--border)", borderRadius: 9, overflow: "hidden", background: "var(--bg)" }}>
-                  {([
-                    { key: "undecided", label: "Undecided", n: modeCounts.undecided },
-                    { key: "all", label: "View all", n: modeCounts.all },
-                    { key: "routed", label: "Already routed", n: modeCounts.routed },
-                  ] as Array<{ key: ViewMode; label: string; n: number }>).map((t, i) => {
-                    const on = mode === t.key;
-                    return (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => { setMode(mode === t.key ? null : t.key); setQ(""); }}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 7,
-                          padding: "8px 15px", fontSize: 12.5, fontWeight: 800, cursor: "pointer",
-                          border: "none", borderLeft: i === 0 ? "none" : "1px solid var(--border)",
-                          background: on ? "var(--gold-dark, #b45309)" : "transparent",
-                          color: on ? "#fff" : "var(--muted)",
-                          transition: "background .15s ease, color .15s ease",
-                        }}
-                      >
-                        {t.label}
-                        <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums", padding: "1px 7px", borderRadius: 999, background: on ? "rgba(255,255,255,0.22)" : "var(--surface-alt, rgba(0,0,0,0.05))", color: on ? "#fff" : "var(--text)" }}>
-                          {fmt0(t.n)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <span style={{ justifySelf: "end", minWidth: 0, width: "100%", maxWidth: 420 }}>
-                  {mode !== null && (
-                    <input
-                      value={q}
-                      onChange={(e) => setQ(e.target.value)}
-                      placeholder="🔎 Search code, category, label, stone, route, size…"
-                      style={{
-                        width: "100%", minWidth: 0, padding: "9px 13px", fontSize: 13,
-                        border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--text)",
-                      }}
-                    />
-                  )}
-                </span>
-              </div>
-              {mode === null ? (
-                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
-                  Tap a view above to list the slabs — tap it again to close.
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 2 }}>
-                    {mode === "undecided" ? "Undecided in this temple" : mode === "routed" ? "Already routed — tick to change route" : "All pending slabs in this temple"}
-                    {" — "}{fmt0(filteredRows.length)}
-                    {q ? ` of ${fmt0(modeRows.length)}` : ""} slab{filteredRows.length === 1 ? "" : "s"}
-                  </div>
-                  {finishedCount > 0 && (
-                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-                      {fmt0(finishedCount)} carved / dispatched slab{finishedCount === 1 ? "" : "s"} not listed — nothing left to route on them.
-                    </div>
-                  )}
-                  {filteredRows.length === 0 ? (
-                    <div style={{ padding: "10px 0", fontSize: 13, color: "var(--muted)" }}>
-                      {q
-                        ? `No slabs in this view match “${q}”.`
-                        : mode === "undecided"
-                          ? "Every pending slab in this temple already has a route — nothing left to decide."
-                          : mode === "routed"
-                            ? "No pending slab here carries a route yet — everything routed has already been carved or dispatched."
-                            : "No pending slabs in this temple."}
-                    </div>
-                  ) : (
-                    <StatusGroups rows={filteredRows} selected={selected} toggle={toggle} toggleAll={toggleAll} />
-                  )}
-                </>
-              )}
-            </div>
           </div>
         )}
       </section>
-
-      {(msg || err) && (
-        <div style={{ fontSize: 13, fontWeight: 700, color: err ? "#991b1b" : "#15803d" }}>{err ?? msg}</div>
-      )}
-
-      {/* Sticky quick-tag bar */}
-      {selected.size > 0 && (
-        <div
-          style={{
-            position: "fixed", left: "var(--content-left)", right: 0, bottom: 0, zIndex: 60,
-            background: "var(--surface)", borderTop: "2px solid var(--gold)",
-            padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
-            gap: 10, flexWrap: "wrap", boxShadow: "0 -4px 12px rgba(0,0,0,0.08)",
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 800 }}>
-            {selected.size} slab{selected.size === 1 ? "" : "s"} selected — set carving method:
-          </span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(["cnc", "outsource", "none"] as CarvingMethod[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                disabled={pending}
-                onClick={() => applyMethod(m)}
-                style={{
-                  padding: "9px 16px", fontSize: 13, fontWeight: 800, borderRadius: 6,
-                  border: `1.5px solid ${METHOD_BADGE[m].border}`,
-                  background: METHOD_BADGE[m].bg, color: METHOD_BADGE[m].fg,
-                  cursor: pending ? "wait" : "pointer",
-                }}
-              >
-                {methodLabel(m)}
-              </button>
-            ))}
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => setSelected(new Set())}
-              className="ghost-button"
-              style={{ fontSize: 12.5 }}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
 
       {seatOpen && templeRow && (
         <SeatMap temple={templeRow.temple} rows={templeSlabs} onClose={() => setSeatOpen(false)} />
