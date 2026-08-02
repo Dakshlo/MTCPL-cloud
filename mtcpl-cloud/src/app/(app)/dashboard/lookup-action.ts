@@ -21,6 +21,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { machineNoLabel } from "@/lib/machine-label";
 
 // CFT helper. Slab/block dimensions are stored in INCHES even though
 // the column names end with `_ft` (legacy naming). 1728 in³ = 1 ft³.
@@ -674,7 +675,12 @@ async function loadSlabContext(
     // pending" pill.
     currentLocation = `Carving done — awaiting approval at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
   } else if (carving?.status === "carving_in_progress") {
-    currentLocation = `On a CNC at ${carving.vendor_name}`;
+    // Name the machine right in the headline — "which CNC?" was the next
+    // question every time (Daksh). Falls back to the old wording when the
+    // row has no machine resolved.
+    currentLocation = carving.machine_code
+      ? `On CNC ${machineNoLabel(carving.machine_code)} at ${carving.vendor_name}`
+      : `On a CNC at ${carving.vendor_name}`;
   } else if (carving?.status === "completed") {
     currentLocation = `Carving completed at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
   } else if (carving?.status === "carving_assigned") {

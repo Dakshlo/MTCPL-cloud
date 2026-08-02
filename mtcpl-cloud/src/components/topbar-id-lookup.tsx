@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lookupId, type LookupResult } from "@/app/(app)/dashboard/lookup-action";
 import { slabStatusLabel } from "@/lib/slab-status-label";
+import { machineNoLabel } from "@/lib/machine-label";
 import {
   lookupFinance,
   type FinanceLookupResult,
@@ -1276,6 +1277,13 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
         {s.stone && <Field k="Stone" v={s.stone} />}
         {s.component_section && <Field k="Category 1" v={s.component_section} />}
         {s.component_element && <Field k="Category 2" v={s.component_element} />}
+        {/* Also captioned here, not just in the big band above — people
+            scan this field list for "label"/"description" (Daksh). */}
+        {s.label && <Field k="Label" v={s.label} />}
+        {s.description && <Field k="Description" v={s.description} />}
+        {s.additional_description && (
+          <Field k="Extra note" v={s.additional_description} />
+        )}
         <Field
           k="Dimensions"
           v={
@@ -1388,8 +1396,15 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
             )}
             {/* Daksh June 2026 — for a carving-done slab, show which CNC
                 carved it, when it was completed/approved, and by whom. */}
+            {/* A bare machine code ("10") reads as a quantity — machineNoLabel
+                turns it into "No. 10". Key follows the tense: still loaded =
+                "On machine", otherwise "Carved on". */}
             {result.carving.machine_code && (
-              <Field k="Carved on" v={result.carving.machine_code} mono />
+              <Field
+                k={result.carving.status === "carving_in_progress" ? "On machine" : "Carved on"}
+                v={machineNoLabel(result.carving.machine_code)}
+                mono
+              />
             )}
             {result.carving.completed_at && (
               <Field
