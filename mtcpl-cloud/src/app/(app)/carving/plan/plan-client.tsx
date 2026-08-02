@@ -125,6 +125,56 @@ function Ring({ value, size = 86, stroke = 9, color, label, sub }: {
   );
 }
 
+/** One ring split into all four stages, total slab count in the middle.
+ *  Drawn done → in-carving → cut-waiting → not-cut clockwise from the top,
+ *  so the finished share always starts at 12 o'clock. */
+const DONUT_ORDER: Array<keyof StageTotals> = ["done", "inCarving", "cutWaiting", "notCut"];
+
+function StageDonut({ stages, total, size = 96, stroke = 12 }: {
+  stages: StageTotals; total: number; size?: number; stroke?: number;
+}) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  let acc = 0;
+  const segs = DONUT_ORDER.map((key) => {
+    const v = stages[key].slabs;
+    const frac = total > 0 ? v / total : 0;
+    const seg = { key, v, frac, start: acc };
+    acc += frac;
+    return seg;
+  }).filter((s) => s.v > 0);
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)", display: "block" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--border)" strokeWidth={stroke} />
+        {segs.map((s) => (
+          <circle
+            key={s.key}
+            cx={size / 2} cy={size / 2} r={r} fill="none"
+            stroke={STAGE_COLOR[s.key]} strokeWidth={stroke}
+            // 2px visual gap between neighbouring slices (skipped when a
+            // single stage owns the whole ring, so it stays a full circle).
+            strokeDasharray={`${Math.max(0, s.frac * c - (segs.length > 1 ? 2 : 0))} ${c}`}
+            strokeDashoffset={-s.start * c}
+            style={{ transition: "stroke-dasharray .7s ease, stroke-dashoffset .7s ease" }}
+          >
+            <title>{`${STAGE_LABELS.find((x) => x.key === s.key)?.label}: ${fmt0(s.v)} slabs · ${fmt0(stages[s.key].cft)} CFT`}</title>
+          </circle>
+        ))}
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+        <span style={{ fontSize: total >= 10000 ? 17 : 20, fontWeight: 800, lineHeight: 1, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+          {fmt0(total)}
+        </span>
+        <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", marginTop: 3 }}>
+          slabs
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Our own temple dropdown — button + panel with search, no native select. */
 function TemplePicker({ temples, value, onPick }: {
   temples: TempleMethodRow[]; value: string; onPick: (t: string) => void;
@@ -462,7 +512,7 @@ export function PlanClient({
       </div>
 
       {/* ── 1. Per-method headline cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(258px, 1fr))", gap: 12 }}>
         {METHOD_ORDER.map((mk) => {
           const s = summaries[mk];
           const th2 = METHOD_THEME[mk];
@@ -477,20 +527,31 @@ export function PlanClient({
                   {pct(done.slabs, s.total.slabs)}% done
                 </span>
               </div>
-              <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>
-                {fmt0(s.total.slabs)} <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>slabs</span>
-                <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)", marginLeft: 8 }}>{fmt0(s.total.cft)} CFT</span>
+              {/* Ring carries the slab total + the whole stage split; the
+                  legend beside it names each slice. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 12 }}>
+                <StageDonut stages={s.stages} total={s.total.slabs} />
+                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+                  {DONUT_ORDER.map((key) => {
+                    const label = STAGE_LABELS.find((x) => x.key === key)!.label;
+                    const v = s.stages[key].slabs;
+                    return (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5 }} title={`${fmt1(s.stages[key].cft)} CFT`}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, background: STAGE_COLOR[key], flexShrink: 0, opacity: v > 0 ? 1 : 0.3 }} />
+                        <span style={{ color: "var(--muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                        <b style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: v > 0 ? "var(--text)" : "var(--muted)" }}>{fmt0(v)}</b>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div style={{ height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden", margin: "8px 0 10px" }}>
-                <div style={{ width: `${pct(done.slabs, s.total.slabs)}%`, height: "100%", background: th2.fg }} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
-                {STAGE_LABELS.map(({ key, label }) => (
-                  <div key={key} style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 11.5 }}>
-                    <span style={{ color: "var(--muted)" }}>{label}</span>
-                    <span style={{ fontWeight: 700 }} title={`${fmt1(s.stages[key].cft)} CFT`}>{fmt0(s.stages[key].slabs)}</span>
-                  </div>
-                ))}
+              {/* Volume stays visually separate from every slab count. */}
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 12, paddingTop: 9, borderTop: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" }}>Volume</span>
+                <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                  <b style={{ fontSize: 15, fontWeight: 800, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{fmt0(s.total.cft)}</b>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>cft</span>
+                </span>
               </div>
             </div>
           );
