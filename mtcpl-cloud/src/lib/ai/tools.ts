@@ -43,6 +43,59 @@ function istRange(key: "today" | "yesterday" | "this_week" | "this_month") {
   return { from: new Date(monthStartMs).toISOString(), to: new Date(todayMidnight + DAY).toISOString() };
 }
 
+/** Explicit calendar window in IST, inclusive of both end dates.
+ *  Added Aug 2026 after reviewing the real questions people ask
+ *  MTCPL-AI: "from 1 july to 30 july", "in the month of June", "last 3
+ *  days" were unanswerable with the four fixed ranges — and worse,
+ *  asking for June in August silently returned August (this_month).
+ *  Accepts YYYY-MM-DD (or anything Date can parse); `to` defaults to
+ *  `from` so a single date means that one day. */
+function istExplicitRange(fromStr: string, toStr?: string | null) {
+  const DAY = 24 * 60 * 60 * 1000;
+  const IST = 5.5 * 60 * 60 * 1000;
+  const dayStartUtc = (s: string) => {
+    const d = new Date(`${String(s).trim().slice(0, 10)}T00:00:00.000Z`);
+    return Number.isNaN(d.getTime()) ? null : d.getTime() - IST;
+  };
+  const a = dayStartUtc(fromStr);
+  if (a == null) return null;
+  const bRaw = toStr ? dayStartUtc(toStr) : a;
+  if (bRaw == null) return null;
+  // tolerate a reversed pair rather than returning an empty window
+  const lo = Math.min(a, bRaw);
+  const hi = Math.max(a, bRaw);
+  return { from: new Date(lo).toISOString(), to: new Date(hi + DAY).toISOString() };
+}
+
+/** Whole days back from today's IST midnight, inclusive of today.
+ *  days_ago: 3 → the last 3 calendar days (day-before-yesterday → today). */
+function istDaysWindow(daysAgo: number) {
+  const DAY = 24 * 60 * 60 * 1000;
+  const IST = 5.5 * 60 * 60 * 1000;
+  const n = Math.max(1, Math.min(370, Math.round(daysAgo)));
+  const todayMidnight = Math.floor((Date.now() + IST) / DAY) * DAY - IST;
+  return {
+    from: new Date(todayMidnight - (n - 1) * DAY).toISOString(),
+    to: new Date(todayMidnight + DAY).toISOString(),
+  };
+}
+
+/** One resolver for every day-level tool: explicit from/to wins, then
+ *  days_ago, then the named range (default today). */
+function resolveWindow(input: {
+  range?: "today" | "yesterday" | "this_week" | "this_month";
+  from?: string | null;
+  to?: string | null;
+  days_ago?: number | null;
+}) {
+  if (input.from) {
+    const explicit = istExplicitRange(input.from, input.to);
+    if (explicit) return explicit;
+  }
+  if (input.days_ago != null && Number.isFinite(input.days_ago)) return istDaysWindow(Number(input.days_ago));
+  return istRange(input.range ?? "today");
+}
+
 /** Build a time window from "N hours ago up to now". Used by
  *  get_user_activity / get_audit_trail when the model passes
  *  hours_ago instead of a day-level range. Clamped to [0.1, 168]
@@ -113,6 +166,9 @@ export const AI_TOOLS = [
           enum: ["today", "yesterday", "this_week", "this_month"],
           description: "Time window in IST.",
         },
+        from: { type: "string", description: "Explicit window START date, IST, YYYY-MM-DD. Overrides `range`. Use for \"1 July to 30 July\", \"in June\", any custom span." },
+        to: { type: "string", description: "Explicit window END date, IST, YYYY-MM-DD, INCLUSIVE. Defaults to `from`." },
+        days_ago: { type: "number", description: "Last N calendar days including today. Use for \"last 3 days\"." },
       },
       required: ["range"],
       additionalProperties: false,
@@ -212,6 +268,9 @@ export const AI_TOOLS = [
           enum: ["today", "yesterday", "this_week", "this_month"],
           description: "Day-level time window in IST. Default: today. Ignored when hours_ago is set.",
         },
+        from: { type: "string", description: "Explicit window START date, IST, YYYY-MM-DD. Overrides `range`. Use for \"1 July to 30 July\", \"in June\", any custom span." },
+        to: { type: "string", description: "Explicit window END date, IST, YYYY-MM-DD, INCLUSIVE. Defaults to `from`." },
+        days_ago: { type: "number", description: "Last N calendar days including today. Use for \"last 3 days\"." },
         hours_ago: {
           type: "number",
           description: "OPTIONAL sub-day window — events from the last N hours up to NOW. Use this for 'last 2 hours', 'last 30 minutes' (pass 0.5), 'last 6 hours' etc. Overrides `range` when both are set. Range: 0.1 to 168 (one week).",
@@ -243,6 +302,9 @@ export const AI_TOOLS = [
       type: "object" as const,
       properties: {
         range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST. Default: today. Ignored when hours_ago is set." },
+        from: { type: "string", description: "Explicit window START date, IST, YYYY-MM-DD (e.g. \"2026-07-01\"). Overrides `range`. Use for \"1 July to 30 July\", \"in June\", any month or custom span." },
+        to: { type: "string", description: "Explicit window END date, IST, YYYY-MM-DD, INCLUSIVE. Defaults to `from` (single day)." },
+        days_ago: { type: "number", description: "Last N calendar days including today (3 = day-before-yesterday to today). Use for \"last 3 days\", \"pichhle 5 din\"." },
         hours_ago: {
           type: "number",
           description: "OPTIONAL sub-day window — events from the last N hours up to NOW. Use for 'last 2 hours', 'last 30 minutes' (pass 0.5), 'last 6 hours'. Overrides `range` when both are set. Range: 0.1 to 168.",
@@ -404,6 +466,9 @@ export const AI_TOOLS = [
       type: "object" as const,
       properties: {
         range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST." },
+        from: { type: "string", description: "Explicit window START date, IST, YYYY-MM-DD (e.g. \"2026-07-01\"). Overrides `range`. Use for \"1 July to 30 July\", \"in June\", any month or custom span." },
+        to: { type: "string", description: "Explicit window END date, IST, YYYY-MM-DD, INCLUSIVE. Defaults to `from` (single day)." },
+        days_ago: { type: "number", description: "Last N calendar days including today (3 = day-before-yesterday to today). Use for \"last 3 days\", \"pichhle 5 din\"." },
         hours_ago: { type: "number", description: "Sub-day window from now (e.g. 2 = last 2 hours). Overrides range." },
         action: { type: "string", description: "Optional — filter to a specific action like 'payment_paid' or 'bill_approved'." },
         limit: { type: "number", description: "Default 30, max 200." },
@@ -449,6 +514,9 @@ export const AI_TOOLS = [
       type: "object" as const,
       properties: {
         range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Day-level window in IST." },
+        from: { type: "string", description: "Explicit window START date, IST, YYYY-MM-DD (e.g. \"2026-07-01\"). Overrides `range`. Use for \"1 July to 30 July\", \"in June\", any month or custom span." },
+        to: { type: "string", description: "Explicit window END date, IST, YYYY-MM-DD, INCLUSIVE. Defaults to `from` (single day)." },
+        days_ago: { type: "number", description: "Last N calendar days including today (3 = day-before-yesterday to today). Use for \"last 3 days\", \"pichhle 5 din\"." },
         hours_ago: { type: "number", description: "Sub-day window (e.g. 2 = last 2 hours). Overrides range." },
         status: {
           type: "string",
@@ -903,7 +971,12 @@ async function getCuttingActivity(input: Record<string, unknown>) {
   const range = (input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month")
     ? input.range
     : "today";
-  const { from, to } = istRange(range);
+  const winArgs = {
+    from: typeof input.from === "string" ? input.from : null,
+    to: typeof input.to === "string" ? input.to : null,
+    days_ago: typeof input.days_ago === "number" ? input.days_ago : null,
+  };
+  const { from, to } = resolveWindow({ range, ...winArgs });
   const admin = createAdminSupabaseClient();
 
   // ── Path 1: Planned cutting (cut_session_blocks) ────────────────────
@@ -1755,7 +1828,12 @@ async function getUserActivity(input: Record<string, unknown>) {
     ? input.range
     : "today";
   const hoursWindow = hoursAgoRaw != null ? istHoursWindow(hoursAgoRaw) : null;
-  const window = hoursWindow ?? istRange(range);
+  const window = hoursWindow ?? resolveWindow({
+    range,
+    from: typeof input.from === "string" ? input.from : null,
+    to: typeof input.to === "string" ? input.to : null,
+    days_ago: typeof input.days_ago === "number" ? input.days_ago : null,
+  });
   const from = window.from;
   const to = window.to;
   const windowLabel = hoursWindow
@@ -1921,7 +1999,12 @@ async function getAuditTrail(input: Record<string, unknown>) {
     ? input.range
     : "today";
   const hoursWindow = hoursAgoRaw != null ? istHoursWindow(hoursAgoRaw) : null;
-  const window = hoursWindow ?? istRange(range);
+  const window = hoursWindow ?? resolveWindow({
+    range,
+    from: typeof input.from === "string" ? input.from : null,
+    to: typeof input.to === "string" ? input.to : null,
+    days_ago: typeof input.days_ago === "number" ? input.days_ago : null,
+  });
   const from = window.from;
   const to = window.to;
   const windowLabel = hoursWindow
@@ -3053,8 +3136,18 @@ async function getFinanceActivity(input: Record<string, unknown>) {
     const r = typeof input.range === "string"
       ? (input.range as "today" | "yesterday" | "this_week" | "this_month")
       : "today";
-    const w = istRange(r);
-    window = { from: w.from, to: w.to, label: r };
+    const explicitFrom = typeof input.from === "string" ? input.from : null;
+    const daysAgo = typeof input.days_ago === "number" ? input.days_ago : null;
+    const w = resolveWindow({
+      range: r,
+      from: explicitFrom,
+      to: typeof input.to === "string" ? input.to : null,
+      days_ago: daysAgo,
+    });
+    const label = explicitFrom
+      ? `${explicitFrom}${typeof input.to === "string" && input.to !== explicitFrom ? ` to ${input.to}` : ""}`
+      : daysAgo != null ? `last ${Math.round(daysAgo)} days` : r;
+    window = { from: w.from, to: w.to, label };
   }
 
   // Finance-domain action prefixes. We pull all and filter for these.
@@ -3327,8 +3420,18 @@ async function getInventoryMovementsRecent(input: Record<string, unknown>) {
     const r = typeof input.range === "string"
       ? (input.range as "today" | "yesterday" | "this_week" | "this_month")
       : "today";
-    const w = istRange(r);
-    window = { from: w.from, to: w.to, label: r };
+    const explicitFrom = typeof input.from === "string" ? input.from : null;
+    const daysAgo = typeof input.days_ago === "number" ? input.days_ago : null;
+    const w = resolveWindow({
+      range: r,
+      from: explicitFrom,
+      to: typeof input.to === "string" ? input.to : null,
+      days_ago: daysAgo,
+    });
+    const label = explicitFrom
+      ? `${explicitFrom}${typeof input.to === "string" && input.to !== explicitFrom ? ` to ${input.to}` : ""}`
+      : daysAgo != null ? `last ${Math.round(daysAgo)} days` : r;
+    window = { from: w.from, to: w.to, label };
   }
 
   let siteIdFilter: string | null = null;
