@@ -304,6 +304,135 @@ const STAGE_DOT: Record<keyof StageTotals, string> = {
   done: "#22c55e",       // green
 };
 
+/** Where the pending CNC load actually sits — one row per temple, most
+ *  work first. Opened from the "Pending CNC work" slab count, mirroring
+ *  the Total-slabs → seat-map pattern (Daksh). Pure client maths off the
+ *  per-temple × per-route stage totals the page already has. */
+function CncByTemple({ temples, onClose }: { temples: TempleMethodRow[]; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const rows = useMemo(() => {
+    const list = temples.map((t) => {
+      const st = t.methods.cnc.stages;
+      const pend = (k: keyof StageTotals) => ({ slabs: st[k].slabs, cft: st[k].cft });
+      const onMachines = pend("inCarving");
+      const cutWaiting = pend("cutWaiting");
+      const notCut = pend("notCut");
+      const slabs = onMachines.slabs + cutWaiting.slabs + notCut.slabs;
+      const cft = onMachines.cft + cutWaiting.cft + notCut.cft;
+      return {
+        temple: t.temple, slabs, cft, onMachines, cutWaiting, notCut,
+        done: st.done.slabs, total: t.methods.cnc.total.slabs,
+      };
+    }).filter((r) => r.slabs > 0);
+    return list.sort((a, b) => b.slabs - a.slabs);
+  }, [temples]);
+
+  const grand = useMemo(() => ({
+    slabs: rows.reduce((a, r) => a + r.slabs, 0),
+    cft: rows.reduce((a, r) => a + r.cft, 0),
+  }), [rows]);
+  const maxSlabs = rows[0]?.slabs ?? 1;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "var(--bg)", display: "flex", flexDirection: "column", animation: "planFadeUp .18s ease both" }}>
+      <div style={{ flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>⚙️ Pending CNC work — temple-wise</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>
+            Only slabs routed to CNC that are not carved yet · heaviest temple first
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+            <b style={{ fontSize: 22, fontWeight: 800, color: "#1d4ed8", fontVariantNumeric: "tabular-nums" }}>{fmt0(grand.slabs)}</b>
+            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>slabs</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>{fmt0(grand.cft)} CFT</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginLeft: 6 }}>· {fmt0(rows.length)} temples</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ fontSize: 12.5, fontWeight: 800, padding: "8px 16px", borderRadius: 8, border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+          >
+            ✕ Close
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 26px" }}>
+        {rows.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "60px 0", fontSize: 13.5, fontWeight: 700, color: "var(--muted)" }}>
+            No CNC work pending anywhere — every CNC-routed slab is carved.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+            {rows.map((r, i) => {
+              const segs = [
+                { k: "m", label: "On machines", v: r.onMachines.slabs, color: STAGE_COLOR.inCarving },
+                { k: "w", label: "Cutted waiting", v: r.cutWaiting.slabs, color: STAGE_COLOR.cutWaiting },
+                { k: "n", label: "Not cut yet", v: r.notCut.slabs, color: STAGE_COLOR.notCut },
+              ].filter((s) => s.v > 0);
+              return (
+                <div
+                  key={r.temple}
+                  className="plan-card"
+                  style={{
+                    border: "1px solid var(--border)", borderLeft: `4px solid ${i === 0 ? "#1d4ed8" : "var(--border)"}`,
+                    borderRadius: 10, background: "var(--surface)", padding: "12px 15px",
+                    animationDelay: `${Math.min(i * 22, 300)}ms`,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", fontVariantNumeric: "tabular-nums", minWidth: 22 }}>
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 800, flex: "1 1 220px", minWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.temple}
+                    </span>
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                      <b style={{ fontSize: 19, fontWeight: 800, color: "#1d4ed8", fontVariantNumeric: "tabular-nums" }}>{fmt0(r.slabs)}</b>
+                      <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>slabs</span>
+                    </span>
+                    <span style={{ padding: "4px 10px", borderRadius: 8, background: "var(--surface-alt, rgba(0,0,0,0.035))", border: "1px solid var(--border)", fontSize: 12, fontWeight: 800, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                      {fmt0(r.cft)} CFT
+                    </span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                      {fmt0(r.done)} of {fmt0(r.total)} carved
+                    </span>
+                  </div>
+
+                  {/* share of the total pending load */}
+                  <div style={{ height: 8, borderRadius: 4, background: "var(--border)", overflow: "hidden", marginTop: 9, display: "flex" }}>
+                    {segs.map((s) => (
+                      <div key={s.k} title={`${s.label}: ${fmt0(s.v)}`} style={{ width: `${(s.v / maxSlabs) * 100}%`, background: s.color }} />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+                    {segs.map((s) => (
+                      <span key={s.k} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
+                        <span style={{ color: "var(--muted)", fontWeight: 700 }}>{s.label}</span>
+                        <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(s.v)}</b>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SeatMap({ temple, rows, onClose }: {
   temple: string; rows: PlanSlab[]; onClose: () => void;
 }) {
@@ -320,6 +449,9 @@ function SeatMap({ temple, rows, onClose }: {
   // Same seats, two groupings: by production stage (cinema rows) or by
   // component category, the way Temple View reads.
   const [groupBy, setGroupBy] = useState<"stage" | "category">("stage");
+  // Category view opens as a collapsed LIST of Category-1 cards (Daksh) —
+  // 8 sections of seats at once was a wall. Expanded set is per cat1.
+  const [openCats, setOpenCats] = useState<Set<string>>(new Set());
   // Route edits land here instantly (seat recolours, chips recount) while
   // router.refresh() reconciles in the background — search, filter and
   // scroll all survive because client state is untouched.
@@ -743,8 +875,18 @@ function SeatMap({ temple, rows, onClose }: {
               }
               return (
                 <>
-                  <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
-                    Carved slabs are not listed here — only work still to be done.
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                      Carved slabs are not listed here — only work still to be done.
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={() => setOpenCats((prev) => (prev.size >= byCategory.length ? new Set() : new Set(byCategory.map((g) => g.cat1))))}
+                      style={{ fontSize: 11.5, fontWeight: 800, padding: "5px 12px", borderRadius: 8, cursor: "pointer", border: "1.5px solid var(--gold-border, #d8c49a)", background: "var(--bg)", color: "var(--gold-dark, #b45309)" }}
+                    >
+                      {openCats.size >= byCategory.length ? "Collapse all" : `Expand all ${fmt0(byCategory.length)}`}
+                    </button>
                   </div>
                   {byCategory.map((g) => {
                     // per-stage tally for the whole Category 1
@@ -752,10 +894,21 @@ function SeatMap({ temple, rows, onClose }: {
                     const tally = SEAT_SECTIONS.filter((sec) => sec.key !== "done")
                       .map((sec) => ({ ...sec, n: rows2.filter((s) => s.stage === sec.key).length }))
                       .filter((t) => t.n > 0);
+                    // A live search must never hide its own matches.
+                    const expanded = openCats.has(g.cat1) || q.trim() !== "";
                     return (
                       <div key={g.cat1} style={{ marginBottom: 18, border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", overflow: "hidden" }}>
-                        {/* Category 1 band */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 13px", background: "rgba(180,140,40,0.07)", borderBottom: "1px solid var(--border)" }}>
+                        {/* Category 1 band — click to expand/collapse */}
+                        <button
+                          type="button"
+                          onClick={() => setOpenCats((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(g.cat1)) next.delete(g.cat1); else next.add(g.cat1);
+                            return next;
+                          })}
+                          style={{ width: "100%", textAlign: "left", cursor: "pointer", font: "inherit", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 13px", background: "rgba(180,140,40,0.07)", border: "none", borderBottom: expanded ? "1px solid var(--border)" : "none" }}
+                        >
+                          <span style={{ fontSize: 11, color: "var(--gold-dark, #b45309)", width: 10, flexShrink: 0 }}>{expanded ? "▾" : "▸"}</span>
                           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--gold-dark, #b45309)", letterSpacing: "0.04em" }}>{g.cat1}</span>
                           <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 9px" }}>
                             {fmt0(g.slabs)} slabs
@@ -770,9 +923,9 @@ function SeatMap({ temple, rows, onClose }: {
                               <b style={{ fontVariantNumeric: "tabular-nums" }}>{fmt0(t.n)}</b>
                             </span>
                           ))}
-                        </div>
-                        {/* Category 2 rows nested inside */}
-                        {g.subs.map((sub, i) => (
+                        </button>
+                        {/* Category 2 rows — only once the card is opened */}
+                        {expanded && g.subs.map((sub, i) => (
                           <div key={sub.cat2} style={{ padding: "11px 13px 13px", borderTop: i === 0 ? "none" : "10px solid var(--bg)" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 8 }}>
                               <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--text)" }}>{sub.cat2}</span>
@@ -1008,6 +1161,8 @@ export function PlanClient({
   // Cinema-style seat map, opened from the Total-slabs stat — the one
   // place slabs are listed and re-routed now.
   const [seatOpen, setSeatOpen] = useState(false);
+  // Temple-wise breakdown of the pending CNC load.
+  const [cncTempleOpen, setCncTempleOpen] = useState(false);
 
   const templeRow = temples.find((t) => t.temple === temple) ?? null;
   // The slab list is ALWAYS temple-scoped (Daksh) — nothing renders until a
@@ -1194,8 +1349,11 @@ export function PlanClient({
             <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)" }}>
               Pending CNC work
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap" }}>
-              <Stat label="Slabs" value={fmt0(forecast.cncPending.slabs)} unit="slabs" tone="count" />
+            <div style={{ display: "flex", gap: 10, marginTop: 7, flexWrap: "wrap", alignItems: "center" }}>
+              {/* Pending slabs opens the temple-wise breakdown of that load. */}
+              <button type="button" className="plan-seat-btn plan-tap-hint" title="See which temples this pending CNC work belongs to" onClick={() => setCncTempleOpen(true)}>
+                <Stat label="Slabs ⤢ tap" value={fmt0(forecast.cncPending.slabs)} unit="slabs" tone="count" />
+              </button>
               <Stat label="Volume" value={fmt0(forecast.cncPending.cft)} unit="cft" tone="volume" size={22} />
             </div>
             {/* Where those pending slabs are, as one stacked bar + legend */}
@@ -1460,6 +1618,8 @@ export function PlanClient({
       {seatOpen && templeRow && (
         <SeatMap temple={templeRow.temple} rows={templeSlabs} onClose={() => setSeatOpen(false)} />
       )}
+
+      {cncTempleOpen && <CncByTemple temples={temples} onClose={() => setCncTempleOpen(false)} />}
     </div>
   );
 }
