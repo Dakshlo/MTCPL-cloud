@@ -316,7 +316,12 @@ export function CarvingDashboardClient({
   const [priorityOnly, setPriorityOnly] = useState(false);
   // Mig 215 — planned-route filter for the Unassigned tab. "all" shows
   // everything; "nil" = only undecided slabs (no tag yet).
-  const [methodFilter, setMethodFilter] = useState<"all" | "cnc" | "outsource" | "none" | "nil">("all");
+  // Default to the window you are standing in (Daksh): the CNC window
+  // opens on CNC-routed slabs, the Outsource window on Manual carving.
+  // Still switchable to All at any time.
+  const [methodFilter, setMethodFilter] = useState<"all" | "cnc" | "outsource" | "none" | "nil">(
+    mode === "outsource" ? "outsource" : "cnc",
+  );
   // Daksh June 2026 — fold parked carving-STORAGE slabs into the
   // Unassigned pool. Off by default; assigning one un-parks it.
   const [inclStorage, setInclStorage] = useState(false);
@@ -660,9 +665,12 @@ export function CarvingDashboardClient({
             gone; just type into the search to narrow down. */}
         <div
           style={{
+            // Capped, not greedy — a full-width search pushed every other
+            // control into one long confusing strip (Daksh).
             position: "relative",
-            flex: "1 1 320px",
-            minWidth: 240,
+            flex: "0 1 320px",
+            minWidth: 220,
+            maxWidth: 340,
           }}
         >
           <span
@@ -740,13 +748,13 @@ export function CarvingDashboardClient({
         {/* Mig 215 — planned-route chips (Unassigned only). "Nil" = the
             undecided pile someone still needs to route. */}
         {tab === "unassigned" && (
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
             {([
               ["all", "All"],
               ["cnc", "CNC"],
-              ["outsource", "Outsource"],
-              ["none", "No carving"],
-              ["nil", "Nil"],
+              ["outsource", "Manual carving"],
+              ["none", "Direct"],
+              ["nil", "Undecided"],
             ] as const).map(([val, lab]) => {
               const on = methodFilter === val;
               return (
@@ -756,13 +764,13 @@ export function CarvingDashboardClient({
                   onClick={() => setMethodFilter(val)}
                   title={val === "nil" ? "Only slabs with no planned route yet" : `Only slabs planned for ${lab}`}
                   style={{
-                    padding: "7px 10px",
+                    padding: "7px 11px",
                     fontSize: 11.5,
-                    fontWeight: 700,
-                    border: `1.5px solid ${on ? "var(--gold-dark)" : "var(--border)"}`,
-                    background: on ? "rgba(180,140,40,0.10)" : "var(--surface)",
-                    color: on ? "var(--gold-dark)" : "var(--muted)",
-                    borderRadius: 6,
+                    fontWeight: 800,
+                    border: "none",
+                    borderLeft: val === "all" ? "none" : "1px solid var(--border)",
+                    background: on ? "var(--gold-dark)" : "transparent",
+                    color: on ? "#fff" : "var(--muted)",
                     cursor: "pointer",
                     whiteSpace: "nowrap",
                   }}
@@ -1991,6 +1999,9 @@ function TempleSlabsPeek({
   // location) and dimension queries (53x29x14, orientation-agnostic).
   const [peekQuery, setPeekQuery] = useState("");
   const peekQueryNorm = peekQuery.trim().toLowerCase();
+  // Route filter inside the temple modal (Daksh) — same vocabulary as the
+  // toolbar chips. "all" by default so nothing is hidden on open.
+  const [peekMethod, setPeekMethod] = useState<"all" | "cnc" | "outsource" | "none" | "nil">("all");
   const peekDimQuery = useMemo(() => {
     const m = peekQueryNorm.match(
       /^\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*$/i,
@@ -2004,7 +2015,17 @@ function TempleSlabsPeek({
     return [a, b, c].sort((x, y) => x - y) as [number, number, number];
   }, [peekQueryNorm]);
 
+  const methodMatched = useMemo(() => {
+    if (peekMethod === "all") return slabs;
+    return slabs.filter((s) => {
+      const m = (s as { carving_method?: string | null }).carving_method ?? null;
+      if (peekMethod === "nil") return m == null || m === "";
+      return m === peekMethod;
+    });
+  }, [slabs, peekMethod]);
+
   const visibleSlabs = useMemo(() => {
+    const slabs = methodMatched;
     if (!peekQueryNorm) return slabs;
     return slabs.filter((s) => {
       if (peekDimQuery) {
@@ -2050,7 +2071,7 @@ function TempleSlabsPeek({
         .toLowerCase();
       return hay.includes(peekQueryNorm);
     });
-  }, [slabs, peekQueryNorm, peekDimQuery]);
+  }, [methodMatched, peekQueryNorm, peekDimQuery]);
 
   // Walk the slabs once: count occurrences per pair key, then assign
   // each key a colour index. Singletons get no colour (NULL). Run
@@ -2144,8 +2165,11 @@ function TempleSlabsPeek({
               {temple}
             </h2>
             <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
-              {peekQueryNorm
-                ? `${visibleSlabs.length} of ${slabs.length} slab${slabs.length !== 1 ? "s" : ""} match`
+              {/* Count must reflect BOTH the text search and the route
+                  filter — otherwise it reads "122 ready" over an empty
+                  list once a route is picked. */}
+              {peekQueryNorm || peekMethod !== "all"
+                ? `${visibleSlabs.length} of ${slabs.length} slab${slabs.length !== 1 ? "s" : ""} shown`
                 : `${slabs.length} slab${slabs.length !== 1 ? "s" : ""} ready to assign`}
             </p>
             {/* Daksh May 2026 — within-temple search. Supports id /
@@ -2172,6 +2196,33 @@ function TempleSlabsPeek({
                 fontFamily: "ui-monospace, monospace",
               }}
             />
+            {/* Planned-route filter — same wording as the toolbar. */}
+            <div style={{ display: "flex", alignItems: "center", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)", marginTop: 8, width: "fit-content" }}>
+              {([
+                ["all", "All"],
+                ["cnc", "CNC"],
+                ["outsource", "Manual carving"],
+                ["none", "Direct"],
+                ["nil", "Undecided"],
+              ] as const).map(([val, lab]) => {
+                const on = peekMethod === val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setPeekMethod(val)}
+                    style={{
+                      padding: "6px 11px", fontSize: 11, fontWeight: 800, cursor: "pointer",
+                      border: "none", borderLeft: val === "all" ? "none" : "1px solid var(--border)",
+                      background: on ? "var(--gold-dark)" : "transparent",
+                      color: on ? "#fff" : "var(--muted)", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {lab}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           {/* Bulk-select toggle — same fn as the toolbar button so
               entering bulk mode here just flips the same state.
