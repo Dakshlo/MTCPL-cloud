@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { fetchAllPaged } from "@/lib/paginate";
 import {
   canConfirmPayments,
   canManageAccounts,
@@ -55,20 +56,34 @@ export default async function PaymentsHistoryPage({
 
   const fromIso = new Date(`${fromFilter}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${toFilter}T23:59:59.999Z`).toISOString();
-  let query = supabase
-    .from("bill_payments")
-    .select(
-      "id, bill_id, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
-    )
-    .eq("status", "paid")
-    .gte("paid_at", fromIso)
-    .lte("paid_at", toIso)
-    .order("paid_at", { ascending: false })
-    .limit(2000);
-  if (methodFilter) query = query.eq("payment_method", methodFilter);
-
-  const { data: paidRaw, error } = await query;
-  if (error) throw new Error(error.message);
+  // Every payment in the window — not the first page of them.
+  //
+  // Aug 2026 runtime test: this was `.limit(2000)`, which PostgREST
+  // silently clamps to its 1000-row response cap with NO error. The
+  // whole payment history is only ~1,100 rows, so any range wider than
+  // roughly 78 days already truncated: a 5 May–3 Aug view showed
+  // "Total paid ₹8,24,98,526" against a true ₹9,32,98,624 — understated
+  // by ₹1.08 crore, with "Payments recorded 1000" as the only tell.
+  //
+  // The vendor filter below is applied in JS AFTER this fetch, so a
+  // truncated fetch also made a single-vendor view under-report (a
+  // vendor whose payments were all older than the cut-off could read
+  // near-zero). Fetching the complete window makes that filter exact.
+  const paidRaw = await fetchAllPaged((from, to) => {
+    let q = supabase
+      .from("bill_payments")
+      .select(
+        "id, bill_id, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
+      )
+      .eq("status", "paid")
+      .gte("paid_at", fromIso)
+      .lte("paid_at", toIso);
+    if (methodFilter) q = q.eq("payment_method", methodFilter);
+    return q
+      .order("paid_at", { ascending: false })
+      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
+      .range(from, to);
+  });
 
   type PaidRow = {
     id: string;

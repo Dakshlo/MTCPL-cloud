@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { fetchAllPaged } from "@/lib/paginate";
 import { canFinalAudit } from "@/lib/accounts-permissions";
 import {
   flagFinalAuditAction,
@@ -51,21 +52,36 @@ export default async function FinalAuditPage() {
 
   // ── Pending queue ────────────────────────────────────────────────
   // Paid payments awaiting verification. Index-backed.
-  const { data: pendingRaw } = await supabase
-    .from("bill_payments")
-    .select(
-      "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, confirmed_by, confirmed_at, bills(id, token, vendor_bill_no, bill_date, bill_vendor_id, bill_vendors(id, name, bank_name, bank_account, ifsc, hdfc_bene_name))",
-    )
-    .eq("status", "paid")
-    .eq("final_audit_status", "pending")
-    // Mig 073 — synthetic advance-application rows are NOT real bank
-    // payments (the cash moved when the original advance was paid),
-    // so they shouldn't appear in Final Audit's queue. Mig 085 — same
-    // for synthetic debit-settlement rows (the excess already moved).
-    .eq("is_advance_application", false)
-    .eq("is_debit_settlement", false)
-    .order("paid_at", { ascending: false })
-    .limit(200);
+  //
+  // Aug 2026 runtime test: this was `.limit(200)`, which made the
+  // "Awaiting verification" tile a hard ceiling rather than a count —
+  // it read 200 (₹1,07,45,279) while 481 payments (₹3,09,97,189) were
+  // genuinely unverified. With no paging on this page, the 281 oldest
+  // could not be reached AT ALL: clearing the visible 200 just refilled
+  // it from the same window, so the backlog always looked under control
+  // and ₹2.02 crore of un-bank-verified money stayed invisible.
+  // Fetch the whole queue so the tile is a real number and every row is
+  // reachable. Verifying a row only stamps final_audit_status on
+  // bill_payments — it never touches bills.amount_outstanding — so this
+  // changes what the auditor can SEE, never what anyone is owed.
+  const pendingRaw = await fetchAllPaged((from, to) =>
+    supabase
+      .from("bill_payments")
+      .select(
+        "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, confirmed_by, confirmed_at, bills(id, token, vendor_bill_no, bill_date, bill_vendor_id, bill_vendors(id, name, bank_name, bank_account, ifsc, hdfc_bene_name))",
+      )
+      .eq("status", "paid")
+      .eq("final_audit_status", "pending")
+      // Mig 073 — synthetic advance-application rows are NOT real bank
+      // payments (the cash moved when the original advance was paid),
+      // so they shouldn't appear in Final Audit's queue. Mig 085 — same
+      // for synthetic debit-settlement rows (the excess already moved).
+      .eq("is_advance_application", false)
+      .eq("is_debit_settlement", false)
+      .order("paid_at", { ascending: false })
+      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
+      .range(from, to),
+  );
 
   // ── Recently audited (last 14 days) ──────────────────────────────
   // Mix of verified + flagged for context. Owner uses the flagged
@@ -77,19 +93,26 @@ export default async function FinalAuditPage() {
   const cutoffIso = new Date(nowMs - 14 * DAY_MS).toISOString();
   void IST_OFFSET_MS;
 
-  const { data: auditedRaw } = await supabase
-    .from("bill_payments")
-    .select(
-      "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
-    )
-    .eq("status", "paid")
-    .eq("is_advance_application", false)
-    .eq("is_debit_settlement", false)
-    .in("final_audit_status", ["verified", "flagged"])
-    .not("final_audit_at", "is", null)
-    .gte("final_audit_at", cutoffIso)
-    .order("final_audit_at", { ascending: false })
-    .limit(200);
+  // Paginated for the same reason as the pending queue above: the
+  // "Verified (24h)" and "Flagged (14d)" tiles are counted from THIS
+  // array, so a 200-row cap would silently under-report them the moment
+  // the auditor works through a real backlog (481 rows are waiting).
+  const auditedRaw = await fetchAllPaged((from, to) =>
+    supabase
+      .from("bill_payments")
+      .select(
+        "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
+      )
+      .eq("status", "paid")
+      .eq("is_advance_application", false)
+      .eq("is_debit_settlement", false)
+      .in("final_audit_status", ["verified", "flagged"])
+      .not("final_audit_at", "is", null)
+      .gte("final_audit_at", cutoffIso)
+      .order("final_audit_at", { ascending: false })
+      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
+      .range(from, to),
+  );
 
   type RawPending = {
     id: string;
