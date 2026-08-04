@@ -308,7 +308,12 @@ const STAGE_DOT: Record<keyof StageTotals, string> = {
  *  work first. Opened from the "Pending CNC work" slab count, mirroring
  *  the Total-slabs → seat-map pattern (Daksh). Pure client maths off the
  *  per-temple × per-route stage totals the page already has. */
-function CncByTemple({ temples, onClose }: { temples: TempleMethodRow[]; onClose: () => void }) {
+function CncByTemple({ temples, onClose, onOpenTemple }: {
+  temples: TempleMethodRow[];
+  onClose: () => void;
+  /** Jump straight from a temple row into that temple's seat map. */
+  onOpenTemple: (temple: string) => void;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -416,15 +421,20 @@ function CncByTemple({ temples, onClose }: { temples: TempleMethodRow[]; onClose
                 const carvedPct = pct(r.done, r.total);
                 const top = i === 0;
                 return (
-                  <div
+                  <button
                     key={r.temple}
-                    className="plan-card"
+                    type="button"
+                    className="plan-card plan-temple-row"
+                    title={`Open the seat map for ${r.temple}`}
+                    onClick={() => onOpenTemple(r.temple)}
                     style={{
                       display: "flex", alignItems: "center", gap: 16,
                       border: `1px solid ${top ? "rgba(29,78,216,0.35)" : "var(--border)"}`,
                       borderRadius: 12, background: "var(--surface)", padding: "13px 16px",
                       boxShadow: top ? "0 2px 10px rgba(29,78,216,0.10)" : "none",
                       animationDelay: `${Math.min(i * 22, 300)}ms`,
+                      width: "100%", textAlign: "left", font: "inherit", color: "inherit",
+                      cursor: "pointer",
                     }}
                   >
                     {/* rank + carved-progress ring */}
@@ -472,8 +482,11 @@ function CncByTemple({ temples, onClose }: { temples: TempleMethodRow[]; onClose
                       <div style={{ marginTop: 5, padding: "3px 10px", borderRadius: 8, background: "var(--surface-alt, rgba(0,0,0,0.035))", border: "1px solid var(--border)", fontSize: 11, fontWeight: 800, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
                         {fmt0(r.cft)} CFT
                       </div>
+                      <div className="plan-temple-go" style={{ marginTop: 6, fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "#1d4ed8", whiteSpace: "nowrap" }}>
+                        Seat map →
+                      </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -1319,6 +1332,13 @@ export function PlanClient({
         .plan-zap { animation: planZap 1.2s ease-in-out infinite; }
         .plan-seat-btn { all: unset; display: inline-block; cursor: pointer; border-radius: 8px; }
         .plan-seat-btn:hover { box-shadow: 0 0 0 2px var(--gold-border, #d8c49a); animation: none; }
+        /* Pending-CNC temple rows are buttons into that temple's seat map.
+           The hint stays faintly visible rather than hover-only, so it is
+           discoverable on a touch screen where :hover never fires. */
+        .plan-temple-row .plan-temple-go { opacity: .45; transition: opacity .12s ease; }
+        .plan-temple-row:hover .plan-temple-go,
+        .plan-temple-row:focus-visible .plan-temple-go { opacity: 1; }
+        .plan-temple-row:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
         /* Total slabs opens the seat map — a soft 2s pulse so it reads as a
            button, not a stat. Stops on hover and for reduced-motion users. */
         @keyframes planTapHint {
@@ -1690,7 +1710,21 @@ export function PlanClient({
         <SeatMap temple={templeRow.temple} rows={templeSlabs} onClose={() => setSeatOpen(false)} />
       )}
 
-      {cncTempleOpen && <CncByTemple temples={temples} onClose={() => setCncTempleOpen(false)} />}
+      {cncTempleOpen && (
+        <CncByTemple
+          temples={temples}
+          onClose={() => setCncTempleOpen(false)}
+          // Clicking a temple in the pending-CNC list hands you straight to
+          // that temple's seat map: select it, drop this overlay, open the
+          // map. The URL effect below then records ?temple=…&map=1, so a
+          // refresh keeps you where you landed.
+          onOpenTemple={(t) => {
+            setTemple(t);
+            setCncTempleOpen(false);
+            setSeatOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }
