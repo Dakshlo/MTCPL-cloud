@@ -107,6 +107,17 @@ export async function runOpenAiConversation(a: RunOpenAiArgs): Promise<TokenBudg
       tools,
       stream: true,
       max_output_tokens: 2048,
+      // THE cost lever on a reasoning model, and it is not obvious: the
+      // model's private thinking is billed as OUTPUT, i.e. at $30/Mtok on
+      // gpt-5.6-sol — the dearest rate in the whole system. Left at the
+      // model's default, a question that fans out over several tools thinks
+      // again before every call and the reasoning alone can dominate the bill
+      // (a daily-report question came to ₹34).
+      //
+      // "low" still reasons — it just stops it deliberating at length over
+      // what is mostly tool selection and formatting. Raise it with
+      // ASK_AI_OPENAI_EFFORT=medium|high if answers get shallow.
+      reasoning: { effort: process.env.ASK_AI_OPENAI_EFFORT || "low" },
     };
     if (previousResponseId) body.previous_response_id = previousResponseId;
 

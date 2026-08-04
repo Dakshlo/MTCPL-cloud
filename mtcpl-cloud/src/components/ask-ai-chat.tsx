@@ -51,6 +51,8 @@ type Msg = {
   images?: string[];
   /** Cost in INR, attached to the assistant reply when the stream finishes */
   costInr?: number;
+  /** Token breakdown behind that cost — shown in the pill's tooltip. */
+  usage?: { model?: string; in?: number; cached?: number; out?: number; rounds?: number };
 };
 
 /** Max concurrent image attachments per message. Cost control — each image
@@ -381,6 +383,24 @@ export function AskAiChat({
                 return copy;
               });
             }
+            continue;
+          }
+          // Token breakdown behind the ₹ pill. On a reasoning model the
+          // thinking is billed as output, so "out" is usually the surprise.
+          if (eventName === "usage") {
+            try {
+              const u = JSON.parse(data) as {
+                model?: string; in?: number; cached?: number; out?: number; rounds?: number;
+              };
+              setMessages((prev) => {
+                const copy = prev.slice();
+                const last = copy[copy.length - 1];
+                if (last?.role === "assistant") {
+                  copy[copy.length - 1] = { ...last, usage: u };
+                }
+                return copy;
+              });
+            } catch { /* breakdown is a nicety — never break the reply over it */ }
             continue;
           }
           if (eventName === "error") {
@@ -1319,6 +1339,7 @@ function MessageList({
             content={m.content}
             images={m.images}
             costInr={m.costInr}
+            usage={m.usage}
             isStreaming={streaming && isLastAssistant}
             // Tool-progress indicator only on the currently-generating assistant message
             activeTool={isLastAssistant && streaming ? activeTool : null}
@@ -1339,6 +1360,7 @@ function MessageBubble({
   content,
   images,
   costInr,
+  usage,
   isStreaming,
   activeTool,
   onFollowUp,
@@ -1348,6 +1370,7 @@ function MessageBubble({
   content: string;
   images?: string[];
   costInr?: number;
+  usage?: { model?: string; in?: number; cached?: number; out?: number; rounds?: number };
   isStreaming: boolean;
   activeTool?: string | null;
   onFollowUp?: (q: string) => void;
@@ -1457,7 +1480,17 @@ function MessageBubble({
             <SpeakButton text={content} />
             {typeof costInr === "number" ? (
               <span
-                title={`This reply cost ~₹${costInr.toFixed(2)} in AI tokens`}
+                title={
+                  usage
+                    ? [
+                        `~₹${costInr.toFixed(2)} of AI tokens · ${usage.model ?? "model"}`,
+                        `${(usage.in ?? 0).toLocaleString("en-IN")} input` +
+                          (usage.cached ? ` (+${usage.cached.toLocaleString("en-IN")} cached, billed at 10%)` : ""),
+                        `${(usage.out ?? 0).toLocaleString("en-IN")} output — on a reasoning model this includes the model's thinking, billed at the output rate`,
+                        `${usage.rounds ?? 1} tool round${(usage.rounds ?? 1) === 1 ? "" : "s"}`,
+                      ].join("\n")
+                    : `This reply cost ~₹${costInr.toFixed(2)} in AI tokens`
+                }
                 style={{
                   display: "inline-flex",
                   alignItems: "center",

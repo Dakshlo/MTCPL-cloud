@@ -321,6 +321,22 @@ export async function POST(req: Request) {
           .eq("id", activeSessionId);
 
         // Report cost last so the client displays it only on a clean finish
+        // Where the money actually went. "₹34" on its own is unactionable —
+        // on a reasoning model the answer is usually "thinking tokens, billed
+        // at the output rate", and you cannot tell that from the total alone.
+        controller.enqueue(
+          sseEvent(
+            "usage",
+            JSON.stringify({
+              model: MODEL,
+              in: totalUsage.input,
+              cached: totalUsage.cacheRead,
+              out: totalUsage.output,
+              rounds,
+            }),
+          ),
+        );
+
         const costRupees = costInr(MODEL, totalUsage, USD_TO_INR);
         controller.enqueue(sseEvent("cost", costRupees.toFixed(2)));
         controller.enqueue(sseEvent("done", "[DONE]"));
