@@ -153,6 +153,11 @@ export function AskAiChat({
   const [attachments, setAttachments] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [voiceLang, setVoiceLang] = useState<"en-IN" | "hi-IN">("en-IN");
+  // Which brain answers. Both run the same system prompt and the same 32
+  // tools, so this changes the cost and the voice — never what the assistant
+  // can see. Read from localStorage in an effect rather than a useState
+  // initialiser: touching window during render is a hydration mismatch.
+  const [provider, setProvider] = useState<"claude" | "openai">("claude");
   const [listening, setListening] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -187,6 +192,15 @@ export function AskAiChat({
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setSidebarOpen(false);
     }
+  }, []);
+
+  // Restore the last-used brain. Effect, not a useState initialiser — see the
+  // note on the provider state above.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("mtcpl_ai_provider");
+      if (saved === "openai" || saved === "claude") setProvider(saved);
+    } catch { /* private mode / storage blocked — stay on the default */ }
   }, []);
 
   useEffect(() => {
@@ -303,6 +317,7 @@ export function AskAiChat({
             ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
           })),
           sessionId: activeSessionId,
+          provider,
         }),
         signal: controller.signal,
       });
@@ -808,6 +823,51 @@ export function AskAiChat({
                   }}
                 >
                   📎{attachments.length > 0 ? <span style={{ fontSize: 11, fontWeight: 700 }}>{attachments.length}</span> : null}
+                </button>
+
+                {/* Which brain answers. Same prompt, same 32 tools on both —
+                    only the cost and the voice differ. Persisted so a choice
+                    survives a reload. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = provider === "claude" ? "openai" : "claude";
+                    setProvider(next);
+                    try {
+                      window.localStorage.setItem("mtcpl_ai_provider", next);
+                    } catch { /* storage blocked — the choice just won't persist */ }
+                  }}
+                  disabled={streaming}
+                  title={
+                    provider === "claude"
+                      ? "Answering with Claude — tap to switch to ChatGPT"
+                      : "Answering with ChatGPT — tap to switch to Claude"
+                  }
+                  style={{
+                    padding: "7px 12px",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    background: provider === "openai" ? "rgba(16,163,127,0.14)" : "rgba(232,197,114,0.12)",
+                    color: provider === "openai" ? "#10a37f" : "#E8C572",
+                    border: `1px solid ${provider === "openai" ? "rgba(16,163,127,0.45)" : "rgba(232,197,114,0.4)"}`,
+                    borderRadius: 8,
+                    cursor: streaming ? "not-allowed" : "pointer",
+                    opacity: streaming ? 0.5 : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: provider === "openai" ? "#10a37f" : "#E8C572",
+                    }}
+                  />
+                  {provider === "openai" ? "ChatGPT" : "Claude"}
                 </button>
 
                 <button

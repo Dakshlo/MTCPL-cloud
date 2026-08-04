@@ -30,48 +30,20 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 import { AI_TOOLS, runTool } from "@/lib/ai/tools";
 import { checkAndIncrement } from "@/lib/ai/rate-limit";
+import {
+  apiKeyFor,
+  costInr,
+  isProviderId,
+  missingKeyMessage,
+  modelFor,
+  OPENAI_STYLE_ADDENDUM,
+  type ProviderId,
+  type TokenBudget,
+} from "@/lib/ai/providers";
+import { runOpenAiConversation } from "@/lib/ai/openai-run";
 
 const MAX_TOOL_ROUNDS = 5;
-// Default upgraded to Opus 4.8 (Daksh Jul 2026) — the most capable model for
-// this cross-department reasoning + bilingual (Hindi/English) formatting + tool
-// selection job. Override with ASK_AI_MODEL=claude-sonnet-5 for a cheaper (still
-// excellent) option, or claude-haiku-4-5 for the fastest/cheapest.
-const MODEL = process.env.ASK_AI_MODEL || "claude-opus-4-8";
 const USD_TO_INR = Number(process.env.USD_TO_INR) || 84; // rough conversion — set exact value via env
-
-/**
- * Published per-million-token prices (USD). Prompt caching splits input into
- * "cache write" (full price + 25%) and "cache read" (10% of base). We accumulate
- * each bucket separately from finalMessage.usage and sum.
- *
- * Keys match the Anthropic model names. If an unlisted model is set we fall
- * back to Opus-4.8 rates so the ₹ counter still displays something sane.
- */
-const PRICES_USD_PER_MTOK: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
-  "claude-opus-4-8":   { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-opus-4-7":   { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-sonnet-5":   { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-haiku-4-5":  { in: 1, out: 5,  cacheRead: 0.1, cacheWrite: 1.25 },
-  "claude-opus-4-5":   { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-};
-
-type TokenBudget = {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-};
-
-function costInr(model: string, u: TokenBudget): number {
-  const p = PRICES_USD_PER_MTOK[model] ?? PRICES_USD_PER_MTOK["claude-sonnet-4-5"];
-  const usd =
-    (u.input * p.in +
-      u.output * p.out +
-      u.cacheRead * p.cacheRead +
-      u.cacheWrite * p.cacheWrite) / 1_000_000;
-  return usd * USD_TO_INR;
-}
 
 type InMessage = {
   role: "user" | "assistant";
@@ -147,10 +119,14 @@ export async function POST(req: Request) {
   // ── Parse body ──
   let messages: InMessage[];
   let sessionId: string | null;
+  let provider: ProviderId;
   try {
     const body = await req.json();
     messages = Array.isArray(body.messages) ? body.messages : [];
     sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
+    // Which brain answers. Unknown/absent falls back to Claude, so an older
+    // cached client that doesn't send the field keeps working unchanged.
+    provider = isProviderId(body.provider) ? body.provider : "claude";
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -158,10 +134,11 @@ export async function POST(req: Request) {
     return new Response("Empty messages", { status: 400 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const MODEL = modelFor(provider);
+  const apiKey = apiKeyFor(provider);
   if (!apiKey) {
     return new Response(
-      JSON.stringify({ error: "ANTHROPIC_API_KEY is not configured." }),
+      JSON.stringify({ error: missingKeyMessage(provider) }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -211,8 +188,16 @@ export async function POST(req: Request) {
     images: lastUserMessage.images && lastUserMessage.images.length > 0 ? lastUserMessage.images : null,
   });
 
-  const anthropic = new Anthropic({ apiKey });
-  const systemPrompt = buildSystemPrompt({ ownerName: profile.full_name || "there" });
+  const anthropic = provider === "claude" ? new Anthropic({ apiKey }) : null;
+  const baseSystemPrompt = buildSystemPrompt({ ownerName: profile.full_name || "there" });
+  // Both providers get the identical brief. ChatGPT additionally gets the
+  // house-style addendum, because the prompt was tuned against Claude and GPT
+  // otherwise drifts (preambles, headings on one-line answers, replying in
+  // English to a Hindi question).
+  const systemPrompt =
+    provider === "openai"
+      ? `${baseSystemPrompt}\n\n${OPENAI_STYLE_ADDENDUM}`
+      : baseSystemPrompt;
 
   const conversation: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
     role: m.role,
@@ -229,10 +214,33 @@ export async function POST(req: Request) {
       const totalUsage: TokenBudget = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
       try {
-        while (rounds < MAX_TOOL_ROUNDS) {
+        if (provider === "openai") {
+          // ChatGPT path. Same tools, same tool loop, same events — see
+          // src/lib/ai/openai-run.ts.
+          const u = await runOpenAiConversation({
+            apiKey,
+            model: MODEL,
+            systemPrompt,
+            messages,
+            maxToolRounds: MAX_TOOL_ROUNDS,
+            onText: (delta) => {
+              controller.enqueue(sseLine(delta));
+              accumulatedAssistantText += delta;
+            },
+            onToolStart: (name) => controller.enqueue(sseEvent("tool_start", name)),
+            onToolEnd: (name) => controller.enqueue(sseEvent("tool_end", name)),
+          });
+          totalUsage.input += u.input;
+          totalUsage.output += u.output;
+          totalUsage.cacheRead += u.cacheRead;
+          totalUsage.cacheWrite += u.cacheWrite;
+          rounds = MAX_TOOL_ROUNDS; // skip the Claude loop below
+        }
+
+        while (provider === "claude" && rounds < MAX_TOOL_ROUNDS) {
           rounds++;
 
-          const modelStream = anthropic.messages.stream({
+          const modelStream = anthropic!.messages.stream({
             model: MODEL,
             max_tokens: 2048,
             system: [
@@ -242,7 +250,18 @@ export async function POST(req: Request) {
                 cache_control: { type: "ephemeral" },
               },
             ],
-            tools: AI_TOOLS,
+            // Cache the tool block too, not just the system prompt.
+            //
+            // The 32 tool schemas are ~8k tokens and were being re-sent at
+            // full input price on EVERY request and every tool round — up to
+            // 5 rounds per question. cache_control on the last tool caches
+            // the whole array, so a hit bills it at 10%. This is the single
+            // biggest lever on the ₹20-40 per question bill (Daksh, Aug 2026).
+            tools: AI_TOOLS.map((t, i) =>
+              i === AI_TOOLS.length - 1
+                ? { ...t, cache_control: { type: "ephemeral" as const } }
+                : t,
+            ),
             messages: conversation,
           });
 
@@ -302,7 +321,7 @@ export async function POST(req: Request) {
           .eq("id", activeSessionId);
 
         // Report cost last so the client displays it only on a clean finish
-        const costRupees = costInr(MODEL, totalUsage);
+        const costRupees = costInr(MODEL, totalUsage, USD_TO_INR);
         controller.enqueue(sseEvent("cost", costRupees.toFixed(2)));
         controller.enqueue(sseEvent("done", "[DONE]"));
         controller.close();
