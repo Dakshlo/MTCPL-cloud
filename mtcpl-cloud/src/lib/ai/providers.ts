@@ -128,26 +128,32 @@ export function providerLabel(provider: ProviderId): string {
 
 export type OpenAiTool = {
   type: "function";
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
 };
 
 /**
  * AI_TOOLS is authored in Anthropic's shape ({ name, description,
- * input_schema }). OpenAI wants ({ type:"function", function:{ name,
- * description, parameters } }) with the identical JSON Schema inside.
+ * input_schema }). The OpenAI Responses API wants a FLAT tool object —
+ * { type:"function", name, description, parameters } — with the identical
+ * JSON Schema inside.
  *
- * Deliberately a pure re-wrap: the schemas themselves are NOT rewritten, so
- * both providers see byte-identical tool contracts and `runTool` stays the
- * single implementation for both.
+ * Note this is deliberately NOT the chat/completions shape, which nests the
+ * same fields under a `function` key. We target /v1/responses because a
+ * reasoning model cannot use function tools on chat/completions; getting this
+ * shape wrong is silently accepted as "no tools" rather than erroring, so it
+ * is worth being explicit.
+ *
+ * A pure re-wrap: the schemas themselves are not rewritten, so both providers
+ * see identical tool contracts and `runTool` stays the single implementation.
  */
 export function toOpenAiTools(): OpenAiTool[] {
   return AI_TOOLS.map((t) => ({
     type: "function" as const,
-    function: {
-      name: t.name,
-      description: t.description ?? "",
-      parameters: (t.input_schema ?? { type: "object", properties: {} }) as Record<string, unknown>,
-    },
+    name: t.name,
+    description: t.description ?? "",
+    parameters: (t.input_schema ?? { type: "object", properties: {} }) as Record<string, unknown>,
   }));
 }
 
