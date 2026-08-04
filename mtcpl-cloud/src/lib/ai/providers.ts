@@ -102,14 +102,18 @@ export function modelFor(provider: ProviderId): string {
 }
 
 export function apiKeyFor(provider: ProviderId): string | undefined {
-  return provider === "openai"
-    ? process.env.OPENAI_API_KEY
-    : process.env.ANTHROPIC_API_KEY;
+  if (provider === "openai") {
+    // Two accepted names. OPENAI_API_KEY is the conventional one; MTCPL_GPT is
+    // what the key was actually filed under in Vercel (Daksh, Aug 2026), and
+    // renaming a live secret is a worse idea than accepting both.
+    return process.env.OPENAI_API_KEY || process.env.MTCPL_GPT;
+  }
+  return process.env.ANTHROPIC_API_KEY;
 }
 
 export function missingKeyMessage(provider: ProviderId): string {
   return provider === "openai"
-    ? "OPENAI_API_KEY is not configured. Add it in .env.local and in the Vercel project settings, then redeploy."
+    ? "No OpenAI key found. Set OPENAI_API_KEY or MTCPL_GPT — in .env.local for local use, and in the Vercel project settings for the live site. A new or changed Vercel variable only takes effect after a redeploy."
     : "ANTHROPIC_API_KEY is not configured.";
 }
 
