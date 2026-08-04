@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
+import { fetchAllPaged } from "@/lib/paginate";
 import {
   canApproveBills,
   canManageAccounts,
@@ -108,36 +109,24 @@ export default async function BillsListPage({
     ((advAppRows ?? []) as Array<{ bill_id: string }>).map((r) => r.bill_id),
   );
 
-  let query = supabase
-    .from("bills")
-    .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
-    )
-    .order("submitted_at", { ascending: false })
-    .limit(500);
-  if (restrictToOwn) query = query.eq("submitted_by", profile.id);
-  if (statusFilter && ALL_STATUSES.includes(statusFilter)) query = query.eq("status", statusFilter);
-  if (vendorFilter) query = query.eq("bill_vendor_id", vendorFilter);
-  if (heldOnly) query = query.gt("held_amount", 0);
-  if (advanceAppliedOnly && billIdsWithAdvance.size > 0) {
-    query = query.in("id", [...billIdsWithAdvance]);
-  } else if (advanceAppliedOnly) {
-    // Nothing applied yet — narrow to an impossible ID so the list
-    // returns empty rather than ignoring the filter.
-    query = query.eq("id", "00000000-0000-0000-0000-000000000000");
-  }
   // Token + vendor's-bill-no + VENDOR NAME search. PostgREST can't
   // OR across an embedded relation column directly, so we first
   // resolve vendor IDs whose name matches, then merge those into
   // the OR clause with bill_vendor_id.in.(...).
+  //
+  // Resolved BEFORE the list query so the paged fetch below stays a
+  // pure function of (from, to) with no await inside the loop body.
+  let searchOrClause: string | null = null;
   if (searchQuery) {
     const safe = searchQuery.replace(/[%,]/g, " ");
-    // Resolve matching vendor IDs (case-insensitive substring).
+    // Resolve matching vendor IDs (case-insensitive substring). No
+    // .limit() — there are ~292 vendors, well under the 1000-row cap,
+    // and the old .limit(200) silently dropped matches on a broad
+    // search, which then dropped those vendors' bills from the results.
     const { data: matchingVendorRows } = await supabase
       .from("bill_vendors")
       .select("id")
-      .ilike("name", `%${safe}%`)
-      .limit(200);
+      .ilike("name", `%${safe}%`);
     const vendorIds = (matchingVendorRows ?? []).map((r) => r.id as string);
     const orParts = [
       `token.ilike.%${safe}%`,
@@ -149,22 +138,70 @@ export default async function BillsListPage({
       // needed.
       orParts.push(`bill_vendor_id.in.(${vendorIds.join(",")})`);
     }
-    query = query.or(orParts.join(","));
+    searchOrClause = orParts.join(",");
   }
 
-  const { data: billsRaw, error } = await query;
-  if (error) throw new Error(error.message);
+  // Aug 2026 runtime test: this list was capped at .limit(500) against
+  // 1,352 bills, so "Approved" (670 today) rendered only its newest 500
+  // rows with nothing on screen saying so — and the status pills below
+  // link INTO this list, so a pill could promise more than the list
+  // could show.
+  const billsRaw = await fetchAllPaged((from, to) => {
+    let q = supabase
+      .from("bills")
+      .select(
+        "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
+      );
+    if (restrictToOwn) q = q.eq("submitted_by", profile.id);
+    if (statusFilter && ALL_STATUSES.includes(statusFilter)) q = q.eq("status", statusFilter);
+    if (vendorFilter) q = q.eq("bill_vendor_id", vendorFilter);
+    if (heldOnly) q = q.gt("held_amount", 0);
+    if (advanceAppliedOnly && billIdsWithAdvance.size > 0) {
+      q = q.in("id", [...billIdsWithAdvance]);
+    } else if (advanceAppliedOnly) {
+      // Nothing applied yet — narrow to an impossible ID so the list
+      // returns empty rather than ignoring the filter.
+      q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+    }
+    if (searchOrClause) q = q.or(searchOrClause);
+    return q
+      .order("submitted_at", { ascending: false })
+      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
+      .range(from, to);
+  });
   const bills = ((billsRaw ?? []) as unknown) as BillRow[];
 
-  let countQuery = supabase.from("bills").select("status", { count: "exact", head: false });
-  if (restrictToOwn) countQuery = countQuery.eq("submitted_by", profile.id);
-  const { data: statusBuckets } = await countQuery;
+  // Status pill counts.
+  //
+  // These were previously computed by SELECTing a `status` column for
+  // every bill and tallying the rows in JS — which PostgREST clamps to
+  // 1,000 rows with no error. With 1,352 bills the pills under-reported
+  // across the board (Approved read 514 against a true 647, Paid in full
+  // 428 against 628), and because each pill is also the filter link, a
+  // pill both misreported the number AND mis-navigated. It also made this
+  // page visibly contradict the approvals page in the same department,
+  // which counts the same thing correctly.
+  //
+  // Now one exact head-count per status: `head: true` transfers no rows
+  // at all, so there is nothing left to truncate. Note the counts are
+  // deliberately NOT narrowed by the vendor/search/held filters — they
+  // describe the whole book, which is what makes them stable filter
+  // targets, exactly as before.
+  const countBills = async (status?: string) => {
+    let q = supabase.from("bills").select("id", { count: "exact", head: true });
+    if (restrictToOwn) q = q.eq("submitted_by", profile.id);
+    if (status) q = q.eq("status", status);
+    const { count } = await q;
+    return count ?? 0;
+  };
+  const [allCount, ...statusCountList] = await Promise.all([
+    countBills(),
+    ...ALL_STATUSES.map((s) => countBills(s)),
+  ]);
   const counts: Record<string, number> = {};
-  for (const r of statusBuckets ?? []) {
-    const s = r.status as string;
-    counts[s] = (counts[s] ?? 0) + 1;
-  }
-  const allCount = Object.values(counts).reduce((s, n) => s + n, 0);
+  ALL_STATUSES.forEach((s, i) => {
+    counts[s] = statusCountList[i] ?? 0;
+  });
 
   return (
     <section className="page-card">
