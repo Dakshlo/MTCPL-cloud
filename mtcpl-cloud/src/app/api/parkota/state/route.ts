@@ -184,6 +184,14 @@ export async function PATCH(request: NextRequest) {
       if (patch.linear !== undefined) merged.linear = patch.linear;
       if (patch.stock !== undefined) merged.stock = patch.stock;
 
+      /* The dev-bypass profile's id is the literal string "dev-user-id", which
+         is not a uuid — writing it into updated_by/created_by fails the whole
+         PATCH with "invalid input syntax for type uuid", so the board cannot be
+         saved at all in local development. Same guard as carving/plan/actions.ts.
+         In production profile.id is always a real uuid, so both columns are
+         written exactly as before. */
+      const isUuidActor = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(profile.id);
+
       // Bounded-growth safety net: keep a full copy at most every 30 minutes so
       // a bad bulk edit is recoverable.
       if (Array.isArray(cur.pts) && cur.pts.length) {
@@ -195,14 +203,14 @@ export async function PATCH(request: NextRequest) {
           .maybeSingle();
         const lastAt = (last as { created_at?: string } | null)?.created_at;
         if (!lastAt || Date.now() - new Date(lastAt).getTime() > SNAPSHOT_EVERY_MS) {
-          await admin.from("parkota_snapshots").insert({ state: cur, rev: curRev, created_by: profile.id });
+          await admin.from("parkota_snapshots").insert({ state: cur, rev: curRev, ...(isUuidActor ? { created_by: profile.id } : {}) });
         }
       }
 
       const nextRev = curRev + 1;
       const { data: updated, error } = await admin
         .from("parkota_state")
-        .update({ state: merged, rev: nextRev, updated_at: new Date().toISOString(), updated_by: profile.id })
+        .update({ state: merged, rev: nextRev, updated_at: new Date().toISOString(), ...(isUuidActor ? { updated_by: profile.id } : {}) })
         .eq("id", ROW_ID)
         .eq("rev", curRev)
         .select("rev")
