@@ -39,6 +39,42 @@
  *  request is not. */
 const CACHE_MS = 10_000;
 
+/**
+ * How long a blackout may last. Choosing one is MANDATORY — there is no
+ * "until I lift it" option, and that is the safety net.
+ *
+ * Without an expiry, a blackout stays on until somebody actively turns it off,
+ * which means a dead phone, a forgotten Supabase login or a trip with no
+ * signal leaves the company offline indefinitely. With one, the worst case is
+ * that you wait it out.
+ *
+ * Needing longer is not a problem: when it lifts, the site is back, so you can
+ * sign in and arm it again.
+ */
+export const BLACKOUT_HOURS = [3, 6, 12, 24] as const;
+export type BlackoutHours = (typeof BLACKOUT_HOURS)[number];
+
+export function isValidBlackoutHours(n: unknown): n is BlackoutHours {
+  return typeof n === "number" && (BLACKOUT_HOURS as readonly number[]).includes(n);
+}
+
+/** The stored shape of the flag. `until` is an ISO timestamp. */
+export type BlackoutValue = { on?: boolean; until?: string | null };
+
+/**
+ * The single rule for "are we dark right now", shared by the middleware and
+ * anything else that needs to ask. Expiry is evaluated at READ time rather
+ * than by a background job — so a blackout lifts itself with no cron, no
+ * scheduled function, and nothing that can fail to run.
+ */
+export function isActive(v: BlackoutValue | null | undefined, now = Date.now()): boolean {
+  if (!v || v.on !== true) return false;
+  if (!v.until) return true;               // legacy row with no expiry — stays on
+  const until = Date.parse(v.until);
+  if (Number.isNaN(until)) return true;    // unreadable date: fail safe, stay dark
+  return now < until;
+}
+
 type Cached = { on: boolean; at: number };
 
 /* Module scope: one cache per running instance. Serverless spins up several,
@@ -73,8 +109,13 @@ export async function isBlackedOut(supabaseUrl: string, serviceKey: string): Pro
       },
     );
     if (!res.ok) throw new Error(`status ${res.status}`);
-    const rows = (await res.json()) as Array<{ value?: { on?: boolean } }>;
-    const on = rows?.[0]?.value?.on === true;
+    const rows = (await res.json()) as Array<{ value?: BlackoutValue }>;
+    /* Expiry is judged here, at read time. Nothing writes the flag back to
+       off when it lapses: a blackout that has run out simply stops counting,
+       so there is no cron and no cleanup job that could fail to run and leave
+       the company dark. The stale row is harmless and gets overwritten the
+       next time the switch is armed. */
+    const on = isActive(rows?.[0]?.value, now);
     cache = { on, at: now };
     return on;
   } catch {
