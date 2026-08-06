@@ -58,8 +58,33 @@ export function isValidBlackoutHours(n: unknown): n is BlackoutHours {
   return typeof n === "number" && (BLACKOUT_HOURS as readonly number[]).includes(n);
 }
 
+/**
+ * Where mtcpl.org sends people while the system is dark.
+ *
+ * The public company site, verified live and served from Vercel. Redirecting
+ * here beats an error page for the reason the switch exists: a 503 tells a
+ * curious visitor "there IS a system at this address and it is temporarily
+ * down", which is exactly the thing worth poking at. A redirect says "this is
+ * just the company" and the ERP stops appearing to exist at this domain.
+ */
+export const COMPANY_URL = "https://www.mateshwaritemple.in/";
+
+/** "redirect" sends visitors to COMPANY_URL; "error" serves the bare 503. */
+export type BlackoutMode = "redirect" | "error";
+
+export function isValidBlackoutMode(v: unknown): v is BlackoutMode {
+  return v === "redirect" || v === "error";
+}
+
 /** The stored shape of the flag. `until` is an ISO timestamp. */
-export type BlackoutValue = { on?: boolean; until?: string | null };
+export type BlackoutValue = { on?: boolean; until?: string | null; mode?: BlackoutMode };
+
+/** Mode of a stored value, defaulting to the bare error page. An older row
+ *  written before modes existed has none, and the 503 is the safer default:
+ *  it reveals nothing and cannot bounce anyone anywhere unexpected. */
+export function modeOf(v: BlackoutValue | null | undefined): BlackoutMode {
+  return v?.mode === "redirect" ? "redirect" : "error";
+}
 
 /**
  * The single rule for "are we dark right now", shared by the middleware and
@@ -75,7 +100,10 @@ export function isActive(v: BlackoutValue | null | undefined, now = Date.now()):
   return now < until;
 }
 
-type Cached = { on: boolean; at: number };
+type Cached = { on: boolean; mode: BlackoutMode; at: number };
+
+/** What the middleware needs to answer a request. */
+export type BlackoutState = { active: boolean; mode: BlackoutMode };
 
 /* Module scope: one cache per running instance. Serverless spins up several,
  * each with its own copy — which is fine, they all converge within CACHE_MS. */
@@ -89,9 +117,9 @@ let cache: Cached | null = null;
  * take the whole site down on its own — an outage should require someone to
  * have actually flipped the switch.
  */
-export async function isBlackedOut(supabaseUrl: string, serviceKey: string): Promise<boolean> {
+export async function readBlackout(supabaseUrl: string, serviceKey: string): Promise<BlackoutState> {
   const now = Date.now();
-  if (cache && now - cache.at < CACHE_MS) return cache.on;
+  if (cache && now - cache.at < CACHE_MS) return { active: cache.on, mode: cache.mode };
 
   try {
     /* Plain fetch rather than supabase-js: this runs in middleware on every
@@ -115,13 +143,15 @@ export async function isBlackedOut(supabaseUrl: string, serviceKey: string): Pro
        so there is no cron and no cleanup job that could fail to run and leave
        the company dark. The stale row is harmless and gets overwritten the
        next time the switch is armed. */
-    const on = isActive(rows?.[0]?.value, now);
-    cache = { on, at: now };
-    return on;
+    const value = rows?.[0]?.value;
+    const on = isActive(value, now);
+    const mode = modeOf(value);
+    cache = { on, mode, at: now };
+    return { active: on, mode };
   } catch {
     // Keep serving the last known answer rather than guessing.
-    if (cache) return cache.on;
-    return false;
+    if (cache) return { active: cache.on, mode: cache.mode };
+    return { active: false, mode: "error" };
   }
 }
 

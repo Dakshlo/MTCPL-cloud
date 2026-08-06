@@ -17,7 +17,12 @@
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { clearBlackoutCache, isValidBlackoutHours, BLACKOUT_HOURS } from "@/lib/blackout";
+import {
+  clearBlackoutCache,
+  isValidBlackoutHours,
+  isValidBlackoutMode,
+  BLACKOUT_HOURS,
+} from "@/lib/blackout";
 
 type Result = { ok: true; until: string } | { ok: false; error: string };
 
@@ -48,6 +53,13 @@ export async function engageBlackoutAction(formData: FormData): Promise<Result> 
     return { ok: false, error: `Choose how long: ${BLACKOUT_HOURS.join(", ")} hours.` };
   }
 
+  /* Re-validated server-side for the same reason as the duration: a server
+     action is a public endpoint. An unrecognised mode falls back to the bare
+     error page, which is the option that reveals nothing and cannot send
+     anyone anywhere unexpected. */
+  const rawMode = formData.get("mode");
+  const mode = isValidBlackoutMode(rawMode) ? rawMode : "error";
+
   const now = new Date();
   const until = new Date(now.getTime() + hours * 3_600_000).toISOString();
 
@@ -62,6 +74,7 @@ export async function engageBlackoutAction(formData: FormData): Promise<Result> 
           at: now.toISOString(),
           until,
           hours,
+          mode,
           by: profile.full_name || profile.id,
         },
         updated_at: now.toISOString(),
@@ -83,6 +96,7 @@ export async function engageBlackoutAction(formData: FormData): Promise<Result> 
     by: profile.full_name || null,
     hours,
     until,
+    mode,
   }).catch(() => {});
 
   // Make this instance act on it immediately rather than waiting out the TTL.

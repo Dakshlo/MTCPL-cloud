@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { canUseParkota } from "@/lib/parkota-access";
-import { isBlackedOut, BLACKOUT_HTML } from "@/lib/blackout";
+import { readBlackout, BLACKOUT_HTML, COMPANY_URL } from "@/lib/blackout";
 
 export async function middleware(request: NextRequest) {
   // ── Full blackout (mig 218) ───────────────────────────────────────
@@ -26,19 +26,39 @@ export async function middleware(request: NextRequest) {
   {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (url && key && (await isBlackedOut(url, key))) {
-      return new NextResponse(BLACKOUT_HTML, {
-        status: 503,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store, no-cache, must-revalidate",
-          // Deliberately NO Retry-After. It is a hint about when to come back,
-          // and nothing served to the outside should suggest a schedule — the
-          // expiry is ours and stays in the database. A bare 503 is already
-          // the "temporary, hold the listing" signal search engines act on.
-          "X-Robots-Tag": "noindex, nofollow",
-        },
-      });
+    if (url && key) {
+      const { active, mode } = await readBlackout(url, key);
+      if (active && mode === "redirect") {
+        /* Send everyone to the public company site instead of showing an
+           error. The ERP simply stops appearing to exist at this address.
+           302, NEVER 301: browsers cache a permanent redirect aggressively
+           and often indefinitely, so a 301 here would keep bouncing staff to
+           the company site long after the blackout lifted, with nothing we
+           could do from our end to undo it. no-store stops any intermediate
+           cache holding on to it either. */
+        return NextResponse.redirect(COMPANY_URL, {
+          status: 302,
+          headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "X-Robots-Tag": "noindex, nofollow",
+          },
+        });
+      }
+      if (active) {
+        return new NextResponse(BLACKOUT_HTML, {
+          status: 503,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            // Deliberately NO Retry-After. It is a hint about when to come
+            // back, and nothing served to the outside should suggest a
+            // schedule — the expiry is ours and stays in the database. A bare
+            // 503 is already the "temporary, hold the listing" signal search
+            // engines act on.
+            "X-Robots-Tag": "noindex, nofollow",
+          },
+        });
+      }
     }
   }
 

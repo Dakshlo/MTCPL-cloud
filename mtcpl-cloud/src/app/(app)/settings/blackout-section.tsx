@@ -19,7 +19,7 @@
  */
 
 import { useState, useTransition } from "react";
-import { BLACKOUT_HOURS } from "@/lib/blackout";
+import { BLACKOUT_HOURS, COMPANY_URL, type BlackoutMode } from "@/lib/blackout";
 
 type Result = { ok: true; until: string } | { ok: false; error: string };
 
@@ -36,6 +36,7 @@ export function BlackoutSection({
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState("");
   const [hours, setHours] = useState<number | null>(null);
+  const [mode, setMode] = useState<BlackoutMode>("redirect");
   const [error, setError] = useState<string | null>(null);
   /* Boolean, not the timestamp: the return time is never rendered, so it has
      no business being in the browser at all. */
@@ -50,6 +51,7 @@ export function BlackoutSection({
     const fd = new FormData();
     fd.set("confirm", confirm.trim());
     fd.set("hours", String(hours ?? ""));
+    fd.set("mode", mode);
     startTransition(async () => {
       const res = await engageAction(fd);
       if (res.ok) setDone(true);
@@ -113,13 +115,46 @@ export function BlackoutSection({
             is the reversible one; this is not it.
           </p>
           <ul style={{ fontSize: 12.5, lineHeight: 1.7, margin: "0 0 14px", paddingLeft: 18, color: "var(--muted)" }}>
-            <li>Every URL answers <b>503 Service Unavailable</b> — pages, APIs, the Parkota board, everything.</li>
+            <li>Every URL is taken over — pages, APIs, the Parkota board, everything.</li>
             <li>No login works. There is no developer bypass, by design.</li>
             <li><b>No data is touched.</b> Every slab, bill and invoice is exactly as you left it.</li>
             <li>Search engines are told to hold, not to drop the site, so nothing is lost from listings.</li>
             <li>It comes back on its own when the time you pick runs out — no action needed.</li>
             <li>To end it sooner, flip the database flag; it returns in about ten seconds.</li>
           </ul>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 6 }}>
+              What should a visitor to mtcpl.org see?
+            </label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {([
+                { id: "redirect" as const, label: "Company website", hint: "Sends them to the public site — the system stops appearing to exist here." },
+                { id: "error" as const, label: "Blank error", hint: "A bare 503 with no branding. Reveals nothing at all." },
+              ]).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => setMode(o.id)}
+                  title={o.hint}
+                  style={{
+                    fontSize: 12.5, fontWeight: 800, padding: "9px 16px", borderRadius: 8,
+                    border: `1.5px solid ${mode === o.id ? "#7f1d1d" : "var(--border)"}`,
+                    background: mode === o.id ? "#7f1d1d" : "transparent",
+                    color: mode === o.id ? "#fff" : "var(--text)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>
+              {mode === "redirect"
+                ? <>Every URL sends visitors to <b>{COMPANY_URL}</b> — a temporary redirect, so browsers stop doing it the moment the blackout lifts.</>
+                : "Every URL answers a bare 503. Nothing on the page says whose it is."}
+            </div>
+          </div>
 
           <div style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 6 }}>
