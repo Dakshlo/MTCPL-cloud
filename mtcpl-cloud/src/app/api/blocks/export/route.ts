@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import * as XLSX from "xlsx";
 
 export async function GET(req: NextRequest) {
+  /* Aug 2026 audit, finding #16. No auth check: anonymous callers happened to
+     get an empty workbook because `blocks` is only readable by `authenticated`,
+     but that is a row-level-security accident, not a gate — and every signed-in
+     account of ANY role (including the three vendor logins) could download the
+     complete block register with vendor_name, bill_no and truck_no.
+
+     Same role list as the Blocks Report page this export is launched from. */
+  try {
+    await requireAuth(["owner", "team_head", "senior_incharge", "developer"]);
+  } catch {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
   const supabase = await createServerSupabaseClient();
 
   const { searchParams } = req.nextUrl;

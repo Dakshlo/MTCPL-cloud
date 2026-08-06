@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import { cutDoneDateByBlock } from "@/lib/cut-done-date";
@@ -8,6 +9,22 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  /* Aug 2026 audit, finding #2 (Critical). This route had NO auth check at all
+     and opens with the SERVICE ROLE client, which bypasses row-level security —
+     so anyone who knew the URL could download the entire post-cut slab register
+     (temple, label, stone, quality, dimensions, CFT, status, cut dates) with no
+     credentials, and the query params let them target one customer's work.
+     src/middleware.ts does not help: its only auth logic is the /parkota gate,
+     and API routes pass straight through.
+
+     Same role list as the Ready Sizes page this export is launched from, so
+     anyone who can see the data on screen can still export it. */
+  try {
+    await requireAuth(["owner", "team_head", "senior_incharge", "block_slab_entry", "carving_head", "developer"]);
+  } catch {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
   const admin = createAdminSupabaseClient();
 
   const { searchParams } = req.nextUrl;
