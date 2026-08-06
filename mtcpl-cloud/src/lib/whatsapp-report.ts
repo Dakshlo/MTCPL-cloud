@@ -1116,7 +1116,11 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     const P = newPage();
     let y = header(P, H - 26, true);
     const mo = data.month;
-    const delta = (cur: number, prevC: number) => { const d = cur - prevC; return `Prev day ${prevC}  (${d > 0 ? "+" : ""}${d})`; };
+    /* Every number in the pill carries its unit. Read on a phone the pill sits
+       away from the big figure, so a bare "0  (+16)" left you guessing whether
+       it counted blocks, slabs or CFT (Daksh, Aug 2026). The unit is stated
+       once and governs both halves. */
+    const delta = (cur: number, prevC: number, unit: string) => { const d = cur - prevC; return `Prev day ${prevC} ${unit}  (${d > 0 ? "+" : ""}${d})`; };
     // "(+5%)" vs the previous month at the same day-of-month; omitted when
     // last month had nothing to compare against.
     const pctTxt = (cur: number, prevV: number) => (prevV > 0 ? ` (${cur >= prevV ? "+" : ""}${Math.round(((cur - prevV) / prevV) * 100)}%)` : "");
@@ -1146,7 +1150,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       {
         c: COL.blue, label: "BLOCKS ADDED", caption: "Last 24 hours",
         big: String(data.today.blocks.count), unit: "blocks", sub: `${fmt1(data.today.blocks.cft)} CFT received`,
-        pill: delta(data.today.blocks.count, data.prev.blocks.count),
+        pill: delta(data.today.blocks.count, data.prev.blocks.count, "blocks"),
         line1: `${mo.monthName} so far: ${fmt0(data.mtd.blocks.count)} blocks · ${fmt0(data.mtd.blocks.cft)} CFT`,
         line2: data.stock ? `In stock: Sandstone ${fmt0(data.stock.sandstoneCft)} CFT · Marble ${fmt1(data.stock.marbleTonnes)} T` : "",
         spark: data.trend.map((d) => d.blocks),
@@ -1154,7 +1158,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       {
         c: COL.cyan, label: "CUTTING DONE", caption: monthCap,
         big: fmt0(data.mtd.cutting.slabs), unit: "slabs", sub: `${fmt1(data.mtd.cutting.cft)} CFT cut`,
-        pill: `+${data.today.cutting.slabs} in 24 h`,
+        pill: `+${data.today.cutting.slabs} slabs in 24 h`,
         line1: vsLine(data.mtd.cutting.slabs, data.mtdPrev.cutting.slabs),
         line2: paceLine(data.mtd.cutting.slabs),
         spark: data.trend.map((d) => d.cutting),
@@ -1162,7 +1166,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       {
         c: COL.amber, label: "CARVING DONE", caption: monthCap,
         big: fmt0(data.mtd.carving.slabs), unit: "slabs", sub: `${fmt1(data.mtd.carving.cft)} CFT carved`,
-        pill: `+${data.today.carving.slabs} in 24 h`,
+        pill: `+${data.today.carving.slabs} slabs in 24 h`,
         line1: vsLine(data.mtd.carving.slabs, data.mtdPrev.carving.slabs),
         line2: paceLine(data.mtd.carving.slabs),
         spark: data.trend.map((d) => d.carving),
@@ -1173,7 +1177,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         // "0.0 T", which is just noise on sandstone-heavy months.
         big: fmt0(data.mtd.dispatch.slabs), unit: "slabs",
         sub: [`${fmt1(data.mtd.dispatch.cft)} CFT`, data.mtd.dispatch.tonnes >= 0.05 ? `${fmt1(data.mtd.dispatch.tonnes)} T` : "", `${data.mtd.dispatch.trucks} trucks`].filter(Boolean).join(" · "),
-        pill: `+${data.today.dispatch.slabs} in 24 h`,
+        pill: `+${data.today.dispatch.slabs} slabs in 24 h`,
         line1: vsLine(data.mtd.dispatch.slabs, data.mtdPrev.dispatch.slabs),
         line2: paceLine(data.mtd.dispatch.slabs),
         spark: data.trend.map((d) => d.dispatch),
