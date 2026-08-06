@@ -17,7 +17,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { deptStatusKey } from "@/lib/system-status";
-import type { Department } from "@/lib/departments";
+import { DEPARTMENTS, type Department } from "@/lib/departments";
 import {
   DEV_BYPASS_COOKIE,
   DEV_BYPASS_MAX_AGE_SECONDS,
@@ -31,7 +31,22 @@ import {
 
 type Result = { ok: true } | { ok: false; error: string };
 
-const VALID_DEPTS: ReadonlyArray<Department> = ["production", "finance", "inventory"];
+/* The dev-bypass profile's id is the literal "dev-user-id", not a uuid, so
+ * writing it into updated_by fails the whole write in local development. */
+const isUuidActor = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+/* Derived from DEPARTMENTS so it can never drift again.
+ *
+ * It had drifted badly: this was a hand-written ["production","finance",
+ * "inventory"] while the app had grown to eight departments and the Settings
+ * page was already rendering an Invoicing card. "invoicing" failed the
+ * membership test and fell through to the global branch below — so pressing
+ * "Take system down" on the INVOICING card locked the ENTIRE system, while the
+ * card itself kept reading invoicing_status and still showed LIVE. Bringing it
+ * back up cleared the global flag instead of the department's. That is the
+ * "sometimes it doesn't work" the developer kept hitting (Daksh, Aug 2026). */
+const VALID_DEPTS: ReadonlyArray<Department> = DEPARTMENTS.map((d) => d.id);
 
 function resolveKey(formData: FormData): { key: string; auditLabel: string } {
   const raw = String(formData.get("department") || "").trim();
@@ -41,8 +56,10 @@ function resolveKey(formData: FormData): { key: string; auditLabel: string } {
       auditLabel: raw,
     };
   }
-  // Legacy / explicit "global" path — flips the system_status row
-  // introduced by migration 031.
+  // Explicit "global" path — flips the system_status row from migration 031.
+  // Reached only when `department` is empty; an unrecognised value is a bug,
+  // so shout rather than silently nuking the whole system.
+  if (raw) throw new Error(`Unknown department "${raw}" — refusing to fall back to the global flag.`);
   return { key: "system_status", auditLabel: "global" };
 }
 
@@ -58,14 +75,29 @@ async function setSystemDown(
   const supabase = createAdminSupabaseClient();
   const { key, auditLabel } = resolveKey(formData);
 
-  const { error } = await supabase
+  /* UPSERT, not UPDATE.
+   *
+   * This was `.update().eq("key", key)`, which matches zero rows when the
+   * settings row does not exist yet — and PostgREST reports that as SUCCESS,
+   * no error. Every department added after migration 036 (register,
+   * maintenance, salary, vehicles) has no row, so the toggle reported "done"
+   * and changed nothing at all. Upserting creates the row on first use, so a
+   * new department works the day it is added.
+   *
+   * `.select()` is what makes the rowcount visible — without it we would be
+   * trusting the same silence that caused the bug. */
+  const { data: rows, error } = await supabase
     .from("system_settings")
-    .update({
-      value: { down, message },
-      updated_at: new Date().toISOString(),
-      updated_by: profile.id,
-    })
-    .eq("key", key);
+    .upsert(
+      {
+        key,
+        value: { down, message },
+        updated_at: new Date().toISOString(),
+        ...(isUuidActor(profile.id) ? { updated_by: profile.id } : {}),
+      },
+      { onConflict: "key" },
+    )
+    .select("key");
 
   if (error) {
     return {
@@ -76,6 +108,9 @@ async function setSystemDown(
           ? "system_settings table missing — run migrations 031 + 036 first."
           : error.message,
     };
+  }
+  if (!rows || rows.length === 0) {
+    return { ok: false, error: `Nothing was saved for "${key}". The status has NOT changed.` };
   }
 
   void logAudit(

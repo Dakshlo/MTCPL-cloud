@@ -15,6 +15,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { Department } from "@/lib/departments";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -36,12 +37,15 @@ export function SystemStatusSection({
   updatedByName: string | null;
   takeDownAction: (formData: FormData) => Promise<Result>;
   bringUpAction: (formData: FormData) => Promise<Result>;
-  /** Migration 036 (+ 038 added 'invoicing') — which department this
-   *  card controls. Posted as a hidden form field so takeSystemDownAction
-   *  / bringSystemUpAction target the right row in system_settings.
-   *  `null` = legacy global flag (system_status row from migration
-   *  031). */
-  department?: "production" | "finance" | "inventory" | "invoicing" | null;
+  /** Which department this card controls. Posted as a hidden form field so
+   *  takeSystemDownAction / bringSystemUpAction target the right row in
+   *  system_settings. `null` = the global flag (system_status, migration 031).
+   *
+   *  Typed as Department rather than a hand-written union: the union had
+   *  fallen four departments behind the app, and a card whose value the
+   *  server did not recognise silently operated the GLOBAL flag instead
+   *  (Aug 2026). */
+  department?: Department | null;
   /** Display title — e.g. "Production · System status". Defaults to
    *  "System status" for the legacy global card. */
   scopeLabel?: string;

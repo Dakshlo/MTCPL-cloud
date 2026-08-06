@@ -18,6 +18,7 @@ import type { AppRole } from "@/lib/types";
 import { AutoBackup } from "@/components/auto-backup";
 import { PeekSection } from "@/components/peek-section";
 import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
+import { DEPARTMENTS } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
 import { MaintenanceCollapsible } from "./maintenance-collapsible";
@@ -212,18 +213,21 @@ export default async function SettingsPage() {
   // System Status — load global + per-department flags (Migration 036).
   // Each falls back to `down: false` if the relevant migration hasn't
   // run, so the page renders normally even on a fresh deploy.
-  const [systemStatus, productionStatus, financeStatus, invoicingStatus, inventoryStatus] = await Promise.all([
+  // Driven by DEPARTMENTS rather than a hand-written list. The old version
+  // named production/finance/invoicing/inventory explicitly and silently fell
+  // four departments behind — Register, Maintenance, Salary and Vehicles had
+  // no card at all, so there was no way to take one of them down (Aug 2026).
+  // Adding a department to DEPARTMENTS now gives it a card automatically.
+  const [systemStatus, ...deptStatusList] = await Promise.all([
     getSystemStatus(),
-    getDepartmentStatus("production"),
-    getDepartmentStatus("finance"),
-    getDepartmentStatus("invoicing"),
-    getDepartmentStatus("inventory"),
+    ...DEPARTMENTS.map((d) => getDepartmentStatus(d.id)),
   ]);
-  // Build a single lookup for updated_by → display name across all
-  // five rows. Cheaper than five parallel single-row lookups.
+  const deptStatuses = DEPARTMENTS.map((d, i) => ({ dept: d, status: deptStatusList[i] }));
+
+  // One lookup for updated_by → display name across every row.
   const profilesMapForSystem: Record<string, string> = await (async () => {
     const ids = new Set<string>(
-      [systemStatus, productionStatus, financeStatus, invoicingStatus, inventoryStatus]
+      [systemStatus, ...deptStatusList]
         .map((s) => s.updatedBy)
         .filter((v): v is string => Boolean(v)),
     );
@@ -234,21 +238,9 @@ export default async function SettingsPage() {
       return {};
     }
   })();
-  const systemUpdatedByName = systemStatus.updatedBy
-    ? profilesMapForSystem[systemStatus.updatedBy] ?? null
-    : null;
-  const productionUpdatedByName = productionStatus.updatedBy
-    ? profilesMapForSystem[productionStatus.updatedBy] ?? null
-    : null;
-  const financeUpdatedByName = financeStatus.updatedBy
-    ? profilesMapForSystem[financeStatus.updatedBy] ?? null
-    : null;
-  const invoicingUpdatedByName = invoicingStatus.updatedBy
-    ? profilesMapForSystem[invoicingStatus.updatedBy] ?? null
-    : null;
-  const inventoryUpdatedByName = inventoryStatus.updatedBy
-    ? profilesMapForSystem[inventoryStatus.updatedBy] ?? null
-    : null;
+  const nameOfUpdater = (id: string | null | undefined) =>
+    id ? profilesMapForSystem[id] ?? null : null;
+  const systemUpdatedByName = nameOfUpdater(systemStatus.updatedBy);
 
   // Screen time — developer only
   const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
@@ -1608,54 +1600,21 @@ export default async function SettingsPage() {
             scopeIcon="🛡️"
             scopeDescription="Locks every department at once — the nuclear option. Use for total deploys or DB-wide maintenance."
           />
-          <SystemStatusSection
-            isDown={productionStatus.down}
-            message={productionStatus.message}
-            updatedAt={productionStatus.updatedAt}
-            updatedByName={productionUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="production"
-            scopeLabel="Production"
-            scopeIcon="🏭"
-            scopeDescription="Locks the cutting / carving / dispatch flow. Finance + Invoicing + Inventory stay live."
-          />
-          <SystemStatusSection
-            isDown={financeStatus.down}
-            message={financeStatus.message}
-            updatedAt={financeStatus.updatedAt}
-            updatedByName={financeUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="finance"
-            scopeLabel="Finance"
-            scopeIcon="💼"
-            scopeDescription="Locks the accounts module (/accounts/*). Production + Invoicing + Inventory stay live."
-          />
-          <SystemStatusSection
-            isDown={invoicingStatus.down}
-            message={invoicingStatus.message}
-            updatedAt={invoicingStatus.updatedAt}
-            updatedByName={invoicingUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="invoicing"
-            scopeLabel="Invoicing"
-            scopeIcon="🧾"
-            scopeDescription="Locks the customer-invoicing module (/invoicing/*). Production + Finance + Inventory stay live."
-          />
-          <SystemStatusSection
-            isDown={inventoryStatus.down}
-            message={inventoryStatus.message}
-            updatedAt={inventoryStatus.updatedAt}
-            updatedByName={inventoryUpdatedByName}
-            takeDownAction={takeSystemDownAction}
-            bringUpAction={bringSystemUpAction}
-            department="inventory"
-            scopeLabel="Inventory"
-            scopeIcon="📦"
-            scopeDescription="Locks the (stub) inventory module. Production + Finance + Invoicing stay live."
-          />
+          {deptStatuses.map(({ dept, status }) => (
+            <SystemStatusSection
+              key={dept.id}
+              isDown={status.down}
+              message={status.message}
+              updatedAt={status.updatedAt}
+              updatedByName={nameOfUpdater(status.updatedBy)}
+              takeDownAction={takeSystemDownAction}
+              bringUpAction={bringSystemUpAction}
+              department={dept.id}
+              scopeLabel={dept.label}
+              scopeIcon={dept.icon}
+              scopeDescription={`Locks ${dept.label} only — ${dept.tooltip}. Every other department stays live.`}
+            />
+          ))}
         </MaintenanceCollapsible>
       )}
     </>
