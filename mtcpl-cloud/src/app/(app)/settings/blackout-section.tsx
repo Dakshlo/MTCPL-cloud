@@ -8,26 +8,20 @@
  * system back BEFORE you arm it, and makes you type the word out. Someone
  * about to take the whole company offline should have read the way back first.
  *
- * A duration is mandatory, and the clock time it will lift is shown next to
- * the choice — the decision gets made against "back at 9:40 PM tonight", not
- * an abstract "6 hours". That timer is the real safety net: the SQL escape
- * needs a Supabase login, and the moment you need it is exactly the moment
- * you might not have one to hand.
+ * A duration is mandatory — the timer is the real safety net, because the SQL
+ * escape needs a Supabase login and the moment you need it is exactly the
+ * moment you might not have one to hand.
+ *
+ * The return time is NOT displayed anywhere: not on the 503 page a visitor
+ * sees, and not here either. Anyone watching the screen over a shoulder, or
+ * the outage itself, learns nothing about when the system comes back. The
+ * expiry is ours, kept in the database (Daksh, Aug 2026).
  */
 
 import { useState, useTransition } from "react";
 import { BLACKOUT_HOURS } from "@/lib/blackout";
 
 type Result = { ok: true; until: string } | { ok: false; error: string };
-
-/** The lift time, written the way it will be read — IST, on a phone. */
-function istWhen(iso: string): string {
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    weekday: "short", day: "numeric", month: "short",
-    hour: "numeric", minute: "2-digit", hour12: true,
-  });
-}
 
 const RESTORE_SQL = `update system_settings
 set value = '{"on": false}'::jsonb,
@@ -43,16 +37,13 @@ export function BlackoutSection({
   const [confirm, setConfirm] = useState("");
   const [hours, setHours] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
+  /* Boolean, not the timestamp: the return time is never rendered, so it has
+     no business being in the browser at all. */
+  const [done, setDone] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const armed = confirm.trim() === "BLACKOUT" && hours !== null;
-
-  /* Shown live next to the buttons so the decision is made against a real
-     clock time, not an abstract "6 hours". */
-  const previewUntil =
-    hours === null ? null : new Date(Date.now() + hours * 3_600_000).toISOString();
 
   const submit = () => {
     setError(null);
@@ -61,12 +52,12 @@ export function BlackoutSection({
     fd.set("hours", String(hours ?? ""));
     startTransition(async () => {
       const res = await engageAction(fd);
-      if (res.ok) setDone(res.until);
+      if (res.ok) setDone(true);
       else setError(res.error);
     });
   };
 
-  if (done !== null) {
+  if (done) {
     return (
       <div style={{ border: "2px solid #7f1d1d", borderRadius: 12, padding: 18, background: "rgba(127,29,29,0.08)" }}>
         <div style={{ fontSize: 15, fontWeight: 800, color: "#7f1d1d", marginBottom: 8 }}>
@@ -77,9 +68,9 @@ export function BlackoutSection({
           including you. Nothing has been deleted — all data is exactly as it
           was.
         </p>
-        <div style={{ fontSize: 13.5, fontWeight: 800, margin: "0 0 12px", padding: "10px 12px", borderRadius: 8, background: "rgba(21,128,61,0.10)", border: "1px solid rgba(21,128,61,0.35)", color: "#15803d" }}>
-          Comes back automatically at {istWhen(done)} IST
-          <span style={{ display: "block", fontWeight: 600, fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, margin: "0 0 12px", padding: "10px 12px", borderRadius: 8, background: "rgba(21,128,61,0.10)", border: "1px solid rgba(21,128,61,0.35)", color: "#15803d" }}>
+          It will come back on its own when the time you chose runs out.
+          <span style={{ display: "block", fontWeight: 500, fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
             You do not have to do anything for that. The SQL below is only if
             you want it back sooner.
           </span>
@@ -152,9 +143,9 @@ export function BlackoutSection({
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 12, color: previewUntil ? "#15803d" : "var(--muted)", fontWeight: previewUntil ? 700 : 600, marginTop: 8 }}>
-              {previewUntil
-                ? `Comes back automatically at ${istWhen(previewUntil)} IST`
+            <div style={{ fontSize: 12, color: hours !== null ? "#15803d" : "var(--muted)", fontWeight: hours !== null ? 700 : 600, marginTop: 8 }}>
+              {hours !== null
+                ? "Lifts itself after that — nothing on screen, anywhere, says when."
                 : "Pick one — a blackout with no end date is how you lose the company for a week."}
             </div>
           </div>

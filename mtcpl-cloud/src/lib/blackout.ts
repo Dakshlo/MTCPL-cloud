@@ -137,9 +137,10 @@ export function clearBlackoutCache(): void {
  * no "MTCPL is down for maintenance" — someone poking at the domain should
  * learn nothing about what is behind it or why it is off.
  *
- * 503 + Retry-After is the correct signal for a temporary outage: search
- * engines hold the existing listing rather than dropping the site, so nothing
- * has to be re-earned when it returns.
+ * A bare 503 is already the "temporary, hold the listing" signal search
+ * engines act on, so nothing has to be re-earned when the site returns. There
+ * is deliberately no Retry-After header: that is a hint about when to come
+ * back, and the expiry is ours to know, not the visitor's.
  */
 export const BLACKOUT_HTML = `<!doctype html>
 <html lang="en"><head>

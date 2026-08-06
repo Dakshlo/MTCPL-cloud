@@ -32,8 +32,10 @@ export async function middleware(request: NextRequest) {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store, no-cache, must-revalidate",
-          "Retry-After": "3600",
-          // Nothing here should ever be indexed or archived while dark.
+          // Deliberately NO Retry-After. It is a hint about when to come back,
+          // and nothing served to the outside should suggest a schedule — the
+          // expiry is ours and stays in the database. A bare 503 is already
+          // the "temporary, hold the listing" signal search engines act on.
           "X-Robots-Tag": "noindex, nofollow",
         },
       });
