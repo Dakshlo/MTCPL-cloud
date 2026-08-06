@@ -21,6 +21,8 @@ import { getSystemStatus, getDepartmentStatus } from "@/lib/system-status";
 import { DEPARTMENTS } from "@/lib/departments";
 import { getProfilesMap } from "@/lib/profiles";
 import { SystemStatusSection } from "./system-status-section";
+import { BlackoutSection } from "./blackout-section";
+import { engageBlackoutAction } from "./blackout-actions";
 import { MaintenanceCollapsible } from "./maintenance-collapsible";
 import { UserRoleVendorPicker } from "./user-role-vendor-picker";
 import { WaRecipientsEditor } from "./wa-recipients-editor";
@@ -1615,6 +1617,9 @@ export default async function SettingsPage() {
               scopeDescription={`Locks ${dept.label} only — ${dept.tooltip}. Every other department stays live.`}
             />
           ))}
+          {/* The nuclear option, kept below the reversible ones so it is never
+              the first thing a hand lands on. */}
+          <BlackoutSection engageAction={engageBlackoutAction} />
         </MaintenanceCollapsible>
       )}
     </>

@@ -2,8 +2,44 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { canUseParkota } from "@/lib/parkota-access";
+import { isBlackedOut, BLACKOUT_HTML } from "@/lib/blackout";
 
 export async function middleware(request: NextRequest) {
+  // ── Full blackout (mig 218) ───────────────────────────────────────
+  // Checked FIRST, before auth, before anything. When it is on, every url
+  // answers 503 for everybody — staff, owner and developer alike. There is
+  // no bypass in the application on purpose: an escape hatch for the
+  // developer is an escape hatch for whoever steals a developer session.
+  //
+  // Middleware is the only layer that can do this. The root layout covers
+  // (app) pages but not API routes or the static /parkota file, and a
+  // page-level guard cannot answer for a url that has no page.
+  //
+  // TO BRING THE SYSTEM BACK, in the Supabase SQL editor:
+  //   update system_settings set value = '{"on": false}'::jsonb,
+  //     updated_at = now() where key = 'blackout';
+  // It returns within ~10s. See src/lib/blackout.ts.
+  //
+  // The flag is cached per instance for 10s, so this is not a database
+  // query per request, and it fails OPEN — a Supabase blip cannot black
+  // out the site by itself.
+  {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (url && key && (await isBlackedOut(url, key))) {
+      return new NextResponse(BLACKOUT_HTML, {
+        status: 503,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          "Retry-After": "3600",
+          // Nothing here should ever be indexed or archived while dark.
+          "X-Robots-Tag": "noindex, nofollow",
+        },
+      });
+    }
+  }
+
   // Migration 036 — surface the request pathname as a header so
   // Server Components can read it via next/headers. The root layout
   // uses this to map the incoming route to a department
