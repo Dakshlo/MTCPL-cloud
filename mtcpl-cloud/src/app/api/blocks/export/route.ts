@@ -22,8 +22,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const from    = searchParams.get("from")   || "";
   const to      = searchParams.get("to")     || "";
-  const status  = searchParams.get("status") || "";
-  const stone   = searchParams.get("stone")  || "";
+  const status   = searchParams.get("status")   || "";
+  const category = searchParams.get("category") || ""; // Fresh | Reused
+  const stone    = searchParams.get("stone")    || "";
   const yard    = searchParams.get("yard")   || "";
   const vendor  = searchParams.get("vendor") || "";
   const block   = searchParams.get("block")  || "";
@@ -35,8 +36,9 @@ export async function GET(req: NextRequest) {
 
   if (from)   query = query.gte("created_at", from + "T00:00:00Z");
   if (to)     query = query.lte("created_at", to + "T23:59:59Z");
-  if (status) query = query.eq("status", status);
-  if (stone)  query = query.eq("stone", stone);
+  if (status)   query = query.eq("status", status);
+  if (category) query = query.eq("category", category); // Fresh vs Restocked
+  if (stone)    query = query.eq("stone", stone);
   if (yard)   query = query.eq("yard", Number(yard));
   if (vendor) query = query.ilike("vendor_name", `%${vendor}%`);
   if (block)  query = query.ilike("id", `%${block}%`);

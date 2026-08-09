@@ -306,24 +306,31 @@ export default async function DashboardPage() {
           soft shadow so they read like first-class entries while
           keeping the same shape (icon · title · subtitle · Open). */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {/* Block Report opens as a real full page now (Daksh, Aug 2026), not
+            the cramped centre-peek iframe — the report grew a stock-snapshot
+            header and a wide table that needed the room. ?from=dashboard tells
+            its Back button to return here. */}
         <div style={{ flex: "1 1 220px", display: "flex" }}>
-          <PeekIframe
-            url="/embed/blocks/report"
-            triggerIcon="📊"
-            triggerLabel="Block Report"
-            modalTitle="Block Report"
-            triggerStyle={{
+          <Link
+            href="/blocks/report?from=dashboard"
+            style={{
               flex: 1,
+              textDecoration: "none",
+              color: "inherit",
+              display: "flex",
+              alignItems: "center",
               padding: "18px 22px 18px 26px",
-              background:
-                "linear-gradient(135deg, #ffffff 0%, #eef4ff 100%)",
+              background: "linear-gradient(135deg, #ffffff 0%, #eef4ff 100%)",
               border: "1px solid #c7d2fe",
               borderLeft: "4px solid #4f46e5",
               borderRadius: 12,
-              boxShadow:
-                "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)",
+              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)",
+              fontWeight: 600,
             }}
-          />
+          >
+            <span style={{ marginRight: 6 }}>📊</span>
+            Block Report
+          </Link>
         </div>
 
         <div style={{ flex: "1 1 220px", display: "flex" }}>

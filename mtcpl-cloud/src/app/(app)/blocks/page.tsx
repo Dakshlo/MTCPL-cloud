@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
@@ -7,7 +8,6 @@ import { BlockGrid } from "./block-grid";
 import { BlockSearchBar } from "./block-search-bar";
 import { MarbleCutLog } from "./marble-cut-log";
 import { undoMarbleCutAction } from "./actions";
-import { PeekIframe } from "@/components/peek-iframe";
 import { PeekSection } from "@/components/peek-section";
 import { generateNextCode } from "./utils";
 import { fetchAllBlockIds } from "./block-ids";
@@ -501,13 +501,30 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
       {(canViewReport || consumedList.length > 0) && (
         <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
           {canViewReport && (
-            <PeekIframe
-              url="/embed/blocks/report"
-              triggerIcon="📊"
-              triggerLabel="Block Report"
-              modalTitle="Block Report"
-              triggerStyle={{ flex: "1 1 280px" }}
-            />
+            // Full page now, not a centre-peek iframe — the report gained a
+            // stock-snapshot header + wide table that wanted the room
+            // (Daksh, Aug 2026). ?from=blocks returns the Back button here.
+            <Link
+              href="/blocks/report?from=blocks"
+              style={{
+                flex: "1 1 280px",
+                textDecoration: "none",
+                color: "var(--text)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "16px 18px",
+                border: "2px dashed var(--border)",
+                borderRadius: 10,
+                background: "var(--surface)",
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              <span><span style={{ marginRight: 6 }}>📊</span>Block Report</span>
+              <span style={{ color: "var(--muted)", fontSize: 18 }}>→</span>
+            </Link>
           )}
 
           {consumedList.length > 0 && (

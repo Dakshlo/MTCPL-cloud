@@ -55,8 +55,6 @@ type Block = {
   updated_at: string | null;
 };
 
-const ALL_STATUSES = ["available", "reserved", "consumed", "discarded"] as const;
-
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -82,16 +80,6 @@ function blockCft(b: Block, isMarble: boolean): number {
   return calcCft(Number(b.length_ft) || 0, Number(b.width_ft) || 0, Number(b.height_ft) || 0);
 }
 
-// Filter-button labels — intentionally status-only so the filter chips match
-// the raw status you can set on a block. The table cell uses blockStatusLabel
-// which adds Fresh vs Used based on category.
-const STATUS_LABELS: Record<string, string> = {
-  available: "Available",
-  reserved: "In Progress",
-  consumed: "Consumed",
-  discarded: "Deleted",
-};
-
 type SortCol = "id" | "stone" | "yard" | "cft" | "status" | "vendor_name" | "created_at" | "updated_at";
 
 export function ReportClient({
@@ -110,6 +98,11 @@ export function ReportClient({
   // to see what's actually in the yard right now, not historical totals that
   // get confusing ("why is our stock so huge?"). Other filters are additive.
   const [statusFilter, setStatusFilter] = useState<string[]>(["available"]);
+  // Fresh vs Restocked (Reused). A whole dimension that used to be visible only
+  // as a "↻" glyph buried in the table — so "show me the restocked blocks in
+  // the yard right now" had no control at all. "Reused"/available is a real,
+  // frequently-asked slice (162 blocks at time of writing).
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "Fresh" | "Reused">("all");
   const [stoneFilter, setStoneFilter] = useState("all");
   const [yardFilter, setYardFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -140,10 +133,13 @@ export function ReportClient({
     return [...byKey.values()].sort();
   }, [blocks]);
 
-  const filtered = useMemo(() => {
+  // Everything EXCEPT the status + category dimensions. The stock-state tiles
+  // and the Fresh/Restocked toggle count against this, so each shows what you
+  // would get if you picked it — standard faceted-filter behaviour, and the
+  // thing that turns the status row from a set of blind pills into a live
+  // read of the yard.
+  const baseRows = useMemo(() => {
     let rows = [...blocks];
-
-    if (statusFilter.length > 0) rows = rows.filter(b => statusFilter.includes(b.status));
     if (stoneFilter !== "all") rows = rows.filter(b => b.stone === stoneFilter);
     if (yardFilter !== "all") rows = rows.filter(b => String(b.yard) === yardFilter);
     if (qualityFilter === "A") rows = rows.filter(b => b.quality === "A");
@@ -153,7 +149,44 @@ export function ReportClient({
     if (blockSearch) rows = rows.filter(b => b.id.toLowerCase().includes(blockSearch.toLowerCase()));
     if (dateFrom) rows = rows.filter(b => b.created_at && b.created_at >= dateFrom);
     if (dateTo) rows = rows.filter(b => b.created_at && b.created_at <= dateTo + "T23:59:59Z");
+    return rows;
+  }, [blocks, stoneFilter, yardFilter, qualityFilter, vendorSearch, blockSearch, dateFrom, dateTo]);
 
+  const matchesCategory = (b: Block) =>
+    categoryFilter === "all" ? true : (b.category ?? "Fresh") === categoryFilter;
+
+  // Count per status, honouring the current category choice.
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = { available: 0, reserved: 0, consumed: 0, discarded: 0 };
+    for (const b of baseRows) if (matchesCategory(b)) c[b.status] = (c[b.status] ?? 0) + 1;
+    return c;
+  }, [baseRows, categoryFilter]);
+
+  // Count per category, honouring the current status choice — the Fresh vs
+  // Restocked split of whatever statuses are selected.
+  const categoryCounts = useMemo(() => {
+    const inStatus = (b: Block) => statusFilter.length === 0 || statusFilter.includes(b.status);
+    let all = 0, fresh = 0, reused = 0;
+    for (const b of baseRows) {
+      if (!inStatus(b)) continue;
+      all++;
+      if ((b.category ?? "Fresh") === "Reused") reused++; else fresh++;
+    }
+    return { all, fresh, reused };
+  }, [baseRows, statusFilter]);
+
+  // The headline slice this makeover exists for: restocked blocks sitting in
+  // the yard available right now.
+  const restockedAvailableNow = useMemo(
+    () => baseRows.filter(b => b.status === "available" && b.category === "Reused").length,
+    [baseRows],
+  );
+
+  const filtered = useMemo(() => {
+    let rows = baseRows.filter(matchesCategory);
+    if (statusFilter.length > 0) rows = rows.filter(b => statusFilter.includes(b.status));
+
+    rows = [...rows];
     rows.sort((a, b) => {
       let av: string | number = "";
       let bv: string | number = "";
@@ -173,7 +206,7 @@ export function ReportClient({
     });
 
     return rows;
-  }, [blocks, statusFilter, stoneFilter, yardFilter, qualityFilter, vendorSearch, blockSearch, dateFrom, dateTo, sortBy, sortDir]);
+  }, [baseRows, statusFilter, categoryFilter, sortBy, sortDir]);
 
   // Combined accumulator — CFT (all rows) plus tonnes + marble count
   // (only marble rows) so the header can show "Total tonnes X.XXX T"
@@ -206,6 +239,7 @@ export function ReportClient({
     // filters. If someone genuinely wants everything they can un-tick
     // Available after this.
     setStatusFilter(["available"]);
+    setCategoryFilter("all");
     setStoneFilter("all");
     setYardFilter("all");
     setQualityFilter("all");
@@ -233,6 +267,7 @@ export function ReportClient({
       if (dateFrom) params.set("from", dateFrom);
       if (dateTo) params.set("to", dateTo);
       if (statusFilter.length === 1) params.set("status", statusFilter[0]);
+      if (categoryFilter !== "all") params.set("category", categoryFilter);
       if (stoneFilter !== "all") params.set("stone", stoneFilter);
       if (yardFilter !== "all") params.set("yard", yardFilter);
       if (vendorSearch) params.set("vendor", vendorSearch);
@@ -264,30 +299,84 @@ export function ReportClient({
         padding: "16px 18px",
         marginBottom: 14,
       }}>
+        {/* ── Stock snapshot ──
+            The four statuses as live-count tiles instead of blind pills, so
+            the row reads as the state of the yard at a glance. Each tile is a
+            multi-select filter (tap to add/remove). The Available tile also
+            splits Fresh vs Restocked underneath. */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {([
+            { s: "available", label: "Available", accent: "#15803d" },
+            { s: "reserved",  label: "In Progress", accent: "#b45309" },
+            { s: "consumed",  label: "Consumed", accent: "#6b7280" },
+            { s: "discarded", label: "Deleted", accent: "#b91c1c" },
+          ] as { s: string; label: string; accent: string }[]).map(({ s, label, accent }) => {
+            const on = statusFilter.includes(s);
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleStatus(s)}
+                title={`${on ? "Hide" : "Show"} ${label.toLowerCase()} blocks`}
+                style={{
+                  flex: "1 1 130px",
+                  textAlign: "left",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  border: `1.5px solid ${on ? accent : "var(--border)"}`,
+                  background: on ? `${accent}14` : "var(--surface-alt)",
+                  transition: "border-color .12s, background .12s",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: on ? accent : "var(--text)", fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                    {statusCounts[s] ?? 0}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--muted)" }}>
+                    {label}
+                  </span>
+                </div>
+                {s === "available" && categoryFilter === "all" && (
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
+                    Fresh {statusCounts.available - restockedAvailableNow} · ↻ Restocked {restockedAvailableNow}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
 
-          {/* Status toggles */}
+          {/* Fresh vs Restocked — the dimension that used to be a glyph in the
+              table. "Restocked" = Reused, a block that came back available
+              after an earlier cut. */}
           <div className="stack" style={{ flex: "0 0 auto" }}>
-            <span>Status</span>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {ALL_STATUSES.map(s => (
+            <span>Type</span>
+            <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+              {([
+                { v: "all" as const, label: `All (${categoryCounts.all})` },
+                { v: "Fresh" as const, label: `Fresh (${categoryCounts.fresh})` },
+                { v: "Reused" as const, label: `↻ Restocked (${categoryCounts.reused})` },
+              ]).map((o, i) => (
                 <button
-                  key={s}
+                  key={o.v}
                   type="button"
-                  onClick={() => toggleStatus(s)}
+                  onClick={() => setCategoryFilter(o.v)}
                   style={{
                     fontSize: 12,
-                    padding: "4px 11px",
-                    borderRadius: 20,
-                    border: "1px solid var(--border)",
+                    fontWeight: categoryFilter === o.v ? 800 : 500,
+                    padding: "7px 13px",
+                    border: "none",
+                    borderLeft: i === 0 ? "none" : "1px solid var(--border)",
                     cursor: "pointer",
-                    fontWeight: statusFilter.includes(s) ? 700 : 400,
-                    background: statusFilter.includes(s) ? "var(--gold)" : "transparent",
-                    color: statusFilter.includes(s) ? "#fff" : "var(--text)",
-                    transition: "background 0.15s",
+                    background: categoryFilter === o.v ? "var(--gold)" : "transparent",
+                    color: categoryFilter === o.v ? "#fff" : "var(--text)",
+                    whiteSpace: "nowrap",
                   }}
                 >
-                  {STATUS_LABELS[s] ?? s}
+                  {o.label}
                 </button>
               ))}
             </div>
@@ -417,11 +506,29 @@ export function ReportClient({
         </div>
 
         {/* Quick presets */}
-        <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Quick:</span>
+
+          {/* The headline view this makeover adds — restocked stock that is
+              available in the yard right now, one tap. Styled apart from the
+              plain presets so it reads as a feature, not another chip. */}
+          <button
+            type="button"
+            onClick={() => { setStatusFilter(["available"]); setCategoryFilter("Reused"); }}
+            style={{
+              fontSize: 11.5, fontWeight: 800, padding: "4px 12px", borderRadius: 20,
+              border: "1.5px solid #15803d", background: "rgba(21,128,61,0.10)", color: "#15803d",
+              cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            ↻ Restocked · available now ({restockedAvailableNow})
+          </button>
+
+          <span style={{ width: 1, height: 16, background: "var(--border)", margin: "0 2px" }} />
+
           {[
-            { label: "Available only", fn: () => setStatusFilter(["available"]) },
-            { label: "Active (available + in progress)", fn: () => setStatusFilter(["available", "reserved"]) },
+            { label: "Available only", fn: () => { setStatusFilter(["available"]); setCategoryFilter("all"); } },
+            { label: "Active (available + in progress)", fn: () => { setStatusFilter(["available", "reserved"]); setCategoryFilter("all"); } },
             { label: "Consumed only", fn: () => setStatusFilter(["consumed"]) },
             { label: "Deleted only", fn: () => setStatusFilter(["discarded"]) },
             { label: "Last 7 days", fn: () => { setDateFrom(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)); setDateTo(today); } },
