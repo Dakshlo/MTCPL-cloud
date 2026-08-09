@@ -34,6 +34,7 @@ import {
 } from "@/lib/cnc-various-cost-report";
 import { OutputPeekCard } from "./output-peek-card";
 import { CostTrend } from "../_ui/cost-trend";
+import { KpiTile, DualKpiTile, Panel, TabBar, TabLink, PickerLabel, pickerRow, pickerInput, pickerBtn, th, td, VcStyles } from "../_ui/kit";
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
@@ -142,7 +143,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
     combinedOutput > 0 ? report.totalCostForPeriod / combinedOutput : NaN;
 
   return (
-    <section style={{ paddingBottom: 24 }}>
+    <section className="vc-page" style={{ paddingBottom: 24 }}>
+      <VcStyles />
       <Link
         href="/reports/various-costing"
         style={{
@@ -197,7 +199,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+        <TabBar>
           <TabLink
             href={`/reports/various-costing/cnc?view=daily&date=${todayStr}`}
             active={view === "daily"}
@@ -222,7 +224,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           >
             Yearly
           </TabLink>
-        </div>
+        </TabBar>
       </header>
 
       {/* ── Period picker (changes per view) ────────────────── */}
@@ -613,187 +615,4 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
       </div>
     </section>
   );
-}
-
-// ── Tiny UI primitives ─────────────────────────────────────────────
-
-function KpiTile({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone: "accent" | "success" | "warning";
-}) {
-  const barColor = tone === "accent" ? "var(--gold)" : tone === "success" ? "#10b981" : "#f59e0b";
-  return (
-    <div
-      style={{
-        position: "relative",
-        padding: "16px 18px",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: barColor }} />
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginTop: 4 }}>
-        {value}
-      </div>
-      {hint && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{hint}</div>}
-    </div>
-  );
-}
-
-function DualKpiTile({
-  label,
-  primary,
-  secondary,
-  hint,
-  tone,
-}: {
-  label: string;
-  primary: string;
-  secondary: string;
-  hint?: string;
-  tone: "accent" | "success" | "warning";
-}) {
-  const barColor = tone === "accent" ? "var(--gold)" : tone === "success" ? "#10b981" : "#f59e0b";
-  return (
-    <div
-      style={{
-        position: "relative",
-        padding: "16px 18px",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: barColor }} />
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginTop: 4 }}>
-        {primary}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", opacity: 0.85, marginTop: 2 }}>
-        {secondary}
-      </div>
-      {hint && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>{hint}</div>}
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--border)",
-          fontSize: 11,
-          fontWeight: 700,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.07em",
-        }}
-      >
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      style={{
-        padding: "8px 14px",
-        fontSize: 12,
-        fontWeight: 700,
-        background: active ? "var(--gold)" : "var(--bg)",
-        color: active ? "#fff" : "var(--text)",
-        border: `1px solid ${active ? "var(--gold-dark)" : "var(--border)"}`,
-        borderRadius: 8,
-        textDecoration: "none",
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function PickerLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-      {children}
-    </span>
-  );
-}
-
-function pickerRow(): React.CSSProperties {
-  return { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 };
-}
-
-function pickerInput(): React.CSSProperties {
-  return {
-    padding: "7px 10px",
-    fontSize: 13,
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid var(--border)",
-    borderRadius: 7,
-  };
-}
-
-function pickerBtn(): React.CSSProperties {
-  return {
-    padding: "7px 14px",
-    fontSize: 12,
-    fontWeight: 700,
-    background: "var(--gold)",
-    color: "#fff",
-    border: "1px solid var(--gold-dark)",
-    borderRadius: 7,
-    cursor: "pointer",
-  };
-}
-
-function th(): React.CSSProperties {
-  return {
-    padding: "10px 14px",
-    fontSize: 11,
-    fontWeight: 700,
-    color: "var(--muted)",
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
-    textAlign: "left",
-  };
-}
-
-function td(): React.CSSProperties {
-  return {
-    padding: "10px 14px",
-    fontSize: 13,
-    color: "var(--text)",
-  };
 }
