@@ -210,7 +210,7 @@ export function CftPeekTile({
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                background: "#fff",
+                background: "var(--surface)",
                 borderRadius: 14,
                 width: "92%",
                 maxWidth: 980,
@@ -224,7 +224,7 @@ export function CftPeekTile({
               <div
                 style={{
                   padding: "18px 22px",
-                  borderBottom: "1px solid #e2e8f0",
+                  borderBottom: "1px solid var(--border)",
                   display: "flex",
                   alignItems: "baseline",
                   justifyContent: "space-between",
@@ -237,7 +237,7 @@ export function CftPeekTile({
                     style={{
                       fontSize: 11,
                       fontWeight: 700,
-                      color: "#64748b",
+                      color: "var(--muted)",
                       textTransform: "uppercase",
                       letterSpacing: "0.08em",
                     }}
@@ -248,7 +248,7 @@ export function CftPeekTile({
                     {slabsCount} slab{slabsCount === 1 ? "" : "s"} ·{" "}
                     <span style={{ fontFamily: "ui-monospace, monospace" }}>{fmtNum(totalCft)} CFT</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                     Status post-cut · counted by block cut date within the selected window
                   </div>
                 </div>
@@ -261,7 +261,7 @@ export function CftPeekTile({
                       aria-label="View mode"
                       style={{
                         display: "inline-flex",
-                        background: "#f1f5f9",
+                        background: "var(--surface-alt)",
                         borderRadius: 999,
                         padding: 3,
                         gap: 2,
@@ -286,9 +286,9 @@ export function CftPeekTile({
                       padding: "6px 14px",
                       fontSize: 13,
                       fontWeight: 600,
-                      background: "#f1f5f9",
-                      color: "#0f172a",
-                      border: "1px solid #cbd5e1",
+                      background: "var(--surface-alt)",
+                      color: "var(--text)",
+                      border: "1px solid var(--border)",
                       borderRadius: 8,
                       cursor: "pointer",
                     }}
@@ -304,7 +304,7 @@ export function CftPeekTile({
                     style={{
                       padding: 48,
                       textAlign: "center",
-                      color: "#64748b",
+                      color: "var(--muted)",
                       fontSize: 14,
                     }}
                   >
@@ -357,7 +357,7 @@ function DetailTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0 }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>From Block</th>
           <th style={th()}>Temple</th>
@@ -369,14 +369,14 @@ function DetailTable({
       </thead>
       <tbody>
         {slabs.map((s) => (
-          <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          <tr key={s.id} style={{ borderBottom: "1px solid var(--border)" }}>
             <td style={{ ...td(), fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>{s.id}</td>
             <td style={{ ...td(), fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
               {s.sourceBlockId ?? "—"}
             </td>
             <td style={td()}>{s.temple ?? "—"}</td>
             <td style={td()}>{s.label ?? "—"}</td>
-            <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
+            <td style={{ ...td(), color: "var(--muted)" }}>{s.stone ?? "—"}</td>
             <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
               {fmtNum(s.lengthIn, 0)}{"× "}
               {fmtNum(s.widthIn, 0)}{"× "}
@@ -390,7 +390,7 @@ function DetailTable({
       </tbody>
       {showTotal && (
         <tfoot>
-          <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+          <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid #d97706" }}>
             <td style={{ ...td(), fontWeight: 800 }} colSpan={6}>
               Total
             </td>
@@ -466,7 +466,7 @@ function GroupedDetailTable({
         icon: "💎",
       }
     : {
-        bg: "#fef3c7",
+        bg: "rgba(234,179,8,0.16)",
         border: "#d97706",
         fg: "#78350f",
         accent: "#92400e",
@@ -481,7 +481,7 @@ function GroupedDetailTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #cbd5e1" }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)" }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>From Block</th>
           <th style={th()}>{secondaryHeader}</th>
@@ -531,7 +531,7 @@ function GroupedDetailTable({
               </td>
             </tr>
             {g.rows.map((s) => (
-              <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+              <tr key={s.id} style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
                 <td
                   style={{
                     ...td(),
@@ -545,7 +545,7 @@ function GroupedDetailTable({
                 <td style={{ ...td(), fontFamily: "ui-monospace, monospace", color: "#b45309" }}>
                   {s.sourceBlockId ?? "—"}
                 </td>
-                <td style={{ ...td(), color: groupBy === "stone" ? "#0f172a" : "#64748b" }}>
+                <td style={{ ...td(), color: groupBy === "stone" ? "var(--text)" : "var(--muted)" }}>
                   {(groupBy === "stone" ? s.temple : s.stone) ?? "—"}
                 </td>
                 <td
@@ -603,7 +603,7 @@ function SummaryTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0 }}>
           <th style={{ ...th(), width: 28 }}></th>
           <th style={th()}>{bucketLabel}</th>
           <th style={{ ...th(), textAlign: "right" }}>Slabs</th>
@@ -622,9 +622,9 @@ function SummaryTable({
                   if (hasSlabs) onToggle(b.key);
                 }}
                 style={{
-                  borderBottom: "1px solid #f1f5f9",
+                  borderBottom: "1px solid var(--border)",
                   cursor: hasSlabs ? "pointer" : "default",
-                  background: b.isToday ? "#fefce8" : isOpen ? "#eff6ff" : undefined,
+                  background: b.isToday ? "rgba(234,179,8,0.10)" : isOpen ? "rgba(59,130,246,0.13)" : undefined,
                   opacity: hasSlabs ? 1 : 0.55,
                 }}
                 title={
@@ -635,12 +635,12 @@ function SummaryTable({
                     : "No cuts this period"
                 }
               >
-                <td style={{ ...td(), textAlign: "center", color: "#64748b", fontFamily: "ui-monospace, monospace" }}>
+                <td style={{ ...td(), textAlign: "center", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
                   {hasSlabs ? (isOpen ? "▼" : "▶") : "·"}
                 </td>
                 <td style={{ ...td(), fontWeight: 700 }}>
                   {b.label}
-                  <span style={{ marginLeft: 8, fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>
+                  <span style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>
                     {b.hint}
                   </span>
                   {b.isToday && (
@@ -650,7 +650,7 @@ function SummaryTable({
                         fontSize: 10,
                         fontWeight: 700,
                         color: "#854d0e",
-                        background: "#fef9c3",
+                        background: "rgba(234,179,8,0.20)",
                         padding: "2px 6px",
                         borderRadius: 4,
                         letterSpacing: "0.04em",
@@ -677,8 +677,8 @@ function SummaryTable({
               </tr>
               {isOpen && hasSlabs && (
                 <tr>
-                  <td colSpan={5} style={{ padding: 0, background: "#f8fafc" }}>
-                    <div style={{ padding: "10px 16px 16px", background: "#f8fafc" }}>
+                  <td colSpan={5} style={{ padding: 0, background: "var(--surface-alt)" }}>
+                    <div style={{ padding: "10px 16px 16px", background: "var(--surface-alt)" }}>
                       {/* Daksh — Stone-wise / Temple-wise toggle for
                           the drill-down. Single level of grouping at a
                           time; flip to see the other view. */}
@@ -695,7 +695,7 @@ function SummaryTable({
                           style={{
                             fontSize: 11,
                             fontWeight: 700,
-                            color: "#64748b",
+                            color: "var(--muted)",
                             textTransform: "uppercase",
                             letterSpacing: "0.06em",
                           }}
@@ -707,7 +707,7 @@ function SummaryTable({
                           aria-label="Drill-down grouping"
                           style={{
                             display: "inline-flex",
-                            background: "#e2e8f0",
+                            background: "var(--surface-alt)",
                             borderRadius: 999,
                             padding: 3,
                             gap: 2,
@@ -735,7 +735,7 @@ function SummaryTable({
         })}
       </tbody>
       <tfoot>
-        <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+        <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid #d97706" }}>
           <td style={td()}></td>
           <td style={{ ...td(), fontWeight: 800 }}>Total</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
@@ -901,8 +901,8 @@ function ToggleBtn({
         padding: "6px 14px",
         fontSize: 12,
         fontWeight: 700,
-        background: active ? "#fff" : "transparent",
-        color: active ? "#0f172a" : "#64748b",
+        background: active ? "var(--surface)" : "transparent",
+        color: active ? "var(--text)" : "var(--muted)",
         border: "none",
         borderRadius: 999,
         cursor: active ? "default" : "pointer",
@@ -920,7 +920,7 @@ function th(): React.CSSProperties {
     padding: "10px 14px",
     fontSize: 11,
     fontWeight: 700,
-    color: "#64748b",
+    color: "var(--muted)",
     textTransform: "uppercase",
     letterSpacing: "0.06em",
     textAlign: "left",
@@ -931,6 +931,6 @@ function td(): React.CSSProperties {
   return {
     padding: "8px 14px",
     fontSize: 12,
-    color: "#0f172a",
+    color: "var(--text)",
   };
 }

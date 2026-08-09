@@ -383,7 +383,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
                   </td>
                   <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>—</td>
                 </tr>
-                <tr style={{ background: "#fffbeb", borderTop: "2px solid var(--gold)" }}>
+                <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid var(--gold)" }}>
                   <td style={{ ...td(), fontWeight: 800 }}>Total cost</td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 14 }}>
                     {fmtINR(report.totalCost)}
@@ -708,7 +708,7 @@ function pickerInput(): React.CSSProperties {
   return {
     padding: "7px 10px",
     fontSize: 13,
-    background: "#fff",
+    background: "var(--surface)",
     color: "var(--text)",
     border: "1px solid var(--border)",
     borderRadius: 7,

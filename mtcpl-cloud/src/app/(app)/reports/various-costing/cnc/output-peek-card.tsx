@@ -185,19 +185,19 @@ export function OutputPeekCard({
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                background: "#fff", borderRadius: 14, width: "94%", maxWidth: 920, maxHeight: "85vh",
+                background: "var(--surface)", borderRadius: 14, width: "94%", maxWidth: 920, maxHeight: "85vh",
                 display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(15,23,42,0.25)",
                 animation: "cncScaleIn 0.15s ease-out",
               }}
             >
               <div
                 style={{
-                  padding: "18px 22px", borderBottom: "1px solid #e2e8f0", display: "flex",
+                  padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex",
                   alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                     Output slabs · {periodLabel}
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 800, marginTop: 2 }}>
@@ -206,13 +206,13 @@ export function OutputPeekCard({
                       {fmtNum(totalSft)} SFT / {fmtNum(totalCft)} CFT
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                     Carving approved in window · thin slabs (≤1 ft thick) count as SFT, thicker as CFT · double-side ×2
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sort</span>
-                  <div role="tablist" aria-label="Sort by" style={{ display: "inline-flex", background: "#f1f5f9", borderRadius: 999, padding: 3, gap: 2 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sort</span>
+                  <div role="tablist" aria-label="Sort by" style={{ display: "inline-flex", background: "var(--surface-alt)", borderRadius: 999, padding: 3, gap: 2 }}>
                     <SortBtn active={sort === "cft"} onClick={() => setSort("cft")} label="CFT" />
                     <SortBtn active={sort === "sft"} onClick={() => setSort("sft")} label="SFT" />
                     <SortBtn active={sort === "vendor"} onClick={() => setSort("vendor")} label="Vendor-wise" />
@@ -221,7 +221,7 @@ export function OutputPeekCard({
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
-                    style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, background: "#f1f5f9", color: "#0f172a", border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer" }}
+                    style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, background: "var(--surface-alt)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer" }}
                   >
                     Esc · Close
                   </button>
@@ -230,7 +230,7 @@ export function OutputPeekCard({
 
               <div style={{ overflow: "auto", padding: "8px 0" }}>
                 {contributingSlabs.length === 0 ? (
-                  <div style={{ padding: 48, textAlign: "center", color: "#64748b", fontSize: 14 }}>
+                  <div style={{ padding: 48, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
                     No slabs were carved in this period.
                   </div>
                 ) : sort === "vendor" ? (
@@ -267,11 +267,11 @@ function FlatTable({
   totalCft: number;
 }) {
   const hi = (col: "sft" | "cft"): React.CSSProperties =>
-    col === highlight ? { background: "#fffbeb" } : {};
+    col === highlight ? { background: "rgba(232,197,114,0.16)" } : {};
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0 }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>Vendor</th>
           <th style={th()}>Stone</th>
@@ -282,21 +282,21 @@ function FlatTable({
       </thead>
       <tbody>
         {slabs.map((s, i) => (
-          <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
             <td style={{ ...td(), fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
               {s.id}
               {s.sides === 2 && <span style={badge()}>2-side</span>}
             </td>
             <td style={td()}>{s.vendorName}</td>
-            <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
+            <td style={{ ...td(), color: "var(--muted)" }}>{s.stone ?? "—"}</td>
             <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
-            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "sft" ? 700 : 400, ...hi("sft") }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
-            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "cft" ? 700 : 400, ...hi("cft") }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "sft" ? 700 : 400, ...hi("sft") }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
+            <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: highlight === "cft" ? 700 : 400, ...hi("cft") }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
           </tr>
         ))}
       </tbody>
       <tfoot>
-        <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+        <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid #d97706" }}>
           <td style={{ ...td(), fontWeight: 800 }} colSpan={4}>Total</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalSft)}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalCft)}</td>
@@ -317,7 +317,7 @@ function VendorGroupedTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0 }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>Stone</th>
           <th style={{ ...th(), textAlign: "right" }}>Dimensions (in)</th>
@@ -340,22 +340,22 @@ function VendorGroupedTable({
               </td>
             </tr>
             {g.rows.map((s, i) => (
-              <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+              <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
                 <td style={{ ...td(), fontFamily: "ui-monospace, monospace", fontWeight: 600, paddingLeft: 28 }}>
                   {s.id}
                   {s.sides === 2 && <span style={badge()}>2-side</span>}
                 </td>
-                <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
+                <td style={{ ...td(), color: "var(--muted)" }}>{s.stone ?? "—"}</td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
               </tr>
             ))}
           </Fragment>
         ))}
       </tbody>
       <tfoot>
-        <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+        <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid #d97706" }}>
           <td style={{ ...td(), fontWeight: 800 }} colSpan={3}>Total · {slabsCount} slab{slabsCount === 1 ? "" : "s"}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalSft)}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalCft)}</td>
@@ -376,7 +376,7 @@ function DayGroupedTable({
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0 }}>
+        <tr style={{ background: "var(--surface-alt)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0 }}>
           <th style={th()}>Size Code</th>
           <th style={th()}>Vendor</th>
           <th style={th()}>Stone</th>
@@ -388,7 +388,7 @@ function DayGroupedTable({
       <tbody>
         {groups.map((g) => (
           <Fragment key={g.day}>
-            <tr style={{ background: "#ecfdf5", borderTop: "2px solid #10b981" }}>
+            <tr style={{ background: "rgba(16,185,129,0.15)", borderTop: "2px solid #10b981" }}>
               <td colSpan={6} style={{ padding: "10px 14px", fontSize: 12, fontWeight: 800, color: "#065f46", letterSpacing: "0.03em" }}>
                 <span>📅 {g.label}</span>
                 <span style={{ marginLeft: 10, color: "#059669", fontWeight: 600, fontSize: 11 }}>
@@ -400,23 +400,23 @@ function DayGroupedTable({
               </td>
             </tr>
             {g.rows.map((s, i) => (
-              <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+              <tr key={`${s.id}-${i}`} style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
                 <td style={{ ...td(), fontFamily: "ui-monospace, monospace", fontWeight: 600, paddingLeft: 28 }}>
                   {s.id}
                   {s.sides === 2 && <span style={badge()}>2-side</span>}
                 </td>
                 <td style={td()}>{s.vendorName}</td>
-                <td style={{ ...td(), color: "#64748b" }}>{s.stone ?? "—"}</td>
+                <td style={{ ...td(), color: "var(--muted)" }}>{s.stone ?? "—"}</td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{dims(s)}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{s.unit === "sft" ? fmtNum(s.sft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.unit === "cft" ? fmtNum(s.cft) : <span style={{ color: "var(--muted)" }}>—</span>}</td>
               </tr>
             ))}
           </Fragment>
         ))}
       </tbody>
       <tfoot>
-        <tr style={{ background: "#fffbeb", borderTop: "2px solid #d97706" }}>
+        <tr style={{ background: "rgba(232,197,114,0.16)", borderTop: "2px solid #d97706" }}>
           <td style={{ ...td(), fontWeight: 800 }} colSpan={4}>Total · {slabsCount} slab{slabsCount === 1 ? "" : "s"} · {groups.filter((g) => g.day !== "unknown").length} day{groups.filter((g) => g.day !== "unknown").length === 1 ? "" : "s"}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalSft)}</td>
           <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>{fmtNum(totalCft)}</td>
@@ -435,7 +435,7 @@ function SortBtn({ active, onClick, label }: { active: boolean; onClick: () => v
       onClick={onClick}
       style={{
         padding: "6px 14px", fontSize: 12, fontWeight: 700,
-        background: active ? "#fff" : "transparent", color: active ? "#0f172a" : "#64748b",
+        background: active ? "var(--surface)" : "transparent", color: active ? "var(--text)" : "var(--muted)",
         border: "none", borderRadius: 999, cursor: active ? "default" : "pointer",
         boxShadow: active ? "0 1px 3px rgba(15,23,42,0.12)" : "none", transition: "background 0.12s, color 0.12s",
       }}
@@ -453,8 +453,8 @@ function badge(): React.CSSProperties {
 }
 
 function th(): React.CSSProperties {
-  return { padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left" };
+  return { padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left" };
 }
 function td(): React.CSSProperties {
-  return { padding: "8px 14px", fontSize: 12, color: "#0f172a" };
+  return { padding: "8px 14px", fontSize: 12, color: "var(--text)" };
 }
