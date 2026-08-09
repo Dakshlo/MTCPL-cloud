@@ -25,6 +25,15 @@ export type SnapshotItem = {
   from: string;
   subject: string;
   summary: string;
+  // 2-4 crisp key points — the facts of the email as separate bullets
+  // (amounts, dates, PO/invoice numbers, names). Optional so older stored
+  // snapshots that predate this still render from `summary` alone.
+  keyPoints?: string[];
+  // The single concrete thing the owner must do, imperative and specific
+  // ("Arrange a vehicle Ahmedabad→Pindwara for Mon 9 AM"). Empty for FYI.
+  action?: string;
+  // When it's due, if the email states one ("Mon 11 Aug, 9 AM"). Empty otherwise.
+  deadline?: string;
   category: string;
   urgency: "action_needed" | "fyi";
   // uid + date let the dashboard open the FULL email on demand (read-
@@ -122,7 +131,7 @@ const SUMMARY_SCHEMA = {
   properties: {
     overview: {
       type: "string",
-      description: "One line for the dashboard header, e.g. '14 emails — 2 need action, 3 worth knowing.'",
+      description: "A 1-2 sentence plain-language digest of what matters in this batch — the actual substance ('L&T needs a vehicle to Pindwara Mon; HDFC debited Rs 4.4L to Shree Marble.'), NOT just counts. The dashboard shows counts separately.",
     },
     items: {
       type: "array",
@@ -138,10 +147,23 @@ const SUMMARY_SCHEMA = {
           urgency: { type: "string", enum: ["action_needed", "fyi"] },
           summary: {
             type: "string",
-            description: "1-2 sentences with the EXACT facts: amounts, dates, names, what is being asked",
+            description: "ONE short headline line of context — who and what, in ~10 words. The detail goes in keyPoints.",
+          },
+          keyPoints: {
+            type: "array",
+            items: { type: "string" },
+            description: "2-4 bullets, each ONE concrete fact: an amount, a date, a PO/invoice/e-way number, a name, a place. Specific, never vague. e.g. ['L&T (Ankur Jain) asking for a vehicle', 'Ahmedabad → Pindwara workshop', 'Virendra Sir, mob 9978442511', 'Monday 9 AM, Zone 6 mock-up inspection'].",
+          },
+          action: {
+            type: "string",
+            description: "The SINGLE concrete thing the owner must do, imperative and specific. Empty string when nothing is required (FYI).",
+          },
+          deadline: {
+            type: "string",
+            description: "When it is due, if the email says so ('Mon 11 Aug, 9 AM'). Empty string if none stated.",
           },
         },
-        required: ["idx", "important", "category", "urgency", "summary"],
+        required: ["idx", "important", "category", "urgency", "summary", "keyPoints", "action", "deadline"],
         additionalProperties: false,
       },
     },
@@ -165,7 +187,13 @@ DROP (important=false) — even if they contain names, dates, amounts, PNRs or l
   • Promotions, marketing, offers, newsletters, social-media notifications, OTP/verification codes, app/account notifications, calendar invites for personal events, receipts for personal purchases, spam.
   • Any email sent BY Google itself (sign-in/security alerts, account or policy notices, Workspace/Maps/Drive notifications).
 
-For every email return an item with the same idx and important true/false. For the KEEP ones, write a 1-2 sentence summary stating EXACTLY what is in it — concrete amounts, dates, invoice/PO numbers, names, and what (if anything) the owner must do. Be specific, never vague ("a bank update" is bad; "HDFC: Rs. 4,41,513 debited to Shree Marble on 9 Jun, balance Rs. 12,30,000" is good). urgency = action_needed ONLY when he must actually do something.`;
+For every email return an item with the same idx and important true/false. For the KEEP ones:
+  • summary — ONE short headline of ~10 words: who it is from and what it is about. Not the detail.
+  • keyPoints — 2-4 bullets, each ONE concrete fact from the email: an amount, a date, an invoice/PO/e-way number, a name, a place. Be specific, never vague ("a bank update" is bad; "HDFC: Rs 4,41,513 debited to Shree Marble, 9 Jun" is good). This is where the substance goes.
+  • action — the SINGLE concrete thing the owner must do, as an imperative ("Arrange a vehicle Ahmedabad→Pindwara for Mon 9 AM"). Empty string if nothing is required.
+  • deadline — when it is due if the email states one; empty string otherwise.
+  • urgency — action_needed ONLY when he must actually do something (i.e. action is non-empty); otherwise fyi.
+And write the batch overview as a real 1-2 sentence digest of what matters across these emails — the substance, not a count.`;
 
 // fromName = clean display name (what we show in bold); fromText keeps
 // the full "Name <addr>" for the AI's context. uid lets us re-open the
@@ -335,7 +363,7 @@ const SUMMARIZE_CONCURRENCY = 3;  // calls running at once
 
 /** Summarize ONE batch of emails — returns the important ones. JSON parse
  *  errors yield [] (skip the batch); API errors propagate to the caller. */
-async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<SnapshotItem[]> {
+async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<{ items: SnapshotItem[]; overview: string }> {
   const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
@@ -347,29 +375,45 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
     messages: [{ role: "user", content: `${SUMMARY_PROMPT}\n\nEMAILS (JSON):\n${JSON.stringify(input)}` }],
   });
   const text = response.content.find((b) => b.type === "text")?.text ?? "";
-  let parsed: { items?: Array<{ idx: number; important: boolean; category: string; urgency: "action_needed" | "fyi"; summary: string }> };
+  let parsed: {
+    overview?: string;
+    items?: Array<{
+      idx: number; important: boolean; category: string;
+      urgency: "action_needed" | "fyi"; summary: string;
+      keyPoints?: string[]; action?: string; deadline?: string;
+    }>;
+  };
   try {
     parsed = JSON.parse(text);
   } catch {
-    return [];
+    return { items: [], overview: "" };
   }
   const items: SnapshotItem[] = [];
   for (const it of parsed.items ?? []) {
     if (!it.important) continue;
     const src = emails[it.idx];
     if (!src) continue;
+    const keyPoints = Array.isArray(it.keyPoints)
+      ? it.keyPoints.map((k) => String(k).trim()).filter(Boolean)
+      : [];
+    const action = (it.action ?? "").trim();
     items.push({
       from: src.fromName,
       subject: src.subject,
       summary: it.summary,
+      keyPoints: keyPoints.length ? keyPoints : undefined,
+      action: action || undefined,
+      deadline: (it.deadline ?? "").trim() || undefined,
       category: it.category,
-      urgency: it.urgency === "action_needed" ? "action_needed" : "fyi",
+      // Trust the explicit ask over the label: if the model marked it
+      // action_needed but gave no action, it's really an FYI, and vice-versa.
+      urgency: action ? "action_needed" : "fyi",
       uid: src.uid,
       date: src.date,
       messageId: src.messageId,
     });
   }
-  return items;
+  return { items, overview: (parsed.overview ?? "").trim() };
 }
 
 /** Ask Claude which emails matter + what they say. Processes emails in
@@ -390,13 +434,16 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   for (let i = 0; i < emails.length; i += SUMMARIZE_BATCH) batches.push(emails.slice(i, i + SUMMARIZE_BATCH));
 
   const out: SnapshotItem[][] = new Array(batches.length).fill(null).map(() => []);
+  const overviews: string[] = new Array(batches.length).fill("");
   let nextIdx = 0;
   let firstError: unknown = null;
   async function worker() {
     while (nextIdx < batches.length) {
       const i = nextIdx++;
       try {
-        out[i] = await summarizeBatch(anthropic, model, batches[i]);
+        const r = await summarizeBatch(anthropic, model, batches[i]);
+        out[i] = r.items;
+        overviews[i] = r.overview;
       } catch (e) {
         if (!firstError) firstError = e;
       }
@@ -412,11 +459,18 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   }
   // Latest email on top (Daksh) — newest by email date first; undated last.
   items.sort((a, b) => (b.date ? Date.parse(b.date) : 0) - (a.date ? Date.parse(a.date) : 0));
+
+  // The digest is the AI's actual read of the substance, joined across
+  // batches. The dashboard renders the counts (N need action, M to note)
+  // itself, so the overview text is free to be about content, not tallies.
+  // Fall back to the old count sentence if the model returned nothing.
+  const digest = overviews.map((o) => o.trim()).filter(Boolean).join(" ");
   const actionCount = items.filter((i) => i.urgency === "action_needed").length;
   const overview =
     items.length === 0
       ? `Scanned ${emails.length} email${emails.length === 1 ? "" : "s"} — nothing important.`
-      : `${items.length} important${actionCount ? `, ${actionCount} need action` : ""} (of ${emails.length} scanned).`;
+      : digest ||
+        `${items.length} important${actionCount ? `, ${actionCount} need action` : ""} (of ${emails.length} scanned).`;
   return { overview, items };
 }
 

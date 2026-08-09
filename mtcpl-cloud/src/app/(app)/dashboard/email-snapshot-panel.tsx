@@ -339,9 +339,44 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                             {action ? "Action needed" : "FYI"}
                           </span>
                         </div>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{it.subject}</div>
-                        <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{it.summary}</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>{it.subject}</div>
+                        {/* Headline line — kept short and quiet; the facts sit in
+                            the key points below. */}
+                        {it.summary && (
+                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)" }}>{it.summary}</div>
+                        )}
+
+                        {/* Key points — the substance, as separate facts. Falls
+                            back to nothing when an older snapshot has none (its
+                            summary already carried the detail). */}
+                        {it.keyPoints && it.keyPoints.length > 0 && (
+                          <ul style={{ margin: "3px 0 0", paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
+                            {it.keyPoints.map((k, ki) => (
+                              <li key={ki} style={{ fontSize: 12.5, lineHeight: 1.45, display: "flex", gap: 7 }}>
+                                <span style={{ color: action ? "#dc2626" : "var(--accent, #4f46e5)", fontWeight: 800, flexShrink: 0 }}>·</span>
+                                <span>{k}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {/* The one thing to do, called out — with the deadline
+                            beside it when the email gave one. */}
+                        {it.action && (
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 5, padding: "6px 10px", borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
+                            <span style={{ fontSize: 11, fontWeight: 800, color: "#dc2626", flexShrink: 0, marginTop: 1 }}>DO</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.4 }}>
+                              {it.action}
+                              {it.deadline && (
+                                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: "#b91c1c", background: "rgba(220,38,38,0.14)", padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                                  ⏱ {it.deadline}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
                             {cat.icon} {cat.label}
                           </span>
