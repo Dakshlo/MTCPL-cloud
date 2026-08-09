@@ -249,9 +249,41 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
             <p style={{ fontSize: 12.5, margin: 0, color: "#b91c1c", fontWeight: 600 }}>⚠ Last run failed: {snap.error}</p>
           ) : (
             <>
-              {snap.overview && <p style={{ fontSize: 13, margin: 0, fontWeight: 600 }}>{snap.overview}</p>}
+              {/* Summary strip — the counts as glanceable pills, then the AI
+                  one-liner underneath. Reads faster than a single sentence
+                  doing both jobs. */}
+              {(() => {
+                const need = snap.items.filter((x) => x.urgency === "action_needed").length;
+                const fyi = snap.items.length - need;
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                      {need > 0 && (
+                        <span style={{ fontSize: 11.5, fontWeight: 800, padding: "3px 10px", borderRadius: 999, color: "#fff", background: "#dc2626", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
+                          {need} need{need === 1 ? "s" : ""} action
+                        </span>
+                      )}
+                      {fyi > 0 && (
+                        <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999, color: "var(--text)", background: "rgba(148,163,184,0.18)", border: "1px solid var(--border)" }}>
+                          {fyi} to note
+                        </span>
+                      )}
+                      {snap.items.length === 0 && (
+                        <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999, color: "#15803d", background: "rgba(21,128,61,0.12)" }}>
+                          Inbox quiet
+                        </span>
+                      )}
+                      <span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>of {snap.scannedCount} scanned</span>
+                    </div>
+                    {snap.overview && (
+                      <p style={{ fontSize: 12.5, margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{snap.overview}</p>
+                    )}
+                  </div>
+                );
+              })()}
               {snap.items.length === 0 ? (
-                <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Nothing important — inbox is quiet. ✅</p>
+                <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Nothing needs you — inbox is quiet. ✅</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {snap.items.map((it, i) => {
@@ -270,7 +302,11 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                         style={{
                           padding: "10px 12px",
                           borderRadius: 10,
-                          border: `1px solid ${action ? "rgba(220,38,38,0.4)" : "var(--border)"}`,
+                          border: `1px solid ${action ? "rgba(220,38,38,0.35)" : "var(--border)"}`,
+                          // A coloured rail down the left edge — red for
+                          // action-needed, quiet grey otherwise — so the eye
+                          // sorts the list before reading a word of it.
+                          borderLeft: `4px solid ${action ? "#dc2626" : "var(--border)"}`,
                           background: action ? "rgba(220,38,38,0.05)" : "var(--bg)",
                           display: "flex",
                           flexDirection: "column",

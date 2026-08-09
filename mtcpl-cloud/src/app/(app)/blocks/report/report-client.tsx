@@ -182,6 +182,28 @@ export function ReportClient({
     [baseRows],
   );
 
+  // Available stock by stone — the one-glance "what is actually in the yard,
+  // by material" KPI. Always available-only (that is the whole question) and
+  // from the full set, so it is a stable reference regardless of the table's
+  // current filters. Marble uses its tonnes→CFT equivalent so the bars are
+  // comparable across materials.
+  const availableByStone = useMemo(() => {
+    const m = new Map<string, { count: number; cft: number; marble: boolean }>();
+    for (const b of blocks) {
+      if (b.status !== "available") continue;
+      const marble = stoneCategoryMap[b.stone] === "marble";
+      const cur = m.get(b.stone) ?? { count: 0, cft: 0, marble };
+      cur.count += 1;
+      cur.cft += blockCft(b, marble);
+      m.set(b.stone, cur);
+    }
+    return [...m.entries()]
+      .map(([stone, v]) => ({ stone, ...v }))
+      .sort((a, b) => b.count - a.count);
+  }, [blocks, stoneCategoryMap]);
+  const maxStoneCount = availableByStone[0]?.count ?? 1;
+  const totalAvailable = availableByStone.reduce((s, r) => s + r.count, 0);
+
   const filtered = useMemo(() => {
     let rows = baseRows.filter(matchesCategory);
     if (statusFilter.length > 0) rows = rows.filter(b => statusFilter.includes(b.status));
@@ -291,6 +313,80 @@ export function ReportClient({
 
   return (
     <div>
+      {/* ── Available stock by stone (KPI) ──
+          One-glance read of what is in the yard, by material. Each bar is a
+          shortcut: tap it to filter the table to that stone's available
+          blocks. Sandstone bars are gold, marble amber, so the two materials
+          read apart at a distance. */}
+      {availableByStone.length > 0 && (
+        <div style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: "14px 18px",
+          marginBottom: 14,
+        }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 800 }}>📦 Available stock by stone</span>
+            <span className="muted" style={{ fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>
+              {totalAvailable} blocks in the yard · tap a bar to filter
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {availableByStone.map(({ stone, count, cft, marble }) => {
+              const accent = marble ? "#b45309" : "var(--gold)";
+              const active = stoneFilter === stone;
+              return (
+                <button
+                  key={stone}
+                  type="button"
+                  onClick={() => { setStoneFilter(active ? "all" : stone); setStatusFilter(["available"]); setCategoryFilter("all"); }}
+                  title={`Show available ${stone} blocks (${count})`}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(96px,auto) 1fr auto",
+                    gap: 12,
+                    alignItems: "center",
+                    width: "100%",
+                    padding: "3px 6px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: active ? "var(--surface-alt)" : "transparent",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{
+                    fontSize: 12, fontWeight: active ? 800 : 600,
+                    color: active ? accent : "var(--text)", whiteSpace: "nowrap",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                  }}>
+                    {stone}
+                    {marble && <span style={{ fontSize: 9 }}>🗿</span>}
+                  </span>
+                  <span style={{ display: "block", height: 16, background: "var(--surface-alt)", borderRadius: 4, overflow: "hidden" }}>
+                    <span style={{
+                      display: "block", height: "100%",
+                      width: `${Math.max(3, (count / maxStoneCount) * 100)}%`,
+                      background: accent,
+                      opacity: active ? 1 : 0.82,
+                      borderRadius: 4,
+                      transition: "width .2s",
+                    }} />
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                    {count}
+                    <span className="muted" style={{ fontWeight: 500, marginLeft: 5 }}>
+                      {cft > 0 ? `${Math.round(cft).toLocaleString("en-IN")} CFT` : ""}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Filter Panel ── */}
       <div style={{
         background: "var(--surface)",
