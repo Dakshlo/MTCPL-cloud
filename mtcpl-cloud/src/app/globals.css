@@ -2182,6 +2182,40 @@ details.block-card[open] {
   font-weight: 500;
 }
 
+/* ── Accounts / Finance kit polish (Daksh, Aug 2026) ──────────────
+   Interaction states for the components accounts/_ui/components.tsx
+   renders itself (KPI cards, vendor links, side-panel close). Inline
+   styles can't express :hover/:focus, so they live here. Finance is a
+   deliberately LIGHT surface, so these values are pinned light too —
+   they must not follow the theme. Nothing here changes layout: only
+   colour, shadow, and a 1px lift on hover. */
+
+.acct-kpi {
+  transition: box-shadow 0.14s ease, border-color 0.14s ease;
+}
+a:hover > .acct-kpi,
+.acct-kpi:hover {
+  border-color: #cbd5e1;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.05),
+    0 4px 12px rgba(15, 23, 42, 0.09);
+}
+/* Only the linked KPI cards get the pointer affordance. */
+a > .acct-kpi {
+  cursor: pointer;
+}
+
+.acct-link:hover strong {
+  color: #4f46e5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.acct-panel-close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
 /* ── Settings Page ───────────────────────────────────────────── */
 
 .settings-section {

@@ -7,6 +7,21 @@
 // The accounts module overlays its own accent palette on top of the
 // app's gold/cream theme so the finance surfaces feel like a
 // distinct section without breaking the overall design language.
+//
+// ── Aug 2026 premium pass (Daksh) ─────────────────────────────────
+// Finance is DELIBERATELY A LIGHT SURFACE — a printed-ledger feel,
+// like Zoho/QuickBooks — and stays light whatever theme the shell is
+// in. That's a product decision, not an oversight: accountants read
+// these screens next to paper and printouts all day. So this kit pins
+// its own light palette (`ink`, `inkMuted`, `surface`) instead of the
+// theme's flipping vars, which also removes the old half-flipped
+// state (light table headers + theme-coloured text).
+//
+// The pass is visual only — sharper radii, tighter//layered shadows,
+// hairline rings, gradient accents, tabular numerals. EVERY export
+// keeps its exact name, props and shape, so no consuming page's
+// layout moves. No data logic lives in this file; `Money` rounding
+// is display-only and untouched.
 
 import type React from "react";
 import Link from "next/link";
@@ -25,12 +40,32 @@ export const ACCOUNTS_TOKENS = {
   dangerLight: "#fee2e2",
   neutral: "#475569",       // slate-600
   neutralLight: "#f1f5f9",  // slate-100
-  border: "#e2e8f0",        // slate-200
+  border: "#e4e9f0",        // hairline — a touch cooler/crisper than slate-200
   borderStrong: "#cbd5e1",  // slate-300
   surface: "#ffffff",
   surfaceMuted: "#f8fafc",  // slate-50
-  shadow: "0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06)",
-  shadowLarge: "0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04)",
+  // Sharper than the old soft double-blur: a tight contact shadow +
+  // a hairline ring, so cards read as crisp sheets rather than fuzzy
+  // blobs. Depth comes from the ring, not from blur radius.
+  shadow:
+    "0 0 0 1px rgba(15,23,42,0.03), 0 1px 2px rgba(15,23,42,0.05)",
+  shadowLarge:
+    "0 0 0 1px rgba(15,23,42,0.04), 0 2px 4px rgba(15,23,42,0.05), 0 8px 20px rgba(15,23,42,0.07)",
+
+  // ── Added in the Aug 2026 pass (purely additive — existing keys
+  //    above keep their meaning so all 60 consumers are unaffected).
+  /** Pinned ink colours. Finance stays light, so text never flips. */
+  ink: "#0f172a",           // slate-900 — primary text
+  inkMuted: "#64748b",      // slate-500 — secondary text
+  /** Sharper corner scale. */
+  radius: 10,
+  radiusSm: 7,
+  /** Paper-like surface wash for cards — barely-there vertical fade. */
+  surfaceGradient: "linear-gradient(180deg, #ffffff 0%, #fcfdfe 100%)",
+  /** Header wash for table heads / panel headers. */
+  headerGradient: "linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%)",
+  /** Focus ring for inputs (used by INPUT_FOCUS_CLASS consumers). */
+  focusRing: "0 0 0 3px rgba(79,70,229,0.14)",
 };
 
 // ── Pay-Today section colours (Mig 042 follow-on) ──────────────────
@@ -95,16 +130,20 @@ export function Money({
     success: ACCOUNTS_TOKENS.success,
     warning: ACCOUNTS_TOKENS.warning,
     danger: ACCOUNTS_TOKENS.danger,
-    muted: "var(--muted)",
+    muted: ACCOUNTS_TOKENS.inkMuted,
     accent: ACCOUNTS_TOKENS.accent,
   };
   return (
     <span
       style={{
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        color: tone ? tones[tone] : "var(--text)",
-        letterSpacing: "-0.01em",
+        color: tone ? tones[tone] : ACCOUNTS_TOKENS.ink,
+        letterSpacing: "-0.02em",
         whiteSpace: "nowrap",
+        // Digits share one advance width, so columns of amounts line
+        // up perfectly down the page — the single biggest "premium
+        // ledger" cue on a finance screen.
+        fontVariantNumeric: "tabular-nums",
         ...sizes[size],
       }}
     >
@@ -175,6 +214,8 @@ export function VendorAvatar({
         fontWeight: 700,
         flexShrink: 0,
         letterSpacing: "0.02em",
+        // Hairline ring lifts the initials off white table rows.
+        boxShadow: "inset 0 0 0 1px rgba(15,23,42,0.06)",
       }}
       aria-hidden="true"
     >
@@ -199,11 +240,11 @@ export function VendorIdentity({
     <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
       <VendorAvatar name={name} size={size} />
       <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <strong style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <strong style={{ fontSize: 13, fontWeight: 650, color: ACCOUNTS_TOKENS.ink, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {name}
         </strong>
         {subLabel && (
-          <span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <span style={{ fontSize: 11, color: ACCOUNTS_TOKENS.inkMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {subLabel}
           </span>
         )}
@@ -212,7 +253,7 @@ export function VendorIdentity({
   );
   if (href) {
     return (
-      <Link href={href} style={{ textDecoration: "none", color: "inherit" }}>
+      <Link href={href} className="acct-link" style={{ textDecoration: "none", color: "inherit" }}>
         {body}
       </Link>
     );
@@ -262,8 +303,11 @@ function Pill({ tint }: { tint: { label: string; bg: string; fg: string; dot: st
         color: tint.fg,
         fontSize: 11,
         fontWeight: 700,
-        letterSpacing: "0.02em",
+        letterSpacing: "0.01em",
         whiteSpace: "nowrap",
+        // Tinted hairline instead of a flat blob — reads sharper at
+        // small sizes and separates the pill from coloured rows.
+        boxShadow: `inset 0 0 0 1px ${tint.dot}33`,
       }}
     >
       <span
@@ -272,6 +316,7 @@ function Pill({ tint }: { tint: { label: string; bg: string; fg: string; dot: st
           height: 6,
           borderRadius: "50%",
           background: tint.dot,
+          boxShadow: `0 0 0 2px ${tint.dot}22`,
         }}
       />
       {tint.label}
@@ -298,7 +343,7 @@ export function KpiCard({
   href?: string;
 }) {
   const toneStyles: Record<string, { accent: string; bg: string }> = {
-    neutral: { accent: ACCOUNTS_TOKENS.neutral, bg: "transparent" },
+    neutral: { accent: ACCOUNTS_TOKENS.neutral, bg: ACCOUNTS_TOKENS.neutralLight },
     accent:  { accent: ACCOUNTS_TOKENS.accent, bg: ACCOUNTS_TOKENS.accentLight },
     success: { accent: ACCOUNTS_TOKENS.success, bg: ACCOUNTS_TOKENS.successLight },
     warning: { accent: ACCOUNTS_TOKENS.warning, bg: ACCOUNTS_TOKENS.warningLight },
@@ -308,18 +353,19 @@ export function KpiCard({
 
   const body = (
     <div
+      className="acct-kpi"
       style={{
         padding: "16px 18px",
-        background: "var(--surface, #fff)",
+        background: ACCOUNTS_TOKENS.surfaceGradient,
         border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderRadius: 12,
+        borderRadius: ACCOUNTS_TOKENS.radius,
         boxShadow: ACCOUNTS_TOKENS.shadow,
         position: "relative",
         overflow: "hidden",
-        transition: "transform 0.15s, box-shadow 0.15s",
       }}
     >
-      {/* Accent bar */}
+      {/* Accent bar — fades out downward so it reads as a lit edge
+          rather than a painted stripe. */}
       <div
         style={{
           position: "absolute",
@@ -327,8 +373,7 @@ export function KpiCard({
           top: 0,
           bottom: 0,
           width: 3,
-          background: t.accent,
-          opacity: 0.85,
+          background: `linear-gradient(180deg, ${t.accent} 0%, ${t.accent}55 100%)`,
         }}
       />
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
@@ -337,9 +382,9 @@ export function KpiCard({
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: "var(--muted)",
+              color: ACCOUNTS_TOKENS.inkMuted,
               textTransform: "uppercase",
-              letterSpacing: "0.06em",
+              letterSpacing: "0.07em",
               marginBottom: 8,
             }}
           >
@@ -347,7 +392,7 @@ export function KpiCard({
           </div>
           <div style={{ wordBreak: "break-word" }}>{value}</div>
           {sublabel && (
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: ACCOUNTS_TOKENS.inkMuted, marginTop: 6 }}>
               {sublabel}
             </div>
           )}
@@ -357,7 +402,7 @@ export function KpiCard({
             style={{
               width: 36,
               height: 36,
-              borderRadius: 10,
+              borderRadius: ACCOUNTS_TOKENS.radiusSm,
               background: t.bg,
               color: t.accent,
               display: "inline-flex",
@@ -365,6 +410,7 @@ export function KpiCard({
               justifyContent: "center",
               fontSize: 18,
               flexShrink: 0,
+              boxShadow: `inset 0 0 0 1px ${t.accent}22`,
             }}
           >
             {icon}
@@ -404,13 +450,13 @@ export function EmptyState({
         textAlign: "center",
         background: ACCOUNTS_TOKENS.surfaceMuted,
         border: `1px dashed ${ACCOUNTS_TOKENS.borderStrong}`,
-        borderRadius: 12,
+        borderRadius: ACCOUNTS_TOKENS.radius,
       }}
     >
       <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>{icon}</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: ACCOUNTS_TOKENS.ink, letterSpacing: "-0.01em", marginBottom: 6 }}>{title}</div>
       {description && (
-        <div style={{ fontSize: 13, color: "var(--muted)", maxWidth: 420, margin: "0 auto" }}>
+        <div style={{ fontSize: 13, color: ACCOUNTS_TOKENS.inkMuted, maxWidth: 420, margin: "0 auto", lineHeight: 1.55 }}>
           {description}
         </div>
       )}
@@ -446,8 +492,12 @@ export function SectionHeader({
         flexWrap: "wrap",
       }}
     >
+      {/* NOTE: hero + section headings sit directly on the PAGE
+          background, not on one of this kit's white cards — so they
+          keep the theme's text vars. Pinning them to slate ink would
+          make them invisible for anyone running the shell dark. */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.01em" }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.015em" }}>
           {title}
         </h2>
         {description && (
@@ -456,7 +506,7 @@ export function SectionHeader({
       </div>
       {typeof count === "number" && (
         <span style={{ fontSize: 12, color: "var(--muted)" }}>
-          <strong style={{ color: "var(--text)" }}>{count}</strong>
+          <strong style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{count}</strong>
           {" "}
           {count === 1 ? "row" : "rows"}
           {total != null && <> · {total}</>}
@@ -478,14 +528,21 @@ export const TABLE_STYLES = {
   // view. Other accounts tables (All Bills, Payment History,
   // Advances, Final Audit) share these styles too — the slight
   // density change there is fine and actually reads cleaner.
+  //
+  // Aug 2026: density deliberately UNCHANGED (same padding/font, so
+  // no row reflows anywhere) — only colour, weight and numerals were
+  // sharpened.
   table: {
     width: "100%",
     borderCollapse: "separate" as const,
     borderSpacing: 0,
     fontSize: 12,
+    color: ACCOUNTS_TOKENS.ink,
+    // Amount columns line up down the table.
+    fontVariantNumeric: "tabular-nums" as const,
   },
   thead: {
-    background: ACCOUNTS_TOKENS.surfaceMuted,
+    background: ACCOUNTS_TOKENS.headerGradient,
   },
   th: {
     textAlign: "left" as const,
@@ -494,8 +551,8 @@ export const TABLE_STYLES = {
     fontWeight: 700,
     color: ACCOUNTS_TOKENS.neutral,
     textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+    letterSpacing: "0.07em",
+    borderBottom: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
     whiteSpace: "nowrap" as const,
   },
   thRight: {
@@ -505,8 +562,8 @@ export const TABLE_STYLES = {
     fontWeight: 700,
     color: ACCOUNTS_TOKENS.neutral,
     textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+    letterSpacing: "0.07em",
+    borderBottom: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
     whiteSpace: "nowrap" as const,
   },
   td: {
@@ -523,9 +580,9 @@ export const TABLE_STYLES = {
     fontSize: 12,
   },
   tableWrap: {
-    background: "var(--surface, #fff)",
+    background: ACCOUNTS_TOKENS.surface,
     border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-    borderRadius: 12,
+    borderRadius: ACCOUNTS_TOKENS.radius,
     overflow: "hidden",
     boxShadow: ACCOUNTS_TOKENS.shadow,
   },
@@ -541,14 +598,16 @@ export const BUTTON_STYLES = {
     padding: "9px 18px",
     fontSize: 13,
     fontWeight: 700,
-    background: ACCOUNTS_TOKENS.accent,
+    // Subtle top-lit gradient reads as a raised key, not a flat block.
+    background: `linear-gradient(180deg, #5b53e8 0%, ${ACCOUNTS_TOKENS.accent} 100%)`,
     color: "#fff",
     border: "1px solid transparent",
-    borderRadius: 8,
+    borderRadius: ACCOUNTS_TOKENS.radiusSm,
     cursor: "pointer",
     textDecoration: "none",
     letterSpacing: "-0.005em",
-    boxShadow: "0 1px 2px rgba(79,70,229,0.18)",
+    boxShadow:
+      "0 1px 2px rgba(79,70,229,0.28), inset 0 1px 0 rgba(255,255,255,0.18)",
     whiteSpace: "nowrap" as const,
     transition: "all 0.12s",
   },
@@ -559,12 +618,13 @@ export const BUTTON_STYLES = {
     padding: "9px 16px",
     fontSize: 13,
     fontWeight: 600,
-    background: "#fff",
-    color: "var(--text)",
+    background: ACCOUNTS_TOKENS.surfaceGradient,
+    color: ACCOUNTS_TOKENS.ink,
     border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-    borderRadius: 8,
+    borderRadius: ACCOUNTS_TOKENS.radiusSm,
     cursor: "pointer",
     textDecoration: "none",
+    boxShadow: "0 1px 1px rgba(15,23,42,0.04)",
     whiteSpace: "nowrap" as const,
     transition: "all 0.12s",
   },
@@ -578,9 +638,10 @@ export const BUTTON_STYLES = {
     background: "#fff",
     color: ACCOUNTS_TOKENS.danger,
     border: `1px solid ${ACCOUNTS_TOKENS.danger}`,
-    borderRadius: 8,
+    borderRadius: ACCOUNTS_TOKENS.radiusSm,
     cursor: "pointer",
     textDecoration: "none",
+    boxShadow: "0 1px 1px rgba(185,28,28,0.10)",
     whiteSpace: "nowrap" as const,
     transition: "all 0.12s",
   },
@@ -592,9 +653,9 @@ export const BUTTON_STYLES = {
     fontSize: 12,
     fontWeight: 600,
     background: "transparent",
-    color: "var(--muted)",
+    color: ACCOUNTS_TOKENS.inkMuted,
     border: `1px dashed ${ACCOUNTS_TOKENS.borderStrong}`,
-    borderRadius: 8,
+    borderRadius: ACCOUNTS_TOKENS.radiusSm,
     cursor: "pointer",
     textDecoration: "none",
     whiteSpace: "nowrap" as const,
@@ -608,9 +669,11 @@ export const INPUT_STYLE: React.CSSProperties = {
   padding: "9px 12px",
   fontSize: 13,
   border: `1px solid ${ACCOUNTS_TOKENS.borderStrong}`,
-  borderRadius: 8,
+  borderRadius: ACCOUNTS_TOKENS.radiusSm,
   background: "#fff",
-  color: "var(--text)",
+  color: ACCOUNTS_TOKENS.ink,
+  // Inset hairline gives the field a recessed, "fillable" feel.
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.05)",
   transition: "border-color 0.12s, box-shadow 0.12s",
 };
 
@@ -645,13 +708,27 @@ export function AccountsHero({
     >
       <div style={{ flex: 1, minWidth: 220 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Indigo tick — a small brand anchor that marks every
+              finance surface without adding a row of height. */}
+          <span
+            aria-hidden
+            style={{
+              width: 4,
+              height: 22,
+              borderRadius: 2,
+              background: `linear-gradient(180deg, ${ACCOUNTS_TOKENS.accent} 0%, #818cf8 100%)`,
+              flexShrink: 0,
+            }}
+          />
+          {/* Theme vars here on purpose — see the note in
+              SectionHeader: this text sits on the page background. */}
           <h1
             style={{
               margin: 0,
               fontSize: 22,
               fontWeight: 800,
               color: "var(--text)",
-              letterSpacing: "-0.02em",
+              letterSpacing: "-0.025em",
             }}
           >
             {title}
@@ -659,7 +736,7 @@ export function AccountsHero({
           {badge}
         </div>
         {description && (
-          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>
             {description}
           </p>
         )}
@@ -696,6 +773,7 @@ export function SidePanel({
         position: "fixed",
         inset: 0,
         background: "rgba(15, 23, 42, 0.45)",
+        backdropFilter: "blur(2px)",
         zIndex: 100,
         display: "flex",
         justifyContent: "flex-end",
@@ -705,13 +783,14 @@ export function SidePanel({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--surface, #fff)",
+          background: ACCOUNTS_TOKENS.surface,
+          color: ACCOUNTS_TOKENS.ink,
           width,
           maxWidth: "92vw",
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          boxShadow: "-8px 0 24px rgba(15, 23, 42, 0.12)",
+          boxShadow: "-8px 0 32px rgba(15, 23, 42, 0.18)",
           animation: "slideInRight 0.18s",
         }}
       >
@@ -719,6 +798,7 @@ export function SidePanel({
           style={{
             padding: "18px 22px",
             borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            background: ACCOUNTS_TOKENS.headerGradient,
             display: "flex",
             alignItems: "flex-start",
             justifyContent: "space-between",
@@ -726,11 +806,11 @@ export function SidePanel({
           }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "var(--text)" }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: ACCOUNTS_TOKENS.ink, letterSpacing: "-0.02em" }}>
               {title}
             </h2>
             {description && (
-              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--muted)" }}>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: ACCOUNTS_TOKENS.inkMuted }}>
                 {description}
               </p>
             )}
@@ -739,6 +819,7 @@ export function SidePanel({
             type="button"
             onClick={onClose}
             aria-label="Close panel"
+            className="acct-panel-close"
             style={{
               width: 30,
               height: 30,
@@ -746,7 +827,7 @@ export function SidePanel({
               background: "transparent",
               cursor: "pointer",
               fontSize: 18,
-              color: "var(--muted)",
+              color: ACCOUNTS_TOKENS.inkMuted,
               borderRadius: 6,
             }}
           >
