@@ -742,7 +742,7 @@ function HeroTile({
           : card.boxShadow,
       }}
     >
-      <div aria-hidden style={{ position: "absolute", right: -40, top: -40, width: 140, height: 140, borderRadius: "50%", background: soft, pointerEvents: "none" }} />
+      <div aria-hidden className="fa-hero-glow" style={{ position: "absolute", right: -40, top: -40, width: 140, height: 140, borderRadius: "50%", background: soft, pointerEvents: "none" }} />
       <div style={{ position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 9, height: 9, borderRadius: 3, background: accent, boxShadow: `0 0 0 3px ${soft}` }} />
@@ -898,9 +898,22 @@ function Styles() {
 @keyframes faFlow  { 0% { background-position: 0% 50% }   100% { background-position: 300% 50% } }
 @keyframes faSheen { 0% { background-position: 120% 0 }   100% { background-position: -120% 0 } }
 
+/* The hero tiles breathe — their tone glow drifts and swells very
+   slowly (11s), so the page feels alive at rest without anything
+   moving fast enough to distract while you're reading a number. */
+.fa-hero-glow { animation: faBreathe 11s ease-in-out infinite; }
+@keyframes faBreathe {
+  0%, 100% { transform: scale(1)    translate(0, 0);      opacity: .85 }
+  50%      { transform: scale(1.14) translate(-6px, 4px); opacity: 1 }
+}
+
+/* Month bars rise on load instead of just appearing. */
+.fa-bar { transform-origin: bottom; animation: faRise .55s cubic-bezier(.22,1,.36,1) both; }
+@keyframes faRise { from { transform: scaleY(0); opacity: .35 } to { transform: scaleY(1); opacity: 1 } }
+
 /* Anyone who asked the OS for less motion gets the calm version. */
 @media (prefers-reduced-motion: reduce) {
-  .fa-liquid, .fa-liquid::after { animation: none; }
+  .fa-liquid, .fa-liquid::after, .fa-hero-glow, .fa-bar { animation: none; }
 }
 
 .fa-hero { transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease, border-color .16s ease; }

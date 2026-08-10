@@ -624,7 +624,7 @@ export default async function SettingsPage() {
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <PeekSection
           icon="👥"
-          title="Users" tone="blue"
+          title="Users"
           count={activeUsers.length}          modalMaxWidth={1100}
         >
           {/* ADD USER — Jul 2026. Self-signup is closed (bot attack), so new
