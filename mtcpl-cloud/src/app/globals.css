@@ -445,8 +445,13 @@ input, select, textarea, button {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1400px;
+  /* Wide-desktop fix (Daksh, Aug 2026): 1400px left content stuck to
+     the left with a dead strip on the right of big monitors. Let pages
+     breathe up to 1720px AND center whatever cap remains so wide
+     screens frame the content instead of abandoning it. */
+  max-width: 1720px;
   width: 100%;
+  margin: 0 auto;
 }
 
 /* ── Page Card ──────────────────────────────────────────────── */
@@ -2166,7 +2171,7 @@ details.block-card[open] {
 }
 
 .slab-send-sticky-inner {
-  max-width: 1400px;
+  max-width: 1720px; /* keep aligned with .page-content's cap */
   margin: 0 auto;
   display: flex;
   align-items: center;

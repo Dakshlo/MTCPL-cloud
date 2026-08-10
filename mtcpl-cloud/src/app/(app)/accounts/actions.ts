@@ -3949,6 +3949,16 @@ export async function getRoyaltySummaryAction(
         given: number;
         net: number;
         entryCount: number;
+        /** The vendor's individual approved entries in the range —
+         *  date + direction + amount, sorted chronologically. Lets
+         *  the Per-vendor table show exactly WHEN each entry
+         *  happened (Daksh, Aug 2026). Only populated on this
+         *  range-wide list, not on per-bucket breakdowns. */
+        entries: Array<{
+          date: string;
+          type: "received" | "given";
+          amount: number;
+        }>;
       }>;
     }
   | { ok: false; error: string }
@@ -4078,6 +4088,14 @@ export async function getRoyaltySummaryAction(
     received: number;
     given: number;
     entryCount: number;
+    /** Individual entries (date + direction + amount). Collected only
+     *  on the overall per-vendor tally — bucket-level tallies skip it
+     *  to keep the payload lean. */
+    entries?: Array<{
+      date: string;
+      type: "received" | "given";
+      amount: number;
+    }>;
   };
   const bucketMap = new Map<
     string,
@@ -4150,6 +4168,7 @@ export async function getRoyaltySummaryAction(
     if (r.entry_type === "received") ov.received += amt;
     else ov.given += amt;
     ov.entryCount += 1;
+    (ov.entries ??= []).push({ date: iso, type: r.entry_type, amount: amt });
     overallVendorMap.set(r.bill_vendor_id, ov);
 
     bucketMap.set(key, bucket);
@@ -4164,6 +4183,11 @@ export async function getRoyaltySummaryAction(
         given: v.given,
         net: v.given - v.received,
         entryCount: v.entryCount,
+        // Chronological — oldest first, so the expanded list reads
+        // top-to-bottom like a passbook. Bucket tallies have none.
+        entries: (v.entries ?? [])
+          .slice()
+          .sort((a, b) => a.date.localeCompare(b.date)),
       }))
       // Biggest movers first (by abs net), so dad's eye lands on
       // the vendors that matter; ties broken by name for stability.

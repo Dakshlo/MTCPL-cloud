@@ -7,8 +7,15 @@
  *   1. Locked: enter passphrase (same 125500 as Royalty Approval).
  *   2. Unlocked: pick date range + granularity (Day / Week / Month).
  *      Auto-loads with sensible defaults (current month, daily).
- *   3. Results: totals tile + bucket table. Each row shows
- *      received / given / net for that bucket.
+ *   3. Results: totals tiles + bucket table + per-vendor table.
+ *
+ * Aug 2026 makeover (Daksh): same premium language as the costing
+ * pages — elevated cards, tone-tinted stat tiles, segmented control,
+ * gold accent-bar panel headers — with every colour theme-safe (the
+ * old build hardcoded light hexes that went light-on-light in dark
+ * mode). Layout order unchanged. Per-vendor rows now show WHEN the
+ * entries happened: a date line under each vendor plus click-to-
+ * expand per-entry rows (date · direction · amount).
  *
  * "Royalty points" not rupees — same convention as the rest of
  * the royalty surfaces (see fmtPoints in royalty-approvals-client).
@@ -18,6 +25,12 @@ import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
+type RoyaltyEntry = {
+  date: string;
+  type: "received" | "given";
+  amount: number;
+};
+
 type VendorBreakdown = {
   id: string;
   name: string;
@@ -25,6 +38,9 @@ type VendorBreakdown = {
   given: number;
   net: number;
   entryCount: number;
+  /** Individual entries (chronological). Present on the range-wide
+   *  per-vendor list; bucket-level breakdowns come back empty. */
+  entries?: RoyaltyEntry[];
 };
 
 type SummaryResult =
@@ -58,8 +74,16 @@ function fmtPoints(n: number): string {
 }
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "4 Aug 2026" for a single ISO date. */
+function fmtDate(iso: string): string {
+  const p = iso.split("-").map(Number);
+  if (p.length !== 3) return iso;
+  return `${p[2]} ${MON[p[1] - 1]} ${p[0]}`;
+}
+
 /** "2 Jul – 22 Jul 2026" for a span, or "15 Jul 2026" when both ends
- *  are the same day. Powers the date line on the Week / Month rows. */
+ *  are the same day. Powers the date line on Week / Month / vendor rows. */
 function fmtDateRange(startIso: string, endIso: string): string {
   const s = startIso.split("-").map(Number); // [y, m, d]
   const e = endIso.split("-").map(Number);
@@ -91,6 +115,138 @@ function firstOfMonthIstYmd(): string {
   return todayIstYmd().slice(0, 7) + "-01";
 }
 
+// ── Shared visual bits (same language as the costing-page kit) ──────
+
+const cardShell: React.CSSProperties = {
+  position: "relative",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 16,
+  overflow: "hidden",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.045)",
+};
+
+const eyebrowStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "var(--muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+};
+
+/** Scoped theme-safe tone vars + row hover. The semantic colours
+ *  (received = green, given = amber) need DIFFERENT shades per theme
+ *  to stay readable, so they live as CSS vars flipped by data-theme. */
+function RsxStyles() {
+  return (
+    <style
+      dangerouslySetInnerHTML={{
+        __html: `
+.rsx { --rsx-green:#15803d; --rsx-amber:#b45309; --rsx-red:#b91c1c; }
+[data-theme="dark"] .rsx { --rsx-green:#4ade80; --rsx-amber:#fbbf24; --rsx-red:#f87171; }
+.rsx tbody tr { transition: background .12s ease; }
+.rsx tr.rsx-click { cursor: pointer; }
+.rsx tr.rsx-click:hover { background: rgba(232,197,114,0.12); }
+`,
+      }}
+    />
+  );
+}
+
+function PanelHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        padding: "13px 18px",
+        borderBottom: "1px solid var(--border)",
+        background: "linear-gradient(180deg, var(--surface-alt), var(--surface))",
+        ...eyebrowStyle,
+      }}
+    >
+      <span style={{ width: 5, height: 15, borderRadius: 3, background: "var(--gold)", flexShrink: 0 }} />
+      {children}
+    </div>
+  );
+}
+
+/** Stat tile — accent dot + soft corner glow + fading top strip. */
+function StatTile({
+  label,
+  value,
+  caption,
+  tone,
+  fg,
+}: {
+  label: string;
+  value: string;
+  caption?: string;
+  tone: { main: string; glow: string };
+  /** Colour for the big value — defaults to the theme text colour. */
+  fg?: string;
+}) {
+  return (
+    <div style={{ ...cardShell, padding: "16px 18px" }}>
+      <div
+        style={{
+          position: "absolute",
+          right: -34,
+          top: -34,
+          width: 120,
+          height: 120,
+          borderRadius: "50%",
+          background: tone.glow,
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 0,
+          height: 3,
+          background: `linear-gradient(90deg, ${tone.main}, transparent 78%)`,
+        }}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 3,
+            background: tone.main,
+            boxShadow: `0 0 0 3px ${tone.glow}`,
+            flexShrink: 0,
+          }}
+        />
+        <div style={eyebrowStyle}>{label}</div>
+      </div>
+      <div
+        style={{
+          fontSize: 25,
+          fontWeight: 800,
+          color: fg ?? "var(--text)",
+          letterSpacing: "-0.02em",
+          marginTop: 9,
+          fontFamily: "ui-monospace, monospace",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </div>
+      {caption && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6, fontWeight: 600 }}>
+          {caption}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RoyaltySummaryClient({
   summaryAction,
 }: {
@@ -111,6 +267,10 @@ export function RoyaltySummaryClient({
   // Which bucket row is expanded to show its per-vendor breakdown.
   // null = none expanded. Reset whenever filters change.
   const [expandedBucketKey, setExpandedBucketKey] = useState<string | null>(
+    null,
+  );
+  // Which vendor row (range-wide table) is expanded to its entries.
+  const [expandedVendorId, setExpandedVendorId] = useState<string | null>(
     null,
   );
 
@@ -158,6 +318,7 @@ export function RoyaltySummaryClient({
   // Collapse any expanded row when the data set changes.
   useEffect(() => {
     setExpandedBucketKey(null);
+    setExpandedVendorId(null);
   }, [fromDate, toDate, granularity]);
 
   // Re-fetch when granularity / date range changes after unlock.
@@ -192,36 +353,51 @@ export function RoyaltySummaryClient({
     });
   }
 
-  // Net tint — same convention as the rest of the royalty UI.
+  // Net tone — direction-aware accent for the Net tile + totals.
   const netTone = useMemo(() => {
     const n = result?.totals.net ?? 0;
     if (n > 0.5)
       return {
-        bg: "#fef3c7",
-        border: "#d97706",
-        fg: "#b45309",
+        tile: { main: "#f59e0b", glow: "rgba(245,158,11,0.15)" },
+        fg: "var(--rsx-amber)",
         icon: "↗",
         caption: "We paid net to vendors",
       };
     if (n < -0.5)
       return {
-        bg: "#dcfce7",
-        border: "#16a34a",
-        fg: "#15803d",
+        tile: { main: "#10b981", glow: "rgba(16,185,129,0.15)" },
+        fg: "var(--rsx-green)",
         icon: "↘",
         caption: "Vendors paid net to us",
       };
     return {
-      bg: "#f1f5f9",
-      border: "#cbd5e1",
-      fg: "#475569",
+      tile: { main: "#94a3b8", glow: "rgba(148,163,184,0.14)" },
+      fg: "var(--muted)",
       icon: "·",
       caption: "Even — no net direction",
     };
   }, [result]);
 
+  const errorBanner = error && (
+    <div
+      role="alert"
+      style={{
+        padding: "9px 13px",
+        background: "rgba(239,68,68,0.12)",
+        border: "1px solid rgba(239,68,68,0.45)",
+        color: "var(--rsx-red)",
+        borderRadius: 10,
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+    >
+      {error}
+    </div>
+  );
+
   return (
-    <section className="page-card" style={{ maxWidth: 980 }}>
+    <section className="page-card rsx">
+      <RsxStyles />
       <FinanceLoadingOverlay show={pending} label="Loading royalty summary…" />
       <header style={{ marginBottom: 22 }}>
         <div
@@ -235,10 +411,10 @@ export function RoyaltySummaryClient({
         >
           Owner View
         </div>
-        <h1 style={{ margin: "2px 0", fontSize: 24, fontWeight: 800 }}>
+        <h1 style={{ margin: "2px 0", fontSize: 25, fontWeight: 800, letterSpacing: "-0.015em" }}>
           🏷️ Royalty Summary
         </h1>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", maxWidth: 760 }}>
           Cross-vendor flow of approved royalty entries. Pick a date
           range and a granularity to see day-by-day, week-by-week, or
           month-by-month totals. Only approved entries count;
@@ -250,30 +426,49 @@ export function RoyaltySummaryClient({
         <form
           onSubmit={handleUnlock}
           style={{
-            background: "#fffbeb",
-            border: "1px dashed #d97706",
-            borderRadius: 12,
-            padding: 24,
+            ...cardShell,
+            padding: 26,
             display: "flex",
             flexDirection: "column",
-            gap: 14,
+            gap: 16,
             maxWidth: 480,
           }}
         >
-          <div>
-            <div
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 0,
+              height: 3,
+              background: "linear-gradient(90deg, var(--gold), transparent 78%)",
+            }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span
+              aria-hidden
               style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: "#92400e",
-                marginBottom: 4,
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                background: "rgba(232,197,114,0.18)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 19,
+                flexShrink: 0,
               }}
             >
-              🔒 Enter summary passphrase
-            </div>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              Same passphrase as the Royalty Approval queue. Read-only
-              view; doesn&apos;t change any entries.
+              🔒
+            </span>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                Enter summary passphrase
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                Same passphrase as the Royalty Approval queue. Read-only
+                view; doesn&apos;t change any entries.
+              </div>
             </div>
           </div>
           <input
@@ -284,30 +479,17 @@ export function RoyaltySummaryClient({
             autoFocus
             inputMode="numeric"
             style={{
-              padding: "10px 14px",
+              padding: "11px 14px",
               fontSize: 16,
               fontFamily: "ui-monospace, monospace",
-              background: "#fff",
-              border: "1px solid #cbd5e1",
-              borderRadius: 8,
+              background: "var(--surface)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
               letterSpacing: "0.2em",
             }}
           />
-          {error && (
-            <div
-              role="alert"
-              style={{
-                padding: "8px 12px",
-                background: "#fee2e2",
-                border: "1px solid #b91c1c",
-                color: "#b91c1c",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {errorBanner}
           <div
             style={{
               display: "flex",
@@ -339,50 +521,24 @@ export function RoyaltySummaryClient({
         </form>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {error && (
-            <div
-              role="alert"
-              style={{
-                padding: "8px 12px",
-                background: "#fee2e2",
-                border: "1px solid #b91c1c",
-                color: "#b91c1c",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {errorBanner}
 
           {/* Filter strip */}
           <div
             style={{
+              ...cardShell,
               display: "flex",
               flexWrap: "wrap",
-              gap: 12,
-              padding: 12,
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
+              gap: 14,
+              padding: "14px 18px",
               alignItems: "flex-end",
             }}
           >
             {granularity === "day" ? (
               <label
-                style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                style={{ display: "flex", flexDirection: "column", gap: 5 }}
               >
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: "var(--muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  Date
-                </span>
+                <span style={{ ...eyebrowStyle, fontSize: 10 }}>Date</span>
                 <input
                   type="date"
                   value={toDate}
@@ -393,11 +549,12 @@ export function RoyaltySummaryClient({
                   min="2015-01-01"
                   max={`${new Date().getFullYear() + 1}-12-31`}
                   style={{
-                    padding: "7px 10px",
+                    padding: "8px 11px",
                     fontSize: 13,
                     border: "1px solid var(--border)",
-                    borderRadius: 6,
-                    background: "#fff",
+                    borderRadius: 9,
+                    background: "var(--surface)",
+                    color: "var(--text)",
                     fontFamily: "ui-monospace, monospace",
                     fontWeight: 600,
                   }}
@@ -406,19 +563,9 @@ export function RoyaltySummaryClient({
             ) : (
               <>
                 <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                  style={{ display: "flex", flexDirection: "column", gap: 5 }}
                 >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "var(--muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    From
-                  </span>
+                  <span style={{ ...eyebrowStyle, fontSize: 10 }}>From</span>
                   <input
                     type="date"
                     value={fromDate}
@@ -426,30 +573,21 @@ export function RoyaltySummaryClient({
                     min="2015-01-01"
                     max={`${new Date().getFullYear() + 1}-12-31`}
                     style={{
-                      padding: "7px 10px",
+                      padding: "8px 11px",
                       fontSize: 13,
                       border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      background: "#fff",
+                      borderRadius: 9,
+                      background: "var(--surface)",
+                      color: "var(--text)",
                       fontFamily: "ui-monospace, monospace",
                       fontWeight: 600,
                     }}
                   />
                 </label>
                 <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                  style={{ display: "flex", flexDirection: "column", gap: 5 }}
                 >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "var(--muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    To
-                  </span>
+                  <span style={{ ...eyebrowStyle, fontSize: 10 }}>To</span>
                   <input
                     type="date"
                     value={toDate}
@@ -457,11 +595,12 @@ export function RoyaltySummaryClient({
                     min="2015-01-01"
                     max={`${new Date().getFullYear() + 1}-12-31`}
                     style={{
-                      padding: "7px 10px",
+                      padding: "8px 11px",
                       fontSize: 13,
                       border: "1px solid var(--border)",
-                      borderRadius: 6,
-                      background: "#fff",
+                      borderRadius: 9,
+                      background: "var(--surface)",
+                      color: "var(--text)",
                       fontFamily: "ui-monospace, monospace",
                       fontWeight: 600,
                     }}
@@ -470,27 +609,18 @@ export function RoyaltySummaryClient({
               </>
             )}
             <div
-              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+              style={{ display: "flex", flexDirection: "column", gap: 5 }}
             >
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}
-              >
-                Group by
-              </span>
+              <span style={{ ...eyebrowStyle, fontSize: 10 }}>Group by</span>
               <div
                 role="tablist"
                 style={{
                   display: "inline-flex",
-                  background: "#f1f5f9",
-                  borderRadius: 999,
-                  padding: 3,
-                  gap: 2,
+                  background: "var(--surface-alt)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: 4,
+                  gap: 3,
                 }}
               >
                 {(["day", "week", "month"] as const).map((g) => (
@@ -510,6 +640,7 @@ export function RoyaltySummaryClient({
                 marginLeft: "auto",
                 fontSize: 11,
                 color: "var(--muted)",
+                fontWeight: 600,
               }}
             >
               {result &&
@@ -521,91 +652,38 @@ export function RoyaltySummaryClient({
             </div>
           </div>
 
-          {/* Totals tile */}
+          {/* Period totals */}
           {result && (
-            <div
-              style={{
-                padding: 14,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  marginBottom: 10,
-                }}
-              >
+            <div>
+              <div style={{ ...eyebrowStyle, fontSize: 10, marginBottom: 8 }}>
                 Period totals
               </div>
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                  gap: 10,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: 12,
                 }}
               >
-                <TotalTile
+                <StatTile
                   label="Received from vendors"
-                  value={fmtPoints(result.totals.received)}
-                  prefix="+"
-                  tone={{ bg: "#dcfce7", border: "#16a34a", fg: "#15803d" }}
+                  value={`+${fmtPoints(result.totals.received)}`}
+                  tone={{ main: "#10b981", glow: "rgba(16,185,129,0.15)" }}
+                  fg="var(--rsx-green)"
                 />
-                <TotalTile
+                <StatTile
                   label="Given to vendors"
-                  value={fmtPoints(result.totals.given)}
-                  prefix="−"
-                  tone={{ bg: "#fef3c7", border: "#d97706", fg: "#b45309" }}
+                  value={`−${fmtPoints(result.totals.given)}`}
+                  tone={{ main: "#f59e0b", glow: "rgba(245,158,11,0.15)" }}
+                  fg="var(--rsx-amber)"
                 />
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    background: netTone.bg,
-                    border: `1.5px solid ${netTone.border}`,
-                    borderRadius: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      color: netTone.fg,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Net (given − received)
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 800,
-                      color: netTone.fg,
-                      marginTop: 3,
-                      fontFamily: "ui-monospace, monospace",
-                      fontFeatureSettings: '"tnum"',
-                      letterSpacing: "-0.01em",
-                    }}
-                  >
-                    {netTone.icon}{" "}
-                    {fmtPoints(Math.abs(result.totals.net))}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: netTone.fg,
-                      marginTop: 2,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {netTone.caption}
-                  </div>
-                </div>
+                <StatTile
+                  label="Net (given − received)"
+                  value={`${netTone.icon} ${fmtPoints(Math.abs(result.totals.net))}`}
+                  caption={netTone.caption}
+                  tone={netTone.tile}
+                  fg={netTone.fg}
+                />
               </div>
             </div>
           )}
@@ -615,11 +693,11 @@ export function RoyaltySummaryClient({
             (result.buckets.length === 0 ? (
               <div
                 style={{
-                  padding: 32,
+                  padding: 36,
                   textAlign: "center",
                   background: "var(--surface)",
                   border: "1px dashed var(--border)",
-                  borderRadius: 12,
+                  borderRadius: 16,
                   color: "var(--muted)",
                   fontSize: 13,
                 }}
@@ -627,24 +705,19 @@ export function RoyaltySummaryClient({
                 No approved royalty entries in this range.
               </div>
             ) : (
-              <div
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  overflow: "hidden",
-                }}
-              >
+              <div style={cardShell}>
+                <PanelHeader>
+                  {granularity === "day"
+                    ? "Day by day"
+                    : granularity === "week"
+                      ? "Week by week"
+                      : "Month by month"}
+                </PanelHeader>
                 <table
                   style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
                 >
                   <thead>
-                    <tr
-                      style={{
-                        background: "#f8fafc",
-                        borderBottom: "1px solid #e2e8f0",
-                      }}
-                    >
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <th style={th()}>
                         {granularity === "day"
                           ? "Day"
@@ -664,9 +737,9 @@ export function RoyaltySummaryClient({
                         b.net > 0.5 ? "+" : b.net < -0.5 ? "−" : "";
                       const netColor =
                         b.net > 0.5
-                          ? "#b45309"
+                          ? "var(--rsx-amber)"
                           : b.net < -0.5
-                            ? "#15803d"
+                            ? "var(--rsx-green)"
                             : "var(--muted)";
                       const isExpanded = expandedBucketKey === b.key;
                       const isSingleBucket = result.buckets.length === 1;
@@ -677,25 +750,27 @@ export function RoyaltySummaryClient({
                       return (
                         <Fragment key={b.key}>
                           <tr
+                            className={isSingleBucket ? undefined : "rsx-click"}
                             onClick={() =>
                               setExpandedBucketKey(
                                 isExpanded ? null : b.key,
                               )
                             }
                             style={{
-                              borderBottom: "1px solid #f1f5f9",
-                              cursor: isSingleBucket ? "default" : "pointer",
-                              background: isExpanded ? "#fffbeb" : undefined,
+                              borderBottom: "1px solid var(--border)",
+                              background: isExpanded
+                                ? "rgba(232,197,114,0.16)"
+                                : undefined,
                             }}
                           >
-                            <td style={{ ...td(), fontWeight: 600 }}>
+                            <td style={{ ...td(), fontWeight: 700 }}>
                               {!isSingleBucket && (
                                 <span
                                   aria-hidden
                                   style={{
                                     display: "inline-block",
                                     width: 12,
-                                    color: "#94a3b8",
+                                    color: "var(--muted)",
                                     fontSize: 10,
                                     marginRight: 6,
                                   }}
@@ -725,7 +800,7 @@ export function RoyaltySummaryClient({
                                 fontFamily: "ui-monospace, monospace",
                                 color:
                                   b.received > 0
-                                    ? "#15803d"
+                                    ? "var(--rsx-green)"
                                     : "var(--muted-light)",
                                 fontWeight: b.received > 0 ? 700 : 500,
                               }}
@@ -741,7 +816,7 @@ export function RoyaltySummaryClient({
                                 fontFamily: "ui-monospace, monospace",
                                 color:
                                   b.given > 0
-                                    ? "#b45309"
+                                    ? "var(--rsx-amber)"
                                     : "var(--muted-light)",
                                 fontWeight: b.given > 0 ? 700 : 500,
                               }}
@@ -782,17 +857,18 @@ export function RoyaltySummaryClient({
                                 v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
                               const vColor =
                                 v.net > 0.5
-                                  ? "#b45309"
+                                  ? "var(--rsx-amber)"
                                   : v.net < -0.5
-                                    ? "#15803d"
+                                    ? "var(--rsx-green)"
                                     : "var(--muted)";
-                              const subBg = isExpanded ? "#fffbeb" : "#fafafa";
                               return (
                                 <tr
                                   key={`${b.key}:${v.id}`}
                                   style={{
-                                    background: subBg,
-                                    borderBottom: "1px solid #f1f5f9",
+                                    background: isExpanded
+                                      ? "rgba(232,197,114,0.08)"
+                                      : "var(--surface-alt)",
+                                    borderBottom: "1px solid var(--border)",
                                   }}
                                 >
                                   <td
@@ -801,7 +877,7 @@ export function RoyaltySummaryClient({
                                       padding: "6px 14px 6px 34px",
                                       fontSize: 12,
                                       fontWeight: 600,
-                                      color: "#475569",
+                                      color: "var(--muted)",
                                     }}
                                   >
                                     · {v.name}
@@ -815,7 +891,7 @@ export function RoyaltySummaryClient({
                                       fontFamily: "ui-monospace, monospace",
                                       color:
                                         v.received > 0
-                                          ? "#15803d"
+                                          ? "var(--rsx-green)"
                                           : "var(--muted-light)",
                                       fontWeight: v.received > 0 ? 700 : 500,
                                     }}
@@ -833,7 +909,7 @@ export function RoyaltySummaryClient({
                                       fontFamily: "ui-monospace, monospace",
                                       color:
                                         v.given > 0
-                                          ? "#b45309"
+                                          ? "var(--rsx-amber)"
                                           : "var(--muted-light)",
                                       fontWeight: v.given > 0 ? 700 : 500,
                                     }}
@@ -877,8 +953,8 @@ export function RoyaltySummaryClient({
                   <tfoot>
                     <tr
                       style={{
-                        background: "#fffbeb",
-                        borderTop: "2px solid #d97706",
+                        background: "rgba(232,197,114,0.16)",
+                        borderTop: "2px solid var(--gold)",
                       }}
                     >
                       <td style={{ ...td(), fontWeight: 800 }}>Total</td>
@@ -888,7 +964,7 @@ export function RoyaltySummaryClient({
                           textAlign: "right",
                           fontFamily: "ui-monospace, monospace",
                           fontWeight: 800,
-                          color: "#15803d",
+                          color: "var(--rsx-green)",
                         }}
                       >
                         {result.totals.received > 0
@@ -901,7 +977,7 @@ export function RoyaltySummaryClient({
                           textAlign: "right",
                           fontFamily: "ui-monospace, monospace",
                           fontWeight: 800,
-                          color: "#b45309",
+                          color: "var(--rsx-amber)",
                         }}
                       >
                         {result.totals.given > 0
@@ -940,33 +1016,18 @@ export function RoyaltySummaryClient({
             ))}
 
           {/* Per-vendor totals across the WHOLE selected range —
-              the answer to "show me which vendor". Always visible
-              when there's data; lets dad scan vendor-by-vendor net
-              without expanding each bucket. */}
+              the answer to "show me which vendor". Each row carries
+              the dates its entries fall on, and clicking expands to
+              the individual entries (date · direction · amount). */}
           {result && result.vendors.length > 0 && (
-            <div
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "10px 14px",
-                  background: "#f8fafc",
-                  borderBottom: "1px solid #e2e8f0",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  color: "#64748b",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
+            <div style={cardShell}>
+              <PanelHeader>
                 Per vendor · {result.vendors.length} vendor
                 {result.vendors.length === 1 ? "" : "s"} active in this range
-              </div>
+                <span style={{ marginLeft: "auto", fontWeight: 600, textTransform: "none", letterSpacing: 0 }}>
+                  Click a vendor for its entries
+                </span>
+              </PanelHeader>
               <table
                 style={{
                   width: "100%",
@@ -975,12 +1036,7 @@ export function RoyaltySummaryClient({
                 }}
               >
                 <thead>
-                  <tr
-                    style={{
-                      background: "#f8fafc",
-                      borderBottom: "1px solid #e2e8f0",
-                    }}
-                  >
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
                     <th style={th()}>Vendor</th>
                     <th style={{ ...th(), textAlign: "right" }}>Received</th>
                     <th style={{ ...th(), textAlign: "right" }}>Given</th>
@@ -994,67 +1050,194 @@ export function RoyaltySummaryClient({
                       v.net > 0.5 ? "+" : v.net < -0.5 ? "−" : "";
                     const netColor =
                       v.net > 0.5
-                        ? "#b45309"
+                        ? "var(--rsx-amber)"
                         : v.net < -0.5
-                          ? "#15803d"
+                          ? "var(--rsx-green)"
                           : "var(--muted)";
+                    const entries = v.entries ?? [];
+                    const isOpen = expandedVendorId === v.id;
+                    const dateLine =
+                      entries.length > 0
+                        ? fmtDateRange(
+                            entries[0].date,
+                            entries[entries.length - 1].date,
+                          )
+                        : null;
                     return (
-                      <tr
-                        key={v.id}
-                        style={{ borderBottom: "1px solid #f1f5f9" }}
-                      >
-                        <td style={{ ...td(), fontWeight: 600 }}>{v.name}</td>
-                        <td
+                      <Fragment key={v.id}>
+                        <tr
+                          className="rsx-click"
+                          onClick={() =>
+                            setExpandedVendorId(isOpen ? null : v.id)
+                          }
                           style={{
-                            ...td(),
-                            textAlign: "right",
-                            fontFamily: "ui-monospace, monospace",
-                            color:
-                              v.received > 0
-                                ? "#15803d"
-                                : "var(--muted-light)",
-                            fontWeight: v.received > 0 ? 700 : 500,
+                            borderBottom: "1px solid var(--border)",
+                            background: isOpen
+                              ? "rgba(232,197,114,0.16)"
+                              : undefined,
                           }}
                         >
-                          {v.received > 0
-                            ? `+${fmtPoints(v.received)}`
-                            : "—"}
-                        </td>
-                        <td
-                          style={{
-                            ...td(),
-                            textAlign: "right",
-                            fontFamily: "ui-monospace, monospace",
-                            color:
-                              v.given > 0 ? "#b45309" : "var(--muted-light)",
-                            fontWeight: v.given > 0 ? 700 : 500,
-                          }}
-                        >
-                          {v.given > 0 ? `−${fmtPoints(v.given)}` : "—"}
-                        </td>
-                        <td
-                          style={{
-                            ...td(),
-                            textAlign: "right",
-                            fontFamily: "ui-monospace, monospace",
-                            fontWeight: 800,
-                            color: netColor,
-                          }}
-                        >
-                          {netSign}
-                          {fmtPoints(Math.abs(v.net))}
-                        </td>
-                        <td
-                          style={{
-                            ...td(),
-                            textAlign: "right",
-                            color: "var(--muted)",
-                            fontSize: 12,
-                          }}
-                        >
-                          {v.entryCount}
-                        </td>
-                      </tr>
+                          <td style={{ ...td(), fontWeight: 700 }}>
+                            <span
+                              aria-hidden
+                              style={{
+                                display: "inline-block",
+                                width: 12,
+                                color: "var(--muted)",
+                                fontSize: 10,
+                                marginRight: 6,
+                              }}
+                            >
+                              {isOpen ? "▾" : "▸"}
+                            </span>
+                            {v.name}
+                            {dateLine && (
+                              <div
+                                style={{
+                                  marginLeft: 18,
+                                  marginTop: 2,
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  color: "var(--muted)",
+                                }}
+                              >
+                                {dateLine}
+                              </div>
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              ...td(),
+                              textAlign: "right",
+                              fontFamily: "ui-monospace, monospace",
+                              color:
+                                v.received > 0
+                                  ? "var(--rsx-green)"
+                                  : "var(--muted-light)",
+                              fontWeight: v.received > 0 ? 700 : 500,
+                            }}
+                          >
+                            {v.received > 0
+                              ? `+${fmtPoints(v.received)}`
+                              : "—"}
+                          </td>
+                          <td
+                            style={{
+                              ...td(),
+                              textAlign: "right",
+                              fontFamily: "ui-monospace, monospace",
+                              color:
+                                v.given > 0
+                                  ? "var(--rsx-amber)"
+                                  : "var(--muted-light)",
+                              fontWeight: v.given > 0 ? 700 : 500,
+                            }}
+                          >
+                            {v.given > 0 ? `−${fmtPoints(v.given)}` : "—"}
+                          </td>
+                          <td
+                            style={{
+                              ...td(),
+                              textAlign: "right",
+                              fontFamily: "ui-monospace, monospace",
+                              fontWeight: 800,
+                              color: netColor,
+                            }}
+                          >
+                            {netSign}
+                            {fmtPoints(Math.abs(v.net))}
+                          </td>
+                          <td
+                            style={{
+                              ...td(),
+                              textAlign: "right",
+                              color: "var(--muted)",
+                              fontSize: 12,
+                            }}
+                          >
+                            {v.entryCount}
+                          </td>
+                        </tr>
+                        {/* The vendor's individual entries — one row per
+                            entry, date in the first column, the amount in
+                            its direction's column. */}
+                        {isOpen &&
+                          entries.map((en, i) => (
+                            <tr
+                              key={`${v.id}:${en.date}:${i}`}
+                              style={{
+                                background: "rgba(232,197,114,0.08)",
+                                borderBottom: "1px solid var(--border)",
+                              }}
+                            >
+                              <td
+                                style={{
+                                  ...td(),
+                                  padding: "6px 14px 6px 34px",
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  color: "var(--muted)",
+                                }}
+                              >
+                                · {fmtDate(en.date)}
+                              </td>
+                              <td
+                                style={{
+                                  ...td(),
+                                  padding: "6px 14px",
+                                  textAlign: "right",
+                                  fontSize: 12,
+                                  fontFamily: "ui-monospace, monospace",
+                                  color:
+                                    en.type === "received"
+                                      ? "var(--rsx-green)"
+                                      : "var(--muted-light)",
+                                  fontWeight: en.type === "received" ? 700 : 500,
+                                }}
+                              >
+                                {en.type === "received"
+                                  ? `+${fmtPoints(en.amount)}`
+                                  : "—"}
+                              </td>
+                              <td
+                                style={{
+                                  ...td(),
+                                  padding: "6px 14px",
+                                  textAlign: "right",
+                                  fontSize: 12,
+                                  fontFamily: "ui-monospace, monospace",
+                                  color:
+                                    en.type === "given"
+                                      ? "var(--rsx-amber)"
+                                      : "var(--muted-light)",
+                                  fontWeight: en.type === "given" ? 700 : 500,
+                                }}
+                              >
+                                {en.type === "given"
+                                  ? `−${fmtPoints(en.amount)}`
+                                  : "—"}
+                              </td>
+                              <td
+                                style={{
+                                  ...td(),
+                                  padding: "6px 14px",
+                                  textAlign: "right",
+                                  fontSize: 12,
+                                  fontFamily: "ui-monospace, monospace",
+                                  fontWeight: 700,
+                                  color:
+                                    en.type === "given"
+                                      ? "var(--rsx-amber)"
+                                      : "var(--rsx-green)",
+                                }}
+                              >
+                                {en.type === "given" ? "+" : "−"}
+                                {fmtPoints(en.amount)}
+                              </td>
+                              <td style={{ ...td(), padding: "6px 14px" }} />
+                            </tr>
+                          ))}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -1101,15 +1284,16 @@ function GranButton({
       aria-selected={active}
       onClick={onClick}
       style={{
-        padding: "5px 14px",
+        padding: "6px 16px",
         fontSize: 12,
         fontWeight: 700,
-        background: active ? "#fff" : "transparent",
-        color: active ? "#0f172a" : "#64748b",
+        background: active ? "var(--gold)" : "transparent",
+        color: active ? "#fff" : "var(--muted)",
         border: "none",
-        borderRadius: 999,
+        borderRadius: 9,
         cursor: active ? "default" : "pointer",
-        boxShadow: active ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+        boxShadow: active ? "0 2px 6px rgba(0,0,0,0.18)" : "none",
+        transition: "background 0.12s, color 0.12s",
       }}
     >
       {label}
@@ -1117,61 +1301,12 @@ function GranButton({
   );
 }
 
-function TotalTile({
-  label,
-  value,
-  prefix,
-  tone,
-}: {
-  label: string;
-  value: string;
-  prefix?: string;
-  tone: { bg: string; border: string; fg: string };
-}) {
-  return (
-    <div
-      style={{
-        padding: "12px 14px",
-        background: tone.bg,
-        border: `1px solid ${tone.border}`,
-        borderRadius: 10,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 800,
-          color: tone.fg,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 800,
-          color: tone.fg,
-          marginTop: 3,
-          fontFamily: "ui-monospace, monospace",
-          fontFeatureSettings: '"tnum"',
-          letterSpacing: "-0.01em",
-        }}
-      >
-        {prefix ?? ""}
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function th(): React.CSSProperties {
   return {
-    padding: "10px 14px",
+    padding: "11px 14px",
     fontSize: 11,
     fontWeight: 700,
-    color: "#64748b",
+    color: "var(--muted)",
     textTransform: "uppercase",
     letterSpacing: "0.06em",
     textAlign: "left",
@@ -1179,7 +1314,7 @@ function th(): React.CSSProperties {
 }
 function td(): React.CSSProperties {
   return {
-    padding: "10px 14px",
+    padding: "11px 14px",
     fontSize: 13,
     color: "var(--text)",
   };
