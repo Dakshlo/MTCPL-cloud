@@ -44,6 +44,11 @@ export function HoldBillForm({
   const [reason, setReason] = useState<string>(currentReason ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  /** Is the field currently sitting on the whole outstanding? Drives
+   *  the ticked state on the "Full amount" button. Tolerant to a
+   *  paise of float drift. */
+  const isFull =
+    amount.trim() !== "" && Math.abs(Number(amount) - maxAmount) < 0.005;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -172,25 +177,55 @@ export function HoldBillForm({
       >
         Amount to hold (₹)
       </label>
-      <input
-        type="number"
-        min="0"
-        max={maxAmount}
-        step="0.01"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        autoFocus
-        style={{
-          fontSize: 14,
-          padding: "9px 12px",
-          border: "1px solid #b45309",
-          borderRadius: 8,
-          background: "#fff",
-          color: "var(--text)",
-          fontFamily: "ui-monospace, monospace",
-          fontWeight: 700,
-        }}
-      />
+      {/* Daksh, Aug 2026 — "Full amount" fills the field with this
+          bill's whole outstanding, so holding an entire bill is one
+          tap instead of typing a 7-digit figure (and mistyping it).
+          Purely a client-side convenience: it writes into the same
+          input, and the server action re-validates the cap exactly as
+          before. Nothing is held until "Apply hold" + confirm. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+        <input
+          type="number"
+          min="0"
+          max={maxAmount}
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          autoFocus
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 14,
+            padding: "9px 12px",
+            border: "1px solid #b45309",
+            borderRadius: 8,
+            background: "#fff",
+            color: "var(--text)",
+            fontFamily: "ui-monospace, monospace",
+            fontWeight: 700,
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setAmount(String(maxAmount))}
+          disabled={pending}
+          title={`Hold the entire outstanding — ₹${maxAmount.toLocaleString("en-IN")}`}
+          style={{
+            flexShrink: 0,
+            padding: "9px 14px",
+            fontSize: 12,
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+            color: isFull ? "#fff" : "#92400e",
+            background: isFull ? "#b45309" : "#fff",
+            border: "1px solid #b45309",
+            borderRadius: 8,
+            cursor: "pointer",
+          }}
+        >
+          {isFull ? "✓ Full amount" : "Full amount"}
+        </button>
+      </div>
       <p
         style={{
           margin: 0,
@@ -199,7 +234,7 @@ export function HoldBillForm({
           fontFamily: "ui-monospace, monospace",
         }}
       >
-        Max ₹{maxAmount.toLocaleString("en-IN")} (the bill's
+        Max ₹{maxAmount.toLocaleString("en-IN")} (the bill&apos;s
         outstanding)
       </p>
 
