@@ -13,9 +13,9 @@
  * Round 2 (Daksh, Aug 2026):
  *   • The three hero tiles are now BUTTONS — pressing one re-lenses
  *     the vendor list (order + which number leads on each row).
- *   • "Still outstanding" is blurred by default with a 20-second peek,
- *     so the biggest number on the screen isn't readable over a
- *     shoulder. Same idea as the Peek-for-5s control on Due Bills.
+ *   • (An earlier "Peek for 20s" blur on Still outstanding was removed
+ *     — the page is already owner+developer only, so hiding the figure
+ *     from the only two people who can open it was pure friction.)
  *   • The vendor sheet is wider, locks the page behind it (it used to
  *     scroll-chain into the background), closes on Esc, and carries a
  *     much fuller stat block.
@@ -24,7 +24,7 @@
  * Read-only view: nothing here mutates anything.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 // ── Types shared with the server page ──────────────────────────────
 
@@ -155,9 +155,6 @@ const display: React.CSSProperties = {
   color: C.ink,
 };
 
-/** Seconds the "Still outstanding" figure stays readable after a peek. */
-const PEEK_SECONDS = 20;
-
 export function FinanceAnalysisClient({
   vendors,
   months,
@@ -179,16 +176,10 @@ export function FinanceAnalysisClient({
   const [alpha, setAlpha] = useState(false); // A–Z overrides the metric ordering
   const [openVendor, setOpenVendor] = useState<VendorAnalysis | null>(null);
 
-  // ── Peek: the outstanding figure is blurred until asked for ──────
-  const [peekLeft, setPeekLeft] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (peekLeft <= 0) return;
-    timerRef.current = setInterval(() => setPeekLeft((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [peekLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  // (Aug 2026 — the "Peek for 20s" blur on Still outstanding was
+  // removed at Daksh's request. The page is already restricted to the
+  // owner and the developer, so hiding the figure from the only two
+  // people allowed to open it was friction with no benefit.)
 
   const collectedPct = totals.billed > 0 ? (totals.paid / totals.billed) * 100 : 0;
 
@@ -278,11 +269,6 @@ export function FinanceAnalysisClient({
           soft={C.amberSoft}
           active={!alpha && metric === "outstanding"}
           onClick={() => pick("outstanding")}
-          // The single most sensitive figure on the screen — hidden
-          // until deliberately revealed, then auto-hidden again.
-          hidden={peekLeft <= 0}
-          peekLeft={peekLeft}
-          onPeek={() => setPeekLeft(PEEK_SECONDS)}
         />
       </div>
 
@@ -721,14 +707,11 @@ function VendorSheet({
 // ── Small pieces ───────────────────────────────────────────────────
 
 function HeroTile({
-  label, value, exact, foot, accent, soft, active, onClick, hidden, peekLeft, onPeek,
+  label, value, exact, foot, accent, soft, active, onClick,
 }: {
   label: string; value: string; exact: string; foot: string; accent: string; soft: string;
   active?: boolean; onClick?: () => void;
-  /** When true the figures are blurred until `onPeek` is pressed. */
-  hidden?: boolean; peekLeft?: number; onPeek?: () => void;
 }) {
-  const masked = !!hidden;
   return (
     <div
       className={`fa-hero${active ? " is-active" : ""}`}
@@ -765,40 +748,10 @@ function HeroTile({
           )}
         </div>
 
-        <div style={{ position: "relative" }}>
-          <div
-            style={{
-              filter: masked ? "blur(11px)" : "none",
-              transition: "filter .28s ease",
-              userSelect: masked ? "none" : "auto",
-              pointerEvents: masked ? "none" : "auto",
-            }}
-          >
-            <div style={{ ...display, fontSize: 34, marginTop: 12, lineHeight: 1.05 }}>{value}</div>
-            <div style={{ fontSize: 12.5, color: C.ink2, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>{exact}</div>
-          </div>
+        <div style={{ ...display, fontSize: 34, marginTop: 12, lineHeight: 1.05 }}>{value}</div>
+        <div style={{ fontSize: 12.5, color: C.ink2, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>{exact}</div>
 
-          {masked && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onPeek?.();
-              }}
-              className="fa-peek"
-              style={{ position: "absolute", left: 0, top: 18 }}
-            >
-              👁 Peek for {PEEK_SECONDS}s
-            </button>
-          )}
-        </div>
-
-        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 9 }}>
-          {!masked && (peekLeft ?? 0) > 0 ? (
-            <span style={{ color: accent, fontWeight: 700 }}>Hiding again in {peekLeft}s · </span>
-          ) : null}
-          {foot}
-        </div>
+        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 9 }}>{foot}</div>
       </div>
     </div>
   );
@@ -909,15 +862,6 @@ function Styles() {
 .fa-hero[role="button"]:hover { transform: translateY(-2px); }
 .fa-hero[role="button"]:active { transform: translateY(0); }
 .fa-hero:focus-visible { outline: 2px solid ${C.indigo}; outline-offset: 3px; }
-
-.fa-peek {
-  padding: 8px 14px; font-size: 12.5px; font-weight: 700;
-  color: ${C.ink}; background: rgba(255,255,255,0.92);
-  border: 1px solid ${C.line}; border-radius: 999px; cursor: pointer;
-  box-shadow: 0 2px 10px rgba(11,18,32,0.12);
-  backdrop-filter: blur(4px);
-}
-.fa-peek:hover { background: #fff; border-color: ${C.amber}; color: ${C.amber}; }
 
 .fa-scrim {
   position: fixed; inset: 0; z-index: 200;

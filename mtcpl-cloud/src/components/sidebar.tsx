@@ -900,6 +900,22 @@ export function Sidebar({
     }
   }
 
+  // Finance Analysis is the owner's whole-department money view. Its
+  // role list is ["developer","owner"], but there are THREE owner
+  // accounts (NARESH, NIKHIL, VINAY) — so a plain role filter put the
+  // link in Nikhil's and Vinay's menus too. The page itself already
+  // bounces them (it re-checks the name server-side), but Daksh asked
+  // for it to not even appear. Strip it here for any owner who isn't
+  // Naresh; the developer keeps it.
+  if (role !== "developer" && !upperName.includes("NARESH")) {
+    visibleEntries = visibleEntries.filter(
+      (e) =>
+        e.type === "divider" ||
+        e.type === "group" ||
+        (e as NavItem).href !== "/accounts/analysis",
+    );
+  }
+
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
     // /slabs/view (Plan Generator) owns /slabs/view and /planning
