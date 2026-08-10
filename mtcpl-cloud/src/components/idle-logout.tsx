@@ -31,6 +31,21 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 const ACTIVITY_KEY = "mtcpl:lastActivity";
 const LOGOUT_KEY = "mtcpl:idleLogout";
 
+/** Reset the shared idle clock to "active right now". The login form
+ *  calls this the moment OTP verification succeeds: a brand-new login
+ *  must never inherit the PREVIOUS session's last-activity stamp. When
+ *  a session expires on its own (overnight), doLogout() never runs, so
+ *  the old stamp survives into the next login — and the mount check
+ *  below judged the fresh login "idle" and kicked it out within
+ *  seconds (the "login twice every morning" bug, Aug 2026). */
+export function markActivityNow() {
+  try {
+    localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
   // <= 0 disables the feature for this user (developer, or an explicit
   // "Never" set by the developer in Settings).
@@ -94,17 +109,55 @@ export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
     // persisted in localStorage, NOT from this fresh mount. Without this,
     // closing the tab silently reset the clock and an abandoned session
     // stayed logged in when reopened (Daksh flagged Jul 2026).
+    let cancelled = false;
     try {
       const storedRaw = localStorage.getItem(ACTIVITY_KEY);
       const stored = storedRaw ? Number(storedRaw) : 0;
       if (stored > 0) {
         if (Date.now() - stored >= idleMs) {
-          // Away longer than the whole window → sign out now, no warning.
-          doLogout();
-          return;
+          // Stamp says "away longer than the whole window". That is EITHER
+          // an abandoned session (sign out, as designed) OR a brand-new
+          // login that inherited the previous session's stamp — when a
+          // session dies on its own, doLogout() never ran, so the stale
+          // stamp survives into the next login and this check used to kick
+          // the user out seconds after OTP (dad's double-login bug, Aug
+          // 2026). Tell them apart by the session's own sign-in time: a
+          // last_sign_in_at NEWER than the stamp can only mean "logged in
+          // after that activity" → fresh start, never a logout.
+          // (getSession reads local storage — fast, no network round-trip.)
+          lastActivity.current = Date.now(); // hold the 1s tick while we decide
+          try {
+            const supabase = createBrowserSupabaseClient();
+            void supabase.auth
+              .getSession()
+              .then(({ data }) => {
+                if (cancelled) return;
+                const signedInAt = data.session?.user?.last_sign_in_at;
+                const signedInMs = signedInAt ? Date.parse(signedInAt) : 0;
+                if (Number.isFinite(signedInMs) && signedInMs > stored) {
+                  // Fresh login — reset the shared clock and carry on.
+                  lastActivity.current = Date.now();
+                  try {
+                    localStorage.setItem(ACTIVITY_KEY, String(lastActivity.current));
+                  } catch {
+                    /* ignore */
+                  }
+                } else {
+                  doLogout();
+                }
+              })
+              .catch(() => {
+                if (!cancelled) doLogout();
+              });
+          } catch {
+            doLogout();
+          }
+          // No early return: fall through to register listeners + the tick,
+          // so a "fresh login" verdict leaves idle tracking fully armed.
+        } else {
+          // Reopened within the window → resume the countdown where it left off.
+          lastActivity.current = stored;
         }
-        // Reopened within the window → resume the countdown where it left off.
-        lastActivity.current = stored;
       } else {
         // No history (first login here, or storage cleared) → start fresh.
         lastActivity.current = Date.now();
@@ -162,6 +215,7 @@ export function IdleLogout({ idleMinutes }: { idleMinutes: number }) {
     }, 1000);
 
     return () => {
+      cancelled = true; // a pending mount-decision must not act on a dead mount
       for (const ev of events) window.removeEventListener(ev, onActivity);
       window.removeEventListener("storage", onStorage);
       clearInterval(tick);

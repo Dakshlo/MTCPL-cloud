@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { markActivityNow } from "@/components/idle-logout";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type Step = "phone" | "otp";
@@ -97,6 +98,11 @@ export function AuthForm() {
         type: "sms",
       });
       if (err) throw err;
+      // Fresh login = fresh idle clock. When the previous session expired
+      // on its own, its last-activity stamp was never cleared — and
+      // IdleLogout's mount check then judged THIS login "idle" and kicked
+      // it out within seconds (the "login twice every morning" bug).
+      markActivityNow();
       // Daksh May 2026 round 2 — full-card success takeover. The
       // form swaps out entirely: OTP inputs disappear, a centered
       // "Verified successfully" sits above a pulsing orange-glow
