@@ -445,12 +445,23 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <div className="page-header">
+      {/* Aug 2026 makeover (Daksh: "worst page in both UI and UX").
+          The sections below used to be one long full-width stack — a
+          dozen near-identical rows that all looked equally important
+          and wasted the whole right half of a desktop screen. They now
+          flow into a responsive card board (see .settings-grid), and
+          each card carries a coloured icon tile so related settings
+          read as a family. Card + modal chrome both live in
+          <PeekSection>. */}
+      <div className="settings-hero">
+        <div className="settings-hero-tick" aria-hidden />
         <div>
           <h1>Settings</h1>
-          <p className="muted">Manage temples and system users.</p>
+          <p>Everything that configures the system — people, master data, messaging and maintenance.</p>
         </div>
       </div>
+
+      <div className="settings-grid">
 
       {/* Mig 057 — Personal Ledger card removed. The module was
           extracted to a standalone app (its own Supabase + Vercel)
@@ -470,7 +481,7 @@ export default async function SettingsPage() {
           (daily report = owner/developer; the rest = developer). Everything
           lives in app_settings; no redeploy needed. */}
       {(canManageWaReport || canManageVendorCc || canManageWaAlerts || canManageWaCutting) && (
-        <PeekSection icon="💬" title="WhatsApp" modalMaxWidth={560}>
+        <PeekSection icon="💬" title="WhatsApp" tone="green" modalMaxWidth={560}>
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             {canManageWaReport && (
               <div>
@@ -519,7 +530,7 @@ export default async function SettingsPage() {
           slab skips the runner and goes straight where it needs to. Stored in
           app_settings. */}
       {canManageSlabStages && slabTransferStages && (
-        <PeekSection icon="🔁" title="Slab Transfer" subtitle="Cutting→Carving · Carving→Dispatch lanes" modalMaxWidth={560}>
+        <PeekSection icon="🔁" title="Slab Transfer" tone="violet" subtitle="Cutting→Carving · Carving→Dispatch lanes" modalMaxWidth={560}>
           <div className="settings-card">
             <SlabTransferEditor initial={slabTransferStages} />
           </div>
@@ -533,7 +544,7 @@ export default async function SettingsPage() {
       {canManageTrucks && (
         <PeekSection
           icon="🚚"
-          title="Transfer trucks"
+          title="Transfer trucks" tone="violet"
           subtitle={`${truckList.filter((t) => t.is_active).length} active · slab-transfer fleet`}
           modalMaxWidth={560}
         >
@@ -613,7 +624,7 @@ export default async function SettingsPage() {
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <PeekSection
           icon="👥"
-          title="Users"
+          title="Users" tone="blue"
           count={activeUsers.length}          modalMaxWidth={1100}
         >
           {/* ADD USER — Jul 2026. Self-signup is closed (bot attack), so new
@@ -983,7 +994,7 @@ export default async function SettingsPage() {
       {!isCarvingHead && (
       <PeekSection
         icon="🪨"
-        title="Stone Types"
+        title="Stone Types" tone="violet"
         count={stoneList.length}        modalMaxWidth={1100}
       >
         <div className="settings-card">
@@ -1156,7 +1167,7 @@ export default async function SettingsPage() {
           server-side by the slab-count check. */}
       <PeekSection
         icon="🛕"
-        title="Temple Codes"
+        title="Temple Codes" tone="violet"
         count={templeList.length}        modalMaxWidth={1100}
       >
         <div className="settings-card">
@@ -1245,7 +1256,7 @@ export default async function SettingsPage() {
       {(currentUser.role === "developer" || currentUser.role === "owner") && (
         <PeekSection
           icon="🛰"
-          title="Live Users"
+          title="Live Users" tone="blue"
           count={liveUsers.length}          modalMaxWidth={1100}
         >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -1409,7 +1420,7 @@ export default async function SettingsPage() {
       {(currentUser.role === "developer" || currentUser.role === "owner") && (
         <PeekSection
           icon="🕐"
-          title="Screen Time Today"
+          title="Screen Time Today" tone="blue"
           count={screenTimeData.length}        >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {screenTimeData.length === 0 ? (
@@ -1478,7 +1489,7 @@ export default async function SettingsPage() {
       {(currentUser.role === "owner" || currentUser.role === "developer") && (
         <PeekSection
           icon="📋"
-          title="Audit Log"
+          title="Audit Log" tone="slate"
           count={(recentAudit ?? []).length}        >
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             {(recentAudit ?? []).length === 0 ? (
@@ -1507,7 +1518,7 @@ export default async function SettingsPage() {
       {currentUser.role === "developer" && (
         <PeekSection
           icon="💾"
-          title="Full System Backup"        >
+          title="Full System Backup" tone="amber"        >
           <div className="settings-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>Export: blocks · slab_requirements · cut_sessions · temples · vendors · profiles</p>
@@ -1532,7 +1543,7 @@ export default async function SettingsPage() {
       {/* File transfer — DEVELOPER ONLY. Upload on one device, download on
           another after logging in (Mac ↔ tablet, no email/AirDrop). */}
       {canTransfer && (
-        <PeekSection icon="📁" title="File Transfer" count={transferFileCount} subtitle="Send files between your devices — upload here, download after logging in elsewhere." modalMaxWidth={700}>
+        <PeekSection icon="📁" title="File Transfer" tone="slate" count={transferFileCount} subtitle="Send files between your devices — upload here, download after logging in elsewhere." modalMaxWidth={700}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <DevFileTransfer />
 
@@ -1576,6 +1587,8 @@ export default async function SettingsPage() {
           </div>
         </PeekSection>
       )}
+
+      </div>{/* /.settings-grid — maintenance sits full-width below */}
 
       {/* Maintenance & system status — DEVELOPER ONLY. Tucked into a
           collapsible at the very bottom so it doesn't compete with

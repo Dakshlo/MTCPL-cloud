@@ -293,12 +293,18 @@ export function FinanceAnalysisClient({
             border: `1px solid ${C.line}`,
           }}
         >
+          {/* Liquid fills (Daksh: "that settlement bar should be a
+              moving liquid of different colour of paid and open").
+              Each side is a wide multi-stop gradient that drifts
+              sideways forever, with a soft sheen riding over it — so
+              the two colours read as two liquids meeting, not two flat
+              blocks. Pure CSS; no JS ticking. */}
           <div
-            className="fa-grow"
-            style={{ width: `${Math.min(collectedPct, 100)}%`, background: `linear-gradient(90deg, ${C.green}, #35c07a)` }}
+            className="fa-grow fa-liquid fa-liquid-green"
+            style={{ width: `${Math.min(collectedPct, 100)}%` }}
             title={`Paid ${inr(totals.paid)}`}
           />
-          <div style={{ flex: 1, background: `linear-gradient(90deg, ${C.amber}, #e0a44a)` }} title={`Outstanding ${inr(totals.outstanding)}`} />
+          <div className="fa-liquid fa-liquid-amber" style={{ flex: 1 }} title={`Outstanding ${inr(totals.outstanding)}`} />
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: C.muted }}>
           {collectedPct.toFixed(1)}% of all billed value has been settled.
@@ -351,8 +357,8 @@ export function FinanceAnalysisClient({
               </div>
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
-                  className="fa-grow"
-                  style={{ width: `${(a.amount / maxAging) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.amber}, #e8b45c)` }}
+                  className="fa-grow fa-liquid fa-liquid-amber"
+                  style={{ width: `${(a.amount / maxAging) * 100}%`, height: "100%", borderRadius: 999 }}
                 />
               </div>
             </div>
@@ -372,8 +378,8 @@ export function FinanceAnalysisClient({
               </div>
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
-                  className="fa-grow"
-                  style={{ width: `${(h.amount / maxHead) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)` }}
+                  className="fa-grow fa-liquid fa-liquid-indigo"
+                  style={{ width: `${(h.amount / maxHead) * 100}%`, height: "100%", borderRadius: 999 }}
                 />
               </div>
             </div>
@@ -484,7 +490,7 @@ export function FinanceAnalysisClient({
                   />
                   <div>
                     <div style={{ height: 7, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
-                      <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: pct >= 99.5 ? C.green : `linear-gradient(90deg, ${C.green}, #7fd4a4)` }} />
+                      <div className="fa-liquid fa-liquid-green" style={{ width: `${Math.min(pct, 100)}%`, height: "100%" }} />
                     </div>
                     <div style={{ fontSize: 10.5, color: C.muted, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>
                       {pct.toFixed(0)}% settled
@@ -579,7 +585,7 @@ function VendorSheet({
 
           <div style={{ marginTop: 18 }}>
             <div style={{ height: 10, borderRadius: 999, background: C.wash, overflow: "hidden", border: `1px solid ${C.line}` }}>
-              <div className="fa-grow" style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: `linear-gradient(90deg, ${C.green}, #43c98a)` }} />
+              <div className="fa-grow fa-liquid fa-liquid-green" style={{ width: `${Math.min(pct, 100)}%`, height: "100%" }} />
             </div>
             <div style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>
               {pct.toFixed(1)}% settled
@@ -857,6 +863,45 @@ function Styles() {
 .fa-bar { transition: height .5s cubic-bezier(.22,1,.36,1); }
 .fa-grow { animation: faGrow .6s cubic-bezier(.22,1,.36,1) both; }
 @keyframes faGrow { from { transform: scaleX(0); transform-origin: left } to { transform: scaleX(1); transform-origin: left } }
+
+/* ── Liquid fills ────────────────────────────────────────────────
+   A wide multi-stop gradient drifting sideways forever, plus a soft
+   sheen riding over it on a different period — the two never line up,
+   so the surface reads as moving liquid rather than a looping band.
+   background-size 300% is what gives the drift room to travel. */
+.fa-liquid {
+  position: relative;
+  overflow: hidden;
+  background-size: 300% 100%;
+  animation: faFlow 9s linear infinite;
+}
+.fa-liquid::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,.42) 45%,
+    rgba(255,255,255,0) 70%);
+  background-size: 220% 100%;
+  animation: faSheen 5.5s ease-in-out infinite;
+}
+/* A bar that both grows in AND flows needs ONE animation declaration —
+   .fa-liquid's would otherwise overwrite .fa-grow's (same specificity,
+   later in source wins) and the grow-in would silently vanish. */
+.fa-grow.fa-liquid {
+  animation: faGrow .6s cubic-bezier(.22,1,.36,1) both,
+             faFlow 9s linear infinite;
+}
+.fa-liquid-green { background-image: linear-gradient(90deg, #0f9d58, #35c07a, #0b8c4d, #46cf8b, #0f9d58); }
+.fa-liquid-amber { background-image: linear-gradient(90deg, #c2740a, #e0a44a, #a95f05, #efb968, #c2740a); }
+.fa-liquid-indigo { background-image: linear-gradient(90deg, #4f46e5, #8b93f8, #3f36d4, #a5abfb, #4f46e5); }
+@keyframes faFlow  { 0% { background-position: 0% 50% }   100% { background-position: 300% 50% } }
+@keyframes faSheen { 0% { background-position: 120% 0 }   100% { background-position: -120% 0 } }
+
+/* Anyone who asked the OS for less motion gets the calm version. */
+@media (prefers-reduced-motion: reduce) {
+  .fa-liquid, .fa-liquid::after { animation: none; }
+}
 
 .fa-hero { transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease, border-color .16s ease; }
 .fa-hero[role="button"]:hover { transform: translateY(-2px); }

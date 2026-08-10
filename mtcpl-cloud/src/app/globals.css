@@ -2247,6 +2247,51 @@ a > .acct-kpi {
 
 /* ── Settings Page ───────────────────────────────────────────── */
 
+/* Aug 2026 makeover. The page was a dozen identical full-width rows;
+   it's now a card board with a proper masthead. Card + modal chrome
+   live in components/peek-section.tsx — these rules cover the page
+   frame and the content INSIDE each section (tables, forms, rows). */
+
+.settings-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.settings-hero-tick {
+  width: 5px;
+  align-self: stretch;
+  min-height: 46px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--gold), var(--gold-border));
+  flex-shrink: 0;
+}
+.settings-hero h1 {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--text);
+}
+.settings-hero p {
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 640px;
+}
+
+/* The board. auto-fill + minmax means it's 1 column on a phone and
+   grows to 2–3 on a desktop without a single media query. */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+/* ── Inside a section (the modal body) ─────────────────────────── */
+
 .settings-section {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2306,9 +2351,63 @@ a > .acct-kpi {
 }
 
 .settings-table-row-face::-webkit-details-marker { display: none; }
-.settings-table-row-face:hover { background: var(--bg); }
+.settings-table-row-face:hover { background: var(--surface-alt); }
+/* Open row reads as "expanded", and its chevron turns. */
+.settings-table-row[open] > .settings-table-row-face {
+  background: var(--gold-subtle, var(--surface-alt));
+  font-weight: 600;
+}
 
 .settings-temple-name { font-weight: 600; color: var(--text); }
+
+/* ── Inner polish (Aug 2026 makeover) ──────────────────────────
+   These apply to the content the settings modals render — the temple
+   / user / stone tables, the inline forms and the edit drawers. All
+   colour + spacing; no layout is reflowed. */
+
+.settings-section {
+  border-radius: 16px;
+}
+.settings-section-header {
+  background: linear-gradient(180deg, var(--surface-alt), var(--surface));
+}
+.settings-table-head {
+  background: linear-gradient(180deg, var(--surface-alt), var(--surface));
+  border-radius: 12px 12px 0 0;
+  letter-spacing: 0.07em;
+}
+.settings-table-row { transition: background .12s ease; }
+.settings-table-edit {
+  background: var(--surface-alt);
+  border-radius: 0 0 12px 12px;
+}
+.settings-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+/* Inputs inside a settings modal get a consistent, recessed field. */
+.peek-dialog-body input[type="text"],
+.peek-dialog-body input[type="tel"],
+.peek-dialog-body input[type="number"],
+.peek-dialog-body input[type="date"],
+.peek-dialog-body select,
+.peek-dialog-body textarea {
+  border-radius: 9px;
+}
+.peek-dialog-body input:focus,
+.peek-dialog-body select:focus,
+.peek-dialog-body textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-subtle, rgba(232,197,114,0.28));
+}
+.settings-sql { border-radius: 12px; }
 
 .code-badge {
   font-family: ui-monospace, monospace;
