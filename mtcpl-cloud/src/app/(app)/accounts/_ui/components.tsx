@@ -364,7 +364,7 @@ export function KpiCard({
         overflow: "hidden",
       }}
     >
-      {/* Accent bar — fades out downward so it reads as a lit edge
+      {/* Accent edge — fades out downward so it reads as a lit edge
           rather than a painted stripe. */}
       <div
         style={{
@@ -372,11 +372,32 @@ export function KpiCard({
           left: 0,
           top: 0,
           bottom: 0,
-          width: 3,
+          width: 4,
           background: `linear-gradient(180deg, ${t.accent} 0%, ${t.accent}55 100%)`,
         }}
       />
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+      {/* Soft tone-coloured glow bleeding in from the top-right. This
+          is what actually makes the card read as "premium" rather than
+          a plain white box — it tints the card with its own meaning
+          (red for overdue, green for paid) without colouring the whole
+          surface and hurting text contrast. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          right: -30,
+          top: -30,
+          width: 110,
+          height: 110,
+          borderRadius: "50%",
+          background: t.bg,
+          opacity: 0.75,
+          pointerEvents: "none",
+        }}
+      />
+      {/* position:relative keeps the content painting ABOVE the
+          absolutely-positioned glow above it. */}
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{

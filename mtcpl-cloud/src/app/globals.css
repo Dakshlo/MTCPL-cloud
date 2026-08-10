@@ -2190,6 +2190,35 @@ details.block-card[open] {
    they must not follow the theme. Nothing here changes layout: only
    colour, shadow, and a 1px lift on hover. */
 
+/* The finance shell (accounts/layout.tsx). `display: contents` means
+   this wrapper generates NO box — its children stay direct flex items
+   of .page-content, so gaps/order are untouched. It exists purely as a
+   CSS hook for the two rules below. */
+.acct-fluid {
+  display: contents;
+}
+
+/* 1. Finance stretches to the full window on wide monitors — the
+      1720px cap that suits reading-width pages just wastes screen on
+      an 11-column bills table. */
+.page-content:has(> .acct-fluid) {
+  max-width: none;
+}
+
+/* 2. Table readability across every finance table at once. Zebra +
+      hover can't be done from the inline TABLE_STYLES objects. Rows
+      that set their own background inline (selected, flagged) win, as
+      inline styles beat these. */
+.acct-fluid tbody tr {
+  transition: background 0.1s ease;
+}
+.acct-fluid tbody tr:nth-of-type(even) {
+  background: #fafbfd;
+}
+.acct-fluid tbody tr:hover {
+  background: #eef2ff;
+}
+
 .acct-kpi {
   transition: box-shadow 0.14s ease, border-color 0.14s ease;
 }
