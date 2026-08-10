@@ -1390,6 +1390,53 @@ details.block-card[open] {
   color: #2D2410;
 }
 
+/* ── The one thing to press (Daksh, Aug 2026) ─────────────────────
+   The landing page is now logo → headline → this button, so a
+   first-time user must not have to hunt for it. Three cues, none of
+   them noisy: a slow halo that breathes outward, a sheen that travels
+   across the face every few seconds, and an arrow that leans forward
+   on hover. It's the only interactive thing on the page, so it can
+   afford to move. */
+.landing-cta-live {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 40px;
+  font-size: 16px;
+  animation: landingPulse 2.6s ease-in-out infinite;
+}
+@keyframes landingPulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(201,151,58,0.40), 0 0 0 0 rgba(201,151,58,0.45); }
+  55%      { box-shadow: 0 6px 26px rgba(201,151,58,0.55), 0 0 0 14px rgba(201,151,58,0); }
+}
+/* Travelling sheen. */
+.landing-cta-live::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 42%;
+  left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.55), transparent);
+  animation: landingSheen 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes landingSheen {
+  0%, 62% { left: -60% }
+  100%    { left: 130% }
+}
+.landing-cta-arrow {
+  display: inline-block;
+  transition: transform 0.18s cubic-bezier(.22,1,.36,1);
+}
+.landing-cta-live:hover .landing-cta-arrow { transform: translateX(4px); }
+
+/* A visitor who asked for less motion still gets a clearly styled
+   button — it simply stops moving. */
+@media (prefers-reduced-motion: reduce) {
+  .landing-cta-live,
+  .landing-cta-live::after { animation: none; }
+}
+
 .landing-divider {
   width: 60px;
   height: 1px;
@@ -1470,6 +1517,33 @@ details.block-card[open] {
   width: 160px;
   height: auto;
   filter: brightness(0) invert(1);
+}
+
+/* Aug 2026 — the login-left panel is now just the mark + the product
+   name (the "Four departments" pitch and its four department cards
+   were removed). Their old rules below are harmless but unused. */
+.login-brand h2 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+  margin: 0;
+}
+.login-brand p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.6;
+  margin: 8px 0 0;
+}
+/* Hairline under the name, so the block reads as a masthead. */
+.login-brand::after {
+  content: "";
+  display: block;
+  width: 46px;
+  height: 2px;
+  margin-top: 16px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold), transparent);
 }
 
 .login-left-copy h2 {

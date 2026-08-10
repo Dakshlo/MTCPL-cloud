@@ -27,36 +27,25 @@ export default async function HomePage() {
           className="landing-logo"
         />
 
+        {/* Aug 2026 (Daksh) — stripped to logo → headline → one button.
+            The marketing tagline and the Block Entry / Plan Generator /
+            Cutting feature strip are gone: nobody arriving here is
+            choosing a product, they're staff trying to get in. One
+            obvious target beats three explanations. */}
         <div className="landing-tagline">
           <h1>
             Stone. <em>Precision.</em> Scale.
           </h1>
-          <p>
-            End-to-end block inventory and cutting plan management.<br />
-            Built for the yard. Designed for clarity.
-          </p>
         </div>
 
-        <Link href="/login" className="landing-cta">
-          Enter System →
+        {/* The button breathes and carries a travelling sheen, so a
+            first-time user can't miss what to press. */}
+        <Link href="/login" className="landing-cta landing-cta-live">
+          <span>Enter System</span>
+          <span className="landing-cta-arrow" aria-hidden="true">
+            →
+          </span>
         </Link>
-
-        <div className="landing-divider" />
-
-        <div className="landing-features">
-          <div className="landing-feature">
-            <strong>Block Entry</strong>
-            <span>Inventory</span>
-          </div>
-          <div className="landing-feature">
-            <strong>Plan Generator</strong>
-            <span>Cut Planning</span>
-          </div>
-          <div className="landing-feature">
-            <strong>Cutting</strong>
-            <span>Workflow</span>
-          </div>
-        </div>
       </div>
     </main>
   );

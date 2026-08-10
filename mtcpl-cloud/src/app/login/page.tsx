@@ -29,6 +29,12 @@ export default async function LoginPage({
           copy + per-department cards now that we run four
           departments end-to-end (Production / Finance / Inventory
           / Invoicing). */}
+      {/* Aug 2026 (Daksh) — the left panel used to carry a "Four
+          departments. One platform." pitch and four department cards.
+          Everyone who reaches this screen already works here; they're
+          signing in, not being sold to. It's now just the mark, the
+          product name and a single line, so the eye goes straight to
+          the form on the right. */}
       <div className="login-left">
         <img
           src="/logo-dark.png"
@@ -36,63 +42,9 @@ export default async function LoginPage({
           className="login-logo"
         />
 
-        <div className="login-left-copy">
-          <h2>Four departments.<br />One platform.</h2>
-          <p>
-            From yard intake to dispatch, billing to inventory — every
-            team works from the same source of truth, on phone,
-            tablet, or desktop.
-          </p>
-        </div>
-
-        <div className="login-departments">
-          {[
-            {
-              key: "production",
-              icon: "🏭",
-              name: "Production",
-              tone: "#c9a14a",
-              copy: "Blocks · Cutting · Carving · Dispatch",
-            },
-            {
-              key: "finance",
-              icon: "💰",
-              name: "Finance",
-              tone: "#5e8c4e",
-              copy: "Bills · Vendor advances · Pay Today · Audits",
-            },
-            {
-              key: "inventory",
-              icon: "📦",
-              name: "Inventory",
-              tone: "#c87850",
-              copy: "Scaffolding · Sites · Stock movements",
-            },
-            {
-              key: "invoicing",
-              icon: "📄",
-              name: "Invoicing",
-              tone: "#7c3aed",
-              copy: "Generate · Track · GST-ready",
-            },
-          ].map((d) => (
-            <div key={d.key} className="login-dept-card">
-              <span
-                className="login-dept-icon"
-                style={{
-                  background: `${d.tone}22`,
-                  color: d.tone,
-                }}
-                aria-hidden
-              >
-                {d.icon}
-              </span>
-              <div className="login-dept-text">
-                <div className="login-dept-name">{d.name}</div>
-                <div className="login-dept-copy">{d.copy}</div>
-              </div>
-            </div>
-          ))}
+        <div className="login-brand">
+          <h2>MTCPL ERP</h2>
+          <p>Mateshwari Temple Construction Pvt. Ltd.</p>
         </div>
       </div>
 
