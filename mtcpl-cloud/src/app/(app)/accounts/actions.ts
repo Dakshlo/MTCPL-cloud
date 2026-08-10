@@ -3931,6 +3931,10 @@ export async function getRoyaltySummaryAction(
           given: number;
           net: number;
           entryCount: number;
+          /** First / last entry date for THIS vendor inside THIS
+           *  bucket — powers the Date column on the sub-rows. */
+          firstDate: string;
+          lastDate: string;
         }>;
       }>;
       totals: {
@@ -3949,6 +3953,10 @@ export async function getRoyaltySummaryAction(
         given: number;
         net: number;
         entryCount: number;
+        /** First / last entry date across the whole range — powers
+         *  the Date column on the per-vendor table. */
+        firstDate: string;
+        lastDate: string;
         /** The vendor's individual approved entries in the range —
          *  date + direction + amount, sorted chronologically. Lets
          *  the Per-vendor table show exactly WHEN each entry
@@ -4088,6 +4096,10 @@ export async function getRoyaltySummaryAction(
     received: number;
     given: number;
     entryCount: number;
+    /** Real span of this vendor's entries within whatever scope the
+     *  tally covers (a single bucket, or the whole range). */
+    firstIso: string;
+    lastIso: string;
     /** Individual entries (date + direction + amount). Collected only
      *  on the overall per-vendor tally — bucket-level tallies skip it
      *  to keep the payload lean. */
@@ -4150,10 +4162,14 @@ export async function getRoyaltySummaryAction(
         received: 0,
         given: 0,
         entryCount: 0,
+        firstIso: iso,
+        lastIso: iso,
       };
     if (r.entry_type === "received") bv.received += amt;
     else bv.given += amt;
     bv.entryCount += 1;
+    if (iso < bv.firstIso) bv.firstIso = iso;
+    if (iso > bv.lastIso) bv.lastIso = iso;
     bucket.vendorMap.set(r.bill_vendor_id, bv);
 
     // Overall vendor tally
@@ -4164,10 +4180,14 @@ export async function getRoyaltySummaryAction(
         received: 0,
         given: 0,
         entryCount: 0,
+        firstIso: iso,
+        lastIso: iso,
       };
     if (r.entry_type === "received") ov.received += amt;
     else ov.given += amt;
     ov.entryCount += 1;
+    if (iso < ov.firstIso) ov.firstIso = iso;
+    if (iso > ov.lastIso) ov.lastIso = iso;
     (ov.entries ??= []).push({ date: iso, type: r.entry_type, amount: amt });
     overallVendorMap.set(r.bill_vendor_id, ov);
 
@@ -4183,6 +4203,8 @@ export async function getRoyaltySummaryAction(
         given: v.given,
         net: v.given - v.received,
         entryCount: v.entryCount,
+        firstDate: v.firstIso,
+        lastDate: v.lastIso,
         // Chronological — oldest first, so the expanded list reads
         // top-to-bottom like a passbook. Bucket tallies have none.
         entries: (v.entries ?? [])

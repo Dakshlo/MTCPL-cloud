@@ -7,15 +7,15 @@
  *   1. Locked: enter passphrase (same 125500 as Royalty Approval).
  *   2. Unlocked: pick date range + granularity (Day / Week / Month).
  *      Auto-loads with sensible defaults (current month, daily).
- *   3. Results: totals tiles + bucket table + per-vendor table.
+ *   3. Results: totals tiles + flow chart + bucket table + per-vendor
+ *      table.
  *
- * Aug 2026 makeover (Daksh): same premium language as the costing
- * pages — elevated cards, tone-tinted stat tiles, segmented control,
- * gold accent-bar panel headers — with every colour theme-safe (the
- * old build hardcoded light hexes that went light-on-light in dark
- * mode). Layout order unchanged. Per-vendor rows now show WHEN the
- * entries happened: a date line under each vendor plus click-to-
- * expand per-entry rows (date · direction · amount).
+ * Aug 2026 (Daksh): premium pass — elevated cards, tone-tinted stat
+ * tiles, segmented control, gold accent-bar panel headers, all colours
+ * theme-safe. Round 2: page blurb dropped, every table carries a real
+ * DATE column (bucket span, per-vendor span, exact date on expanded
+ * entry rows), and a given-vs-received bar chart sits above the tables
+ * — click a bar to open that bucket.
  *
  * "Royalty points" not rupees — same convention as the rest of
  * the royalty surfaces (see fmtPoints in royalty-approvals-client).
@@ -38,25 +38,31 @@ type VendorBreakdown = {
   given: number;
   net: number;
   entryCount: number;
+  /** Span of this vendor's entries within its scope (bucket, or the
+   *  whole range on the per-vendor table). */
+  firstDate: string;
+  lastDate: string;
   /** Individual entries (chronological). Present on the range-wide
    *  per-vendor list; bucket-level breakdowns come back empty. */
   entries?: RoyaltyEntry[];
 };
 
+type Bucket = {
+  key: string;
+  label: string;
+  rangeStart: string;
+  rangeEnd: string;
+  received: number;
+  given: number;
+  net: number;
+  entryCount: number;
+  vendors: VendorBreakdown[];
+};
+
 type SummaryResult =
   | {
       ok: true;
-      buckets: Array<{
-        key: string;
-        label: string;
-        rangeStart: string;
-        rangeEnd: string;
-        received: number;
-        given: number;
-        net: number;
-        entryCount: number;
-        vendors: VendorBreakdown[];
-      }>;
+      buckets: Bucket[];
       totals: {
         received: number;
         given: number;
@@ -73,6 +79,15 @@ function fmtPoints(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
+/** Compact form for chart labels — 12,50,000 → 12.5L. */
+function fmtCompact(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 10000000) return `${(n / 10000000).toFixed(a >= 100000000 ? 0 : 1)}Cr`;
+  if (a >= 100000) return `${(n / 100000).toFixed(a >= 1000000 ? 0 : 1)}L`;
+  if (a >= 1000) return `${(n / 1000).toFixed(a >= 10000 ? 0 : 1)}k`;
+  return fmtPoints(n);
+}
+
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** "4 Aug 2026" for a single ISO date. */
@@ -83,7 +98,7 @@ function fmtDate(iso: string): string {
 }
 
 /** "2 Jul – 22 Jul 2026" for a span, or "15 Jul 2026" when both ends
- *  are the same day. Powers the date line on Week / Month / vendor rows. */
+ *  are the same day. Powers the Date column everywhere. */
 function fmtDateRange(startIso: string, endIso: string): string {
   const s = startIso.split("-").map(Number); // [y, m, d]
   const e = endIso.split("-").map(Number);
@@ -147,6 +162,9 @@ function RsxStyles() {
 .rsx tbody tr { transition: background .12s ease; }
 .rsx tr.rsx-click { cursor: pointer; }
 .rsx tr.rsx-click:hover { background: rgba(232,197,114,0.12); }
+.rsx .rsx-bar-col { cursor: pointer; }
+.rsx .rsx-bar-col:hover .rsx-bar { filter: brightness(1.12); }
+.rsx .rsx-bar { transition: height .25s ease, filter .12s ease; }
 `,
       }}
     />
@@ -244,6 +262,175 @@ function StatTile({
         </div>
       )}
     </div>
+  );
+}
+
+/** Given-vs-received bars, one pair per bucket. Pure CSS heights (no
+ *  SVG maths) so it reflows with the card on any screen width. Click
+ *  a column to expand that bucket in the table below. */
+function FlowChart({
+  buckets,
+  selectedKey,
+  onSelect,
+}: {
+  buckets: Bucket[];
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
+}) {
+  const max = Math.max(...buckets.map((b) => Math.max(b.received, b.given)), 1);
+  // Keep bar columns readable when there are many buckets (a 31-day
+  // month): the row scrolls sideways instead of shrinking to slivers.
+  const minColWidth = buckets.length > 12 ? 46 : 0;
+  // Few buckets = wide columns, so fatten the bars to match — a 20px
+  // bar stranded in a 600px column reads as a stray line.
+  const barWidth =
+    buckets.length <= 2 ? 54 : buckets.length <= 4 ? 40 : buckets.length <= 8 ? 28 : 20;
+  return (
+    <div style={cardShell}>
+      <PanelHeader>
+        Given vs received
+        <span
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            gap: 14,
+            fontWeight: 600,
+            textTransform: "none",
+            letterSpacing: 0,
+            alignItems: "center",
+          }}
+        >
+          <LegendDot color="var(--rsx-green)" label="Received" />
+          <LegendDot color="var(--rsx-amber)" label="Given" />
+        </span>
+      </PanelHeader>
+      <div style={{ padding: "18px 18px 14px", overflowX: "auto" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "stretch",
+            gap: 10,
+            minWidth: minColWidth ? buckets.length * minColWidth : undefined,
+          }}
+        >
+          {buckets.map((b) => {
+            const isSel = selectedKey === b.key;
+            return (
+              <div
+                key={b.key}
+                className="rsx-bar-col"
+                onClick={() => onSelect(b.key)}
+                title={`${b.label} · ${fmtDateRange(b.rangeStart, b.rangeEnd)}\nReceived ${fmtPoints(b.received)} · Given ${fmtPoints(b.given)}`}
+                style={{
+                  flex: 1,
+                  minWidth: minColWidth || undefined,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "6px 4px",
+                  borderRadius: 10,
+                  background: isSel ? "rgba(232,197,114,0.16)" : "transparent",
+                }}
+              >
+                {/* value caption above the taller bar */}
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    fontFamily: "ui-monospace, monospace",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {fmtCompact(Math.max(b.received, b.given))}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "center",
+                    gap: 4,
+                    height: 104,
+                    width: "100%",
+                  }}
+                >
+                  <Bar
+                    value={b.received}
+                    max={max}
+                    width={barWidth}
+                    color="var(--rsx-green)"
+                    glow="rgba(16,185,129,0.30)"
+                  />
+                  <Bar
+                    value={b.given}
+                    max={max}
+                    width={barWidth}
+                    color="var(--rsx-amber)"
+                    glow="rgba(245,158,11,0.30)"
+                  />
+                </div>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: isSel ? "var(--text)" : "var(--muted)",
+                    textAlign: "center",
+                    lineHeight: 1.25,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    maxWidth: "100%",
+                  }}
+                >
+                  {b.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Bar({
+  value,
+  max,
+  width,
+  color,
+  glow,
+}: {
+  value: number;
+  max: number;
+  width: number;
+  color: string;
+  glow: string;
+}) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div
+      className="rsx-bar"
+      style={{
+        width,
+        maxWidth: "42%",
+        // Zero stays visually zero; anything non-zero keeps a 3px stub
+        // so a tiny entry is still findable on the baseline.
+        height: value > 0 ? `${Math.max(pct, 3)}%` : 0,
+        background: color,
+        borderRadius: "5px 5px 0 0",
+        boxShadow: value > 0 ? `0 0 0 1px ${glow}` : "none",
+      }}
+    />
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+      <span style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
+      {label}
+    </span>
   );
 }
 
@@ -399,7 +586,7 @@ export function RoyaltySummaryClient({
     <section className="page-card rsx">
       <RsxStyles />
       <FinanceLoadingOverlay show={pending} label="Loading royalty summary…" />
-      <header style={{ marginBottom: 22 }}>
+      <header style={{ marginBottom: 18 }}>
         <div
           style={{
             fontSize: 11,
@@ -411,15 +598,9 @@ export function RoyaltySummaryClient({
         >
           Owner View
         </div>
-        <h1 style={{ margin: "2px 0", fontSize: 25, fontWeight: 800, letterSpacing: "-0.015em" }}>
+        <h1 style={{ margin: "2px 0 0", fontSize: 25, fontWeight: 800, letterSpacing: "-0.015em" }}>
           🏷️ Royalty Summary
         </h1>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", maxWidth: 760 }}>
-          Cross-vendor flow of approved royalty entries. Pick a date
-          range and a granularity to see day-by-day, week-by-week, or
-          month-by-month totals. Only approved entries count;
-          pending and rejected are ignored.
-        </p>
       </header>
 
       {!unlocked ? (
@@ -688,6 +869,18 @@ export function RoyaltySummaryClient({
             </div>
           )}
 
+          {/* Flow chart — only earns its space with 2+ buckets to
+              compare; a single bucket says nothing a tile doesn't. */}
+          {result && result.buckets.length > 1 && (
+            <FlowChart
+              buckets={result.buckets}
+              selectedKey={expandedBucketKey}
+              onSelect={(k) =>
+                setExpandedBucketKey(expandedBucketKey === k ? null : k)
+              }
+            />
+          )}
+
           {/* Bucket table */}
           {result &&
             (result.buckets.length === 0 ? (
@@ -713,8 +906,9 @@ export function RoyaltySummaryClient({
                       ? "Week by week"
                       : "Month by month"}
                 </PanelHeader>
+                <div style={{ overflowX: "auto" }}>
                 <table
-                  style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
+                  style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: 13 }}
                 >
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -725,6 +919,7 @@ export function RoyaltySummaryClient({
                             ? "Week"
                             : "Month"}
                       </th>
+                      <th style={th()}>Date</th>
                       <th style={{ ...th(), textAlign: "right" }}>Received</th>
                       <th style={{ ...th(), textAlign: "right" }}>Given</th>
                       <th style={{ ...th(), textAlign: "right" }}>Net</th>
@@ -779,19 +974,9 @@ export function RoyaltySummaryClient({
                                 </span>
                               )}
                               {b.label}
-                              {granularity !== "day" && (
-                                <div
-                                  style={{
-                                    marginLeft: isSingleBucket ? 0 : 18,
-                                    marginTop: 2,
-                                    fontSize: 11,
-                                    fontWeight: 500,
-                                    color: "var(--muted)",
-                                  }}
-                                >
-                                  {fmtDateRange(b.rangeStart, b.rangeEnd)}
-                                </div>
-                              )}
+                            </td>
+                            <td style={dateCell()}>
+                              {fmtDateRange(b.rangeStart, b.rangeEnd)}
                             </td>
                             <td
                               style={{
@@ -884,6 +1069,15 @@ export function RoyaltySummaryClient({
                                   </td>
                                   <td
                                     style={{
+                                      ...dateCell(),
+                                      padding: "6px 14px",
+                                      fontSize: 11.5,
+                                    }}
+                                  >
+                                    {fmtDateRange(v.firstDate, v.lastDate)}
+                                  </td>
+                                  <td
+                                    style={{
                                       ...td(),
                                       padding: "6px 14px",
                                       textAlign: "right",
@@ -958,6 +1152,12 @@ export function RoyaltySummaryClient({
                       }}
                     >
                       <td style={{ ...td(), fontWeight: 800 }}>Total</td>
+                      <td style={dateCell()}>
+                        {fmtDateRange(
+                          result.buckets[0].rangeStart,
+                          result.buckets[result.buckets.length - 1].rangeEnd,
+                        )}
+                      </td>
                       <td
                         style={{
                           ...td(),
@@ -1012,13 +1212,14 @@ export function RoyaltySummaryClient({
                     </tr>
                   </tfoot>
                 </table>
+                </div>
               </div>
             ))}
 
           {/* Per-vendor totals across the WHOLE selected range —
               the answer to "show me which vendor". Each row carries
               the dates its entries fall on, and clicking expands to
-              the individual entries (date · direction · amount). */}
+              the individual entries (exact date · amount). */}
           {result && result.vendors.length > 0 && (
             <div style={cardShell}>
               <PanelHeader>
@@ -1028,9 +1229,11 @@ export function RoyaltySummaryClient({
                   Click a vendor for its entries
                 </span>
               </PanelHeader>
+              <div style={{ overflowX: "auto" }}>
               <table
                 style={{
                   width: "100%",
+                  minWidth: 720,
                   borderCollapse: "collapse",
                   fontSize: 13,
                 }}
@@ -1038,6 +1241,7 @@ export function RoyaltySummaryClient({
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
                     <th style={th()}>Vendor</th>
+                    <th style={th()}>Date</th>
                     <th style={{ ...th(), textAlign: "right" }}>Received</th>
                     <th style={{ ...th(), textAlign: "right" }}>Given</th>
                     <th style={{ ...th(), textAlign: "right" }}>Net</th>
@@ -1056,13 +1260,6 @@ export function RoyaltySummaryClient({
                           : "var(--muted)";
                     const entries = v.entries ?? [];
                     const isOpen = expandedVendorId === v.id;
-                    const dateLine =
-                      entries.length > 0
-                        ? fmtDateRange(
-                            entries[0].date,
-                            entries[entries.length - 1].date,
-                          )
-                        : null;
                     return (
                       <Fragment key={v.id}>
                         <tr
@@ -1091,19 +1288,9 @@ export function RoyaltySummaryClient({
                               {isOpen ? "▾" : "▸"}
                             </span>
                             {v.name}
-                            {dateLine && (
-                              <div
-                                style={{
-                                  marginLeft: 18,
-                                  marginTop: 2,
-                                  fontSize: 11,
-                                  fontWeight: 500,
-                                  color: "var(--muted)",
-                                }}
-                              >
-                                {dateLine}
-                              </div>
-                            )}
+                          </td>
+                          <td style={dateCell()}>
+                            {fmtDateRange(v.firstDate, v.lastDate)}
                           </td>
                           <td
                             style={{
@@ -1159,8 +1346,8 @@ export function RoyaltySummaryClient({
                           </td>
                         </tr>
                         {/* The vendor's individual entries — one row per
-                            entry, date in the first column, the amount in
-                            its direction's column. */}
+                            entry, exact date in the Date column, amount
+                            in its direction's column. */}
                         {isOpen &&
                           entries.map((en, i) => (
                             <tr
@@ -1179,7 +1366,19 @@ export function RoyaltySummaryClient({
                                   color: "var(--muted)",
                                 }}
                               >
-                                · {fmtDate(en.date)}
+                                ·{" "}
+                                {en.type === "given" ? "Given" : "Received"}
+                              </td>
+                              <td
+                                style={{
+                                  ...dateCell(),
+                                  padding: "6px 14px",
+                                  fontSize: 11.5,
+                                  fontWeight: 700,
+                                  color: "var(--text)",
+                                }}
+                              >
+                                {fmtDate(en.date)}
                               </td>
                               <td
                                 style={{
@@ -1242,6 +1441,7 @@ export function RoyaltySummaryClient({
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -1317,5 +1517,16 @@ function td(): React.CSSProperties {
     padding: "11px 14px",
     fontSize: 13,
     color: "var(--text)",
+  };
+}
+/** Date column — monospaced so spans line up down the column, and
+ *  never wraps mid-range. */
+function dateCell(): React.CSSProperties {
+  return {
+    padding: "11px 14px",
+    fontSize: 12,
+    color: "var(--muted)",
+    fontFamily: "ui-monospace, monospace",
+    whiteSpace: "nowrap",
   };
 }
