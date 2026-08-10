@@ -10,10 +10,21 @@
  * (green = paid, amber = outstanding); and one smooth spring for the
  * vendor sheet. No library — everything below is hand-rolled CSS.
  *
+ * Round 2 (Daksh, Aug 2026):
+ *   • The three hero tiles are now BUTTONS — pressing one re-lenses
+ *     the vendor list (order + which number leads on each row).
+ *   • "Still outstanding" is blurred by default with a 20-second peek,
+ *     so the biggest number on the screen isn't readable over a
+ *     shoulder. Same idea as the Peek-for-5s control on Due Bills.
+ *   • The vendor sheet is wider, locks the page behind it (it used to
+ *     scroll-chain into the background), closes on Esc, and carries a
+ *     much fuller stat block.
+ *   • A vendor's bills read oldest → newest (sorted server-side).
+ *
  * Read-only view: nothing here mutates anything.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // ── Types shared with the server page ──────────────────────────────
 
@@ -65,6 +76,7 @@ export type MonthPoint = {
 export type HeadSlice = { head: string; amount: number };
 
 type Totals = { billed: number; paid: number; outstanding: number; bills: number };
+type Metric = "billed" | "paid" | "outstanding";
 
 // ── Formatting ─────────────────────────────────────────────────────
 
@@ -115,6 +127,12 @@ const C = {
   red: "#c0392b",
 };
 
+const METRIC_META: Record<Metric, { label: string; color: string; soft: string }> = {
+  billed: { label: "Billed", color: C.indigo, soft: C.indigoSoft },
+  paid: { label: "Paid", color: C.green, soft: C.greenSoft },
+  outstanding: { label: "Open", color: C.amber, soft: C.amberSoft },
+};
+
 const card: React.CSSProperties = {
   background: C.paper,
   border: `1px solid ${C.line}`,
@@ -137,6 +155,9 @@ const display: React.CSSProperties = {
   color: C.ink,
 };
 
+/** Seconds the "Still outstanding" figure stays readable after a peek. */
+const PEEK_SECONDS = 20;
+
 export function FinanceAnalysisClient({
   vendors,
   months,
@@ -144,7 +165,6 @@ export function FinanceAnalysisClient({
   aging,
   totals,
   activeVendorCount,
-  generatedFor,
 }: {
   vendors: VendorAnalysis[];
   months: MonthPoint[];
@@ -152,11 +172,23 @@ export function FinanceAnalysisClient({
   aging: Array<{ label: string; amount: number; count: number }>;
   totals: Totals;
   activeVendorCount: number;
-  generatedFor: string;
+  generatedFor?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"outstanding" | "paid" | "billed" | "name">("outstanding");
+  const [metric, setMetric] = useState<Metric>("outstanding");
+  const [alpha, setAlpha] = useState(false); // A–Z overrides the metric ordering
   const [openVendor, setOpenVendor] = useState<VendorAnalysis | null>(null);
+
+  // ── Peek: the outstanding figure is blurred until asked for ──────
+  const [peekLeft, setPeekLeft] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (peekLeft <= 0) return;
+    timerRef.current = setInterval(() => setPeekLeft((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [peekLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const collectedPct = totals.billed > 0 ? (totals.paid / totals.billed) * 100 : 0;
 
@@ -170,14 +202,26 @@ export function FinanceAnalysisClient({
         )
       : vendors;
     const sorted = [...list];
-    if (sort === "name") sorted.sort((a, b) => a.name.localeCompare(b.name));
-    else sorted.sort((a, b) => b[sort] - a[sort]);
+    if (alpha) sorted.sort((a, b) => a.name.localeCompare(b.name));
+    else sorted.sort((a, b) => b[metric] - a[metric]);
     return sorted;
-  }, [vendors, query, sort]);
+  }, [vendors, query, metric, alpha]);
+
+  /** Total of the active metric across what's currently listed — this
+   *  is the number that visibly changes as you press the hero tiles. */
+  const shownTotal = useMemo(
+    () => shown.reduce((s, v) => s + v[metric], 0),
+    [shown, metric],
+  );
 
   const maxMonth = Math.max(...months.map((m) => Math.max(m.paid, m.billed)), 1);
   const maxHead = Math.max(...heads.map((h) => h.amount), 1);
   const maxAging = Math.max(...aging.map((a) => a.amount), 1);
+
+  function pick(m: Metric) {
+    setMetric(m);
+    setAlpha(false);
+  }
 
   return (
     <section style={{ paddingBottom: 40 }}>
@@ -186,24 +230,17 @@ export function FinanceAnalysisClient({
       {/* ── Masthead ─────────────────────────────────────────── */}
       <header style={{ marginBottom: 26 }}>
         <div style={{ ...eyebrow, color: C.indigo }}>Owner view · Finance</div>
-        <h1
-          style={{
-            ...display,
-            margin: "6px 0 0",
-            fontSize: 38,
-            lineHeight: 1.05,
-          }}
-        >
+        <h1 style={{ ...display, margin: "6px 0 0", fontSize: 38, lineHeight: 1.05 }}>
           Finance Analysis
         </h1>
-        <p style={{ margin: "8px 0 0", fontSize: 14, color: C.muted, maxWidth: 620, lineHeight: 1.55 }}>
-          The whole department in one place — what we&apos;ve been billed, what
-          we&apos;ve paid, what&apos;s still open, and every vendor&apos;s full history.
-          Open any vendor to see its bills and every payment made.
+        <p style={{ margin: "8px 0 0", fontSize: 14, color: C.muted, maxWidth: 640, lineHeight: 1.55 }}>
+          The whole department in one place. Tap any of the three figures below to
+          re-order every vendor by it — then open a vendor for its full bill and
+          payment history.
         </p>
       </header>
 
-      {/* ── Hero numbers ─────────────────────────────────────── */}
+      {/* ── Hero numbers (each one is a lens) ────────────────── */}
       <div
         style={{
           display: "grid",
@@ -219,6 +256,8 @@ export function FinanceAnalysisClient({
           foot={`${totals.bills.toLocaleString("en-IN")} bills · ${vendors.length} vendors`}
           accent={C.indigo}
           soft={C.indigoSoft}
+          active={!alpha && metric === "billed"}
+          onClick={() => pick("billed")}
         />
         <HeroTile
           label="Total paid"
@@ -227,6 +266,8 @@ export function FinanceAnalysisClient({
           foot={`${collectedPct.toFixed(1)}% of everything billed`}
           accent={C.green}
           soft={C.greenSoft}
+          active={!alpha && metric === "paid"}
+          onClick={() => pick("paid")}
         />
         <HeroTile
           label="Still outstanding"
@@ -235,6 +276,13 @@ export function FinanceAnalysisClient({
           foot={`across ${activeVendorCount} vendor${activeVendorCount === 1 ? "" : "s"}`}
           accent={C.amber}
           soft={C.amberSoft}
+          active={!alpha && metric === "outstanding"}
+          onClick={() => pick("outstanding")}
+          // The single most sensitive figure on the screen — hidden
+          // until deliberately revealed, then auto-hidden again.
+          hidden={peekLeft <= 0}
+          peekLeft={peekLeft}
+          onPeek={() => setPeekLeft(PEEK_SECONDS)}
         />
       </div>
 
@@ -261,10 +309,7 @@ export function FinanceAnalysisClient({
         >
           <div
             className="fa-grow"
-            style={{
-              width: `${Math.min(collectedPct, 100)}%`,
-              background: `linear-gradient(90deg, ${C.green}, #35c07a)`,
-            }}
+            style={{ width: `${Math.min(collectedPct, 100)}%`, background: `linear-gradient(90deg, ${C.green}, #35c07a)` }}
             title={`Paid ${inr(totals.paid)}`}
           />
           <div style={{ flex: 1, background: `linear-gradient(90deg, ${C.amber}, #e0a44a)` }} title={`Outstanding ${inr(totals.outstanding)}`} />
@@ -292,8 +337,10 @@ export function FinanceAnalysisClient({
               <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                 {m.paid > 0 ? compact(m.paid) : ""}
               </div>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 130, width: "100%", justifyContent: "center" }}
-                title={`${m.label} ${m.year}\nBilled ${inr(m.billed)}\nPaid ${inr(m.paid)}`}>
+              <div
+                style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 130, width: "100%", justifyContent: "center" }}
+                title={`${m.label} ${m.year}\nBilled ${inr(m.billed)}\nPaid ${inr(m.paid)}`}
+              >
                 <Bar value={m.billed} max={maxMonth} color={C.indigo} />
                 <Bar value={m.paid} max={maxMonth} color={C.green} />
               </div>
@@ -319,12 +366,7 @@ export function FinanceAnalysisClient({
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
                   className="fa-grow"
-                  style={{
-                    width: `${(a.amount / maxAging) * 100}%`,
-                    height: "100%",
-                    borderRadius: 999,
-                    background: `linear-gradient(90deg, ${C.amber}, #e8b45c)`,
-                  }}
+                  style={{ width: `${(a.amount / maxAging) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.amber}, #e8b45c)` }}
                 />
               </div>
             </div>
@@ -345,12 +387,7 @@ export function FinanceAnalysisClient({
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
                   className="fa-grow"
-                  style={{
-                    width: `${(h.amount / maxHead) * 100}%`,
-                    height: "100%",
-                    borderRadius: 999,
-                    background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)`,
-                  }}
+                  style={{ width: `${(h.amount / maxHead) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)` }}
                 />
               </div>
             </div>
@@ -370,10 +407,17 @@ export function FinanceAnalysisClient({
             flexWrap: "wrap",
           }}
         >
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={eyebrow}>Every vendor</div>
-            <div style={{ ...display, fontSize: 19, marginTop: 4 }}>
-              {shown.length} of {vendors.length}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={eyebrow}>
+              Every vendor · by {alpha ? "name" : METRIC_META[metric].label.toLowerCase()}
+            </div>
+            <div style={{ ...display, fontSize: 19, marginTop: 4, display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span>{shown.length} of {vendors.length}</span>
+              {!alpha && (
+                <span style={{ fontSize: 14, fontWeight: 600, color: METRIC_META[metric].color, fontVariantNumeric: "tabular-nums" }}>
+                  {inr(shownTotal)} {METRIC_META[metric].label.toLowerCase()}
+                </span>
+              )}
             </div>
           </div>
           <input
@@ -398,27 +442,10 @@ export function FinanceAnalysisClient({
               ["outstanding", "Open"],
               ["paid", "Paid"],
               ["billed", "Billed"],
-              ["name", "A–Z"],
             ] as const).map(([k, lbl]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setSort(k)}
-                style={{
-                  padding: "6px 14px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  border: "none",
-                  borderRadius: 9,
-                  cursor: sort === k ? "default" : "pointer",
-                  background: sort === k ? C.paper : "transparent",
-                  color: sort === k ? C.ink : C.muted,
-                  boxShadow: sort === k ? "0 1px 3px rgba(11,18,32,0.12)" : "none",
-                }}
-              >
-                {lbl}
-              </button>
+              <SegBtn key={k} active={!alpha && metric === k} label={lbl} onClick={() => pick(k)} />
             ))}
+            <SegBtn active={alpha} label="A–Z" onClick={() => setAlpha(true)} />
           </div>
         </div>
 
@@ -441,8 +468,8 @@ export function FinanceAnalysisClient({
                     width: "100%",
                     textAlign: "left",
                     display: "grid",
-                    gridTemplateColumns: "minmax(180px,2.2fr) minmax(120px,1fr) minmax(120px,1fr) minmax(150px,1.3fr)",
-                    gap: 16,
+                    gridTemplateColumns: "minmax(170px,2fr) repeat(3, minmax(96px,1fr)) minmax(140px,1.2fr)",
+                    gap: 14,
                     alignItems: "center",
                     padding: "16px 24px",
                     background: "transparent",
@@ -461,16 +488,14 @@ export function FinanceAnalysisClient({
                       {v.lastPaymentDate ? ` · last paid ${fmtDate(v.lastPaymentDate)}` : " · never paid"}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10, ...eyebrow }}>Paid</div>
-                    <div style={{ fontSize: 14, fontWeight: 650, color: C.green, fontVariantNumeric: "tabular-nums" }}>{inr(v.paid)}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10, ...eyebrow }}>Open</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: v.outstanding > 0.5 ? C.amber : C.muted, fontVariantNumeric: "tabular-nums" }}>
-                      {v.outstanding > 0.5 ? inr(v.outstanding) : "settled"}
-                    </div>
-                  </div>
+                  <Cell label="Billed" value={inr(v.billed)} tone={C.ink2} lead={!alpha && metric === "billed"} />
+                  <Cell label="Paid" value={inr(v.paid)} tone={C.green} lead={!alpha && metric === "paid"} />
+                  <Cell
+                    label="Open"
+                    value={v.outstanding > 0.5 ? inr(v.outstanding) : "settled"}
+                    tone={v.outstanding > 0.5 ? C.amber : C.muted}
+                    lead={!alpha && metric === "outstanding"}
+                  />
                   <div>
                     <div style={{ height: 7, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                       <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: pct >= 99.5 ? C.green : `linear-gradient(90deg, ${C.green}, #7fd4a4)` }} />
@@ -487,17 +512,58 @@ export function FinanceAnalysisClient({
         )}
       </div>
 
-      {openVendor && <VendorSheet vendor={openVendor} onClose={() => setOpenVendor(null)} />}
+      {openVendor && (
+        <VendorSheet vendor={openVendor} companyOutstanding={totals.outstanding} onClose={() => setOpenVendor(null)} />
+      )}
     </section>
   );
 }
 
 // ── Vendor detail sheet ────────────────────────────────────────────
 
-function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: () => void }) {
+function VendorSheet({
+  vendor: v,
+  companyOutstanding,
+  onClose,
+}: {
+  vendor: VendorAnalysis;
+  companyOutstanding: number;
+  onClose: () => void;
+}) {
   const [tab, setTab] = useState<"bills" | "payments">("bills");
   const pct = v.billed > 0 ? (v.paid / v.billed) * 100 : 0;
   const age = daysSince(v.oldestOpenDate);
+  const sinceLastPaid = daysSince(v.lastPaymentDate);
+
+  // Lock the page behind the sheet. Without this the wheel scrolled
+  // THROUGH to the background page once the sheet hit its end (Daksh:
+  // "when i scroll the background page get scrolled"). Also wire Esc.
+  //
+  // NOTE: lock the <html> element, not <body>. This app already sets
+  // body { overflow: hidden } and scrolls on the document element
+  // (document.scrollingElement === <html>), so a body-only lock is a
+  // no-op here — verified in the browser before writing this.
+  // overscroll-behavior: contain on the sheet is the second line of
+  // defence for any nested scroller.
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = root.style.overflow;
+    root.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      root.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const paidCount = v.payments.length;
+  const avgBill = v.billCount > 0 ? v.billed / v.billCount : 0;
+  const shareOfOpen = companyOutstanding > 0 ? (v.outstanding / companyOutstanding) * 100 : 0;
+  const biggestBill = v.bills.reduce((m, b) => Math.max(m, b.billed), 0);
+  const settledCount = v.billCount - v.openBillCount;
 
   return (
     <div className="fa-scrim" onClick={onClose} role="dialog" aria-modal="true" aria-label={`${v.name} detail`}>
@@ -509,7 +575,7 @@ function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: 
               <div style={eyebrow}>Vendor</div>
               <h2 style={{ ...display, fontSize: 27, margin: "6px 0 0", lineHeight: 1.15 }}>{v.name}</h2>
               <div style={{ fontSize: 12.5, color: C.muted, marginTop: 7 }}>
-                {v.category ? `${v.category} · ` : ""}
+                {v.category ? `${v.category.replace(/_/g, " ")} · ` : ""}
                 {v.billCount} bill{v.billCount === 1 ? "" : "s"} · first billed {fmtDate(v.firstBillDate)}
                 {!v.isActive && " · inactive"}
               </div>
@@ -517,6 +583,7 @@ function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: 
             <button type="button" onClick={onClose} aria-label="Close" className="fa-close">✕</button>
           </div>
 
+          {/* Headline four */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 12, marginTop: 22 }}>
             <MiniStat label="Billed" value={inr(v.billed)} color={C.ink} />
             <MiniStat label="Paid" value={inr(v.paid)} color={C.green} />
@@ -534,10 +601,27 @@ function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: 
               {age != null && v.outstanding > 0.5 && ` · oldest open ${age} days`}
             </div>
           </div>
+
+          {/* Deeper facts — the "more informative" ask. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(132px,1fr))", gap: 10, marginTop: 16 }}>
+            <Fact label="Bills open / settled" value={`${v.openBillCount} / ${settledCount}`} />
+            <Fact label="Payments made" value={paidCount === 0 ? "None" : `${paidCount}`} />
+            <Fact label="Average bill" value={inr(avgBill)} />
+            <Fact label="Largest bill" value={inr(biggestBill)} />
+            <Fact
+              label="Share of all open"
+              value={v.outstanding > 0.5 ? `${shareOfOpen.toFixed(1)}%` : "—"}
+              hint={v.outstanding > 0.5 ? "of the company's outstanding" : undefined}
+            />
+            <Fact
+              label="Since last payment"
+              value={sinceLastPaid == null ? "Never paid" : `${sinceLastPaid} days`}
+            />
+          </div>
         </div>
 
         {/* Tabs */}
-        <div style={{ padding: "14px 30px 0", display: "flex", gap: 6 }}>
+        <div style={{ padding: "14px 30px 0", display: "flex", gap: 6, alignItems: "center" }}>
           {([["bills", `Bills (${v.bills.length})`], ["payments", `Payments (${v.payments.length})`]] as const).map(([k, lbl]) => (
             <button
               key={k}
@@ -557,49 +641,57 @@ function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: 
               {lbl}
             </button>
           ))}
+          <span style={{ marginLeft: "auto", fontSize: 11, color: C.muted }}>
+            {tab === "bills" ? "Oldest first" : "Newest first"}
+          </span>
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 30px 30px" }}>
+        <div style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: "16px 30px 30px" }}>
           {tab === "bills" ? (
             v.bills.length === 0 ? (
               <Empty text="No bills recorded for this vendor." />
             ) : (
-              v.bills.map((b) => (
-                <div key={b.id} style={{ display: "flex", gap: 14, alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${C.line}` }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 650, color: C.ink }}>
-                      {b.token || b.billNo || "—"}
-                      {b.billNo && b.token && <span style={{ color: C.muted, fontWeight: 500 }}> · bill {b.billNo}</span>}
+              v.bills.map((b) => {
+                const bAge = daysSince(b.date);
+                return (
+                  <div key={b.id} style={{ display: "flex", gap: 14, alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${C.line}` }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 650, color: C.ink }}>
+                        {b.token || b.billNo || "—"}
+                        {b.billNo && b.token && <span style={{ color: C.muted, fontWeight: 500 }}> · bill {b.billNo}</span>}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>
+                        {fmtDate(b.date)}
+                        {bAge != null && b.outstanding > 0.5 ? ` · ${bAge}d old` : ""}
+                        {b.costHead ? ` · ${b.costHead.replace(/_/g, " ")}` : ""}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>
-                      {fmtDate(b.date)}
-                      {b.costHead ? ` · ${b.costHead.replace(/_/g, " ")}` : ""}
+                    <div style={{ textAlign: "right", minWidth: 96 }}>
+                      <div style={{ fontSize: 13, fontWeight: 650, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(b.billed)}</div>
+                      <div style={{ fontSize: 11, color: b.paid > 0 ? C.green : C.muted, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>
+                        {inr(b.paid)} paid
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 108, textAlign: "right" }}>
+                      {b.outstanding > 0.5 ? (
+                        <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.amberSoft, color: C.amber, fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                          {inr(b.outstanding)} open
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.greenSoft, color: C.green, fontSize: 11.5, fontWeight: 700 }}>
+                          Settled
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", minWidth: 96 }}>
-                    <div style={{ fontSize: 13, fontWeight: 650, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(b.billed)}</div>
-                    <div style={{ fontSize: 11, color: C.green, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{inr(b.paid)} paid</div>
-                  </div>
-                  <div style={{ minWidth: 104, textAlign: "right" }}>
-                    {b.outstanding > 0.5 ? (
-                      <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.amberSoft, color: C.amber, fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                        {inr(b.outstanding)} open
-                      </span>
-                    ) : (
-                      <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.greenSoft, color: C.green, fontSize: 11.5, fontWeight: 700 }}>
-                        Settled
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )
           ) : v.payments.length === 0 ? (
             <Empty text="No payment has been made to this vendor yet." />
           ) : (
             <div style={{ position: "relative", paddingLeft: 22 }}>
-              {/* timeline rail */}
               <div style={{ position: "absolute", left: 5, top: 8, bottom: 8, width: 2, background: C.line, borderRadius: 2 }} />
               {v.payments.map((p) => (
                 <div key={p.id} style={{ position: "relative", padding: "13px 0", borderBottom: `1px solid ${C.line}` }}>
@@ -629,23 +721,128 @@ function VendorSheet({ vendor: v, onClose }: { vendor: VendorAnalysis; onClose: 
 // ── Small pieces ───────────────────────────────────────────────────
 
 function HeroTile({
-  label, value, exact, foot, accent, soft,
+  label, value, exact, foot, accent, soft, active, onClick, hidden, peekLeft, onPeek,
 }: {
   label: string; value: string; exact: string; foot: string; accent: string; soft: string;
+  active?: boolean; onClick?: () => void;
+  /** When true the figures are blurred until `onPeek` is pressed. */
+  hidden?: boolean; peekLeft?: number; onPeek?: () => void;
 }) {
+  const masked = !!hidden;
   return (
-    <div style={{ ...card, padding: "22px 24px", position: "relative", overflow: "hidden" }}>
+    <div
+      className={`fa-hero${active ? " is-active" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{
+        ...card,
+        padding: "22px 24px",
+        position: "relative",
+        overflow: "hidden",
+        cursor: onClick ? "pointer" : "default",
+        borderColor: active ? accent : C.line,
+        boxShadow: active
+          ? `0 0 0 1px ${accent}, 0 10px 28px ${soft}`
+          : card.boxShadow,
+      }}
+    >
       <div aria-hidden style={{ position: "absolute", right: -40, top: -40, width: 140, height: 140, borderRadius: "50%", background: soft, pointerEvents: "none" }} />
       <div style={{ position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 9, height: 9, borderRadius: 3, background: accent, boxShadow: `0 0 0 3px ${soft}` }} />
           <span style={eyebrow}>{label}</span>
+          {active && (
+            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: accent, letterSpacing: "0.06em" }}>
+              SORTING
+            </span>
+          )}
         </div>
-        <div style={{ ...display, fontSize: 34, marginTop: 12, lineHeight: 1.05 }}>{value}</div>
-        <div style={{ fontSize: 12.5, color: C.ink2, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>{exact}</div>
-        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 9 }}>{foot}</div>
+
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              filter: masked ? "blur(11px)" : "none",
+              transition: "filter .28s ease",
+              userSelect: masked ? "none" : "auto",
+              pointerEvents: masked ? "none" : "auto",
+            }}
+          >
+            <div style={{ ...display, fontSize: 34, marginTop: 12, lineHeight: 1.05 }}>{value}</div>
+            <div style={{ fontSize: 12.5, color: C.ink2, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>{exact}</div>
+          </div>
+
+          {masked && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPeek?.();
+              }}
+              className="fa-peek"
+              style={{ position: "absolute", left: 0, top: 18 }}
+            >
+              👁 Peek for {PEEK_SECONDS}s
+            </button>
+          )}
+        </div>
+
+        <div style={{ fontSize: 11.5, color: C.muted, marginTop: 9 }}>
+          {!masked && (peekLeft ?? 0) > 0 ? (
+            <span style={{ color: accent, fontWeight: 700 }}>Hiding again in {peekLeft}s · </span>
+          ) : null}
+          {foot}
+        </div>
       </div>
     </div>
+  );
+}
+
+function Cell({ label, value, tone, lead }: { label: string; value: string; tone: string; lead: boolean }) {
+  return (
+    <div style={{ textAlign: "right" }}>
+      <div style={{ ...eyebrow, fontSize: 9.5, color: lead ? tone : C.muted }}>{label}</div>
+      <div
+        style={{
+          fontSize: lead ? 15 : 13,
+          fontWeight: lead ? 750 : 600,
+          color: lead ? tone : C.ink2,
+          opacity: lead ? 1 : 0.75,
+          fontVariantNumeric: "tabular-nums",
+          transition: "font-size .14s ease",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SegBtn({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "6px 14px",
+        fontSize: 12,
+        fontWeight: 700,
+        border: "none",
+        borderRadius: 9,
+        cursor: active ? "default" : "pointer",
+        background: active ? C.paper : "transparent",
+        color: active ? C.ink : C.muted,
+        boxShadow: active ? "0 1px 3px rgba(11,18,32,0.12)" : "none",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -654,6 +851,15 @@ function MiniStat({ label, value, color }: { label: string; value: string; color
     <div style={{ background: C.wash, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px" }}>
       <div style={{ ...eyebrow, fontSize: 10 }}>{label}</div>
       <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 5, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+    </div>
+  );
+}
+
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div style={{ padding: "9px 12px", border: `1px solid ${C.line}`, borderRadius: 12 }} title={hint}>
+      <div style={{ fontSize: 9.5, ...eyebrow, letterSpacing: "0.07em" }}>{label}</div>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink2, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{value}</div>
     </div>
   );
 }
@@ -699,20 +905,36 @@ function Styles() {
 .fa-grow { animation: faGrow .6s cubic-bezier(.22,1,.36,1) both; }
 @keyframes faGrow { from { transform: scaleX(0); transform-origin: left } to { transform: scaleX(1); transform-origin: left } }
 
+.fa-hero { transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease, border-color .16s ease; }
+.fa-hero[role="button"]:hover { transform: translateY(-2px); }
+.fa-hero[role="button"]:active { transform: translateY(0); }
+.fa-hero:focus-visible { outline: 2px solid ${C.indigo}; outline-offset: 3px; }
+
+.fa-peek {
+  padding: 8px 14px; font-size: 12.5px; font-weight: 700;
+  color: ${C.ink}; background: rgba(255,255,255,0.92);
+  border: 1px solid ${C.line}; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(11,18,32,0.12);
+  backdrop-filter: blur(4px);
+}
+.fa-peek:hover { background: #fff; border-color: ${C.amber}; color: ${C.amber}; }
+
 .fa-scrim {
   position: fixed; inset: 0; z-index: 200;
   background: rgba(11,18,32,0.34);
   backdrop-filter: saturate(160%) blur(6px);
   display: flex; justify-content: flex-end;
   animation: faFade .18s ease both;
+  overscroll-behavior: contain;
 }
 @keyframes faFade { from { opacity: 0 } to { opacity: 1 } }
 .fa-sheet {
-  width: 640px; max-width: 96vw; height: 100%;
+  width: 980px; max-width: 96vw; height: 100%;
   background: ${C.paper};
   display: flex; flex-direction: column;
   box-shadow: -20px 0 60px rgba(11,18,32,0.22);
   animation: faSlide .34s cubic-bezier(.22,1,.36,1) both;
+  overscroll-behavior: contain;
 }
 @keyframes faSlide { from { transform: translateX(26px); opacity: .4 } to { transform: translateX(0); opacity: 1 } }
 .fa-close {

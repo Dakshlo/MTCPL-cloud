@@ -255,10 +255,15 @@ export default async function FinanceAnalysisPage() {
   }
   for (const a of aging) a.amount = Math.round(a.amount);
 
-  // Sort each vendor's sub-lists newest-first, biggest vendors first.
+  // Biggest vendors first; each vendor's sub-lists sorted below.
   const vendorList = [...accs.values()];
   for (const v of vendorList) {
-    v.bills.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    // Bills oldest → newest (Daksh, Aug 2026): a vendor's ledger should
+    // read like a passbook, so the oldest bill — usually the one still
+    // unpaid — is the first thing you see.
+    v.bills.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+    // Payments stay newest-first: "when did we last pay them" is the
+    // question that list answers.
     v.payments.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
     v.billed = Math.round(v.billed);
     v.paid = Math.round(v.paid);
