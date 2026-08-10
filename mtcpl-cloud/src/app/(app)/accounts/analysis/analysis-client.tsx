@@ -95,6 +95,58 @@ function compact(n: number): string {
   return String(Math.round(n));
 }
 
+/** Format n using the UNIT of `ref`, so a counting number doesn't flip
+ *  from "52.5 L" to "1.23 Cr" mid-animation. */
+function compactLike(n: number, ref: number): string {
+  const a = Math.abs(ref);
+  if (a >= 1e7) return `${(n / 1e7).toFixed(2)} Cr`;
+  if (a >= 1e5) return `${(n / 1e5).toFixed(2)} L`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(1)} k`;
+  return String(Math.round(n));
+}
+
+/** Counts 0 → target ONCE on mount, then stops for good. rAF-driven and
+ *  self-cancelling, so nothing is left running afterwards — the whole
+ *  point of replacing the old always-on liquid bars. Honours
+ *  prefers-reduced-motion by jumping straight to the value. */
+function useCountUp(target: number, durationMs = 950, delayMs = 0): number {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setV(target);
+      return;
+    }
+    let raf = 0;
+    let startTs = 0;
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    const step = (ts: number) => {
+      if (!startTs) startTs = ts;
+      const p = Math.min(1, (ts - startTs) / durationMs);
+      setV(target * easeOut(p));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    const timer = setTimeout(() => {
+      raf = requestAnimationFrame(step);
+    }, delayMs);
+    // Guarantee the real figure even if rAF never runs. Browsers pause
+    // requestAnimationFrame in a hidden/background tab, so without this
+    // a page opened in a background tab would sit at ₹0 until focused —
+    // and a finance screen showing zeros is far worse than one that
+    // skips its animation. Caught in testing: with the preview pane
+    // hidden, every sample read "0.00 Cr" and never moved.
+    const settle = setTimeout(() => setV(target), delayMs + durationMs + 300);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(settle);
+      cancelAnimationFrame(raf);
+    };
+  }, [target, durationMs, delayMs]);
+  return v;
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   const p = iso.split("-").map(Number);
@@ -242,8 +294,8 @@ export function FinanceAnalysisClient({
       >
         <HeroTile
           label="Total billed"
-          value={compact(totals.billed)}
-          exact={inr(totals.billed)}
+          amount={totals.billed}
+          delay={0}
           foot={`${totals.bills.toLocaleString("en-IN")} bills · ${vendors.length} vendors`}
           accent={C.indigo}
           soft={C.indigoSoft}
@@ -252,8 +304,8 @@ export function FinanceAnalysisClient({
         />
         <HeroTile
           label="Total paid"
-          value={compact(totals.paid)}
-          exact={inr(totals.paid)}
+          amount={totals.paid}
+          delay={90}
           foot={`${collectedPct.toFixed(1)}% of everything billed`}
           accent={C.green}
           soft={C.greenSoft}
@@ -262,8 +314,8 @@ export function FinanceAnalysisClient({
         />
         <HeroTile
           label="Still outstanding"
-          value={compact(totals.outstanding)}
-          exact={inr(totals.outstanding)}
+          amount={totals.outstanding}
+          delay={180}
           foot={`across ${activeVendorCount} vendor${activeVendorCount === 1 ? "" : "s"}`}
           accent={C.amber}
           soft={C.amberSoft}
@@ -273,7 +325,7 @@ export function FinanceAnalysisClient({
       </div>
 
       {/* ── Settlement bar ───────────────────────────────────── */}
-      <div style={{ ...card, padding: "20px 24px", marginBottom: 16 }}>
+      <div className="fa-reveal" style={{ ...card, ["--d" as string]: "300ms", padding: "20px 24px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
           <div style={eyebrow}>Settlement</div>
           <div style={{ fontSize: 13, color: C.muted }}>
@@ -300,11 +352,11 @@ export function FinanceAnalysisClient({
               the two colours read as two liquids meeting, not two flat
               blocks. Pure CSS; no JS ticking. */}
           <div
-            className="fa-grow fa-liquid fa-liquid-green"
-            style={{ width: `${Math.min(collectedPct, 100)}%` }}
+            className="fa-grow"
+            style={{ width: `${Math.min(collectedPct, 100)}%`, background: `linear-gradient(90deg, ${C.green}, #35c07a)` }}
             title={`Paid ${inr(totals.paid)}`}
           />
-          <div className="fa-liquid fa-liquid-amber" style={{ flex: 1 }} title={`Outstanding ${inr(totals.outstanding)}`} />
+          <div style={{ flex: 1, background: `linear-gradient(90deg, ${C.amber}, #e0a44a)` }} title={`Outstanding ${inr(totals.outstanding)}`} />
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: C.muted }}>
           {collectedPct.toFixed(1)}% of all billed value has been settled.
@@ -312,7 +364,7 @@ export function FinanceAnalysisClient({
       </div>
 
       {/* ── Cash out per month ───────────────────────────────── */}
-      <div style={{ ...card, padding: "20px 24px", marginBottom: 16 }}>
+      <div className="fa-reveal" style={{ ...card, ["--d" as string]: "420ms", padding: "20px 24px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
             <div style={eyebrow}>Last 12 months</div>
@@ -343,7 +395,7 @@ export function FinanceAnalysisClient({
       </div>
 
       {/* ── Aging + cost heads ───────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginBottom: 16 }}>
+      <div className="fa-reveal" style={{ ["--d" as string]: "540ms", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginBottom: 16 }}>
         <div style={{ ...card, padding: "20px 24px" }}>
           <div style={eyebrow}>How old is the open money</div>
           <div style={{ ...display, fontSize: 19, margin: "4px 0 18px" }}>Aging of outstanding</div>
@@ -357,8 +409,8 @@ export function FinanceAnalysisClient({
               </div>
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
-                  className="fa-grow fa-liquid fa-liquid-amber"
-                  style={{ width: `${(a.amount / maxAging) * 100}%`, height: "100%", borderRadius: 999 }}
+                  className="fa-grow"
+                  style={{ width: `${(a.amount / maxAging) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.amber}, #e8b45c)` }}
                 />
               </div>
             </div>
@@ -378,8 +430,8 @@ export function FinanceAnalysisClient({
               </div>
               <div style={{ height: 8, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
                 <div
-                  className="fa-grow fa-liquid fa-liquid-indigo"
-                  style={{ width: `${(h.amount / maxHead) * 100}%`, height: "100%", borderRadius: 999 }}
+                  className="fa-grow"
+                  style={{ width: `${(h.amount / maxHead) * 100}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)` }}
                 />
               </div>
             </div>
@@ -388,7 +440,7 @@ export function FinanceAnalysisClient({
       </div>
 
       {/* ── Vendors ──────────────────────────────────────────── */}
-      <div style={{ ...card, overflow: "hidden" }}>
+      <div className="fa-reveal" style={{ ...card, ["--d" as string]: "660ms", overflow: "hidden" }}>
         <div
           style={{
             padding: "20px 24px",
@@ -490,7 +542,7 @@ export function FinanceAnalysisClient({
                   />
                   <div>
                     <div style={{ height: 7, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
-                      <div className="fa-liquid fa-liquid-green" style={{ width: `${Math.min(pct, 100)}%`, height: "100%" }} />
+                      <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: pct >= 99.5 ? C.green : `linear-gradient(90deg, ${C.green}, #7fd4a4)` }} />
                     </div>
                     <div style={{ fontSize: 10.5, color: C.muted, marginTop: 5, fontVariantNumeric: "tabular-nums" }}>
                       {pct.toFixed(0)}% settled
@@ -585,7 +637,7 @@ function VendorSheet({
 
           <div style={{ marginTop: 18 }}>
             <div style={{ height: 10, borderRadius: 999, background: C.wash, overflow: "hidden", border: `1px solid ${C.line}` }}>
-              <div className="fa-grow fa-liquid fa-liquid-green" style={{ width: `${Math.min(pct, 100)}%`, height: "100%" }} />
+              <div className="fa-grow" style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: `linear-gradient(90deg, ${C.green}, #43c98a)` }} />
             </div>
             <div style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>
               {pct.toFixed(1)}% settled
@@ -713,14 +765,19 @@ function VendorSheet({
 // ── Small pieces ───────────────────────────────────────────────────
 
 function HeroTile({
-  label, value, exact, foot, accent, soft, active, onClick,
+  label, amount, foot, accent, soft, active, onClick, delay = 0,
 }: {
-  label: string; value: string; exact: string; foot: string; accent: string; soft: string;
+  label: string; amount: number; foot: string; accent: string; soft: string;
   active?: boolean; onClick?: () => void;
+  /** ms to wait before this tile reveals + starts counting. */
+  delay?: number;
 }) {
+  const counted = useCountUp(amount, 950, delay);
+  const value = compactLike(counted, amount);
+  const exact = inr(counted);
   return (
     <div
-      className={`fa-hero${active ? " is-active" : ""}`}
+      className={`fa-hero fa-reveal${active ? " is-active" : ""}`}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
@@ -732,6 +789,7 @@ function HeroTile({
       }}
       style={{
         ...card,
+        ["--d" as string]: `${delay}ms`,
         padding: "22px 24px",
         position: "relative",
         overflow: "hidden",
@@ -742,7 +800,7 @@ function HeroTile({
           : card.boxShadow,
       }}
     >
-      <div aria-hidden className="fa-hero-glow" style={{ position: "absolute", right: -40, top: -40, width: 140, height: 140, borderRadius: "50%", background: soft, pointerEvents: "none" }} />
+      <div aria-hidden style={{ position: "absolute", right: -40, top: -40, width: 140, height: 140, borderRadius: "50%", background: soft, pointerEvents: "none" }} />
       <div style={{ position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 9, height: 9, borderRadius: 3, background: accent, boxShadow: `0 0 0 3px ${soft}` }} />
@@ -864,56 +922,26 @@ function Styles() {
 .fa-grow { animation: faGrow .6s cubic-bezier(.22,1,.36,1) both; }
 @keyframes faGrow { from { transform: scaleX(0); transform-origin: left } to { transform: scaleX(1); transform-origin: left } }
 
-/* ── Liquid fills ────────────────────────────────────────────────
-   A wide multi-stop gradient drifting sideways forever, plus a soft
-   sheen riding over it on a different period — the two never line up,
-   so the surface reads as moving liquid rather than a looping band.
-   background-size 300% is what gives the drift room to travel. */
-.fa-liquid {
-  position: relative;
-  overflow: hidden;
-  background-size: 300% 100%;
-  animation: faFlow 9s linear infinite;
+/* ── One-time entrance, top → down ───────────────────────────────
+   Daksh: the infinite liquid bars lagged — 178 vendor bars each
+   running a gradient animation plus a sheen pseudo-element meant ~380
+   elements repainting forever. Replaced with a single cascading
+   reveal: each band fades and lifts in once, staggered down the page
+   (KPIs → settlement → chart → aging/heads → vendors), and the KPI
+   figures count up from zero. After ~1.4s NOTHING is animating, so the
+   page is completely static while you actually use it. */
+.fa-reveal {
+  animation: faReveal .5s cubic-bezier(.22,1,.36,1) both;
+  animation-delay: var(--d, 0ms);
 }
-.fa-liquid::after {
-  content: "";
-  position: absolute; inset: 0;
-  background: linear-gradient(100deg,
-    rgba(255,255,255,0) 0%,
-    rgba(255,255,255,.42) 45%,
-    rgba(255,255,255,0) 70%);
-  background-size: 220% 100%;
-  animation: faSheen 5.5s ease-in-out infinite;
+@keyframes faReveal {
+  from { opacity: 0; transform: translateY(14px) }
+  to   { opacity: 1; transform: translateY(0) }
 }
-/* A bar that both grows in AND flows needs ONE animation declaration —
-   .fa-liquid's would otherwise overwrite .fa-grow's (same specificity,
-   later in source wins) and the grow-in would silently vanish. */
-.fa-grow.fa-liquid {
-  animation: faGrow .6s cubic-bezier(.22,1,.36,1) both,
-             faFlow 9s linear infinite;
-}
-.fa-liquid-green { background-image: linear-gradient(90deg, #0f9d58, #35c07a, #0b8c4d, #46cf8b, #0f9d58); }
-.fa-liquid-amber { background-image: linear-gradient(90deg, #c2740a, #e0a44a, #a95f05, #efb968, #c2740a); }
-.fa-liquid-indigo { background-image: linear-gradient(90deg, #4f46e5, #8b93f8, #3f36d4, #a5abfb, #4f46e5); }
-@keyframes faFlow  { 0% { background-position: 0% 50% }   100% { background-position: 300% 50% } }
-@keyframes faSheen { 0% { background-position: 120% 0 }   100% { background-position: -120% 0 } }
-
-/* The hero tiles breathe — their tone glow drifts and swells very
-   slowly (11s), so the page feels alive at rest without anything
-   moving fast enough to distract while you're reading a number. */
-.fa-hero-glow { animation: faBreathe 11s ease-in-out infinite; }
-@keyframes faBreathe {
-  0%, 100% { transform: scale(1)    translate(0, 0);      opacity: .85 }
-  50%      { transform: scale(1.14) translate(-6px, 4px); opacity: 1 }
-}
-
-/* Month bars rise on load instead of just appearing. */
-.fa-bar { transform-origin: bottom; animation: faRise .55s cubic-bezier(.22,1,.36,1) both; }
-@keyframes faRise { from { transform: scaleY(0); opacity: .35 } to { transform: scaleY(1); opacity: 1 } }
 
 /* Anyone who asked the OS for less motion gets the calm version. */
 @media (prefers-reduced-motion: reduce) {
-  .fa-liquid, .fa-liquid::after, .fa-hero-glow, .fa-bar { animation: none; }
+  .fa-reveal, .fa-grow, .fa-bar { animation: none; }
 }
 
 .fa-hero { transition: transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease, border-color .16s ease; }
