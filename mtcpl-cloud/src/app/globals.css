@@ -2458,7 +2458,47 @@ a > .acct-kpi {
   letter-spacing: 0.07em;
   color: var(--muted);
 }
-/* Inputs inside a settings modal get a consistent, recessed field. */
+/* ── Inside a settings section (Aug 2026, round 2) ───────────────
+   Daksh: "inside card there is still boring." A section body is always
+   the same two things — a compose form at the top, then the list of
+   existing rows — so both are treated here. CSS only, and scoped to
+   .peek-dialog-body so none of it can leak onto other pages. */
+
+/* The compose form reads as a distinct "add something" panel instead
+   of loose fields floating above the list. */
+.peek-dialog-body .settings-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.peek-dialog-body .settings-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+/* Gold tick in front of the form heading. */
+.peek-dialog-body .settings-card-title::before {
+  content: "";
+  width: 4px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--gold);
+  flex-shrink: 0;
+}
+
+/* Field labels go small + quiet, so the INPUT is the loud part. */
+.peek-dialog-body label.stack > span:first-child {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.peek-dialog-body .settings-form-row { gap: 14px; row-gap: 12px; }
+
 .peek-dialog-body input[type="text"],
 .peek-dialog-body input[type="tel"],
 .peek-dialog-body input[type="number"],
@@ -2466,6 +2506,9 @@ a > .acct-kpi {
 .peek-dialog-body select,
 .peek-dialog-body textarea {
   border-radius: 9px;
+  background: var(--surface);
+  box-shadow: inset 0 1px 2px rgba(15,23,42,0.04);
+  transition: border-color .12s ease, box-shadow .12s ease;
 }
 .peek-dialog-body input:focus,
 .peek-dialog-body select:focus,
@@ -2474,6 +2517,34 @@ a > .acct-kpi {
   border-color: var(--gold);
   box-shadow: 0 0 0 3px var(--gold-subtle, rgba(232,197,114,0.28));
 }
+
+/* Existing rows respond to the cursor, so it's obvious which one you
+   are about to edit. */
+.peek-dialog-body .settings-table-row-face,
+.peek-dialog-body details > summary {
+  border-radius: 10px;
+  transition: background .12s ease;
+}
+
+/* Code chips (temple codes, stone codes) — crisper and tighter. */
+.peek-dialog-body .code-badge {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 7px;
+}
+
+/* The section's primary action carries real weight. */
+.peek-dialog-body .primary-button {
+  border-radius: 9px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(161,98,7,0.25);
+}
+
+/* Helper text under a form reads as a note, not as body copy. */
+.peek-dialog-body .settings-card > p,
+.peek-dialog-body .muted { line-height: 1.55; }
+
 .settings-sql { border-radius: 12px; }
 
 .code-badge {

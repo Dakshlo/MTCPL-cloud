@@ -270,15 +270,20 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
               minWidth: 320,
               maxWidth: 360,
               padding: 8,
-              background: "rgba(255, 255, 255, 0.78)",
-              // Apple-style frosted glass. Both prefixed + standard
-              // for Safari + Chrome / Firefox.
+              // Aug 2026 (Daksh): this was rgba(255,255,255,0.78) — 22%
+              // of the page bled through and the KPI cards / charts
+              // behind it showed straight through the task names. A
+              // dropdown you read numbers off has to be opaque. Kept a
+              // touch of blur + saturation at the edges so it still
+              // reads as a floating glass panel, but the surface itself
+              // is now solid and the shadow does the lifting.
+              background: "rgba(255, 255, 255, 0.985)",
               backdropFilter: "blur(22px) saturate(180%)",
               WebkitBackdropFilter: "blur(22px) saturate(180%)",
-              border: "1px solid rgba(255, 255, 255, 0.55)",
+              border: "1px solid rgba(15, 23, 42, 0.10)",
               borderRadius: 14,
               boxShadow:
-                "0 12px 40px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.55)",
+                "0 18px 50px rgba(15, 23, 42, 0.26), 0 4px 12px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7)",
               zIndex: 200,
               animation:
                 "mtcpl-tasks-bloom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1.05) both",

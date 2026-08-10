@@ -70,7 +70,7 @@ export function TopbarDiaryBadge({ count, items }: { count: number; items: Diary
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 300, maxWidth: 340, padding: 8,
-          background: "rgba(255,255,255,0.82)", backdropFilter: "blur(22px) saturate(180%)", WebkitBackdropFilter: "blur(22px) saturate(180%)",
+          background: "rgba(255,255,255,0.985)", backdropFilter: "blur(22px) saturate(180%)", WebkitBackdropFilter: "blur(22px) saturate(180%)",
           border: "1px solid rgba(255,255,255,0.55)", borderRadius: 14, zIndex: 200,
           boxShadow: "0 12px 40px rgba(15,23,42,0.18), 0 0 0 1px rgba(15,23,42,0.04)",
           maxHeight: "calc(100vh - 84px)", overflowY: "auto", overscrollBehavior: "contain",

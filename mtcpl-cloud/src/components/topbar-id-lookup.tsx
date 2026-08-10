@@ -336,7 +336,9 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               width: 440,
               maxWidth: "calc(100vw - 32px)",
               padding: 14,
-              background: "rgba(255, 255, 255, 0.78)",
+              // Aug 2026 (Daksh): was 0.78 — the page showed through the
+              // search results. Opaque surface, blur kept for the edges.
+              background: "rgba(255, 255, 255, 0.985)",
               backdropFilter: "blur(22px) saturate(180%)",
               WebkitBackdropFilter: "blur(22px) saturate(180%)",
               border: "1px solid rgba(255, 255, 255, 0.55)",
