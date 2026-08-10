@@ -4,8 +4,6 @@ import Link from "next/link";
 import { headers, cookies } from "next/headers";
 
 import { LogoutButton } from "@/components/logout-button";
-import { MessengerPill } from "@/components/messenger-pill";
-import { NotificationBell } from "@/components/notification-bell";
 import { NavigationProgress } from "@/components/navigation-progress";
 import { RealtimeRefresh } from "@/components/realtime-refresh";
 import { RouteTracker } from "@/components/route-tracker";
@@ -31,7 +29,6 @@ import { LedgerSecretTrigger } from "@/components/ledger-secret-trigger";
 import { ledgerScope } from "@/lib/ledger-access";
 import { requireAuth } from "@/lib/auth";
 import { canApproveCuts, canSeeAwaitingReview } from "@/lib/cutting-permissions";
-import { canUseMessenger } from "@/lib/messenger-permissions";
 import {
   canApproveBills,
   canApproveDebit,
@@ -72,7 +69,6 @@ const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge", "c
 // rejectedBillsBadge below) where it shares the same visual
 // rhythm as Crosscheck / Pay Today / Final Audit counters and
 // stays out of the way when there's nothing to act on.
-const NOTIFICATION_ROLES = ["developer"];
 
 // Idle auto-logout (Daksh, June 2026): applies to EVERY role except
 // developer. 10 min of inactivity signs the user out (active use never
@@ -688,21 +684,69 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
         )}
         <div className="topbar">
+          {/* Aug 2026 makeover (Daksh: "its boring"). The bar used to be
+              a stacked label/name on the left and eight loose chips on
+              the right, with the role badge stranded among the tools.
+              It's now two clear zones: ONE identity cluster (avatar +
+              name + role) on the left, and on the right the working
+              pills, a hairline divider, then the small icon controls.
+              The Messenger pill and the notification bell are gone —
+              see the note further down. */}
           <div className="topbar-left">
-            <span className="topbar-label">Signed in as</span>
-            {/* Daksh May 2026 — link still goes to /profile but
-                the page itself is now read-only for non-devs (some
-                role gates key off the display name; a self-rename
-                would silently revoke those grants). Tooltip + dashed
-                underline removed to stop hinting "click to edit". */}
-            <Link
-              href="/profile"
-              className="topbar-name"
-              title="View your profile"
-              style={{ textDecoration: "none", cursor: "pointer" }}
-            >
-              {displayName}
+            {/* Daksh May 2026 — link still goes to /profile but the page
+                itself is read-only for non-devs (some role gates key off
+                the display name; a self-rename would silently revoke
+                those grants). */}
+            <Link href="/profile" className="topbar-identity" title="View your profile">
+              <span className="topbar-avatar" aria-hidden="true">
+                {(displayName || "?")
+                  .trim()
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map((w) => w[0] ?? "")
+                  .join("")
+                  .toUpperCase()}
+              </span>
+              <span className="topbar-identity-text">
+                <span className="topbar-label">Signed in as</span>
+                <span className="topbar-name">{displayName}</span>
+              </span>
             </Link>
+            <span className="role-pill" style={
+              profile.role === "developer"       ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
+              profile.role === "owner"           ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
+              profile.role === "team_head"       ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
+              // Mig 076 — emerald + soft glow so Rajesh's pill reads
+              // as a tier above TEAM HEAD without clashing with the
+              // gold (developer) or black (owner) badges.
+              profile.role === "senior_incharge" ? {
+                background: "linear-gradient(135deg, #047857 0%, #10b981 100%)",
+                color: "#fff",
+                fontWeight: 800,
+                letterSpacing: "0.04em",
+                boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
+              } :
+              {}
+            }>
+              {({
+                developer: "DEVELOPER",
+                owner: "OWNER",
+                team_head: "TEAM HEAD",
+                senior_incharge: "SENIOR INCHARGE ★",
+                block_slab_entry: "BLOCK+SLAB ENTRY",
+                slab_entry: "SLAB ENTRY",
+                block_entry: "BLOCK ENTRY",
+                cutting_operator: "CUTTING OPERATOR",
+                biller: "BILLER",
+                accountant: "ACCOUNTANT",
+                accountant_star: "ACCOUNTANT ★",
+                // Mig 076 round 2 — display-only rename. DB enum
+                // stays 'crosscheck'.
+                crosscheck: "MANAGER",
+                cnc_expense_entry: "EXPENSES ENTRY",
+                employee_register: "EMPLOYEE REGISTER",
+              } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
+            </span>
           </div>
           <div className="topbar-right">
             {/* ID Lookup quick-access dropdown — sits to the left of
@@ -800,58 +844,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               ownerView: ["owner", "developer"].includes(profile.role),
             })} />
 
-            {/* Mig 078 — Messenger pilot. canUseMessenger is locked
-                to developer + owner; everyone else never sees the
-                pill. The component owns its panel + realtime sub. */}
-            {canUseMessenger(profile) && (
-              <MessengerPill
-                profile={{
-                  id: profile.id,
-                  role: profile.role as "owner" | "developer",
-                  full_name: profile.full_name,
-                }}
-              />
-            )}
-
-            <span className="role-pill" style={
-              profile.role === "developer"       ? { background: "var(--gold)", color: "#fff", fontWeight: 700 } :
-              profile.role === "owner"           ? { background: "#1a1a1a", color: "#fff", fontWeight: 700 } :
-              profile.role === "team_head"       ? { background: "#1e3a5f", color: "#fff", fontWeight: 700 } :
-              // Mig 076 — emerald + soft glow so Rajesh's pill reads
-              // as a tier above TEAM HEAD without clashing with the
-              // gold (developer) or black (owner) badges.
-              profile.role === "senior_incharge" ? {
-                background: "linear-gradient(135deg, #047857 0%, #10b981 100%)",
-                color: "#fff",
-                fontWeight: 800,
-                letterSpacing: "0.04em",
-                boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset, 0 1px 3px rgba(16,185,129,0.35)",
-              } :
-              {}
-            }>
-              {({
-                developer: "DEVELOPER",
-                owner: "OWNER",
-                team_head: "TEAM HEAD",
-                senior_incharge: "SENIOR INCHARGE ★",
-                block_slab_entry: "BLOCK+SLAB ENTRY",
-                slab_entry: "SLAB ENTRY",
-                block_entry: "BLOCK ENTRY",
-                cutting_operator: "CUTTING OPERATOR",
-                biller: "BILLER",
-                accountant: "ACCOUNTANT",
-                accountant_star: "ACCOUNTANT ★",
-                // Mig 076 round 2 — display-only rename. DB enum
-                // stays 'crosscheck'.
-                crosscheck: "MANAGER",
-                cnc_expense_entry: "EXPENSES ENTRY",
-                employee_register: "EMPLOYEE REGISTER",
-              } as Record<string, string>)[profile.role] ?? profile.role.replace(/_/g, " ").toUpperCase()}
-            </span>
+            {/* Aug 2026 (Daksh) — the Messenger pill and the
+                NotificationBell were both removed from the topbar.
+                The messenger duplicated what the team actually uses
+                (WhatsApp + the Work Diary), and the bell was noise.
+                Their components still exist, unmounted, if either is
+                ever wanted back. */}
+            {/* hairline: working pills to the left of it, small
+                icon controls to the right */}
+            <span className="topbar-div" aria-hidden="true" />
             <TopbarRefreshButton />
-            {NOTIFICATION_ROLES.includes(profile.role) && (
-              <NotificationBell userId={profile.id} role={profile.role} />
-            )}
             {SETTINGS_ROLES.includes(profile.role) && (
               <Link href="/settings" className="topbar-settings-btn" title="Settings">
                 ⚙
