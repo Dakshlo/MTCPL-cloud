@@ -524,6 +524,17 @@ const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "accountant", "accountant_star"],
     department: "finance",
   },
+  // Owner's whole-department analysis (Daksh, Aug 2026). Listed for
+  // owner + developer here; the PAGE itself narrows owner down to the
+  // named owner (NARESH), the same convention cutting-permissions.ts
+  // uses — so a second owner account sees the link but gets bounced.
+  {
+    href: "/accounts/analysis",
+    label: "Finance Analysis",
+    icon: "📈",
+    roles: ["developer", "owner"],
+    department: "finance",
+  },
   {
     href: "/accounts/pay-today",
     label: "Pay Today",
