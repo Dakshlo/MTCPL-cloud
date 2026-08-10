@@ -485,15 +485,20 @@ export default async function BillDetailPage({
         </>
       )}
 
-      {/* Hero block — token, vendor, total, status */}
+      {/* Hero block — token, vendor, total, status.
+          Aug 2026 premium pass: deeper elevation, softer corners and a
+          faint indigo wash from the top-left, so the bill reads as a
+          document header rather than a panel. Layout unchanged. */}
       <div
         style={{
-          background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)",
+          position: "relative",
+          overflow: "hidden",
+          background: `linear-gradient(135deg, ${ACCOUNTS_TOKENS.accentLight} 0%, #ffffff 46%)`,
           border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-          borderRadius: 14,
-          padding: "20px 22px",
+          borderRadius: 18,
+          padding: "22px 24px",
           marginBottom: 18,
-          boxShadow: ACCOUNTS_TOKENS.shadow,
+          boxShadow: ACCOUNTS_TOKENS.shadowLarge,
           display: "flex",
           gap: 20,
           flexWrap: "wrap",
@@ -501,6 +506,17 @@ export default async function BillDetailPage({
           justifyContent: "space-between",
         }}
       >
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 0,
+            height: 3,
+            background: `linear-gradient(90deg, ${ACCOUNTS_TOKENS.accent}, transparent 62%)`,
+          }}
+        />
         <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
           <VendorAvatar name={vendor?.name ?? "?"} size={56} />
           <div style={{ minWidth: 0 }}>
@@ -802,6 +818,103 @@ export default async function BillDetailPage({
               tone={Number(bill.amount_outstanding) > 0 ? ACCOUNTS_TOKENS.warning : ACCOUNTS_TOKENS.success}
             />
           </div>
+
+          {/* Settlement bar (Daksh, Aug 2026) — how far this ONE bill
+              has been paid down, in a single glance. The three cards
+              above give the amounts; this gives the ratio, which is
+              what the eye actually wants first. Held money is drawn as
+              a distinct hatched slice so a bill that looks "unpaid" is
+              visibly explained by an owner hold rather than by
+              inaction. Read-only: derived entirely from figures
+              already on the bill. */}
+          {(() => {
+            const payable = Number(
+              bill.amount_payable_to_vendor ?? bill.amount_total,
+            );
+            if (!(payable > 0)) return null;
+            const paid = Number(bill.amount_paid) || 0;
+            const held = Number(bill.held_amount) || 0;
+            const paidPct = Math.max(0, Math.min(100, (paid / payable) * 100));
+            const heldPct = Math.max(0, Math.min(100 - paidPct, (held / payable) * 100));
+            const cleared = Number(bill.amount_outstanding) <= 0.5;
+            return (
+              <div
+                style={{
+                  padding: "14px 16px",
+                  background: ACCOUNTS_TOKENS.surfaceGradient,
+                  border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                  borderRadius: ACCOUNTS_TOKENS.radius,
+                  boxShadow: ACCOUNTS_TOKENS.shadow,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginBottom: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: ACCOUNTS_TOKENS.inkMuted,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.07em",
+                    }}
+                  >
+                    Settlement
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: cleared
+                        ? ACCOUNTS_TOKENS.success
+                        : ACCOUNTS_TOKENS.inkMuted,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {cleared ? "Fully settled" : `${paidPct.toFixed(1)}% paid`}
+                    {held > 0 && (
+                      <span style={{ color: ACCOUNTS_TOKENS.warning }}>
+                        {" · "}₹{held.toLocaleString("en-IN")} held
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    height: 10,
+                    borderRadius: 999,
+                    overflow: "hidden",
+                    background: ACCOUNTS_TOKENS.neutralLight,
+                    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+                  }}
+                >
+                  <div
+                    title={`Paid ₹${paid.toLocaleString("en-IN")}`}
+                    style={{
+                      width: `${paidPct}%`,
+                      background: `linear-gradient(90deg, ${ACCOUNTS_TOKENS.success}, #34c98a)`,
+                    }}
+                  />
+                  <div
+                    title={`Held ₹${held.toLocaleString("en-IN")}`}
+                    style={{
+                      width: `${heldPct}%`,
+                      // Hatched, so held money never reads as paid money.
+                      background: `repeating-linear-gradient(45deg, ${ACCOUNTS_TOKENS.warning} 0 5px, ${ACCOUNTS_TOKENS.warning}88 5px 10px)`,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Partial rejection (mig 045) — visible when:
                 (a) a rejection is already marked (always render the
@@ -1784,30 +1897,81 @@ function SummaryCard({
   value: React.ReactNode;
   tone: string;
 }) {
+  // Aug 2026 premium pass (Daksh) — same card, same place, richer
+  // read: a tone-coloured glow bleeds in from the top-right so each
+  // card carries its own meaning at a glance, the left edge fades
+  // downward instead of sitting as a flat 3px stripe, and an accent
+  // dot anchors the label. Content is position:relative so it always
+  // paints above the glow.
   return (
     <div
       style={{
-        padding: 14,
-        background: "#fff",
+        position: "relative",
+        overflow: "hidden",
+        padding: "15px 16px",
+        background: ACCOUNTS_TOKENS.surfaceGradient,
         border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: `3px solid ${tone}`,
-        borderRadius: 10,
+        borderRadius: ACCOUNTS_TOKENS.radius,
         boxShadow: ACCOUNTS_TOKENS.shadow,
       }}
     >
       <div
+        aria-hidden
         style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: "var(--muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          marginBottom: 6,
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          background: `linear-gradient(180deg, ${tone} 0%, ${tone}55 100%)`,
         }}
-      >
-        {label}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          right: -34,
+          top: -34,
+          width: 116,
+          height: 116,
+          borderRadius: "50%",
+          background: `${tone}14`,
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ position: "relative" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            marginBottom: 8,
+          }}
+        >
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 2,
+              background: tone,
+              boxShadow: `0 0 0 3px ${tone}1f`,
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: ACCOUNTS_TOKENS.inkMuted,
+              textTransform: "uppercase",
+              letterSpacing: "0.07em",
+            }}
+          >
+            {label}
+          </span>
+        </div>
+        <div>{value}</div>
       </div>
-      <div>{value}</div>
     </div>
   );
 }

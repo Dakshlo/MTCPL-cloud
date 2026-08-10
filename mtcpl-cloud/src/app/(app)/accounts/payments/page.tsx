@@ -254,6 +254,15 @@ export default async function PaymentsHistoryPage({
           { label: "Yesterday", from: istYest, to: istYest },
           { label: "Last 7 days", from: istLast7, to: istToday },
           { label: "Last 30 days", from: istLast30, to: istToday },
+          // "All time" (Daksh, Aug 2026). The page defaults to the last
+          // 30 days, so the header total only ever showed a month —
+          // which read as a contradiction against Finance Analysis's
+          // lifetime "Total paid". This pill makes the whole ledger one
+          // tap away. Safe to fetch: the query above is paginated
+          // (fetchAllPaged), so a range this wide is NOT truncated by
+          // PostgREST's 1000-row cap. 2015-01-01 predates the business's
+          // first record, so it is effectively "everything".
+          { label: "All time", from: "2015-01-01", to: istToday },
         ];
         return (
           <div
