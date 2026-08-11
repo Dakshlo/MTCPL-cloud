@@ -380,6 +380,17 @@ export function AuthForm() {
               maxLength={6}
               inputMode="numeric"
               pattern="[0-9]*"
+              // Aug 2026 (Daksh) — dad wanted a 4-digit OTP because
+              // typing six is a nuisance. Supabase won't go below 6
+              // ("Must be 6 or larger"), and generating our own code
+              // would mean replacing Supabase's OTP *and* session
+              // minting on the login path — a lot of risk for two
+              // keystrokes. This attribute solves the actual problem
+              // instead: iOS and Android read the code out of the SMS
+              // and offer it above the keyboard, so it's one tap and
+              // no typing at all. Without it the phone doesn't know
+              // this box wants the code.
+              autoComplete="one-time-code"
               disabled={succeeded}
               style={{
                 letterSpacing: 12,
