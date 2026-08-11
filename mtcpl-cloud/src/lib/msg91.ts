@@ -12,9 +12,18 @@
 //
 // DLT facts (Airtel, via MSG91):
 //   • Sender / header .... MATSHW (DLT registered)
-//   • Approved template .. "Your MATESHWARI PORTAL login OTP is
+//   • Live template ...... "Your MATESHWARI PORTAL login OTP is
 //                            {#numeric#} . Valid for 10 minutes.
 //                            Do not share it."
+//   • Pending (Aug 2026) .. "MTCPL Login OTP Short" — "Your login OTP
+//                            is {#numeric#}. Valid for 10 minutes. Do
+//                            not share it." Daksh's dad wanted the
+//                            brand name out of the body; the header
+//                            still identifies us. DLT content is
+//                            IMMUTABLE once approved, so any wording
+//                            change means a new template AND a new
+//                            MSG91 flow id — hence the env override
+//                            on OTP_TEMPLATE_ID below.
 //   • The MSG91 flow template id below maps ##var1## -> the OTP.
 // The message MUST go out exactly as the registered template or the
 // DLT operator blocks it — that's why we send via the template id and
@@ -22,8 +31,21 @@
 
 const MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow/";
 
-// Not secret — the approved MSG91 "SEND_OTP" flow/template id.
-const OTP_TEMPLATE_ID = "6a252460e3ddb4d18b0c412b";
+/**
+ * The approved MSG91 "SEND_OTP" flow id. Not secret.
+ *
+ * Env-overridable so swapping templates is a Vercel setting rather
+ * than a deploy: paste the new flow id into MSG91_OTP_TEMPLATE_ID and
+ * it takes effect on the next request; clear the variable and it falls
+ * straight back to the known-good id below. Logins never wait on a
+ * build, and a bad swap is a one-field undo.
+ *
+ * ⚠ This is the MSG91 FLOW id, NOT the DLT template id (the long
+ * numeric one, e.g. 1007616171429714115). Two different values —
+ * only the flow id belongs here.
+ */
+const OTP_TEMPLATE_ID =
+  process.env.MSG91_OTP_TEMPLATE_ID?.trim() || "6a252460e3ddb4d18b0c412b";
 
 /** Normalise a mobile to MSG91's "country code + number, no +" form
  *  (e.g. "919876543210"). Accepts +91…, 91…, or a bare 10-digit
