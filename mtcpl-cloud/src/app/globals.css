@@ -2992,3 +2992,171 @@ body.vendor-cockpit-fullscreen .page-card {
    * can clip multi-page documents on some browsers. */
   body { overflow: visible !important; }
 }
+
+/* ── Dashboard greeting hero ──────────────────────────────────────
+ * Aug 2026 (Daksh): "on dashboard can you make this strip UI more
+ * good." Same dark-bronze brand card in the same spot; richer finish:
+ * layered gold glows, a gold hairline ring, gradient name, a
+ * time-of-day tile, and the online users as initial-avatars + names
+ * instead of one long comma-separated pill. ALL motion is one-shot
+ * (an entrance and a single sheen sweep) — infinite animations on
+ * dashboards caused the Finance Analysis lag. */
+.dash-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  border-radius: 14px;
+  padding: 20px 24px;
+  background:
+    radial-gradient(560px 200px at 88% -30%, rgba(232, 197, 114, 0.20), transparent 62%),
+    radial-gradient(420px 200px at -6% 130%, rgba(201, 151, 58, 0.14), transparent 60%),
+    linear-gradient(120deg, #241c0d 0%, #33270f 46%, #4a3a1f 100%);
+  border: 1px solid rgba(232, 197, 114, 0.20);
+  box-shadow:
+    0 4px 18px rgba(45, 36, 16, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  animation: dash-hero-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* One-time sheen so the strip feels alive on landing without a
+ * forever animation. */
+.dash-hero::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -45%;
+  width: 38%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.09) 50%, transparent);
+  transform: skewX(-18deg);
+  animation: dash-hero-sheen 1.1s ease-out 0.4s 1 both;
+  pointer-events: none;
+}
+@keyframes dash-hero-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dash-hero-sheen {
+  from { transform: skewX(-18deg) translateX(0); opacity: 1; }
+  to   { transform: skewX(-18deg) translateX(480%); opacity: 0; }
+}
+
+.dash-hero-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+
+.dash-hero-tile {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  border-radius: 13px;
+  background: linear-gradient(160deg, rgba(232, 197, 114, 0.22), rgba(232, 197, 114, 0.07));
+  border: 1px solid rgba(232, 197, 114, 0.30);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.dash-hero-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(232, 197, 114, 0.75);
+  margin-bottom: 5px;
+}
+.dash-hero-date::before {
+  content: "";
+  width: 14px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #e8c572, rgba(232, 197, 114, 0));
+}
+
+.dash-hero-title {
+  font-size: 23px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.4px;
+  line-height: 1.15;
+}
+.dash-hero-name {
+  background: linear-gradient(100deg, #f5da96 0%, #e8c572 45%, #d2a44c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dash-hero-sub { font-size: 12px; color: rgba(255, 255, 255, 0.52); margin-top: 4px; }
+
+/* Online-users cluster (right side) */
+.dash-online {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 8px 14px 8px 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  max-width: 400px;
+  min-width: 0;
+}
+.dash-avatars { display: flex; flex-shrink: 0; }
+.dash-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #2d2410;
+  background: linear-gradient(150deg, #f0d18a, #c9973a);
+  border: 2px solid #33270f; /* separation ring against the card */
+  margin-left: -8px;
+}
+.dash-avatar:first-child { margin-left: 0; }
+.dash-avatar-more { background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 10px; }
+.dash-online-meta { min-width: 0; }
+.dash-online-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+.dash-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+  flex-shrink: 0;
+}
+.dash-online-names {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.dash-online-empty { font-size: 12px; color: rgba(255, 255, 255, 0.35); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-hero, .dash-hero::after { animation: none; }
+}

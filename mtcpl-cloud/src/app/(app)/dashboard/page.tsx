@@ -37,6 +37,13 @@ function istToday(daysAgo = 0) {
   };
 }
 
+/** "PARESH KUMAR" → "PK" — for the hero's online-user avatars. */
+function initialsOf(name: string | null): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts.slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
+}
+
 export default async function DashboardPage() {
   // Permissive auth + explicit guard. We need to allow Rajesh
   // (whose stored role is team_head, not owner) onto the dashboard
@@ -73,22 +80,20 @@ export default async function DashboardPage() {
     });
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
-        {/* Lightweight greeting header — same visual style as the main
-            dashboard but with no online-users panel. */}
-        <div style={{
-          background: "linear-gradient(135deg, #2D2410 0%, #4a3a1f 100%)",
-          borderRadius: 12,
-          padding: "20px 24px",
-          boxShadow: "0 4px 16px rgba(45,36,16,0.18)",
-        }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
-            {dateDisplay}
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.3px" }}>
-            {greeting}, <span style={{ color: "#E8C572" }}>{profile.full_name || "there"}</span>
-          </div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-            Open Block Journey to track inventory throughput.
+        {/* Lightweight greeting header — same .dash-hero chrome as the
+            main dashboard, just without the online-users panel. */}
+        <div className="dash-hero">
+          <div className="dash-hero-left">
+            <div className="dash-hero-tile" aria-hidden>
+              {hr < 12 ? "🌅" : hr < 17 ? "☀️" : "🌙"}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="dash-hero-date">{dateDisplay}</div>
+              <div className="dash-hero-title">
+                {greeting}, <span className="dash-hero-name">{profile.full_name || "there"}</span>
+              </div>
+              <div className="dash-hero-sub">Open Block Journey to track inventory throughput.</div>
+            </div>
           </div>
         </div>
 
@@ -228,41 +233,49 @@ export default async function DashboardPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
 
-      {/* ── GREETING HEADER ── */}
-      <div style={{
-        background: "linear-gradient(135deg, #2D2410 0%, #4a3a1f 100%)",
-        borderRadius: 12,
-        padding: "20px 24px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        flexWrap: "wrap",
-        gap: 12,
-        boxShadow: "0 4px 16px rgba(45,36,16,0.18)",
-      }}>
-        <div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
-            {dateDisplay}
+      {/* ── GREETING HEADER ── styled by .dash-hero (globals.css):
+          same card, richer finish — layered gold glows, hairline ring,
+          gradient name, time-of-day tile, and online users as
+          initial-avatars + names instead of one long comma pill. */}
+      <div className="dash-hero">
+        <div className="dash-hero-left">
+          <div className="dash-hero-tile" aria-hidden>
+            {hr < 12 ? "🌅" : hr < 17 ? "☀️" : "🌙"}
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "-0.3px" }}>
-            {greeting}, <span style={{ color: "#E8C572" }}>{ownerName}</span>
-          </div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-            Here&apos;s your operations overview
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          {onlineList.length > 0 ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.07)", borderRadius: 20, padding: "6px 12px" }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 0 2px rgba(34,197,94,0.3)", display: "inline-block", flexShrink: 0 }} />
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontWeight: 500 }}>
-                {onlineList.map((u) => u.full_name || "—").join(", ")} online
-              </span>
+          <div style={{ minWidth: 0 }}>
+            <div className="dash-hero-date">{dateDisplay}</div>
+            <div className="dash-hero-title">
+              {greeting}, <span className="dash-hero-name">{ownerName}</span>
             </div>
-          ) : (
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>No other users online</div>
-          )}
+            <div className="dash-hero-sub">Here&apos;s your operations overview</div>
+          </div>
         </div>
+        {onlineList.length > 0 ? (
+          <div
+            className="dash-online"
+            // Full list on hover, since the visible line clamps at two rows.
+            title={onlineList.map((u) => u.full_name || "—").join(", ")}
+          >
+            <div className="dash-avatars">
+              {onlineList.slice(0, 5).map((u) => (
+                <span key={u.id} className="dash-avatar">{initialsOf(u.full_name)}</span>
+              ))}
+              {onlineList.length > 5 && (
+                <span className="dash-avatar dash-avatar-more">+{onlineList.length - 5}</span>
+              )}
+            </div>
+            <div className="dash-online-meta">
+              <div className="dash-online-label">
+                <span className="dash-online-dot" /> Online now · {onlineList.length}
+              </div>
+              <div className="dash-online-names">
+                {onlineList.map((u) => u.full_name || "—").join(", ")}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="dash-online-empty">No other users online</div>
+        )}
       </div>
 
       {/* ── ASK AI / BLOCK JOURNEY / TV MODE ENTRIES ──
