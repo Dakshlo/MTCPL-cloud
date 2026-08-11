@@ -11,6 +11,11 @@ import { RoyaltySecretDot } from "./royalty-secret-dot";
 import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
+import {
+  canViewVariousCosting,
+  canViewCncCosts,
+  canViewCutterCosts,
+} from "@/lib/expenses-permissions";
 import { DprEntryCard } from "@/components/dpr-entry-card";
 import { CncLogbookEntryCard } from "@/components/cnc-logbook-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
@@ -278,7 +283,17 @@ export default async function DashboardPage() {
         {/* Production DPR + CNC Logbook — owner/developer only. */}
         {isOwnerOrDev && <DprEntryCard />}
         {isOwnerOrDev && <CncLogbookEntryCard />}
-        <VariousCostingEntryCard />
+        {/* Two reports, straight off the card — the old
+            /reports/various-costing landing in between did nothing but
+            show these same two choices. Its per-report gate moves here
+            so we don't render a button that only leads to a redirect;
+            both report pages still enforce their own. */}
+        {canViewVariousCosting(profile) && (
+          <VariousCostingEntryCard
+            canCnc={canViewCncCosts(profile)}
+            canCutter={canViewCutterCosts(profile)}
+          />
+        )}
         <TvModeEntryCard />
         {/* Owner-only market-news brief + chat (liquid-glass page). */}
         {canSeeMarketNews(profile) && <MarketNewsEntryCard />}

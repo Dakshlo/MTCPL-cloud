@@ -14,7 +14,7 @@
  *     costing" Daksh's dad explicitly asked for.
  *   • The aggregate operational-expense breakdown by category.
  *
- * Footer keeps three navigation paths: ← Various Costing, Enter /
+ * Footer keeps three navigation paths: ← Back to dashboard, Enter /
  * edit expenses, Open full Excel report ↗ (the existing
  * /carving/reports view, which carries depreciation + the
  * paper-shaped per-vendor cross-tab).
@@ -146,7 +146,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
     <section className="vc-page" style={{ paddingBottom: 24 }}>
       <VcStyles />
       <Link
-        href="/reports/various-costing"
+        href="/dashboard"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -163,7 +163,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           whiteSpace: "nowrap",
         }}
       >
-        ← Back to Various Costing
+        ← Back to dashboard
       </Link>
       {/* ── Header ───────────────────────────────────────────── */}
       <header
@@ -566,7 +566,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
         }}
       >
         <Link
-          href="/reports/various-costing"
+          href="/dashboard"
           style={{
             padding: "8px 14px",
             fontSize: 13,
@@ -578,7 +578,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
             textDecoration: "none",
           }}
         >
-          ← Various Costing
+          ← Back to dashboard
         </Link>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Link

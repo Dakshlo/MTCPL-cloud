@@ -1,165 +1,25 @@
 /**
- * Mig 060 — Various Costing landing. Two sub-cards:
- *   1. CNC Costing  → existing carving monthly report at
- *      /carving/reports (cost-per-SFT/CFT broken down per CNC vendor).
- *   2. Cutter Costing → the new mig 060 report at
- *      /reports/various-costing/cutter (aggregate cost-per-CFT for
- *      the cutting machines).
+ * Mig 060 — Various Costing landing. RETIRED Aug 2026.
  *
- * Auth: canViewVariousCosting (= can view either sub-report). The
- * sub-cards themselves gate to whichever the user can actually open.
+ * Daksh: "that page just increases resistance so remove it — instead
+ * when you press Various Costing it will give directly 2 options on
+ * the dashboard."
+ *
+ * The page's whole job was to show two cards, CNC and Cutter. Those
+ * two now sit as buttons on the dashboard's Various Costing card
+ * (components/various-costing-entry-card.tsx), and both report pages
+ * point their back-link at /dashboard, so nothing links here any more.
+ *
+ * Kept as a redirect rather than deleted: the route is a year old, so
+ * it's in browser histories and bookmarks, and cutting/expenses/
+ * actions.ts still calls revalidatePath("/reports/various-costing").
+ * A redirect turns all of those into a harmless bounce instead of a
+ * 404. The two child routes (/cnc, /cutter) are untouched and remain
+ * the real reports.
  */
 
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuth } from "@/lib/auth";
-import {
-  canViewCncCosts,
-  canViewCutterCosts,
-  canViewVariousCosting,
-} from "@/lib/expenses-permissions";
 
 export default async function VariousCostingLanding() {
-  const { profile } = await requireAuth();
-  if (!canViewVariousCosting(profile)) {
-    redirect("/");
-  }
-  const canCnc = canViewCncCosts(profile);
-  const canCutter = canViewCutterCosts(profile);
-
-  return (
-    <section style={{ paddingBottom: 24 }}>
-      <div style={{ marginBottom: 18 }}>
-        <Link
-          href="/dashboard"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--muted)",
-            textDecoration: "none",
-          }}
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: 14,
-        }}
-      >
-        <CostingCard
-          href="/reports/various-costing/cnc"
-          enabled={canCnc}
-          icon="🛠"
-          tone="#7c3aed"
-          title="CNC Costing"
-        />
-        <CostingCard
-          href="/reports/various-costing/cutter"
-          enabled={canCutter}
-          icon="✂"
-          tone="#0ea5e9"
-          title="Cutter Costing"
-        />
-      </div>
-    </section>
-  );
-}
-
-function CostingCard({
-  href,
-  enabled,
-  icon,
-  tone,
-  title,
-}: {
-  href: string;
-  enabled: boolean;
-  icon: string;
-  tone: string;
-  title: string;
-}) {
-  const inner = (
-    <div
-      style={{
-        // Fixed minHeight + identical content → both cards are exactly
-        // the same size whether they sit side-by-side or wrap.
-        minHeight: 132,
-        padding: "20px 22px",
-        background: enabled ? "var(--surface)" : "var(--bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 14,
-        position: "relative",
-        overflow: "hidden",
-        opacity: enabled ? 1 : 0.55,
-        transition: "transform 0.12s, box-shadow 0.12s",
-        cursor: enabled ? "pointer" : "not-allowed",
-        textDecoration: "none",
-        color: "inherit",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        gap: 16,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 4,
-          background: tone,
-        }}
-      />
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 22,
-            background: tone + "1a",
-            color: tone,
-            borderRadius: 10,
-          }}
-        >
-          {icon}
-        </div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)" }}>{title}</div>
-      </div>
-      <div
-        style={{
-          display: "inline-flex",
-          alignSelf: "flex-start",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
-          fontSize: 12,
-          fontWeight: 700,
-          color: enabled ? "var(--gold)" : "var(--muted)",
-          background: enabled ? "var(--bg)" : "transparent",
-          border: `1px solid ${enabled ? "var(--gold)" : "var(--border)"}`,
-          borderRadius: 999,
-        }}
-      >
-        {enabled ? "Open report →" : "No access"}
-      </div>
-    </div>
-  );
-  if (!enabled) return inner;
-  return (
-    <Link href={href} style={{ textDecoration: "none", color: "inherit" }}>
-      {inner}
-    </Link>
-  );
+  redirect("/dashboard");
 }

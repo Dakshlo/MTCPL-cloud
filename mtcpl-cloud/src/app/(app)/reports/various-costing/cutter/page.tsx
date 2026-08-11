@@ -129,7 +129,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
     <section className="vc-page" style={{ paddingBottom: 24 }}>
       <VcStyles />
       <Link
-        href="/reports/various-costing"
+        href="/dashboard"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -146,7 +146,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
           whiteSpace: "nowrap",
         }}
       >
-        ← Back to Various Costing
+        ← Back to dashboard
       </Link>
       {/* ── Header ───────────────────────────────────────────── */}
       <header
@@ -464,7 +464,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <Link
-          href="/reports/various-costing"
+          href="/dashboard"
           style={{
             padding: "8px 14px",
             fontSize: 13,
@@ -476,7 +476,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
             textDecoration: "none",
           }}
         >
-          ← Various Costing
+          ← Back to dashboard
         </Link>
         <Link
           href="/cutting/expenses"

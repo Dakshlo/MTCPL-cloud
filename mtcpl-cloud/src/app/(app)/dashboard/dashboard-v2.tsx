@@ -284,15 +284,22 @@ export function DashboardV2({
           <Link href="/reports/dpr" style={{ textDecoration: "none", display: "flex" }}>
             <TileBody index="03" icon="🏭" accent="#34d399" accentLight="#047857" title="Production DPR" cta="→" />
           </Link>
-          <Link href="/reports/various-costing" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody index="04" icon="📊" accent="#7dd3fc" accentLight="#0369a1" title="Various Costing" cta="→" />
+          {/* Aug 2026 — one "Various Costing" tile used to point at a
+              landing page whose only content was these two choices.
+              That page now redirects, so the reports are their own
+              tiles and the extra hop is gone. */}
+          <Link href="/reports/various-costing/cnc" style={{ textDecoration: "none", display: "flex" }}>
+            <TileBody index="04" icon="🛠" accent="#7dd3fc" accentLight="#0369a1" title="CNC Costing" cta="→" />
+          </Link>
+          <Link href="/reports/various-costing/cutter" style={{ textDecoration: "none", display: "flex" }}>
+            <TileBody index="05" icon="✂" accent="#7dd3fc" accentLight="#0369a1" title="Cutter Costing" cta="→" />
           </Link>
           <Link href="/carving/floor?mode=tv" target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "flex" }}>
-            <TileBody index="05" icon="📺" accent="#f59e0b" accentLight="#b45309" title="Carving floor on the wall" cta="↗" />
+            <TileBody index="06" icon="📺" accent="#f59e0b" accentLight="#b45309" title="Carving floor on the wall" cta="↗" />
           </Link>
           {showMarketNews && (
             <Link href="/market-news" style={{ textDecoration: "none", display: "flex" }}>
-              <TileBody index="06" icon="📰" accent="#a5b4fc" accentLight="#4f46e5" title="Market brief & chat" cta="→" />
+              <TileBody index="07" icon="📰" accent="#a5b4fc" accentLight="#4f46e5" title="Market brief & chat" cta="→" />
             </Link>
           )}
         </div>
