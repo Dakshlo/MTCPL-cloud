@@ -11,6 +11,7 @@ import { undoMarbleCutAction } from "./actions";
 import { PeekSection } from "@/components/peek-section";
 import { generateNextCode } from "./utils";
 import { fetchAllBlockIds } from "./block-ids";
+import { fetchAllPaged } from "@/lib/paginate";
 import { yardLabel } from "@/lib/yards";
 import type { StoneCategory } from "@/lib/stone-categories";
 
@@ -29,16 +30,52 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   const admin = createAdminSupabaseClient();
   const isEntryRole = (BLOCK_ENTRY_ROLES as readonly string[]).includes(profile.role);
 
-  let blocksQuery = admin
-    .from("blocks")
-    .select(
-      "id, stone, yard, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, quality, truck_no, vendor_name, bill_no, created_at, created_by",
-    )
-    .in("status", ["available", "reserved"])
-    .order("created_at", { ascending: false })
-    .limit(500);
-
-  if (isEntryRole) blocksQuery = blocksQuery.eq("created_by", profile.id);
+  // Every available/reserved block, paginated.
+  //
+  // Aug 2026 (Daksh: "there is a block MT-B-228, when I search it in
+  // Find ID it's there, but in Blocks when I search it, it doesn't
+  // show"). This query used to end in `.limit(500)`. There were 613
+  // available/reserved blocks, so the 113 oldest — 8,367 CFT across 4
+  // stones and 6 yards — never reached the page AT ALL: not the grid,
+  // not the category counts, and not the search bar, which filters
+  // this array client-side. MT-B-228 sat at row 567. Find ID looks the
+  // id up in the DB directly, which is why the two disagreed.
+  //
+  // Ordered created_at DESC *then id*: a page boundary landing inside
+  // a group of identical timestamps can otherwise drop or repeat a row
+  // (see the warning in lib/paginate.ts).
+  type BlockRow = {
+    id: string;
+    stone: string;
+    yard: number;
+    category: string | null;
+    length_ft: number | null;
+    width_ft: number | null;
+    height_ft: number | null;
+    tonnes: number | string | null;
+    truck_entry_id: string | null;
+    status: string;
+    quality: string | null;
+    truck_no: string | null;
+    vendor_name: string | null;
+    bill_no: string | null;
+    created_at: string | null;
+    created_by: string | null;
+  };
+  function fetchAllBlocks(): Promise<BlockRow[]> {
+    return fetchAllPaged<BlockRow>((from, to) => {
+      const q = admin
+        .from("blocks")
+        .select(
+          "id, stone, yard, category, length_ft, width_ft, height_ft, tonnes, truck_entry_id, status, quality, truck_no, vendor_name, bill_no, created_at, created_by",
+        )
+        .in("status", ["available", "reserved"])
+        .order("created_at", { ascending: false })
+        .order("id");
+      // Block-entry roles only ever see their own entries.
+      return (isEntryRole ? q.eq("created_by", profile.id) : q).range(from, to);
+    });
+  }
 
   // Paginated open-slab fetch — Supabase's PostgREST caps single .select()
   // calls at 1000 rows. Without paging, the manual-cut slab picker only
@@ -79,7 +116,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   }
 
   const [
-    { data: blocks, error },
+    blocks,
     { data: allIds },
     { data: consumed },
     { data: vendorRows },
@@ -87,7 +124,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     openSlabs,
     { data: operatorRows },
   ] = await Promise.all([
-    blocksQuery,
+    fetchAllBlocks(),
     // Paginated (fetchAllBlockIds) — .limit(100000) does NOT override Supabase's
     // 1000-row response cap, so a truncated pool made the Add Block form suggest
     // an already-taken code. Kept in {data:[{id}]} shape for the destructure.
@@ -116,7 +153,8 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     admin.from("operators").select("id, name").eq("is_active", true).order("name"),
   ]);
 
-  if (error) throw new Error(error.message);
+  // No `error` check here any more — fetchAllBlocks throws on the first
+  // bad page rather than returning an {error} envelope.
 
   const profilesMap = await getProfilesMap();
 
