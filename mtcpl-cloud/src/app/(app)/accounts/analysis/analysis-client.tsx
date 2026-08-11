@@ -24,7 +24,20 @@
  * Read-only view: nothing here mutates anything.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+
+import {
+  buildPlan,
+  MOOD_META,
+  URGENCY_META,
+  DEFAULT_TERMS_DAYS,
+  type PayMetaMap,
+  type PayMood,
+  type PayUrgency,
+  type VendorGroup,
+  type PayPick,
+} from "./recommend";
+import { saveVendorPayMetaAction, saveVendorGroupsAction } from "./actions";
 
 // ── Types shared with the server page ──────────────────────────────
 
@@ -55,6 +68,9 @@ export type VendorAnalysis = {
   nickname: string | null;
   category: string | null;
   isActive: boolean;
+  /** Credit period (days) from the vendor master; null = not recorded
+   *  (the planner assumes DEFAULT_TERMS_DAYS and says so). */
+  termsDays: number | null;
   billed: number;
   paid: number;
   outstanding: number;
@@ -216,6 +232,8 @@ export function FinanceAnalysisClient({
   aging,
   totals,
   activeVendorCount,
+  payMeta,
+  payGroups,
 }: {
   vendors: VendorAnalysis[];
   months: MonthPoint[];
@@ -224,6 +242,8 @@ export function FinanceAnalysisClient({
   totals: Totals;
   activeVendorCount: number;
   generatedFor?: string;
+  payMeta: PayMetaMap;
+  payGroups: VendorGroup[];
 }) {
   const [query, setQuery] = useState("");
   const [metric, setMetric] = useState<Metric>("outstanding");
@@ -232,6 +252,85 @@ export function FinanceAnalysisClient({
   /** Vendor ids ticked for the cumulative comparison. Daksh: "he will
    *  select 5 vendors and see the data cumulative." */
   const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  // ── Planner metadata — optimistic local copies of the two
+  //    app_settings blobs; every edit fires the server action and
+  //    reverts on failure. Finance data itself is never written.
+  const [meta, setMeta] = useState<PayMetaMap>(payMeta);
+  const [groups, setGroups] = useState<VendorGroup[]>(payGroups);
+  const [, startSave] = useTransition();
+  // Mirror of `meta` that updates synchronously. Two taps in the same
+  // tick (e.g. 😠 then 🔥) otherwise both read the SAME stale closure
+  // and the second wipes the first's optimistic value — caught live in
+  // testing. Each save also sends the vendor's FULL meta, so whichever
+  // server write lands last carries both fields.
+  const metaRef = { current: meta } as { current: PayMetaMap };
+
+  function setVendorMeta(vendorId: string, patch: { mood?: PayMood | null; urgency?: PayUrgency | null }) {
+    const base = metaRef.current;
+    const cur = { ...(base[vendorId] ?? {}) };
+    if ("mood" in patch) {
+      if (patch.mood == null) delete cur.mood;
+      else cur.mood = patch.mood;
+    }
+    if ("urgency" in patch) {
+      if (patch.urgency == null) delete cur.urgency;
+      else cur.urgency = patch.urgency;
+    }
+    const next = { ...base };
+    const full = Object.keys(cur).length === 0 ? null : cur;
+    if (full == null) delete next[vendorId];
+    else next[vendorId] = full;
+    metaRef.current = next;
+    setMeta(next);
+    startSave(async () => {
+      const res = await saveVendorPayMetaAction(vendorId, full);
+      if (!res.ok) {
+        metaRef.current = base;
+        setMeta(base);
+        alert(`Could not save: ${res.error}`);
+      }
+    });
+  }
+
+  function saveGroups(next: VendorGroup[]) {
+    const prev = groups;
+    setGroups(next);
+    startSave(async () => {
+      const res = await saveVendorGroupsAction(next);
+      if (!res.ok) {
+        setGroups(prev);
+        alert(`Could not save groups: ${res.error}`);
+      }
+    });
+  }
+
+  /** Quick lookup: vendor id → the group it belongs to (if any). */
+  const groupOf = useMemo(() => {
+    const m = new Map<string, VendorGroup>();
+    for (const g of groups) for (const id of g.vendorIds) m.set(id, g);
+    return m;
+  }, [groups]);
+
+  function groupPicked() {
+    const ids = [...picked];
+    if (ids.length < 2) return;
+    const members = vendors.filter((v) => picked.has(v.id));
+    // Best default name: the person — the most common nickname among
+    // what's ticked, else the first firm's name.
+    const nick = members.map((v) => v.nickname).filter(Boolean)[0] ?? members[0]?.name ?? "Group";
+    const name = window.prompt("Group these firms as one person. Name:", nick ?? "");
+    if (!name || !name.trim()) return;
+    // Ticking a vendor already in another group moves it here.
+    const cleaned = groups
+      .map((g) => ({ ...g, vendorIds: g.vendorIds.filter((id) => !picked.has(id)) }))
+      .filter((g) => g.vendorIds.length >= 2);
+    saveGroups([
+      ...cleaned,
+      { id: `g${Date.now().toString(36)}`, name: name.trim().slice(0, 80), vendorIds: ids },
+    ]);
+    setPicked(new Set());
+  }
 
   // (Aug 2026 — the "Peek for 20s" blur on Still outstanding was
   // removed at Daksh's request. The page is already restricted to the
@@ -421,6 +520,18 @@ export function FinanceAnalysisClient({
         </div>
       </div>
 
+      {/* ── Payment planner — "who should I pay today?" ──────── */}
+      <PayPlanner
+        vendors={vendors}
+        groups={groups}
+        meta={meta}
+        onDissolveGroup={(gid) => saveGroups(groups.filter((g) => g.id !== gid))}
+        onOpenVendorId={(id) => {
+          const v = vendors.find((x) => x.id === id);
+          if (v) setOpenVendor(v);
+        }}
+      />
+
       {/* ── Aging + cost heads ───────────────────────────────── */}
       <div className="fa-reveal" style={{ ["--d" as string]: "540ms", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginBottom: 16 }}>
         <div style={{ ...card, padding: "20px 24px" }}>
@@ -488,23 +599,43 @@ export function FinanceAnalysisClient({
                 {pickedTotals.names.join(" · ")}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setPicked(new Set())}
-              style={{
-                padding: "7px 14px",
-                fontSize: 12,
-                fontWeight: 700,
-                color: C.ink2,
-                background: C.wash,
-                border: `1px solid ${C.line}`,
-                borderRadius: 999,
-                cursor: "pointer",
-                flexShrink: 0,
-              }}
-            >
-              Clear selection
-            </button>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              {pickedTotals.n >= 2 && (
+                <button
+                  type="button"
+                  onClick={groupPicked}
+                  title="Club these firms as one person — the payment planner will treat any firm's payment as that person's"
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#fff",
+                    background: C.indigo,
+                    border: `1px solid ${C.indigo}`,
+                    borderRadius: 999,
+                    cursor: "pointer",
+                  }}
+                >
+                  🔗 Group as one person
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPicked(new Set())}
+                style={{
+                  padding: "7px 14px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.ink2,
+                  background: C.wash,
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 999,
+                  cursor: "pointer",
+                }}
+              >
+                Clear selection
+              </button>
+            </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 12, marginTop: 14 }}>
@@ -651,6 +782,16 @@ export function FinanceAnalysisClient({
                       {v.nickname ? (
                         <span style={{ color: C.indigo, fontWeight: 600 }}>✦ {v.nickname} · </span>
                       ) : null}
+                      {groupOf.has(v.id) && (
+                        <span
+                          title={`Grouped: any of ${groupOf.get(v.id)!.name}'s firms count as one payee in the planner`}
+                          style={{ color: C.indigo, fontWeight: 700 }}
+                        >
+                          🔗 {groupOf.get(v.id)!.name} ·{" "}
+                        </span>
+                      )}
+                      {meta[v.id]?.mood && `${MOOD_META[meta[v.id]!.mood!].emoji} `}
+                      {meta[v.id]?.urgency && `${URGENCY_META[meta[v.id]!.urgency!].emoji} `}
                       {v.billCount} bill{v.billCount === 1 ? "" : "s"}
                       {v.category ? ` · ${v.category}` : ""}
                       {v.lastPaymentDate ? ` · last paid ${fmtDate(v.lastPaymentDate)}` : " · never paid"}
@@ -681,7 +822,14 @@ export function FinanceAnalysisClient({
       </div>
 
       {openVendor && (
-        <VendorSheet vendor={openVendor} companyOutstanding={totals.outstanding} onClose={() => setOpenVendor(null)} />
+        <VendorSheet
+          vendor={openVendor}
+          companyOutstanding={totals.outstanding}
+          onClose={() => setOpenVendor(null)}
+          meta={meta[openVendor.id] ?? {}}
+          onMeta={(patch) => setVendorMeta(openVendor.id, patch)}
+          groupName={groupOf.get(openVendor.id)?.name ?? null}
+        />
       )}
     </section>
   );
@@ -693,10 +841,16 @@ function VendorSheet({
   vendor: v,
   companyOutstanding,
   onClose,
+  meta,
+  onMeta,
+  groupName,
 }: {
   vendor: VendorAnalysis;
   companyOutstanding: number;
   onClose: () => void;
+  meta: { mood?: PayMood; urgency?: PayUrgency };
+  onMeta: (patch: { mood?: PayMood | null; urgency?: PayUrgency | null }) => void;
+  groupName: string | null;
 }) {
   const [tab, setTab] = useState<"bills" | "payments">("bills");
   const pct = v.billed > 0 ? (v.paid / v.billed) * 100 : 0;
@@ -785,6 +939,56 @@ function VendorSheet({
               label="Since last payment"
               value={sinceLastPaid == null ? "Never paid" : `${sinceLastPaid} days`}
             />
+          </div>
+
+          {/* ── Planner dials (Daksh) — dad's read on the vendor, fed
+              straight into the payment planner's scoring. Tapping the
+              active emoji again clears it back to unset. */}
+          <div
+            style={{
+              marginTop: 16,
+              padding: "12px 16px",
+              background: C.wash,
+              border: `1px solid ${C.line}`,
+              borderRadius: 14,
+              display: "flex",
+              gap: 22,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <EmojiDial
+              label="Relationship"
+              options={(["good", "avg", "bad"] as PayMood[]).map((k) => ({
+                key: k,
+                emoji: MOOD_META[k].emoji,
+                title: MOOD_META[k].label,
+              }))}
+              value={meta.mood ?? null}
+              onPick={(k) => onMeta({ mood: meta.mood === k ? null : (k as PayMood) })}
+            />
+            <EmojiDial
+              label="Wants money"
+              options={(["chill", "normal", "high"] as PayUrgency[]).map((k) => ({
+                key: k,
+                emoji: URGENCY_META[k].emoji,
+                title: URGENCY_META[k].label,
+              }))}
+              value={meta.urgency ?? null}
+              onPick={(k) => onMeta({ urgency: meta.urgency === k ? null : (k as PayUrgency) })}
+            />
+            <div style={{ fontSize: 11.5, color: C.muted, marginLeft: "auto" }}>
+              Credit period{" "}
+              <strong style={{ color: C.ink2 }}>
+                {v.termsDays != null ? `${v.termsDays}d` : `${DEFAULT_TERMS_DAYS}d (assumed)`}
+              </strong>
+              {groupName ? (
+                <>
+                  {" · "}
+                  <span style={{ color: C.indigo, fontWeight: 700 }}>🔗 {groupName}</span>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -881,6 +1085,383 @@ function VendorSheet({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Payment planner ────────────────────────────────────────────────
+
+const BUDGET_CHIPS: Array<[label: string, value: number]> = [
+  ["5 L", 5e5],
+  ["10 L", 1e6],
+  ["15 L", 1.5e6],
+  ["25 L", 2.5e6],
+  ["50 L", 5e6],
+  ["1 Cr", 1e7],
+];
+
+function PayPlanner({
+  vendors,
+  groups,
+  meta,
+  onDissolveGroup,
+  onOpenVendorId,
+}: {
+  vendors: VendorAnalysis[];
+  groups: VendorGroup[];
+  meta: PayMetaMap;
+  onDissolveGroup: (groupId: string) => void;
+  onOpenVendorId: (vendorId: string) => void;
+}) {
+  const [budgetText, setBudgetText] = useState("");
+  const [showSkipped, setShowSkipped] = useState(false);
+
+  const budget = useMemo(() => {
+    const n = Number(budgetText.replace(/[^\d]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }, [budgetText]);
+
+  const plan = useMemo(
+    () => buildPlan(vendors, groups, meta, budget),
+    [vendors, groups, meta, budget],
+  );
+
+  const allocPct = budget > 0 ? Math.min(100, (plan.allocated / budget) * 100) : 0;
+
+  return (
+    <div className="fa-reveal" style={{ ...card, ["--d" as string]: "480ms", marginBottom: 16, overflow: "hidden" }}>
+      <div style={{ padding: "20px 24px 18px", borderBottom: `1px solid ${C.line}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ ...eyebrow, color: C.indigo }}>Payment planner · read-only</div>
+            <div style={{ ...display, fontSize: 19, marginTop: 4 }}>Who should I pay today?</div>
+            <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6, maxWidth: 620, lineHeight: 1.5 }}>
+              Set today&apos;s budget and the planner splits it across vendors — weighing whose turn
+              it is by their own payment rhythm, how stale the money is, and your 😊/🔥 dials on each
+              vendor. Bills still inside a vendor&apos;s credit period are never suggested. It changes
+              nothing — every rupee stays exactly where it is until you actually pay.
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={eyebrow}>Payable pool</div>
+            <div style={{ ...display, fontSize: 21, marginTop: 4, color: C.amber }}>{inr(plan.totalEligible)}</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>open &amp; past credit period</div>
+          </div>
+        </div>
+
+        {/* Budget controls */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {BUDGET_CHIPS.map(([lbl, val]) => (
+              <button
+                key={lbl}
+                type="button"
+                onClick={() => setBudgetText(String(val))}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  borderRadius: 999,
+                  cursor: "pointer",
+                  border: `1px solid ${budget === val ? C.indigo : C.line}`,
+                  background: budget === val ? C.indigo : C.wash,
+                  color: budget === val ? "#fff" : C.ink2,
+                }}
+              >
+                ₹{lbl}
+              </button>
+            ))}
+          </div>
+          <input
+            value={budgetText === "" ? "" : Number(budgetText).toLocaleString("en-IN")}
+            onChange={(e) => setBudgetText(e.target.value.replace(/[^\d]/g, ""))}
+            inputMode="numeric"
+            placeholder="Or type an amount…"
+            className="fa-input"
+            style={{
+              flex: "1 1 170px",
+              maxWidth: 230,
+              padding: "10px 14px",
+              fontSize: 14,
+              fontWeight: 650,
+              fontVariantNumeric: "tabular-nums",
+              color: C.ink,
+              background: C.wash,
+              border: `1px solid ${C.line}`,
+              borderRadius: 12,
+              outline: "none",
+            }}
+          />
+          {budget > 0 && (
+            <button
+              type="button"
+              onClick={() => setBudgetText("")}
+              style={{ padding: "8px 12px", fontSize: 12, fontWeight: 700, color: C.muted, background: "transparent", border: "none", cursor: "pointer" }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Allocation summary */}
+        {budget > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+              <span>
+                <strong style={{ color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(plan.allocated)}</strong>{" "}
+                across {plan.picks.length} payee{plan.picks.length === 1 ? "" : "s"}
+              </span>
+              {plan.leftover > 0 && (
+                <span>
+                  <strong style={{ color: C.green, fontVariantNumeric: "tabular-nums" }}>{inr(plan.leftover)}</strong> left in hand
+                </span>
+              )}
+            </div>
+            <div style={{ height: 10, borderRadius: 999, background: C.wash, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+              <div style={{ width: `${allocPct}%`, height: "100%", background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)`, transition: "width .3s cubic-bezier(.22,1,.36,1)" }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Results */}
+      {budget <= 0 ? (
+        <div style={{ padding: "28px 24px", textAlign: "center", color: C.muted, fontSize: 13.5 }}>
+          Pick a budget above — the plan appears instantly, ranked with reasons.
+        </div>
+      ) : plan.picks.length === 0 ? (
+        <div style={{ padding: "28px 24px", textAlign: "center", color: C.muted, fontSize: 13.5 }}>
+          Nothing to suggest — either the budget is too small or every open bill is still inside its
+          credit period.
+        </div>
+      ) : (
+        <div style={{ padding: "6px 24px 8px" }}>
+          {plan.picks.map((p, i) => (
+            <PickCard key={p.unit.key} pick={p} rank={i + 1} onOpenVendorId={onOpenVendorId} />
+          ))}
+        </div>
+      )}
+
+      {/* Skipped + groups footer */}
+      <div style={{ padding: "10px 24px 18px", borderTop: `1px solid ${C.line}`, display: "flex", flexDirection: "column", gap: 10 }}>
+        {budget > 0 && plan.skipped.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowSkipped((s) => !s)}
+              style={{ border: "none", background: "transparent", color: C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
+            >
+              {showSkipped ? "▾" : "▸"} {plan.skipped.length} vendor{plan.skipped.length === 1 ? "" : "s"} not
+              suggested (inside credit period)
+            </button>
+            {showSkipped && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                {plan.skipped.map((s) => (
+                  <div key={s.unit.key} style={{ fontSize: 12, color: C.muted }}>
+                    <strong style={{ color: C.ink2 }}>{s.unit.name}</strong> — {s.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {groups.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ ...eyebrow }}>People</span>
+            {groups.map((g) => (
+              <span
+                key={g.id}
+                title={`${g.vendorIds.length} firms count as one payee`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "5px 7px 5px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.indigo,
+                  background: C.indigoSoft,
+                  border: `1px solid ${C.indigo}44`,
+                  borderRadius: 999,
+                }}
+              >
+                🔗 {g.name} · {g.vendorIds.length}
+                <button
+                  type="button"
+                  onClick={() => onDissolveGroup(g.id)}
+                  title={`Ungroup ${g.name}`}
+                  style={{ border: "none", background: "transparent", color: C.indigo, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "2px 4px" }}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: C.muted }}>
+          Tip: tick 2+ firms in the vendor list below and press “Group as one person” — the planner
+          then treats any of that person&apos;s firms as one payee. Set the 😊/🔥 dials inside each
+          vendor&apos;s sheet.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: number; onOpenVendorId: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const u = p.unit;
+  const shownCoverage = open ? p.coverage : p.coverage.slice(0, 3);
+  return (
+    <div style={{ padding: "16px 0", borderBottom: `1px solid ${C.line}` }} className="fa-pick">
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {/* Rank */}
+        <div
+          style={{
+            width: 30,
+            height: 30,
+            flexShrink: 0,
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 13,
+            fontWeight: 800,
+            color: rank <= 3 ? "#fff" : C.ink2,
+            background: rank <= 3 ? C.indigo : C.wash,
+            border: `1px solid ${rank <= 3 ? C.indigo : C.line}`,
+          }}
+        >
+          {rank}
+        </div>
+
+        {/* Who */}
+        <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={() => onOpenVendorId(u.vendorIds[0])}
+            title="Open detail"
+            style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", textAlign: "left" }}
+          >
+            <span style={{ fontSize: 14.5, fontWeight: 700, color: C.ink, letterSpacing: "-0.01em" }}>
+              {u.isGroup ? `🔗 ${u.name}` : u.name}
+            </span>
+          </button>
+          {u.isGroup && (
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {u.memberNames.join(" · ")}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
+            {p.reasons.map((r, i) => (
+              <span
+                key={i}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "3px 9px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.ink2,
+                  background: C.wash,
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 999,
+                }}
+              >
+                <span aria-hidden>{r.icon}</span> {r.text}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* How much */}
+        <div style={{ textAlign: "right", minWidth: 150 }}>
+          <div style={{ ...display, fontSize: 21, color: p.clearsFully ? C.green : C.ink }}>{inr(p.amount)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+            {p.clearsFully ? "clears all payable" : `of ${inr(u.eligible)} payable`} · score {p.score}
+          </div>
+          <div style={{ marginTop: 7, height: 6, width: 150, marginLeft: "auto", borderRadius: 999, background: C.wash, overflow: "hidden" }}>
+            <div
+              style={{
+                width: `${Math.min(100, (p.amount / Math.max(u.eligible, 1)) * 100)}%`,
+                height: "100%",
+                background: p.clearsFully ? C.green : `linear-gradient(90deg, ${C.indigo}, #7c8cf8)`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Which bills this covers — n full + possibly one partial */}
+      <div style={{ marginTop: 10, marginLeft: 44, fontSize: 12, color: C.muted, display: "flex", flexDirection: "column", gap: 3 }}>
+        {shownCoverage.map((cvg, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+            <span style={{ color: C.ink2, fontWeight: 650 }}>{cvg.billLabel}</span>
+            {u.isGroup && <span>({cvg.vendorName})</span>}
+            <span>{fmtDate(cvg.date)}</span>
+            <span style={{ fontVariantNumeric: "tabular-nums", color: cvg.full ? C.green : C.amber, fontWeight: 700 }}>
+              {cvg.full ? `${inr(cvg.pay)} — full` : `${inr(cvg.pay)} of ${inr(cvg.open)} — partial`}
+            </span>
+          </div>
+        ))}
+        {p.coverage.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            style={{ alignSelf: "flex-start", border: "none", background: "transparent", color: C.indigo, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
+          >
+            {open ? "Show fewer bills" : `+${p.coverage.length - 3} more bill${p.coverage.length - 3 === 1 ? "" : "s"}`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Three-emoji segmented dial (Relationship / Wants money). */
+function EmojiDial({
+  label,
+  options,
+  value,
+  onPick,
+}: {
+  label: string;
+  options: Array<{ key: string; emoji: string; title: string }>;
+  value: string | null;
+  onPick: (key: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink2 }}>{label}</span>
+      <div style={{ display: "inline-flex", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 999, padding: 3, gap: 2 }}>
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            title={o.title}
+            aria-pressed={value === o.key}
+            onClick={() => onPick(o.key)}
+            style={{
+              width: 34,
+              height: 30,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              borderRadius: 999,
+              border: "none",
+              cursor: "pointer",
+              background: value === o.key ? C.indigoSoft : "transparent",
+              boxShadow: value === o.key ? `inset 0 0 0 1.5px ${C.indigo}` : "none",
+              filter: value && value !== o.key ? "grayscale(0.9) opacity(0.55)" : "none",
+              transition: "background .12s ease, filter .12s ease",
+            }}
+          >
+            {o.emoji}
+          </button>
+        ))}
       </div>
     </div>
   );

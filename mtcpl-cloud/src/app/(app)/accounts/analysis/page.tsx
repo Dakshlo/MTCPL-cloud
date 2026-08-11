@@ -19,6 +19,7 @@ import { fetchAllPaged } from "@/lib/paginate";
 
 import { FinanceAnalysisClient } from "./analysis-client";
 import type { VendorAnalysis, MonthPoint, HeadSlice } from "./analysis-client";
+import type { PayMetaMap, VendorGroup } from "./recommend";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,9 @@ type VendorRow = {
   nickname: string | null;
   category: string | null;
   is_active: boolean | null;
+  /** Credit period agreed with the vendor (262 of 304 have one,
+   *  10–60d). The payment planner skips bills still inside it. */
+  payment_terms_days: number | null;
 };
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -96,11 +100,30 @@ export default async function FinanceAnalysisPage() {
     fetchAllPaged<VendorRow>((from, to) =>
       admin
         .from("bill_vendors")
-        .select("id, name, nickname, category, is_active")
+        .select("id, name, nickname, category, is_active, payment_terms_days")
         .order("id")
         .range(from, to),
     ),
   ]);
+
+  // ── Planner metadata (app_settings; absent = defaults) ───────────
+  // Dad's mood/pressure dials + firm groups. Two tiny jsonb blobs —
+  // see actions.ts for shape and why app_settings (no migration).
+  const { data: settingRows } = await admin
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["fa_vendor_meta", "fa_vendor_groups"]);
+  let payMeta: PayMetaMap = {};
+  let payGroups: VendorGroup[] = [];
+  for (const r of settingRows ?? []) {
+    if (r.key === "fa_vendor_meta" && r.value && typeof r.value === "object") {
+      payMeta = r.value as PayMetaMap;
+    }
+    if (r.key === "fa_vendor_groups" && r.value && typeof r.value === "object") {
+      const g = (r.value as { groups?: unknown }).groups;
+      if (Array.isArray(g)) payGroups = g as VendorGroup[];
+    }
+  }
 
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
   const billById = new Map(bills.map((b) => [b.id, b]));
@@ -119,6 +142,7 @@ export default async function FinanceAnalysisPage() {
         nickname: v?.nickname?.trim() || null,
         category: v?.category ?? null,
         isActive: v?.is_active !== false,
+        termsDays: v?.payment_terms_days ?? null,
         billed: 0,
         paid: 0,
         outstanding: 0,
@@ -295,6 +319,8 @@ export default async function FinanceAnalysisPage() {
       totals={totals}
       activeVendorCount={vendorList.filter((v) => v.outstanding > 0.5).length}
       generatedFor={profile.full_name ?? "Owner"}
+      payMeta={payMeta}
+      payGroups={payGroups}
     />
   );
 }
