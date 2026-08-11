@@ -453,7 +453,13 @@ export default async function SettingsPage() {
           each card carries a coloured icon tile so related settings
           read as a family. Card + modal chrome both live in
           <PeekSection>. */}
-      <div className="settings-hero">
+      {/* `settings-portrait-ok` is a developer-only marker class. The app
+          shows a rotate-to-landscape wall on phones, which is right for
+          the data-dense yard pages but defeats the point here — Daksh
+          needs to add a user or hit the blackout switch from his phone,
+          in portrait, without a laptop. The CSS hook that reads this
+          sits beside the .rotate-prompt rules in globals.css. */}
+      <div className={`settings-hero${currentUser.role === "developer" ? " settings-portrait-ok" : ""}`}>
         <div className="settings-hero-tick" aria-hidden />
         <div>
           <h1>Settings</h1>

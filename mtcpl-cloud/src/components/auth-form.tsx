@@ -280,18 +280,15 @@ export function AuthForm() {
         <form onSubmit={handleSendOtp} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <label className="stack">
             <span>Mobile Number</span>
-            <div style={{ display: "flex", gap: 0 }}>
-              <span style={{
-                display: "flex", alignItems: "center", padding: "0 12px",
-                background: "var(--surface-alt)", border: "1px solid var(--border)",
-                borderRight: "none", borderRadius: "8px 0 0 8px",
-                fontSize: 14, color: "var(--muted)", flexShrink: 0, whiteSpace: "nowrap",
-                fontWeight: 600,
-              }}>
-                🇮🇳 +91
-              </span>
+            {/* Prefix + number are one bordered control (.phone-field in
+                globals.css). Aug 2026 — this used to be two separately
+                bordered boxes and the input overflowed the card on a
+                phone; see the .phone-field comment for the why. */}
+            <div className="phone-field">
+              <span className="phone-field-prefix">🇮🇳 +91</span>
               <input
                 type="tel"
+                className="phone-field-input"
                 // Daksh May 2026 — removed the "98765 43210" placeholder.
                 // It looked pre-filled and confused new users.
                 placeholder=""
@@ -299,16 +296,9 @@ export function AuthForm() {
                 onChange={e => setPhone(e.target.value)}
                 required
                 maxLength={10}
-                style={{
-                  borderRadius: "0 8px 8px 0",
-                  flex: 1,
-                  fontSize: 16,
-                  letterSpacing: "0.04em",
-                  fontFamily: "ui-monospace, monospace",
-                  padding: "10px 14px",
-                }}
                 inputMode="numeric"
                 pattern="[0-9]*"
+                autoComplete="tel-national"
                 autoFocus
               />
             </div>

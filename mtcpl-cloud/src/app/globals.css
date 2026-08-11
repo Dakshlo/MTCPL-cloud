@@ -691,6 +691,12 @@ input[type="number"],
 input[type="email"],
 input[type="password"],
 input[type="date"],
+/* Aug 2026 (Daksh) — `tel` and `search` were missing from this list, so
+   every phone-number field in the app (login, temple installer, dispatch
+   incharge, partner) fell back to raw browser styling. On iOS that reads
+   as a broken, mismatched box. */
+input[type="tel"],
+input[type="search"],
 select,
 textarea {
   background: var(--surface);
@@ -710,6 +716,8 @@ input[type="number"]:focus,
 input[type="email"]:focus,
 input[type="password"]:focus,
 input[type="date"]:focus,
+input[type="tel"]:focus,
+input[type="search"]:focus,
 select:focus,
 textarea:focus {
   border-color: var(--gold);
@@ -1681,6 +1689,66 @@ details.block-card[open] {
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
   position: relative;
   z-index: 1;
+}
+
+/* ── Login mobile-number field ──────────────────────────────────
+ * The +91 prefix and the number read as ONE control.
+ *
+ * Aug 2026 (Daksh) — "in phone the login page phone number field is
+ * broken." Two causes: (1) `input[type=tel]` was missing from the
+ * shared input rule above, so this box had no app styling at all;
+ * (2) the input was `flex: 1` with no `min-width: 0`, and a flex
+ * item's automatic minimum size never shrinks below an <input>'s
+ * intrinsic width (~20 characters) — so on a phone it pushed
+ * straight out through the right edge of the card. */
+.phone-field {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.phone-field:focus-within {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-subtle);
+}
+
+.phone-field-prefix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Class doubled to outrank the `input[type="tel"]` element rule. */
+.phone-field-input.phone-field-input {
+  flex: 1 1 auto;
+  min-width: 0;          /* ← the actual overflow fix */
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 14px;
+  /* 16px is deliberate: anything smaller makes iOS Safari zoom the
+   * whole page in when the field takes focus. */
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, monospace;
+}
+
+.phone-field-input.phone-field-input:focus {
+  box-shadow: none;      /* the ring lives on the wrapper */
 }
 
 /* ── Pending Page ───────────────────────────────────────────── */
@@ -2782,6 +2850,44 @@ body.vendor-cockpit-fullscreen .page-card {
    * doesn't peek through if the overlay is briefly translucent. */
   body { overflow: hidden; }
 }
+
+/* ── Settings: developer-only portrait escape hatch ──────────────
+ * Aug 2026 (Daksh): "for developer only — for me — in phone make the
+ * settings page phone usage, cause sometimes I may have to add a user
+ * or blackout the site and I may not have my PC/laptop with me."
+ *
+ * The rotate wall above is right for the data-dense yard pages, but it
+ * defeats the whole point here: Settings has to work one-handed, in
+ * portrait, in a hurry. The `.settings-portrait-ok` marker is only
+ * rendered for role=developer (settings/page.tsx), so every other role
+ * still gets the rotate prompt exactly as before. */
+@media (orientation: portrait) and (max-width: 900px) {
+  body:has(.settings-portrait-ok) .rotate-prompt { display: none; }
+
+  /* One column: the board's auto-fill track is 330px, wider than a
+   * phone once page padding is off. */
+  body:has(.settings-portrait-ok) .settings-grid { grid-template-columns: 1fr; }
+
+  /* …and let the cards actually shrink into it. A grid item defaults
+   * to `min-width: auto`, which floors the track at the item's
+   * min-content width — with nowrap titles that came out at 612px, so
+   * the cards rendered wider than the screen and were clipped. */
+  body:has(.settings-portrait-ok) .settings-grid > * { min-width: 0; }
+  body:has(.settings-portrait-ok) .peek-card { min-width: 0; }
+
+  /* Subtitles wrap rather than ellipsize — on a phone the second line
+   * is cheap and reading the whole label matters more. */
+  body:has(.settings-portrait-ok) .peek-sub { white-space: normal; }
+
+  /* The topbar pills are laid out for a wide screen; let them scroll
+   * sideways instead of being cut off at the edge. */
+  body:has(.settings-portrait-ok) .topbar-right {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  body:has(.settings-portrait-ok) .topbar-right::-webkit-scrollbar { display: none; }
+}
+
 @keyframes rotate-prompt-shake {
   0%, 100% { transform: rotate(0deg); }
   25%      { transform: rotate(-15deg); }

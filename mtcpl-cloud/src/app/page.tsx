@@ -2,12 +2,16 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
+import { getMobileDeveloperLanding } from "@/lib/mobile-landing";
 
 export default async function HomePage() {
   const { user, profile } = await getAuthContext();
 
   if (user && profile) {
-    redirect(getDefaultRouteForProfile(profile));
+    // Developer on a phone lands straight in Settings — see
+    // lib/mobile-landing.ts. Every other role is unaffected.
+    const mobileLanding = await getMobileDeveloperLanding(profile);
+    redirect(mobileLanding ?? getDefaultRouteForProfile(profile));
   }
 
   // User authenticated but no profile row yet (trigger race condition) — send to pending

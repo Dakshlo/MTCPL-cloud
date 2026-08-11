@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth-form";
 import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
+import { getMobileDeveloperLanding } from "@/lib/mobile-landing";
 
 export default async function LoginPage({
   searchParams,
@@ -11,7 +12,11 @@ export default async function LoginPage({
   const { user, profile } = await getAuthContext();
 
   if (user && profile) {
-    redirect(getDefaultRouteForProfile(profile));
+    // Developer signing in on a phone goes straight to Settings, so
+    // adding a user or hitting the blackout switch is two taps from
+    // the login screen. See lib/mobile-landing.ts.
+    const mobileLanding = await getMobileDeveloperLanding(profile);
+    redirect(mobileLanding ?? getDefaultRouteForProfile(profile));
   }
 
   // User authenticated but profile missing or inactive — send to pending
