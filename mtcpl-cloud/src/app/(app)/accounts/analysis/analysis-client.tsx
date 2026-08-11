@@ -51,6 +51,8 @@ export type VendorPayment = {
 export type VendorAnalysis = {
   id: string;
   name: string;
+  /** The person behind the firm — several owners run more than one. */
+  nickname: string | null;
   category: string | null;
   isActive: boolean;
   billed: number;
@@ -227,6 +229,9 @@ export function FinanceAnalysisClient({
   const [metric, setMetric] = useState<Metric>("outstanding");
   const [alpha, setAlpha] = useState(false); // A–Z overrides the metric ordering
   const [openVendor, setOpenVendor] = useState<VendorAnalysis | null>(null);
+  /** Vendor ids ticked for the cumulative comparison. Daksh: "he will
+   *  select 5 vendors and see the data cumulative." */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   // (Aug 2026 — the "Peek for 20s" blur on Still outstanding was
   // removed at Daksh's request. The page is already restricted to the
@@ -241,6 +246,10 @@ export function FinanceAnalysisClient({
       ? vendors.filter(
           (v) =>
             v.name.toLowerCase().includes(q) ||
+            // Daksh: "we have many people who have multiple firms, so
+            // dad can search with nickname" — one query for "ketan"
+            // now surfaces every firm that man runs.
+            (v.nickname ?? "").toLowerCase().includes(q) ||
             (v.category ?? "").toLowerCase().includes(q),
         )
       : vendors;
@@ -256,6 +265,24 @@ export function FinanceAnalysisClient({
     () => shown.reduce((s, v) => s + v[metric], 0),
     [shown, metric],
   );
+
+  /** Cumulative figures for the ticked vendors — the "select 5 and see
+   *  the combined position" view. Derived, never stored. */
+  const pickedTotals = useMemo(() => {
+    const chosen = vendors.filter((v) => picked.has(v.id));
+    return chosen.reduce(
+      (a, v) => ({
+        n: a.n + 1,
+        billed: a.billed + v.billed,
+        paid: a.paid + v.paid,
+        outstanding: a.outstanding + v.outstanding,
+        bills: a.bills + v.billCount,
+        openBills: a.openBills + v.openBillCount,
+        names: a.names.concat(v.nickname || v.name),
+      }),
+      { n: 0, billed: 0, paid: 0, outstanding: 0, bills: 0, openBills: 0, names: [] as string[] },
+    );
+  }, [vendors, picked]);
 
   const maxMonth = Math.max(...months.map((m) => Math.max(m.paid, m.billed)), 1);
   const maxHead = Math.max(...heads.map((h) => h.amount), 1);
@@ -439,6 +466,72 @@ export function FinanceAnalysisClient({
         </div>
       </div>
 
+      {/* ── Selected-vendors total ───────────────────────────────
+          Appears only once something is ticked. Daksh: "he will select
+          5 vendors and he will see the data cumulative." */}
+      {pickedTotals.n > 0 && (
+        <div
+          style={{
+            ...card,
+            marginBottom: 14,
+            padding: "16px 20px",
+            border: `1px solid ${C.indigo}`,
+            boxShadow: `0 0 0 1px ${C.indigo}22, 0 10px 28px ${C.indigoSoft}`,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...eyebrow, color: C.indigo }}>
+                {pickedTotals.n} vendor{pickedTotals.n === 1 ? "" : "s"} selected · combined
+              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 560 }}>
+                {pickedTotals.names.join(" · ")}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPicked(new Set())}
+              style={{
+                padding: "7px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                color: C.ink2,
+                background: C.wash,
+                border: `1px solid ${C.line}`,
+                borderRadius: 999,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              Clear selection
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px,1fr))", gap: 12, marginTop: 14 }}>
+            <MiniStat label="Billed" value={inr(pickedTotals.billed)} color={C.ink} />
+            <MiniStat label="Paid" value={inr(pickedTotals.paid)} color={C.green} />
+            <MiniStat label="Still open" value={pickedTotals.outstanding > 0.5 ? inr(pickedTotals.outstanding) : "Settled"} color={pickedTotals.outstanding > 0.5 ? C.amber : C.green} />
+            <MiniStat
+              label="Settled"
+              value={`${pickedTotals.billed > 0 ? ((pickedTotals.paid / pickedTotals.billed) * 100).toFixed(1) : "0.0"}%`}
+              color={C.ink2}
+            />
+            <MiniStat label="Bills open / total" value={`${pickedTotals.openBills} / ${pickedTotals.bills}`} color={C.ink2} />
+          </div>
+
+          <div style={{ marginTop: 14, height: 10, borderRadius: 999, background: C.wash, overflow: "hidden", border: `1px solid ${C.line}` }}>
+            <div
+              style={{
+                width: `${pickedTotals.billed > 0 ? Math.min((pickedTotals.paid / pickedTotals.billed) * 100, 100) : 0}%`,
+                height: "100%",
+                background: `linear-gradient(90deg, ${C.green}, #43c98a)`,
+                transition: "width .3s cubic-bezier(.22,1,.36,1)",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Vendors ──────────────────────────────────────────── */}
       <div className="fa-reveal" style={{ ...card, ["--d" as string]: "660ms", overflow: "hidden" }}>
         <div
@@ -467,7 +560,7 @@ export function FinanceAnalysisClient({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search vendor or category…"
+            placeholder="Search vendor, person or category…"
             className="fa-input"
             style={{
               flex: "1 1 240px",
@@ -502,31 +595,62 @@ export function FinanceAnalysisClient({
             {shown.map((v) => {
               const pct = v.billed > 0 ? (v.paid / v.billed) * 100 : 0;
               const age = daysSince(v.oldestOpenDate);
+              const isPicked = picked.has(v.id);
               return (
-                <button
+                <div
                   key={v.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setOpenVendor(v)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setOpenVendor(v);
+                    }
+                  }}
                   className="fa-row"
                   style={{
                     width: "100%",
                     textAlign: "left",
                     display: "grid",
-                    gridTemplateColumns: "minmax(170px,2fr) repeat(3, minmax(96px,1fr)) minmax(140px,1.2fr)",
+                    gridTemplateColumns: "26px minmax(170px,2fr) repeat(3, minmax(96px,1fr)) minmax(140px,1.2fr)",
                     gap: 14,
                     alignItems: "center",
                     padding: "16px 24px",
-                    background: "transparent",
+                    background: isPicked ? "rgba(79,70,229,0.06)" : "transparent",
                     border: "none",
                     borderBottom: `1px solid ${C.line}`,
                     cursor: "pointer",
                   }}
                 >
+                  {/* Tick to add this vendor to the cumulative total.
+                      stopPropagation so ticking doesn't also open the
+                      vendor sheet. */}
+                  <input
+                    type="checkbox"
+                    checked={isPicked}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      setPicked((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(v.id)) next.delete(v.id);
+                        else next.add(v.id);
+                        return next;
+                      });
+                    }}
+                    aria-label={`Include ${v.name} in the total`}
+                    style={{ width: 16, height: 16, cursor: "pointer", accentColor: C.indigo }}
+                  />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 650, color: C.ink, letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {v.name}
                     </div>
                     <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3 }}>
+                      {/* The person first — that is what dad searches by. */}
+                      {v.nickname ? (
+                        <span style={{ color: C.indigo, fontWeight: 600 }}>✦ {v.nickname} · </span>
+                      ) : null}
                       {v.billCount} bill{v.billCount === 1 ? "" : "s"}
                       {v.category ? ` · ${v.category}` : ""}
                       {v.lastPaymentDate ? ` · last paid ${fmtDate(v.lastPaymentDate)}` : " · never paid"}
@@ -549,7 +673,7 @@ export function FinanceAnalysisClient({
                       {age != null && v.outstanding > 0.5 ? ` · oldest ${age}d` : ""}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

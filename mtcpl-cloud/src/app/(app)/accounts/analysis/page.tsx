@@ -50,6 +50,10 @@ type PaymentRow = {
 type VendorRow = {
   id: string;
   name: string;
+  /** The person behind the firm. Daksh: several owners run multiple
+   *  firms, so dad searches by the man, not the letterhead. 202 of 304
+   *  vendors carry one. */
+  nickname: string | null;
   category: string | null;
   is_active: boolean | null;
 };
@@ -92,7 +96,7 @@ export default async function FinanceAnalysisPage() {
     fetchAllPaged<VendorRow>((from, to) =>
       admin
         .from("bill_vendors")
-        .select("id, name, category, is_active")
+        .select("id, name, nickname, category, is_active")
         .order("id")
         .range(from, to),
     ),
@@ -112,6 +116,7 @@ export default async function FinanceAnalysisPage() {
       a = {
         id: vid,
         name: v?.name ?? "(unknown vendor)",
+        nickname: v?.nickname?.trim() || null,
         category: v?.category ?? null,
         isActive: v?.is_active !== false,
         billed: 0,
