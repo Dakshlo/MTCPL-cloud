@@ -197,6 +197,9 @@ const C = {
   red: "#c0392b",
 };
 
+/** How many vendor rows render before the "Load all" footer. */
+const VENDOR_PAGE = 10;
+
 const METRIC_META: Record<Metric, { label: string; color: string; soft: string }> = {
   billed: { label: "Billed", color: C.indigo, soft: C.indigoSoft },
   paid: { label: "Paid", color: C.green, soft: C.greenSoft },
@@ -252,6 +255,10 @@ export function FinanceAnalysisClient({
   /** Vendor ids ticked for the cumulative comparison. Daksh: "he will
    *  select 5 vendors and see the data cumulative." */
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  /** Daksh: "every vendor section make it only load 10 vendors only.
+   *  If wish to see all, under there will load all." 178 rows was a
+   *  long scroll past the point anyone reads. */
+  const [showAllVendors, setShowAllVendors] = useState(false);
 
   // ── Planner metadata — optimistic local copies of the two
   //    app_settings blobs; every edit fires the server action and
@@ -402,11 +409,6 @@ export function FinanceAnalysisClient({
         <h1 style={{ ...display, margin: "6px 0 0", fontSize: 38, lineHeight: 1.05 }}>
           Finance Analysis
         </h1>
-        <p style={{ margin: "8px 0 0", fontSize: 14, color: C.muted, maxWidth: 640, lineHeight: 1.55 }}>
-          The whole department in one place. Tap any of the three figures below to
-          re-order every vendor by it — then open a vendor for its full bill and
-          payment history.
-        </p>
       </header>
 
       {/* ── Hero numbers (each one is a lens) ────────────────── */}
@@ -519,18 +521,6 @@ export function FinanceAnalysisClient({
           ))}
         </div>
       </div>
-
-      {/* ── Payment planner — "who should I pay today?" ──────── */}
-      <PayPlanner
-        vendors={vendors}
-        groups={groups}
-        meta={meta}
-        onDissolveGroup={(gid) => saveGroups(groups.filter((g) => g.id !== gid))}
-        onOpenVendorId={(id) => {
-          const v = vendors.find((x) => x.id === id);
-          if (v) setOpenVendor(v);
-        }}
-      />
 
       {/* ── Aging + cost heads ───────────────────────────────── */}
       <div className="fa-reveal" style={{ ["--d" as string]: "540ms", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginBottom: 16 }}>
@@ -680,7 +670,13 @@ export function FinanceAnalysisClient({
               Every vendor · by {alpha ? "name" : METRIC_META[metric].label.toLowerCase()}
             </div>
             <div style={{ ...display, fontSize: 19, marginTop: 4, display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <span>{shown.length} of {vendors.length}</span>
+              {/* Say what's actually on screen, not what matched — a
+                  "178 of 178" over 10 visible rows reads as a bug. */}
+              <span>
+                {showAllVendors || shown.length <= VENDOR_PAGE
+                  ? `${shown.length} of ${vendors.length}`
+                  : `Top ${VENDOR_PAGE} of ${shown.length}`}
+              </span>
               {!alpha && (
                 <span style={{ fontSize: 14, fontWeight: 600, color: METRIC_META[metric].color, fontVariantNumeric: "tabular-nums" }}>
                   {inr(shownTotal)} {METRIC_META[metric].label.toLowerCase()}
@@ -690,7 +686,11 @@ export function FinanceAnalysisClient({
           </div>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              // A new search starts from the top 10 again.
+              setShowAllVendors(false);
+            }}
             placeholder="Search vendor, person or category…"
             className="fa-input"
             style={{
@@ -723,7 +723,7 @@ export function FinanceAnalysisClient({
           </div>
         ) : (
           <div>
-            {shown.map((v) => {
+            {(showAllVendors ? shown : shown.slice(0, VENDOR_PAGE)).map((v) => {
               const pct = v.billed > 0 ? (v.paid / v.billed) * 100 : 0;
               const age = daysSince(v.oldestOpenDate);
               const isPicked = picked.has(v.id);
@@ -817,9 +817,69 @@ export function FinanceAnalysisClient({
                 </div>
               );
             })}
+
+            {/* Load-all footer — only when there's more behind it. */}
+            {!showAllVendors && shown.length > VENDOR_PAGE && (
+              <button
+                type="button"
+                onClick={() => setShowAllVendors(true)}
+                className="fa-loadall"
+                style={{
+                  width: "100%",
+                  padding: "16px 24px",
+                  border: "none",
+                  borderTop: `1px solid ${C.line}`,
+                  background: C.wash,
+                  color: C.indigo,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Load all {shown.length} vendors
+                <span style={{ color: C.muted, fontWeight: 600 }}>
+                  {" "}· {shown.length - VENDOR_PAGE} more
+                </span>
+              </button>
+            )}
+            {showAllVendors && shown.length > VENDOR_PAGE && (
+              <button
+                type="button"
+                onClick={() => setShowAllVendors(false)}
+                className="fa-loadall"
+                style={{
+                  width: "100%",
+                  padding: "14px 24px",
+                  border: "none",
+                  borderTop: `1px solid ${C.line}`,
+                  background: C.wash,
+                  color: C.muted,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Show top {VENDOR_PAGE} only
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* ── Payment planner ──────────────────────────────────────
+          Sits LAST (Daksh, Aug 2026: "put this section in bottom").
+          It's the act-on-it tool, so it reads after the picture the
+          rest of the page paints. */}
+      <PayPlanner
+        vendors={vendors}
+        groups={groups}
+        meta={meta}
+        onDissolveGroup={(gid) => saveGroups(groups.filter((g) => g.id !== gid))}
+        onOpenVendorId={(id) => {
+          const v = vendors.find((x) => x.id === id);
+          if (v) setOpenVendor(v);
+        }}
+      />
 
       {openVendor && (
         <VendorSheet
@@ -1130,18 +1190,12 @@ function PayPlanner({
   const allocPct = budget > 0 ? Math.min(100, (plan.allocated / budget) * 100) : 0;
 
   return (
-    <div className="fa-reveal" style={{ ...card, ["--d" as string]: "480ms", marginBottom: 16, overflow: "hidden" }}>
+    <div className="fa-reveal" style={{ ...card, ["--d" as string]: "780ms", marginTop: 16, overflow: "hidden" }}>
       <div style={{ padding: "20px 24px 18px", borderBottom: `1px solid ${C.line}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
           <div>
             <div style={{ ...eyebrow, color: C.indigo }}>Payment planner · read-only</div>
             <div style={{ ...display, fontSize: 19, marginTop: 4 }}>Who should I pay today?</div>
-            <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6, maxWidth: 620, lineHeight: 1.5 }}>
-              Set today&apos;s budget and the planner splits it across vendors — weighing whose turn
-              it is by their own payment rhythm, how stale the money is, and your 😊/🔥 dials on each
-              vendor. Bills still inside a vendor&apos;s credit period are never suggested. It changes
-              nothing — every rupee stays exactly where it is until you actually pay.
-            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={eyebrow}>Payable pool</div>
@@ -1299,11 +1353,6 @@ function PayPlanner({
             ))}
           </div>
         )}
-        <div style={{ fontSize: 11, color: C.muted }}>
-          Tip: tick 2+ firms in the vendor list below and press “Group as one person” — the planner
-          then treats any of that person&apos;s firms as one payee. Set the 😊/🔥 dials inside each
-          vendor&apos;s sheet.
-        </div>
       </div>
     </div>
   );
@@ -1621,6 +1670,8 @@ function Styles() {
         __html: `
 .fa-row { transition: background .12s ease; }
 .fa-row:hover { background: #f7f9fc; }
+.fa-loadall { transition: background .12s ease, color .12s ease; }
+.fa-loadall:hover { background: #eef1f7; }
 .fa-row:last-child { border-bottom: none !important; }
 .fa-input:focus { border-color: ${C.indigo} !important; box-shadow: 0 0 0 4px rgba(79,70,229,0.12); background: #fff !important; }
 .fa-bar { transition: height .5s cubic-bezier(.22,1,.36,1); }
