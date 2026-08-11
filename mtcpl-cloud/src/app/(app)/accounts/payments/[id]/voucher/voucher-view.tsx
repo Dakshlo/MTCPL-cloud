@@ -15,16 +15,29 @@
 import Link from "next/link";
 import { numberToIndianWords } from "./number-to-words";
 
+// Aug 2026 (Daksh: "it dont show company info like invoice and
+// challan") — the voucher header was a bare logo, so a vendor
+// receiving it had no GSTIN, address or contact on the document. These
+// now match EXACTLY what the tax invoice and delivery challan print
+// (see invoicing/challans/[id]/review/review-form.tsx), so all three
+// documents state the same registered entity.
+//
+// ⚠ Note the address here USED to read "Opposite Ajari Fatak,
+// Pindwara, Sirohi" while the invoice/challan print the RIICO address.
+// They are now aligned on the invoice's, since that is the GST-
+// registered one — worth a second pair of eyes.
+//
+// ⚠ Keep in sync with the emailed-PDF voucher, which is a SEPARATE
+// renderer: src/lib/voucher-pdf.ts, fed by the COMPANY consts in
+// accounts/actions.ts (~L1819 and ~L2062). Those still carry the old
+// header; this change only touches the on-screen / printed voucher.
 const COMPANY = {
   name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
-  // Daksh — registered office. Keep in sync with the same const in
-  // src/app/(app)/accounts/actions.ts (the email + PDF voucher
-  // builder reads from there).
-  addressLines: [
-    "Opposite Ajari Fatak",
-    "Pindwara, Sirohi",
-    "Rajasthan",
-  ],
+  address:
+    "G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan",
+  gstin: "08AAFCM15Q1ZA",
+  phone: "759 759 1188",
+  email: "temple@mtcpl.co",
 } as const;
 
 type VendorInfo = {
@@ -102,7 +115,12 @@ export function VoucherView({
           .voucher-letterhead-header { padding-bottom: 8px !important; }
           .voucher-title-pill { padding: 5px 14px !important; font-size: 11.5px !important; }
           .voucher-print-title-wrap { margin: 12px 0 14px !important; }
-          .voucher-salutation { margin: 14px 0 0 !important; font-size: 11.5px !important; line-height: 1.5 !important; }
+          .voucher-company-name { font-size: 12px !important; }
+          .voucher-company-line { font-size: 9px !important; }
+          .voucher-letterhead-header img { height: 44px !important; }
+          .voucher-amount-strip { margin-top: 10px !important; padding: 8px 12px !important; }
+          .voucher-amount-strip .amt { font-size: 17px !important; }
+          .voucher-salutation { margin: 12px 0 0 !important; font-size: 11.5px !important; line-height: 1.5 !important; }
           .voucher-description { margin-top: 10px !important; padding: 7px 12px !important; font-size: 11px !important; }
           .voucher-signatures { margin-top: 22px !important; gap: 28px !important; }
           .voucher-sig-spacer { margin-bottom: 22px !important; }
@@ -121,17 +139,69 @@ export function VoucherView({
           font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
           position: relative;
         }
-        /* Letterhead chrome — logo top-left + gold accent line. */
+        /* Letterhead: logo left, company details right, double rule
+           under — the same masthead shape the tax invoice uses. */
         .voucher-letterhead-header {
           display: flex;
-          align-items: center;
-          padding-bottom: 14px;
-          border-bottom: 1px solid #222;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 18px;
+          padding-bottom: 12px;
+          border-bottom: 2.5px double #222;
           margin-bottom: 0;
         }
         .voucher-letterhead-header img {
-          height: 56px;
+          height: 52px;
           width: auto;
+          flex-shrink: 0;
+        }
+        .voucher-company {
+          text-align: right;
+          min-width: 0;
+        }
+        .voucher-company-name {
+          font-size: 13px;
+          font-weight: 800;
+          letter-spacing: -0.01em;
+          color: #111;
+        }
+        .voucher-company-line {
+          font-size: 10px;
+          color: #666;
+          line-height: 1.55;
+          margin-top: 1px;
+        }
+        /* The figure the vendor actually cares about. */
+        .voucher-amount-strip {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 14px;
+          margin-top: 16px;
+          padding: 11px 16px;
+          background: #faf7ef;
+          border: 1px solid #e0d6b8;
+          border-left: 4px solid var(--gold-dark, #b87333);
+          border-radius: 6px;
+        }
+        .voucher-amount-strip .lbl {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: #7a6a3f;
+        }
+        .voucher-amount-strip .amt {
+          font-size: 20px;
+          font-weight: 800;
+          color: #111;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          letter-spacing: -0.02em;
+        }
+        .voucher-amount-strip .words {
+          font-size: 10.5px;
+          color: #6b6b6b;
+          font-style: italic;
         }
         .voucher-title-pill {
           display: inline-block;
@@ -213,6 +283,17 @@ export function VoucherView({
             emailed PDF feel like the same document. */}
         <header className="voucher-letterhead-header">
           <img src="/logo-dark.png" alt="MTCPL" />
+          {/* Company block — the piece that was missing. Same entity
+              details the tax invoice and challan carry, so a vendor
+              can verify who paid them straight off the voucher. */}
+          <div className="voucher-company">
+            <div className="voucher-company-name">{COMPANY.name}</div>
+            <div className="voucher-company-line">{COMPANY.address}</div>
+            <div className="voucher-company-line">
+              <strong>GSTIN: {COMPANY.gstin}</strong> · ☎ {COMPANY.phone} · ✉{" "}
+              {COMPANY.email}
+            </div>
+          </div>
         </header>
 
         {/* "PAYMENT VOUCHER" title as a gold pill, sitting just below
@@ -307,6 +388,21 @@ export function VoucherView({
           )}
         </dl>
 
+        {/* The figure, pulled out of the list so it can't be missed on
+            a printed page. */}
+        <div className="voucher-amount-strip">
+          <div>
+            <div className="lbl">Amount paid</div>
+            <div className="words">{amountInWords} Only</div>
+          </div>
+          <div className="amt">
+            ₹{payment.paidAmount.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </div>
+        </div>
+
         {/* Salutation paragraph (mirrors HDFC's "Dear Sir/Madam …") */}
         <p
           className="voucher-salutation"
@@ -388,10 +484,10 @@ export function VoucherView({
             computer-generated note underneath. */}
         <footer className="voucher-letterhead-footer">
           <div>
-            Mateshwari Temples Construction Pvt. Ltd. · Nh-27, Opposite Ajari Gate, Pindwara, Dist-Sirohi, Rajasthan
+            {COMPANY.name} · {COMPANY.address}
           </div>
           <div>
-            ☎ +91 759 759 1188 · ✉ temple@mtcpl.co
+            GSTIN: {COMPANY.gstin} · ☎ {COMPANY.phone} · ✉ {COMPANY.email}
           </div>
           <div className="gen-note">
             Computer-generated voucher · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
