@@ -282,6 +282,50 @@ export function buildUnits(
 
 const W = { turn: 0.3, aging: 0.25, urgency: 0.25, mood: 0.1, size: 0.1 };
 
+/**
+ * The marks table behind a pick's score — Daksh: "give marks out of
+ * 100 why you think that decision." Maxes are W×100, so the five maxes
+ * always total exactly 100 and the UI can't drift from the weights.
+ * Colours deliberately avoid the money palette (green = paid,
+ * amber = open) so marks never read as rupees.
+ */
+export const SCORE_PARTS: Array<{
+  key: keyof PayPick["components"];
+  label: string;
+  icon: string;
+  max: number;
+  color: string;
+}> = [
+  { key: "turn", label: "Their turn", icon: "🔁", max: W.turn * 100, color: "#4f46e5" },
+  { key: "aging", label: "Money age", icon: "📅", max: W.aging * 100, color: "#7c3aed" },
+  { key: "urgency", label: "Wants money", icon: "🔥", max: W.urgency * 100, color: "#0ea5e9" },
+  { key: "mood", label: "Relationship", icon: "🤝", max: W.mood * 100, color: "#64748b" },
+  { key: "size", label: "Amount size", icon: "⚖️", max: W.size * 100, color: "#94a3b8" },
+];
+
+/**
+ * Split a pick's score into the five earned-marks, guaranteed to sum
+ * EXACTLY to the score (largest-remainder rounding) — dad checking
+ * 26+20+13+5+8 against the badge must never find a ±1 gap.
+ */
+export function scoreBreakdown(
+  components: PayPick["components"],
+  score: number,
+): Array<{ key: string; label: string; icon: string; max: number; color: string; earned: number }> {
+  const parts = SCORE_PARTS.map((p) => {
+    const raw = components[p.key] * p.max;
+    return { key: p.key as string, label: p.label, icon: p.icon, max: p.max, color: p.color, raw, earned: Math.floor(raw) };
+  });
+  let rem = score - parts.reduce((s, p) => s + p.earned, 0);
+  const byFraction = [...parts].sort((a, b) => (b.raw - Math.floor(b.raw)) - (a.raw - Math.floor(a.raw)));
+  for (const p of byFraction) {
+    if (rem <= 0) break;
+    p.earned += 1;
+    rem -= 1;
+  }
+  return parts.map(({ raw: _raw, ...rest }) => rest);
+}
+
 export function buildPlan(
   vendors: VendorAnalysis[],
   groups: VendorGroup[],

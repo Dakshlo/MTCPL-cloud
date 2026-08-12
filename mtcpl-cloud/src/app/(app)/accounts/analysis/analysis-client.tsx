@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   buildPlan,
+  scoreBreakdown,
   MOOD_META,
   URGENCY_META,
   DEFAULT_TERMS_DAYS,
@@ -1497,6 +1498,8 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
   const [open, setOpen] = useState(false);
   const u = p.unit;
   const shownCoverage = open ? p.coverage : p.coverage.slice(0, 3);
+  // The five earned-marks behind the score — sums exactly to it.
+  const marks = scoreBreakdown(p.components, p.score);
   return (
     <div style={{ padding: "16px 0", borderBottom: `1px solid ${C.line}` }} className="fa-pick">
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1560,11 +1563,15 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
           </div>
         </div>
 
+        {/* Marks — its own ring, its own colour, its own unit, so the
+            79 can never be misread as ₹79 or mixed with the amounts. */}
+        <ScoreBadge score={p.score} />
+
         {/* How much */}
         <div style={{ textAlign: "right", minWidth: 150 }}>
           <div style={{ ...display, fontSize: 21, color: p.clearsFully ? C.green : C.ink }}>{inr(p.amount)}</div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-            {p.clearsFully ? "clears all payable" : `of ${inr(u.eligible)} payable`} · score {p.score}
+            {p.clearsFully ? "clears all payable" : `of ${inr(u.eligible)} payable`}
           </div>
           <div style={{ marginTop: 7, height: 6, width: 150, marginLeft: "auto", borderRadius: 999, background: C.wash, overflow: "hidden" }}>
             <div
@@ -1575,6 +1582,36 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
               }}
             />
           </div>
+        </div>
+      </div>
+
+      {/* Why these marks — Daksh: "give marks out of 100 why you think
+          that decision." One track per pick: five coloured segments on
+          a 100-wide bar, then the arithmetic spelled out so the badge
+          can be checked by hand (the parts sum exactly to the score). */}
+      <div style={{ marginTop: 10, marginLeft: 44 }}>
+        <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: C.wash, maxWidth: 560 }}>
+          {marks.map(
+            (m) =>
+              m.earned > 0 && (
+                <div
+                  key={m.key}
+                  title={`${m.label}: ${m.earned}/${m.max}`}
+                  style={{ width: `${m.earned}%`, background: m.color }}
+                />
+              ),
+          )}
+        </div>
+        <div style={{ marginTop: 5, fontSize: 11, color: C.muted, display: "flex", flexWrap: "wrap", gap: "3px 12px" }}>
+          {marks.map((m) => (
+            <span key={m.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: m.color, display: "inline-block" }} />
+              {m.icon} {m.label}{" "}
+              <strong style={{ color: C.ink2, fontVariantNumeric: "tabular-nums" }}>
+                {m.earned}/{m.max}
+              </strong>
+            </span>
+          ))}
         </div>
       </div>
 
@@ -1611,6 +1648,41 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The priority marks, drawn as an indigo ring with an explicit /100 —
+ *  a different shape, colour and unit from every rupee figure on the
+ *  card, so it can't be confused with an amount. */
+function ScoreBadge({ score }: { score: number }) {
+  const r = 19;
+  const circ = 2 * Math.PI * r;
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, flexShrink: 0 }}
+      title="Priority marks out of 100 — how strongly the planner recommends paying this vendor today. Not an amount. The coloured bar below shows exactly where the marks come from."
+    >
+      <svg width={46} height={46} viewBox="0 0 46 46" aria-label={`Priority ${score} out of 100`}>
+        <circle cx={23} cy={23} r={r} fill="none" stroke={C.indigoSoft} strokeWidth={4.5} />
+        <circle
+          cx={23}
+          cy={23}
+          r={r}
+          fill="none"
+          stroke={C.indigo}
+          strokeWidth={4.5}
+          strokeLinecap="round"
+          strokeDasharray={`${(Math.max(0, Math.min(100, score)) / 100) * circ} ${circ}`}
+          transform="rotate(-90 23 23)"
+        />
+        <text x={23} y={27.5} textAnchor="middle" fontSize={14} fontWeight={800} fill={C.indigo}>
+          {score}
+        </text>
+      </svg>
+      <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: C.indigo }}>
+        marks /100
+      </span>
     </div>
   );
 }
