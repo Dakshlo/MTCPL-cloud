@@ -319,6 +319,18 @@ export function FinanceAnalysisClient({
     return m;
   }, [groups]);
 
+  /** Groups represented in the current tick-selection — so Ungroup can
+   *  live right next to Group, instead of only as a ✕ on a chip down
+   *  in the planner (Daksh couldn't find it there). */
+  const pickedGroups = useMemo(() => {
+    const out = new Map<string, VendorGroup>();
+    for (const id of picked) {
+      const g = groupOf.get(id);
+      if (g) out.set(g.id, g);
+    }
+    return [...out.values()];
+  }, [picked, groupOf]);
+
   function groupPicked() {
     const ids = [...picked];
     if (ids.length < 2) return;
@@ -590,6 +602,31 @@ export function FinanceAnalysisClient({
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              {/* Undo, exactly where the grouping happened. Tick any
+                  firm that's in a group and this appears — no hunting
+                  for the ✕ on a chip further down the page. */}
+              {pickedGroups.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ids = new Set(pickedGroups.map((g) => g.id));
+                    saveGroups(groups.filter((g) => !ids.has(g.id)));
+                  }}
+                  title={`Split ${pickedGroups.map((g) => g.name).join(", ")} back into separate firms`}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: C.ink2,
+                    background: C.paper,
+                    border: `1px solid ${C.indigo}66`,
+                    borderRadius: 999,
+                    cursor: "pointer",
+                  }}
+                >
+                  ⇤ Ungroup {pickedGroups.map((g) => g.name).join(", ")}
+                </button>
+              )}
               {pickedTotals.n >= 2 && (
                 <button
                   type="button"
