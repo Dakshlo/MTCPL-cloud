@@ -60,6 +60,8 @@ type EligibleBill = VendorBill & {
   vendorName: string;
   ageDays: number;
   termsDays: number;
+  /** outstanding − held: the only part a suggestion may touch. */
+  payable: number;
 };
 
 export type PayUnit = {
@@ -69,8 +71,11 @@ export type PayUnit = {
   memberNames: string[];       // firms inside (1 for a lone vendor)
   vendorIds: string[];
   outstanding: number;         // everything open
-  eligible: number;            // open AND past the credit period
+  eligible: number;            // open, past credit, NET OF HOLDS — the payable pool
   insideCredit: number;        // open but still inside credit
+  /** Withheld money across open bills (mig 072). Deliberately parked
+   *  by the owner, so the planner never counts or suggests it. */
+  held: number;
   eligibleBills: EligibleBill[]; // oldest first
   typicalPayment: number | null; // median of their recent payments
   cycleDays: number | null;    // median gap between their payments
@@ -97,6 +102,9 @@ export type PayPick = {
     date: string | null;
     open: number;
     pay: number;
+    /** Withheld part of this bill — shown so dad sees why a "full"
+     *  payment still leaves the bill open. */
+    held: number;
     full: boolean;
   }>;
   reasons: PickReason[];
@@ -111,6 +119,9 @@ export type PayPlan = {
   allocated: number;
   leftover: number;
   totalEligible: number;       // across all units — the real payable pool
+  /** Withheld money across every unit's open bills — excluded from
+   *  the pool and from every suggestion. */
+  totalHeld: number;
 };
 
 // ── Small maths helpers ────────────────────────────────────────────
@@ -155,6 +166,7 @@ export function buildUnits(
     const eligibleBills: EligibleBill[] = [];
     let eligible = 0;
     let insideCredit = 0;
+    let held = 0;
     let anyAssumed = false;
 
     for (const v of members) {
@@ -162,18 +174,25 @@ export function buildUnits(
       if (v.termsDays == null) anyAssumed = true;
       for (const b of v.bills) {
         if (b.outstanding <= 0.5) continue;
+        // Held money is out of bounds regardless of age — the owner
+        // parked it on purpose (Daksh: "if hold then don't give in
+        // result that pay that").
+        held += b.held;
         const age = daysSinceIso(b.date, nowMs);
         if (age != null && age <= terms) {
           insideCredit += b.outstanding;
           continue;
         }
-        eligible += b.outstanding;
+        const payable = b.outstanding - b.held;
+        if (payable <= 0.5) continue; // fully held — nothing suggestible
+        eligible += payable;
         eligibleBills.push({
           ...b,
           vendorId: v.id,
           vendorName: v.name,
           ageDays: age ?? 9999,
           termsDays: terms,
+          payable,
         });
       }
     }
@@ -201,9 +220,11 @@ export function buildUnits(
     const cycle = median(gaps);
 
     const lastPay = payDates[0] ?? null;
+    // Weighted by PAYABLE, not outstanding — held money mustn't drag
+    // the urgency up for cash nobody intends to release.
     const weightedAge =
       eligible > 0
-        ? eligibleBills.reduce((s, b) => s + b.ageDays * b.outstanding, 0) / eligible
+        ? eligibleBills.reduce((s, b) => s + b.ageDays * b.payable, 0) / eligible
         : 0;
 
     // Group meta = the loudest member: worst mood, highest urgency.
@@ -233,6 +254,7 @@ export function buildUnits(
       outstanding: members.reduce((s, v) => s + v.outstanding, 0),
       eligible: Math.round(eligible),
       insideCredit: Math.round(insideCredit),
+      held: Math.round(held),
       eligibleBills,
       typicalPayment: median(payAmounts),
       cycleDays: cycle != null ? Math.max(7, Math.round(cycle)) : null,
@@ -274,9 +296,20 @@ export function buildPlan(
   for (const u of units) {
     if (u.outstanding <= 0.5) continue; // fully settled — not even worth listing
     if (u.eligible < 500) {
+      // Say exactly WHY there's nothing suggestible — inside credit,
+      // on hold, or both.
+      const parts: string[] = [];
+      if (u.insideCredit > 0.5) {
+        parts.push(
+          `₹${Math.round(u.insideCredit).toLocaleString("en-IN")} inside the ${u.termsLabel} credit period`,
+        );
+      }
+      if (u.held > 0.5) {
+        parts.push(`₹${u.held.toLocaleString("en-IN")} on hold`);
+      }
       skipped.push({
         unit: u,
-        reason: `All ₹${Math.round(u.insideCredit).toLocaleString("en-IN")} open is still inside the ${u.termsLabel} credit period`,
+        reason: parts.length > 0 ? `Nothing payable — ${parts.join(" · ")}` : "Nothing payable",
       });
       continue;
     }
@@ -325,7 +358,7 @@ export function buildPlan(
     // for never-paid vendors: a typical eligible bill.
     const base =
       u.typicalPayment ??
-      median(u.eligibleBills.map((b) => b.outstanding)) ??
+      median(u.eligibleBills.map((b) => b.payable)) ??
       u.eligible;
 
     let amount = Math.min(u.eligible, Math.max(base, 5000));
@@ -341,7 +374,8 @@ export function buildPlan(
     let rem = amount;
     for (const b of u.eligibleBills) {
       if (rem <= 0) break;
-      const pay = Math.min(b.outstanding, rem);
+      // Only the un-held part of a bill may be covered.
+      const pay = Math.min(b.payable, rem);
       rem -= pay;
       coverage.push({
         billLabel: b.token || b.billNo || "bill",
@@ -349,7 +383,10 @@ export function buildPlan(
         date: b.date,
         open: Math.round(b.outstanding),
         pay: Math.round(pay),
-        full: pay >= b.outstanding - 0.5,
+        held: Math.round(b.held),
+        // "Full" = the bill is genuinely closed by this payment. A
+        // bill with money still held stays open by design.
+        full: b.held < 0.5 && pay >= b.outstanding - 0.5,
       });
     }
 
@@ -376,6 +413,12 @@ export function buildPlan(
       icon: "📅",
       text: `₹${u.eligible.toLocaleString("en-IN")} past the ${u.termsLabel} credit period`,
     });
+    if (u.held > 0.5) {
+      reasons.push({
+        icon: "✋",
+        text: `₹${u.held.toLocaleString("en-IN")} on hold — kept out of this suggestion`,
+      });
+    }
     if (u.urgency === "high") reasons.push({ icon: "🔥", text: "Pressing hard for money" });
     if (u.urgency === "chill") reasons.push({ icon: "🧊", text: "Not pushing for money" });
     if (u.mood === "bad") reasons.push({ icon: "😠", text: "Relation is strained — settling helps" });
@@ -396,5 +439,6 @@ export function buildPlan(
     allocated,
     leftover: Math.max(0, Math.floor(budget) - allocated),
     totalEligible: candidates.reduce((s, u) => s + u.eligible, 0),
+    totalHeld: units.reduce((s, u) => s + u.held, 0),
   };
 }

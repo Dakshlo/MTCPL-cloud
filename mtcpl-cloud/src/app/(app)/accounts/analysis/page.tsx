@@ -37,6 +37,10 @@ type BillRow = {
   amount_payable_to_vendor: number | null;
   amount_paid: number | null;
   amount_outstanding: number | null;
+  /** Mig 072 — slice of outstanding the owner has deliberately
+   *  withheld. The payment planner must never suggest paying it. */
+  held_amount: number | null;
+  held_reason: string | null;
   bill_vendor_id: string | null;
 };
 
@@ -84,7 +88,7 @@ export default async function FinanceAnalysisPage() {
       admin
         .from("bills")
         .select(
-          "id, token, vendor_bill_no, bill_date, cost_head, status, amount_payable_to_vendor, amount_paid, amount_outstanding, bill_vendor_id",
+          "id, token, vendor_bill_no, bill_date, cost_head, status, amount_payable_to_vendor, amount_paid, amount_outstanding, held_amount, held_reason, bill_vendor_id",
         )
         .in("status", LEDGER_STATUSES)
         .order("id")
@@ -146,6 +150,7 @@ export default async function FinanceAnalysisPage() {
         billed: 0,
         paid: 0,
         outstanding: 0,
+        held: 0,
         billCount: 0,
         openBillCount: 0,
         firstBillDate: null,
@@ -165,9 +170,13 @@ export default async function FinanceAnalysisPage() {
     const billed = Number(b.amount_payable_to_vendor) || 0;
     const paid = Number(b.amount_paid) || 0;
     const out = Number(b.amount_outstanding) || 0;
+    // Hold is only meaningful against money still owed — a fully-paid
+    // bill with a stale held_amount shouldn't count as held money.
+    const held = Math.min(Math.max(Number(b.held_amount) || 0, 0), out);
     a.billed += billed;
     a.paid += paid;
     a.outstanding += out;
+    a.held += held;
     a.billCount += 1;
     if (out > 0.5) {
       a.openBillCount += 1;
@@ -188,6 +197,8 @@ export default async function FinanceAnalysisPage() {
       billed,
       paid,
       outstanding: out,
+      held,
+      heldReason: held > 0 ? (b.held_reason?.trim() || null) : null,
     });
   }
 
@@ -297,6 +308,7 @@ export default async function FinanceAnalysisPage() {
     v.billed = Math.round(v.billed);
     v.paid = Math.round(v.paid);
     v.outstanding = Math.round(v.outstanding);
+    v.held = Math.round(v.held);
   }
   vendorList.sort((a, b) => b.outstanding - a.outstanding || b.billed - a.billed);
 

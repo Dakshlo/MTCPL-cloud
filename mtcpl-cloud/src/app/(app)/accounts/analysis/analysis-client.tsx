@@ -51,6 +51,11 @@ export type VendorBill = {
   billed: number;
   paid: number;
   outstanding: number;
+  /** Slice of `outstanding` the owner has deliberately withheld
+   *  (mig 072). Clamped to outstanding server-side. The planner never
+   *  suggests paying it. */
+  held: number;
+  heldReason: string | null;
 };
 
 export type VendorPayment = {
@@ -74,6 +79,8 @@ export type VendorAnalysis = {
   billed: number;
   paid: number;
   outstanding: number;
+  /** Total withheld across this vendor's open bills. */
+  held: number;
   billCount: number;
   openBillCount: number;
   firstBillDate: string | null;
@@ -368,14 +375,27 @@ export function FinanceAnalysisClient({
             // dad can search with nickname" — one query for "ketan"
             // now surfaces every firm that man runs.
             (v.nickname ?? "").toLowerCase().includes(q) ||
-            (v.category ?? "").toLowerCase().includes(q),
+            (v.category ?? "").toLowerCase().includes(q) ||
+            // …and searching a PERSON (group) name surfaces every firm
+            // clubbed under him, even ones whose own name/nickname
+            // doesn't contain the query.
+            (groupOf.get(v.id)?.name.toLowerCase().includes(q) ?? false),
         )
       : vendors;
     const sorted = [...list];
     if (alpha) sorted.sort((a, b) => a.name.localeCompare(b.name));
     else sorted.sort((a, b) => b[metric] - a[metric]);
     return sorted;
-  }, [vendors, query, metric, alpha]);
+  }, [vendors, query, metric, alpha, groupOf]);
+
+  /** Groups whose name matches the search — offered as one-tap "select
+   *  the whole person" chips above the list (Daksh: "if we choose that
+   *  it will automatically select those group firms"). */
+  const matchedGroups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, query]);
 
   /** Total of the active metric across what's currently listed — this
    *  is the number that visibly changes as you press the hero tiles. */
@@ -754,6 +774,62 @@ export function FinanceAnalysisClient({
           </div>
         </div>
 
+        {/* Person match — searching a group name offers the whole
+            person as one tap: ticks every firm he runs, which lights
+            the combined card above. */}
+        {matchedGroups.length > 0 && (
+          <div
+            style={{
+              padding: "12px 24px",
+              borderBottom: `1px solid ${C.line}`,
+              background: "rgba(79,70,229,0.04)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ ...eyebrow, color: C.indigo }}>Person</span>
+            {matchedGroups.map((g) => {
+              const allPicked = g.vendorIds.every((id) => picked.has(id));
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() =>
+                    setPicked((prev) => {
+                      const next = new Set(prev);
+                      // Toggle the whole person: tap once to select all
+                      // his firms, tap again to drop them.
+                      if (allPicked) g.vendorIds.forEach((id) => next.delete(id));
+                      else g.vendorIds.forEach((id) => next.add(id));
+                      return next;
+                    })
+                  }
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "7px 14px",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: allPicked ? "#fff" : C.indigo,
+                    background: allPicked ? C.indigo : C.paper,
+                    border: `1px solid ${C.indigo}`,
+                    borderRadius: 999,
+                    cursor: "pointer",
+                  }}
+                >
+                  🔗 {g.name}
+                  <span style={{ fontWeight: 600, opacity: 0.8 }}>
+                    {allPicked ? "· selected ✓" : `· select ${g.vendorIds.length} firms`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {shown.length === 0 ? (
           <div style={{ padding: 48, textAlign: "center", color: C.muted, fontSize: 14 }}>
             No vendor matches “{query}”.
@@ -1036,6 +1112,13 @@ function VendorSheet({
               label="Since last payment"
               value={sinceLastPaid == null ? "Never paid" : `${sinceLastPaid} days`}
             />
+            {v.held > 0.5 && (
+              <Fact
+                label="✋ On hold"
+                value={inr(v.held)}
+                hint="withheld on purpose — the planner skips it"
+              />
+            )}
           </div>
 
           {/* ── Planner dials (Daksh) — dad's read on the vendor, fed
@@ -1144,9 +1227,19 @@ function VendorSheet({
                     </div>
                     <div style={{ minWidth: 108, textAlign: "right" }}>
                       {b.outstanding > 0.5 ? (
-                        <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.amberSoft, color: C.amber, fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                          {inr(b.outstanding)} open
-                        </span>
+                        <>
+                          <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.amberSoft, color: C.amber, fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                            {inr(b.outstanding)} open
+                          </span>
+                          {b.held > 0.5 && (
+                            <div
+                              title={b.heldReason ? `Hold reason: ${b.heldReason}` : "Held by owner"}
+                              style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: C.red, fontVariantNumeric: "tabular-nums" }}
+                            >
+                              ✋ {inr(b.held)} held
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <span style={{ display: "inline-block", padding: "4px 11px", borderRadius: 999, background: C.greenSoft, color: C.green, fontSize: 11.5, fontWeight: 700 }}>
                           Settled
@@ -1238,6 +1331,11 @@ function PayPlanner({
             <div style={eyebrow}>Payable pool</div>
             <div style={{ ...display, fontSize: 21, marginTop: 4, color: C.amber }}>{inr(plan.totalEligible)}</div>
             <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>open &amp; past credit period</div>
+            {plan.totalHeld > 0 && (
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.red, marginTop: 4 }}>
+                ✋ {inr(plan.totalHeld)} on hold · excluded
+              </div>
+            )}
           </div>
         </div>
 
@@ -1344,7 +1442,7 @@ function PayPlanner({
               style={{ border: "none", background: "transparent", color: C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
             >
               {showSkipped ? "▾" : "▸"} {plan.skipped.length} vendor{plan.skipped.length === 1 ? "" : "s"} not
-              suggested (inside credit period)
+              suggested (inside credit period or on hold)
             </button>
             {showSkipped && (
               <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1488,8 +1586,19 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
             {u.isGroup && <span>({cvg.vendorName})</span>}
             <span>{fmtDate(cvg.date)}</span>
             <span style={{ fontVariantNumeric: "tabular-nums", color: cvg.full ? C.green : C.amber, fontWeight: 700 }}>
-              {cvg.full ? `${inr(cvg.pay)} — full` : `${inr(cvg.pay)} of ${inr(cvg.open)} — partial`}
+              {cvg.full
+                ? `${inr(cvg.pay)} — full`
+                : cvg.held > 0 && cvg.pay >= cvg.open - cvg.held - 0.5
+                  ? // Payable part fully covered; the bill stays open only
+                    // because the rest is deliberately held.
+                    `${inr(cvg.pay)} of ${inr(cvg.open)} — rest on hold`
+                  : `${inr(cvg.pay)} of ${inr(cvg.open)} — partial`}
             </span>
+            {cvg.held > 0 && (
+              <span style={{ color: C.red, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                ✋ {inr(cvg.held)} held
+              </span>
+            )}
           </div>
         ))}
         {p.coverage.length > 3 && (
