@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/auth-form";
 import { getAuthContext, getDefaultRouteForProfile } from "@/lib/auth";
 import { getMobileDeveloperLanding } from "@/lib/mobile-landing";
+import { isWhatsAppOtpEnabled } from "@/lib/msg91";
 
 export default async function LoginPage({
   searchParams,
@@ -66,7 +67,10 @@ export default async function LoginPage({
               ⏳ You were signed out after 10 minutes of inactivity, for security. Please sign in again.
             </div>
           )}
-          <AuthForm />
+          {/* The WhatsApp button only renders once an approved template
+              is configured — see isWhatsAppOtpEnabled(). Unset env =
+              the screen looks exactly as it always did. */}
+          <AuthForm whatsappEnabled={isWhatsAppOtpEnabled()} />
           <p className="muted" style={{ marginTop: 16, fontSize: 12, textAlign: "center" }}>
             New accounts require management approval before access is granted.
           </p>

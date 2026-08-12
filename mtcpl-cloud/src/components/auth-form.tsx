@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 
 import { markActivityNow } from "@/components/idle-logout";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { setOtpChannelAction } from "@/lib/otp-channel-action";
+// Type-only: erased at compile, so lib/otp-channel's server-side
+// Supabase admin client never reaches the browser bundle.
+import type { OtpChannel } from "@/lib/otp-channel";
 
 type Step = "phone" | "otp";
 
@@ -18,7 +22,7 @@ function normalizePhone(raw: string): string {
   return `+${digits}`;
 }
 
-export function AuthForm() {
+export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolean }) {
   const supabase = createBrowserSupabaseClient();
 
   const [step, setStep] = useState<Step>("phone");
@@ -31,14 +35,31 @@ export function AuthForm() {
   // pop animation; redirect happens 1100 ms later so the user
   // sees the flourish before the page navigates.
   const [succeeded, setSucceeded] = useState(false);
+  /** Which button is mid-flight, so only that one shows a spinner. */
+  const [sendingVia, setSendingVia] = useState<OtpChannel | null>(null);
 
-  async function handleSendOtp(e: React.FormEvent) {
+  async function handleSendOtp(e: React.FormEvent, channel: OtpChannel = "sms") {
     e.preventDefault();
     setPending(true);
+    setSendingVia(channel);
     setError("");
 
     try {
       const normalized = normalizePhone(phone);
+      // Tell the server which pipe to use BEFORE asking Supabase for a
+      // code — Supabase mints the OTP and calls our hook server-to-
+      // server, so the choice can't ride along with it. Deliberately
+      // not awaited-and-thrown: if recording the preference fails the
+      // hook simply defaults to SMS, and a login must never be blocked
+      // by a cosmetic setting.
+      if (channel === "whatsapp") {
+        try {
+          await setOtpChannelAction(normalized, "whatsapp");
+        } catch (chErr) {
+          // eslint-disable-next-line no-console
+          console.error("[auth-form] could not set WhatsApp channel, using SMS:", chErr);
+        }
+      }
       // 20-second timeout race so the button never hangs forever when
       // Supabase / the SMS provider is unreachable. Without this, a
       // network stall or SMS-provider outage left the form stuck on
@@ -82,6 +103,7 @@ export function AuthForm() {
       setError(friendly);
     } finally {
       setPending(false);
+      setSendingVia(null);
     }
   }
 
@@ -304,27 +326,68 @@ export function AuthForm() {
             </div>
           </label>
 
-          <button
-            className="primary-button"
-            disabled={pending || phone.replace(/\D/g, "").length < 10}
-            type="submit"
-            style={{
-              marginTop: 4,
-              padding: "11px 16px",
-              fontSize: 14,
-              fontWeight: 700,
-              transition: "opacity 0.15s ease",
-            }}
-          >
-            {pending ? (
-              <>
-                <span className="mtcpl-spinner" />
-                Sending code…
-              </>
-            ) : (
-              "Send OTP →"
+          {/* Daksh (Aug 2026): "don't remove SMS — we will use 2
+              buttons, SMS and WhatsApp, user can get whatever they
+              want." SMS stays the primary (it reaches every phone with
+              no app and no data); WhatsApp is the nicer path — Meta
+              bolds the code and offers a copy button.
+
+              The WhatsApp button only appears once an approved template
+              is configured, so it can never be a button that only
+              fails. Even then, if the WhatsApp send errors the server
+              falls back to SMS rather than stranding anyone. */}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button
+              className="primary-button"
+              disabled={pending || phone.replace(/\D/g, "").length < 10}
+              type="submit"
+              style={{
+                flex: 1,
+                padding: "11px 16px",
+                fontSize: 14,
+                fontWeight: 700,
+                transition: "opacity 0.15s ease",
+              }}
+            >
+              {pending && sendingVia === "sms" ? (
+                <>
+                  <span className="mtcpl-spinner" />
+                  Sending…
+                </>
+              ) : (
+                // Only name the channel when there's actually a choice
+                // — with WhatsApp off the screen reads exactly as it
+                // always has.
+                whatsappEnabled ? "SMS →" : "Send OTP →"
+              )}
+            </button>
+            {whatsappEnabled && (
+              <button
+                type="button"
+                onClick={(e) => handleSendOtp(e, "whatsapp")}
+                disabled={pending || phone.replace(/\D/g, "").length < 10}
+                className="wa-otp-button"
+                style={{
+                  flex: 1,
+                  padding: "11px 16px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  transition: "opacity 0.15s ease",
+                }}
+              >
+                {pending && sendingVia === "whatsapp" ? (
+                  <>
+                    <span className="mtcpl-spinner" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <span aria-hidden>💬</span> WhatsApp
+                  </>
+                )}
+              </button>
             )}
-          </button>
+          </div>
         </form>
       ) : (
         <form

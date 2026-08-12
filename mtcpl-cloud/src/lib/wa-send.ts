@@ -12,7 +12,16 @@ const WA_BULK_URL =
 
 export type WaComponents = Record<
   string,
-  { type: string; value: string; filename?: string }
+  {
+    type: string;
+    value: string;
+    filename?: string;
+    /** Button components only (e.g. an Authentication template's
+     *  Copy-code button, which Meta requires the code to be passed to
+     *  as well as the body). Ignored by body_/header_ entries. */
+    subtype?: string;
+    index?: string;
+  }
 >;
 
 /** Normalise an Indian phone number to MSG91's `91XXXXXXXXXX` form

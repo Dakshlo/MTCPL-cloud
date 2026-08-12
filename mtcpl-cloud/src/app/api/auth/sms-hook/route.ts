@@ -27,7 +27,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { sendOtpSms } from "@/lib/msg91";
+import { sendOtpSms, sendOtpWhatsApp, isWhatsAppOtpEnabled } from "@/lib/msg91";
+import { readOtpChannel } from "@/lib/otp-channel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,7 +107,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Channel routing (Daksh, Aug 2026) ──────────────────────────
+  // The login screen offers two buttons and records the choice via
+  // setOtpChannelAction; Supabase's payload can't carry it, so we read
+  // it back here. WhatsApp is tried first when it was chosen AND a
+  // template is configured — but a failure NEVER strands anyone: we
+  // fall straight through to the SMS that has always worked. Better a
+  // text they didn't ask for than no way into the app.
   try {
+    if (isWhatsAppOtpEnabled() && (await readOtpChannel(phone)) === "whatsapp") {
+      try {
+        await sendOtpWhatsApp(phone, otp);
+        return NextResponse.json({});
+      } catch (waErr) {
+        console.error(
+          "[sms-hook] WhatsApp OTP failed, falling back to SMS:",
+          waErr instanceof Error ? waErr.message : waErr,
+        );
+      }
+    }
     await sendOtpSms(phone, otp);
   } catch (err) {
     const message = err instanceof Error ? err.message : "SMS send failed.";

@@ -29,6 +29,8 @@
 // DLT operator blocks it — that's why we send via the template id and
 // pass ONLY the numeric code as var1 (never free text).
 
+import { sendWhatsAppTemplate, type WaComponents } from "@/lib/wa-send";
+
 const MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow/";
 
 /**
@@ -46,6 +48,60 @@ const MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow/";
  */
 const OTP_TEMPLATE_ID =
   process.env.MSG91_OTP_TEMPLATE_ID?.trim() || "6a252460e3ddb4d18b0c412b";
+
+/**
+ * Deliver the login OTP over WhatsApp instead of SMS.
+ *
+ * Daksh (Aug 2026) wanted the code in bold — SMS is plain text and
+ * physically cannot do it, WhatsApp can. Meta's Authentication-category
+ * templates bold the code automatically and can carry a "Copy code"
+ * button, so the person taps once instead of reading digits off a
+ * notification.
+ *
+ * Dormant until MSG91_WA_OTP_TEMPLATE names an approved template —
+ * `isWhatsAppOtpEnabled()` is what the hook checks before offering the
+ * channel at all. Throws on any failure so the caller can fall back to
+ * SMS rather than leave someone unable to log in.
+ *
+ * ⚠ If the approved template carries a Copy-code button, Meta requires
+ * the code to be passed for the BUTTON as well as the body, or the send
+ * is rejected. MSG91's exact key for that isn't documented in the
+ * account we already use (every existing template here is body/header
+ * only), so it's sent only when MSG91_WA_OTP_BUTTON=1 and the shape may
+ * need one correction against the real template. That's safe to get
+ * wrong: a rejected WhatsApp send throws, the hook catches it, and the
+ * SMS goes out as normal.
+ */
+export async function sendOtpWhatsApp(mobileRaw: string, otp: string): Promise<void> {
+  const templateName = process.env.MSG91_WA_OTP_TEMPLATE?.trim();
+  if (!templateName) throw new Error("MSG91_WA_OTP_TEMPLATE is not set.");
+
+  const mobiles = toMsg91Mobile(mobileRaw);
+  if (!/^\d{12}$/.test(mobiles)) {
+    throw new Error(`Bad recipient mobile "${mobileRaw}" (normalised "${mobiles}").`);
+  }
+
+  const components: WaComponents = {
+    body_1: { type: "text", value: otp },
+  };
+  if (process.env.MSG91_WA_OTP_BUTTON === "1") {
+    components.button_1 = { type: "text", value: otp, subtype: "url", index: "0" };
+  }
+
+  await sendWhatsAppTemplate({
+    to: [mobiles],
+    templateName,
+    lang: process.env.MSG91_WA_OTP_LANG?.trim() || "en",
+    components,
+  });
+}
+
+/** True once an approved WhatsApp OTP template is configured. The login
+ *  screen asks the server this so it doesn't offer a button that can
+ *  only fail. */
+export function isWhatsAppOtpEnabled(): boolean {
+  return Boolean(process.env.MSG91_WA_OTP_TEMPLATE?.trim());
+}
 
 /** Normalise a mobile to MSG91's "country code + number, no +" form
  *  (e.g. "919876543210"). Accepts +91…, 91…, or a bare 10-digit
