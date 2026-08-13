@@ -693,6 +693,14 @@ export function ReportClient({
           blocks={filtered}
           palettes={stonePalettes}
           stoneCategoryMap={stoneCategoryMap}
+          // Plain stock-state names — NOT blockStatusLabel, which maps
+          // available → "Fresh"/"Used" for the table's badges and would
+          // make this pill say "showing: Fresh" when it means Available.
+          filterNote={
+            statusFilter
+              .map((s) => ({ available: "Available", reserved: "In progress", consumed: "Consumed", discarded: "Deleted" }[s] ?? s))
+              .join(" + ") || "All statuses"
+          }
           onClose={() => setPreviewOpen(false)}
         />
       )}
@@ -839,17 +847,16 @@ export function ReportClient({
 
 // ── Yard preview — "cinema" (Daksh, Aug 2026) ──────────────────────
 //
-// v2 (Daksh): "make UI theme white, show RIICO and MTCPL on different
-// pages — first MTCPL, we swipe or arrow right, then RIICO. In a yard,
-// group stone-wise, and yard-wise show data on top."
+// v2 (Daksh): white theme; one facility per page (tabs, ← →, swipe,
+// edge arrows); yard data on top; stone-wise clusters inside a yard.
+// v3 (Daksh): hover a tile for a detail card (like the CNC logbook's
+// slab cards) instead of hunting a bottom strip; clusters order their
+// blocks big → small; and the masthead names the statuses on stage so
+// "is this available only?" is never a guess.
 //
-// So: a light full-screen stage, ONE facility per page (segmented tabs,
-// ← → keys, swipe, and edge arrows all switch), each yard card leads
-// with its own numbers, and inside a yard the tiles cluster by stone
-// with a labelled header per cluster. Tiles keep the stone's real
-// 3-face palette and volume-scaled size; status shows as treatment
-// (reserved = gold ring, consumed = faded, deleted = faded + red).
-// Draws whatever the report is currently FILTERED to.
+// Tiles keep the stone's real 3-face palette and volume-scaled size;
+// status shows as treatment (reserved = gold ring, consumed = faded,
+// deleted = faded + red). Draws whatever the report is FILTERED to.
 //
 // Portaled to <body>: hover-lift cards create transformed ancestors,
 // and a transform becomes the containing block for position:fixed —
@@ -859,12 +866,18 @@ type CinemaProps = {
   blocks: Block[];
   palettes: Array<{ name: string; color_top: string; color_front: string; color_side: string }>;
   stoneCategoryMap: Record<string, StoneCategory>;
+  /** e.g. "Available" — which statuses the report is filtered to. */
+  filterNote: string;
   onClose: () => void;
 };
 
-function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps) {
+/** What the floating card knows: the block + where to draw itself. */
+type HoverInfo = { b: Block; x: number; y: number; below: boolean };
+
+function YardCinema({ blocks, palettes, stoneCategoryMap, filterNote, onClose }: CinemaProps) {
   const [facility, setFacility] = useState<Facility>("mtcpl");
-  const [picked, setPicked] = useState<Block | null>(null);
+  const [hover, setHover] = useState<HoverInfo | null>(null);
+  const [pinned, setPinned] = useState<HoverInfo | null>(null);
   const [touchX, setTouchX] = useState<number | null>(null);
 
   const go = (dir: 1 | -1) => {
@@ -872,7 +885,8 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
     const next = FACILITIES[Math.min(FACILITIES.length - 1, Math.max(0, i + dir))];
     if (next !== facility) {
       setFacility(next);
-      setPicked(null);
+      setHover(null);
+      setPinned(null);
     }
   };
 
@@ -917,8 +931,10 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
     return {};
   };
 
-  /** yard → stone → blocks, so a yard renders as labelled stone
-   *  clusters (biggest cluster first) instead of one mixed heap. */
+  /** yard → stone → blocks. Each cluster is sorted big → small
+   *  (Daksh: "arrange them from bigger to smaller size block"), so a
+   *  cluster reads like stock laid out in the yard — heavy pieces
+   *  first, offcuts trailing. */
   const yardStoneGroups = useMemo(() => {
     const m = new Map<number, Map<string, Block[]>>();
     for (const b of blocks) {
@@ -928,8 +944,12 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
       if (!g.has(b.stone)) g.set(b.stone, []);
       g.get(b.stone)!.push(b);
     }
+    for (const g of m.values()) {
+      for (const list of g.values()) list.sort((a, z) => volumeOf(z) - volumeOf(a));
+    }
     return m;
-  }, [blocks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, stoneCategoryMap]);
 
   const yardStats = (y: number) => {
     const g = yardStoneGroups.get(y);
@@ -966,8 +986,21 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
     return [...counts.entries()].sort((a, z) => z[1] - a[1]);
   }, [facility, yardStoneGroups]);
 
+  /** Anchor the floating card to a tile: centred, above it when there
+   *  is room, otherwise below; always clamped inside the viewport. */
+  const infoFromTile = (b: Block, el: HTMLElement): HoverInfo => {
+    const r = el.getBoundingClientRect();
+    const CARD_W = 264;
+    const CARD_H = 190;
+    const x = Math.max(8, Math.min(r.left + r.width / 2 - CARD_W / 2, window.innerWidth - CARD_W - 8));
+    const below = r.top - CARD_H - 10 < 8;
+    const y = below ? r.bottom + 10 : r.top - 10;
+    return { b, x, y, below };
+  };
+
   const fTotals = facilityStats(facility);
   const idx = FACILITIES.indexOf(facility);
+  const shown = pinned ?? hover;
 
   const overlay = (
     <div
@@ -998,7 +1031,9 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
         .yc-arrow { transition: background .12s ease, transform .12s ease, box-shadow .12s ease; }
         .yc-arrow:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(45,36,16,0.16); background: var(--surface); }
         .yc-arrow:disabled { opacity: .3; cursor: default; }
-        @media (prefers-reduced-motion: reduce) { .yc-page { animation: none; } }
+        .yc-card { animation: ycCard .14s ease both; }
+        @keyframes ycCard { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+        @media (prefers-reduced-motion: reduce) { .yc-page, .yc-card { animation: none; } }
       `}</style>
 
       {/* ── Header ── */}
@@ -1028,7 +1063,8 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
                 type="button"
                 onClick={() => {
                   setFacility(f);
-                  setPicked(null);
+                  setHover(null);
+                  setPinned(null);
                 }}
                 style={{
                   padding: "7px 16px",
@@ -1115,6 +1151,21 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
             <span style={{ fontSize: 13.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
               {fTotals.n} block{fTotals.n === 1 ? "" : "s"} · {fTotals.cft.toFixed(0)} CFT
             </span>
+            {/* Which statuses are on stage — so "available only?" is
+                answered right here, not guessed. */}
+            <span
+              style={{
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: "#15803d",
+                background: "rgba(21,128,61,0.08)",
+                border: "1px solid rgba(21,128,61,0.3)",
+                borderRadius: 999,
+                padding: "3px 10px",
+              }}
+            >
+              showing: {filterNote}
+            </span>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>
               {idx === 0 ? "page 1 of 2 · RIICO →" : "page 2 of 2 · ← MTCPL"}
             </span>
@@ -1138,7 +1189,7 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
                     overflow: "hidden",
                   }}
                 >
-                  {/* Yard data ON TOP (Daksh) */}
+                  {/* Yard data ON TOP */}
                   <div
                     style={{
                       display: "flex",
@@ -1157,7 +1208,7 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
                     </span>
                   </div>
 
-                  {/* Stone-wise clusters */}
+                  {/* Stone-wise clusters, each big → small */}
                   <div style={{ padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12, minHeight: 64 }}>
                     {groups.length === 0 && (
                       <span style={{ fontSize: 12, color: "var(--muted)" }}>No blocks here under the current filter.</span>
@@ -1178,20 +1229,24 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
                             {list.map((b) => {
                               const vol = volumeOf(b);
                               const side = sideOf(vol);
-                              const isPicked = picked?.id === b.id;
+                              const isPinned = pinned?.b.id === b.id;
                               return (
                                 <button
                                   key={b.id}
                                   type="button"
-                                  onClick={() => setPicked(isPicked ? null : b)}
-                                  title={`${b.id} · ${b.stone} · ${vol.toFixed(1)} CFT${b.quality ? ` · ${b.quality}` : ""} · ${blockStatusLabel(b.status)}`}
+                                  aria-label={`${b.id} · ${b.stone}`}
+                                  onMouseEnter={(e) => setHover(infoFromTile(b, e.currentTarget))}
+                                  onMouseLeave={() => setHover(null)}
+                                  onClick={(e) =>
+                                    setPinned(isPinned ? null : infoFromTile(b, e.currentTarget))
+                                  }
                                   style={{
                                     width: side,
                                     height: Math.round(side * 0.72),
                                     borderRadius: 4,
                                     background: `linear-gradient(180deg, ${p.top} 0%, ${p.top} 42%, ${p.front} 100%)`,
-                                    border: `1.5px solid ${isPicked ? "var(--text)" : p.front}`,
-                                    boxShadow: isPicked ? "0 0 0 2.5px var(--gold)" : "0 1px 3px rgba(45,36,16,0.18)",
+                                    border: `1.5px solid ${isPinned ? "var(--text)" : p.front}`,
+                                    boxShadow: isPinned ? "0 0 0 2.5px var(--gold)" : "0 1px 3px rgba(45,36,16,0.18)",
                                     cursor: "pointer",
                                     padding: 0,
                                     flexShrink: 0,
@@ -1236,39 +1291,73 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
         </div>
       </div>
 
-      {/* ── Picked-block detail strip ── */}
-      {picked && (
+      {/* ── Floating block card (hover; click a tile to pin) ── */}
+      {shown && (
         <div
+          className="yc-card"
           style={{
-            borderTop: "1px solid var(--border)",
+            position: "fixed",
+            left: shown.x,
+            top: shown.y,
+            transform: shown.below ? "none" : "translateY(-100%)",
+            width: 264,
+            zIndex: 410,
             background: "var(--surface)",
-            padding: "12px 22px",
-            display: "flex",
-            gap: 18,
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            fontSize: 13,
-            boxShadow: "0 -6px 18px rgba(45,36,16,0.06)",
+            border: "1px solid var(--border)",
+            borderRadius: 14,
+            boxShadow: "0 4px 10px rgba(45,36,16,0.10), 0 18px 44px rgba(45,36,16,0.16)",
+            padding: "12px 14px",
+            pointerEvents: pinned ? "auto" : "none",
+            fontSize: 12.5,
           }}
         >
-          <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "var(--gold-dark)" }}>{picked.id}</strong>
-          <span style={{ fontWeight: 700 }}>{picked.stone}</span>
-          <span>{yardLabel(picked.yard)}</span>
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>
-            {stoneCategoryMap[picked.stone] === "marble"
-              ? `${Number(picked.tonnes ?? 0)} T (≈${volumeOf(picked).toFixed(1)} CFT)`
-              : `${picked.length_ft ?? "—"} × ${picked.width_ft ?? "—"} × ${picked.height_ft ?? "—"} in · ${volumeOf(picked).toFixed(2)} CFT`}
-          </span>
-          {picked.quality && <span>Grade {picked.quality}</span>}
-          <span>{blockStatusLabel(picked.status)}</span>
-          {picked.vendor_name && <span style={{ color: "var(--muted)" }}>{picked.vendor_name}</span>}
-          <button
-            type="button"
-            onClick={() => setPicked(null)}
-            style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 13 }}
-          >
-            ✕
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: 4,
+                flexShrink: 0,
+                background: getStonePalette(shown.b.stone, palettes).top,
+                border: `1.5px solid ${getStonePalette(shown.b.stone, palettes).front}`,
+              }}
+            />
+            <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "var(--gold-dark)" }}>{shown.b.id}</strong>
+            {pinned && (
+              <button
+                type="button"
+                onClick={() => setPinned(null)}
+                aria-label="Unpin"
+                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 13, padding: 0 }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", marginTop: 9, color: "var(--text)" }}>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Stone</span>
+            <span style={{ fontWeight: 700 }}>{shown.b.stone}</span>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Yard</span>
+            <span>{yardLabel(shown.b.yard)}</span>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Size</span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              {stoneCategoryMap[shown.b.stone] === "marble"
+                ? `${Number(shown.b.tonnes ?? 0)} T (≈${volumeOf(shown.b).toFixed(1)} CFT)`
+                : `${shown.b.length_ft ?? "—"} × ${shown.b.width_ft ?? "—"} × ${shown.b.height_ft ?? "—"} in · ${volumeOf(shown.b).toFixed(2)} CFT`}
+            </span>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Grade</span>
+            <span>{shown.b.quality || "—"}</span>
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Status</span>
+            <span>{blockStatusLabel(shown.b.status)}{isReusedBlock(shown.b.category) ? " · ↻ Restocked" : ""}</span>
+            {shown.b.vendor_name && (
+              <>
+                <span style={{ color: "var(--muted)", fontWeight: 600 }}>Vendor</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shown.b.vendor_name}</span>
+              </>
+            )}
+            <span style={{ color: "var(--muted)", fontWeight: 600 }}>Added</span>
+            <span>{fmtDate(shown.b.created_at)}</span>
+          </div>
         </div>
       )}
     </div>
