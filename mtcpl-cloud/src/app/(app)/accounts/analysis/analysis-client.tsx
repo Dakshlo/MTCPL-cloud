@@ -29,6 +29,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   buildPlan,
   scoreBreakdown,
+  isMuteActive,
   MOOD_META,
   URGENCY_META,
   DEFAULT_TERMS_DAYS,
@@ -281,7 +282,10 @@ export function FinanceAnalysisClient({
   // server write lands last carries both fields.
   const metaRef = { current: meta } as { current: PayMetaMap };
 
-  function setVendorMeta(vendorId: string, patch: { mood?: PayMood | null; urgency?: PayUrgency | null }) {
+  function setVendorMeta(
+    vendorId: string,
+    patch: { mood?: PayMood | null; urgency?: PayUrgency | null; muteUntil?: string | null },
+  ) {
     const base = metaRef.current;
     const cur = { ...(base[vendorId] ?? {}) };
     if ("mood" in patch) {
@@ -291,6 +295,10 @@ export function FinanceAnalysisClient({
     if ("urgency" in patch) {
       if (patch.urgency == null) delete cur.urgency;
       else cur.urgency = patch.urgency;
+    }
+    if ("muteUntil" in patch) {
+      if (patch.muteUntil == null) delete cur.muteUntil;
+      else cur.muteUntil = patch.muteUntil;
     }
     const next = { ...base };
     const full = Object.keys(cur).length === 0 ? null : cur;
@@ -993,6 +1001,11 @@ export function FinanceAnalysisClient({
           const v = vendors.find((x) => x.id === id);
           if (v) setOpenVendor(v);
         }}
+        // Mute the whole payee — for a group that's every firm, since
+        // one live firm would keep the person in the suggestions.
+        onSetMute={(vendorIds, until) => {
+          for (const id of vendorIds) setVendorMeta(id, { muteUntil: until });
+        }}
       />
 
       {openVendor && (
@@ -1022,8 +1035,8 @@ function VendorSheet({
   vendor: VendorAnalysis;
   companyOutstanding: number;
   onClose: () => void;
-  meta: { mood?: PayMood; urgency?: PayUrgency };
-  onMeta: (patch: { mood?: PayMood | null; urgency?: PayUrgency | null }) => void;
+  meta: { mood?: PayMood; urgency?: PayUrgency; muteUntil?: string };
+  onMeta: (patch: { mood?: PayMood | null; urgency?: PayUrgency | null; muteUntil?: string | null }) => void;
   groupName: string | null;
 }) {
   const [tab, setTab] = useState<"bills" | "payments">("bills");
@@ -1158,6 +1171,44 @@ function VendorSheet({
               value={meta.urgency ?? null}
               onPick={(k) => onMeta({ urgency: meta.urgency === k ? null : (k as PayUrgency) })}
             />
+            {/* Mute lives here too, so a silenced vendor can be woken
+                even when no budget is set (the planner's skipped list
+                — the other unmute — only renders once a plan runs). */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink2 }}>🔕 Mute</span>
+              {isMuteActive(meta.muteUntil, Date.now()) ? (
+                <>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: C.red }}>
+                    {meta.muteUntil === "forever" ? "until you unmute" : `till ${fmtDate(meta.muteUntil ?? null)}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onMeta({ muteUntil: null })}
+                    style={{ padding: "5px 12px", fontSize: 11.5, fontWeight: 700, color: "#fff", background: C.indigo, border: "none", borderRadius: 999, cursor: "pointer" }}
+                  >
+                    Unmute
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: "inline-flex", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 999, padding: 3, gap: 2 }}>
+                  {[
+                    { lbl: "1 wk", until: () => new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10) },
+                    { lbl: "1 mo", until: () => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) },
+                    { lbl: "∞", until: () => "forever" },
+                  ].map((o) => (
+                    <button
+                      key={o.lbl}
+                      type="button"
+                      title={o.lbl === "∞" ? "Mute until you unmute" : `Mute for ${o.lbl === "1 wk" ? "1 week" : "1 month"}`}
+                      onClick={() => onMeta({ muteUntil: o.until() })}
+                      style={{ padding: "4px 10px", fontSize: 11, fontWeight: 700, color: C.ink2, background: "transparent", border: "none", borderRadius: 999, cursor: "pointer" }}
+                    >
+                      {o.lbl}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div style={{ fontSize: 11.5, color: C.muted, marginLeft: "auto" }}>
               Credit period{" "}
               <strong style={{ color: C.ink2 }}>
@@ -1298,12 +1349,15 @@ function PayPlanner({
   meta,
   onDissolveGroup,
   onOpenVendorId,
+  onSetMute,
 }: {
   vendors: VendorAnalysis[];
   groups: VendorGroup[];
   meta: PayMetaMap;
   onDissolveGroup: (groupId: string) => void;
   onOpenVendorId: (vendorId: string) => void;
+  /** until = "forever" | "YYYY-MM-DD" to mute, null to unmute. */
+  onSetMute: (vendorIds: string[], until: string | null) => void;
 }) {
   const [budgetText, setBudgetText] = useState("");
   const [showSkipped, setShowSkipped] = useState(false);
@@ -1428,7 +1482,7 @@ function PayPlanner({
       ) : (
         <div style={{ padding: "6px 24px 8px" }}>
           {plan.picks.map((p, i) => (
-            <PickCard key={p.unit.key} pick={p} rank={i + 1} onOpenVendorId={onOpenVendorId} />
+            <PickCard key={p.unit.key} pick={p} rank={i + 1} onOpenVendorId={onOpenVendorId} onSetMute={onSetMute} />
           ))}
         </div>
       )}
@@ -1443,13 +1497,24 @@ function PayPlanner({
               style={{ border: "none", background: "transparent", color: C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
             >
               {showSkipped ? "▾" : "▸"} {plan.skipped.length} vendor{plan.skipped.length === 1 ? "" : "s"} not
-              suggested (inside credit period or on hold)
+              suggested (inside credit · on hold · muted)
             </button>
             {showSkipped && (
               <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
                 {plan.skipped.map((s) => (
-                  <div key={s.unit.key} style={{ fontSize: 12, color: C.muted }}>
-                    <strong style={{ color: C.ink2 }}>{s.unit.name}</strong> — {s.reason}
+                  <div key={s.unit.key} style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <span>
+                      <strong style={{ color: C.ink2 }}>{s.unit.name}</strong> — {s.reason}
+                    </span>
+                    {s.unit.muteActive && (
+                      <button
+                        type="button"
+                        onClick={() => onSetMute(s.unit.vendorIds, null)}
+                        style={{ border: "none", background: "transparent", color: C.indigo, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
+                      >
+                        Unmute
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1494,15 +1559,46 @@ function PayPlanner({
   );
 }
 
-function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: number; onOpenVendorId: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
+function PickCard({
+  pick: p,
+  rank,
+  onOpenVendorId,
+  onSetMute,
+}: {
+  pick: PayPick;
+  rank: number;
+  onOpenVendorId: (id: string) => void;
+  onSetMute: (vendorIds: string[], until: string | null) => void;
+}) {
+  // Redesign (Daksh: "this looks too clustered") — the card leads with
+  // just WHO / one-line why / MARKS / HOW MUCH. The full working —
+  // reason chips, the marks table, bill-by-bill coverage — sits behind
+  // one expander, so ten picks read as ten calm rows.
+  const [expanded, setExpanded] = useState(false);
+  const [muteMenu, setMuteMenu] = useState(false);
   const u = p.unit;
-  const shownCoverage = open ? p.coverage : p.coverage.slice(0, 3);
-  // The five earned-marks behind the score — sums exactly to it.
   const marks = scoreBreakdown(p.components, p.score);
+
+  // One quiet context line for the collapsed state: the rhythm fact,
+  // plus the two things dad must never miss even collapsed.
+  const context = [
+    p.reasons[0]?.text,
+    u.held > 0.5 ? `\u270B ${inr(u.held)} on hold` : null,
+    u.isGroup ? `\uD83D\uDD17 ${u.memberNames.length} firms` : null,
+  ]
+    .filter(Boolean)
+    .join(" \u00B7 ");
+
+  function mute(until: string | null) {
+    setMuteMenu(false);
+    onSetMute(u.vendorIds, until);
+  }
+  const in7 = () => new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const in30 = () => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
   return (
-    <div style={{ padding: "16px 0", borderBottom: `1px solid ${C.line}` }} className="fa-pick">
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+    <div style={{ padding: "14px 0", borderBottom: `1px solid ${C.line}` }} className="fa-pick">
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         {/* Rank */}
         <div
           style={{
@@ -1523,7 +1619,7 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
           {rank}
         </div>
 
-        {/* Who */}
+        {/* Who + one quiet line */}
         <div style={{ flex: "1 1 240px", minWidth: 0 }}>
           <button
             type="button"
@@ -1532,15 +1628,118 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
             style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", textAlign: "left" }}
           >
             <span style={{ fontSize: 14.5, fontWeight: 700, color: C.ink, letterSpacing: "-0.01em" }}>
-              {u.isGroup ? `🔗 ${u.name}` : u.name}
+              {u.isGroup ? `\uD83D\uDD17 ${u.name}` : u.name}
             </span>
           </button>
-          {u.isGroup && (
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {u.memberNames.join(" · ")}
+          <div style={{ fontSize: 11.5, color: C.muted, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {context}
+          </div>
+        </div>
+
+        {/* Mute — "don't suggest them" (for a while, or until unmuted) */}
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setMuteMenu((m) => !m)}
+            title="Mute this vendor — stop suggesting them"
+            aria-expanded={muteMenu}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 10,
+              border: `1px solid ${muteMenu ? C.indigo : C.line}`,
+              background: muteMenu ? C.indigoSoft : C.wash,
+              cursor: "pointer",
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            {"\uD83D\uDD15"}
+          </button>
+          {muteMenu && (
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                top: 36,
+                zIndex: 30,
+                background: C.paper,
+                border: `1px solid ${C.line}`,
+                borderRadius: 12,
+                boxShadow: "0 12px 32px rgba(11,18,32,0.14)",
+                padding: 6,
+                display: "flex",
+                flexDirection: "column",
+                minWidth: 190,
+              }}
+            >
+              {[
+                { label: "Mute for 1 week", until: in7() },
+                { label: "Mute for 1 month", until: in30() },
+                { label: "Mute until I unmute", until: "forever" },
+              ].map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => mute(o.until)}
+                  className="fa-mute-opt"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    textAlign: "left",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontSize: 12.5,
+                    fontWeight: 650,
+                    color: C.ink2,
+                    cursor: "pointer",
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+              <div style={{ fontSize: 10.5, color: C.muted, padding: "4px 12px 6px" }}>
+                Muted vendors move to the \u201Cnot suggested\u201D list below, with an Unmute.
+              </div>
             </div>
           )}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
+        </div>
+
+        {/* Marks — its own ring, its own colour, its own unit. */}
+        <ScoreBadge score={p.score} />
+
+        {/* How much */}
+        <div style={{ textAlign: "right", minWidth: 140 }}>
+          <div style={{ ...display, fontSize: 21, color: p.clearsFully ? C.green : C.ink }}>{inr(p.amount)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+            {p.clearsFully ? "clears all payable" : `of ${inr(u.eligible)} payable`}
+          </div>
+        </div>
+      </div>
+
+      {/* One expander for the full working */}
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          marginLeft: 44,
+          marginTop: 8,
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          fontSize: 12,
+          fontWeight: 700,
+          color: C.indigo,
+          cursor: "pointer",
+        }}
+      >
+        {expanded ? "\u25BE Hide" : "\u25B8 Why these marks \u00B7 which bills"}
+      </button>
+
+      {expanded && (
+        <>
+          {/* Reasons in words */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, marginLeft: 44 }}>
             {p.reasons.map((r, i) => (
               <span
                 key={i}
@@ -1561,93 +1760,54 @@ function PickCard({ pick: p, rank, onOpenVendorId }: { pick: PayPick; rank: numb
               </span>
             ))}
           </div>
-        </div>
 
-        {/* Marks — its own ring, its own colour, its own unit, so the
-            79 can never be misread as ₹79 or mixed with the amounts. */}
-        <ScoreBadge score={p.score} />
-
-        {/* How much */}
-        <div style={{ textAlign: "right", minWidth: 150 }}>
-          <div style={{ ...display, fontSize: 21, color: p.clearsFully ? C.green : C.ink }}>{inr(p.amount)}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-            {p.clearsFully ? "clears all payable" : `of ${inr(u.eligible)} payable`}
+          {/* The marks, spelled out — parts sum exactly to the badge. */}
+          <div style={{ marginTop: 10, marginLeft: 44 }}>
+            <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: C.wash, maxWidth: 560 }}>
+              {marks.map(
+                (m) =>
+                  m.earned > 0 && (
+                    <div key={m.key} title={`${m.label}: ${m.earned}/${m.max}`} style={{ width: `${m.earned}%`, background: m.color }} />
+                  ),
+              )}
+            </div>
+            <div style={{ marginTop: 5, fontSize: 11, color: C.muted, display: "flex", flexWrap: "wrap", gap: "3px 12px" }}>
+              {marks.map((m) => (
+                <span key={m.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 2, background: m.color, display: "inline-block" }} />
+                  {m.icon} {m.label}{" "}
+                  <strong style={{ color: C.ink2, fontVariantNumeric: "tabular-nums" }}>
+                    {m.earned}/{m.max}
+                  </strong>
+                </span>
+              ))}
+            </div>
           </div>
-          <div style={{ marginTop: 7, height: 6, width: 150, marginLeft: "auto", borderRadius: 999, background: C.wash, overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${Math.min(100, (p.amount / Math.max(u.eligible, 1)) * 100)}%`,
-                height: "100%",
-                background: p.clearsFully ? C.green : `linear-gradient(90deg, ${C.indigo}, #7c8cf8)`,
-              }}
-            />
-          </div>
-        </div>
-      </div>
 
-      {/* Why these marks — Daksh: "give marks out of 100 why you think
-          that decision." One track per pick: five coloured segments on
-          a 100-wide bar, then the arithmetic spelled out so the badge
-          can be checked by hand (the parts sum exactly to the score). */}
-      <div style={{ marginTop: 10, marginLeft: 44 }}>
-        <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: C.wash, maxWidth: 560 }}>
-          {marks.map(
-            (m) =>
-              m.earned > 0 && (
-                <div
-                  key={m.key}
-                  title={`${m.label}: ${m.earned}/${m.max}`}
-                  style={{ width: `${m.earned}%`, background: m.color }}
-                />
-              ),
-          )}
-        </div>
-        <div style={{ marginTop: 5, fontSize: 11, color: C.muted, display: "flex", flexWrap: "wrap", gap: "3px 12px" }}>
-          {marks.map((m) => (
-            <span key={m.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 7, height: 7, borderRadius: 2, background: m.color, display: "inline-block" }} />
-              {m.icon} {m.label}{" "}
-              <strong style={{ color: C.ink2, fontVariantNumeric: "tabular-nums" }}>
-                {m.earned}/{m.max}
-              </strong>
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Which bills this covers — n full + possibly one partial */}
-      <div style={{ marginTop: 10, marginLeft: 44, fontSize: 12, color: C.muted, display: "flex", flexDirection: "column", gap: 3 }}>
-        {shownCoverage.map((cvg, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-            <span style={{ color: C.ink2, fontWeight: 650 }}>{cvg.billLabel}</span>
-            {u.isGroup && <span>({cvg.vendorName})</span>}
-            <span>{fmtDate(cvg.date)}</span>
-            <span style={{ fontVariantNumeric: "tabular-nums", color: cvg.full ? C.green : C.amber, fontWeight: 700 }}>
-              {cvg.full
-                ? `${inr(cvg.pay)} — full`
-                : cvg.held > 0 && cvg.pay >= cvg.open - cvg.held - 0.5
-                  ? // Payable part fully covered; the bill stays open only
-                    // because the rest is deliberately held.
-                    `${inr(cvg.pay)} of ${inr(cvg.open)} — rest on hold`
-                  : `${inr(cvg.pay)} of ${inr(cvg.open)} — partial`}
-            </span>
-            {cvg.held > 0 && (
-              <span style={{ color: C.red, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                ✋ {inr(cvg.held)} held
-              </span>
-            )}
+          {/* Which bills this covers */}
+          <div style={{ marginTop: 10, marginLeft: 44, fontSize: 12, color: C.muted, display: "flex", flexDirection: "column", gap: 3 }}>
+            {p.coverage.map((cvg, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                <span style={{ color: C.ink2, fontWeight: 650 }}>{cvg.billLabel}</span>
+                {u.isGroup && <span>({cvg.vendorName})</span>}
+                <span>{fmtDate(cvg.date)}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums", color: cvg.full ? C.green : C.amber, fontWeight: 700 }}>
+                  {cvg.full
+                    ? `${inr(cvg.pay)} \u2014 full`
+                    : cvg.held > 0 && cvg.pay >= cvg.open - cvg.held - 0.5
+                      ? `${inr(cvg.pay)} of ${inr(cvg.open)} \u2014 rest on hold`
+                      : `${inr(cvg.pay)} of ${inr(cvg.open)} \u2014 partial`}
+                </span>
+                {cvg.held > 0 && (
+                  <span style={{ color: C.red, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                    {"\u270B"} {inr(cvg.held)} held
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-        {p.coverage.length > 3 && (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            style={{ alignSelf: "flex-start", border: "none", background: "transparent", color: C.indigo, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}
-          >
-            {open ? "Show fewer bills" : `+${p.coverage.length - 3} more bill${p.coverage.length - 3 === 1 ? "" : "s"}`}
-          </button>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1890,6 +2050,7 @@ function Styles() {
 .fa-row:hover { background: #f7f9fc; }
 .fa-loadall { transition: background .12s ease, color .12s ease; }
 .fa-loadall:hover { background: #eef1f7; }
+.fa-mute-opt:hover { background: ${C.wash}; }
 .fa-row:last-child { border-bottom: none !important; }
 .fa-input:focus { border-color: ${C.indigo} !important; box-shadow: 0 0 0 4px rgba(79,70,229,0.12); background: #fff !important; }
 .fa-bar { transition: height .5s cubic-bezier(.22,1,.36,1); }

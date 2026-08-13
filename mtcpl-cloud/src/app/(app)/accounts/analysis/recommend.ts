@@ -30,8 +30,22 @@ export type PayMood = "good" | "avg" | "bad";
 /** Dad's read on how hard the vendor is pressing for money. */
 export type PayUrgency = "chill" | "normal" | "high";
 
-export type VendorPayMeta = { mood?: PayMood; urgency?: PayUrgency };
+export type VendorPayMeta = {
+  mood?: PayMood;
+  urgency?: PayUrgency;
+  /** "Don't suggest this vendor": an ISO date (muted through that day)
+   *  or "forever" (until dad unmutes). Absent/expired = not muted. */
+  muteUntil?: string;
+};
 export type PayMetaMap = Record<string, VendorPayMeta>;
+
+/** Is this vendor's mute still in force? */
+export function isMuteActive(muteUntil: string | undefined, nowMs: number): boolean {
+  if (!muteUntil) return false;
+  if (muteUntil === "forever") return true;
+  const t = Date.parse(`${muteUntil.slice(0, 10)}T23:59:59+05:30`);
+  return Number.isFinite(t) && t > nowMs;
+}
 
 /** A "person" — several firms clubbed as one payee. Any firm's payment
  *  counts as that person having been paid. */
@@ -84,6 +98,10 @@ export type PayUnit = {
   weightedAge: number;         // amount-weighted mean age of eligible
   mood: PayMood | null;
   urgency: PayUrgency | null;
+  /** Dad said "don't suggest them for now". A group is muted only when
+   *  EVERY firm in it is muted (one live firm keeps the person live). */
+  muteActive: boolean;
+  muteLabel: string | null;    // "muted till 19 Aug" / "muted until you unmute"
   termsLabel: string;          // "60d" or "30d (assumed)" etc.
   anyTermsAssumed: boolean;
 };
@@ -131,6 +149,15 @@ function median(xs: number[]): number | null {
   const s = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-08-19" → "19 Aug 2026" (for mute labels). */
+function fmtShortDate(iso: string): string {
+  const p = iso.slice(0, 10).split("-").map(Number);
+  if (p.length !== 3 || !p[1]) return iso;
+  return `${p[2]} ${MON_SHORT[p[1] - 1]} ${p[0]}`;
 }
 
 function daysSinceIso(iso: string | null, nowMs: number): number | null {
@@ -239,6 +266,17 @@ export function buildUnits(
       ? urgencies.sort((a, b) => urgRank.indexOf(b) - urgRank.indexOf(a))[0]
       : null;
 
+    // Mute: the unit is silenced only while EVERY member is. Effective
+    // end = the first member expiry (one firm waking up wakes the
+    // person), so the label always tells dad the true resume date.
+    const mutes = members.map((v) => meta[v.id]?.muteUntil);
+    const muteActive = members.length > 0 && mutes.every((m) => isMuteActive(m, nowMs));
+    let muteLabel: string | null = null;
+    if (muteActive) {
+      const dated = mutes.filter((m): m is string => !!m && m !== "forever").sort();
+      muteLabel = dated.length === 0 ? "muted until you unmute" : `muted till ${fmtShortDate(dated[0])}`;
+    }
+
     const termsSet = [...new Set(members.map((v) => v.termsDays ?? DEFAULT_TERMS_DAYS))];
     const termsLabel =
       termsSet.length === 1
@@ -263,6 +301,8 @@ export function buildUnits(
       weightedAge,
       mood,
       urgency,
+      muteActive,
+      muteLabel,
       termsLabel,
       anyTermsAssumed: anyAssumed,
     };
@@ -339,6 +379,13 @@ export function buildPlan(
   const candidates: PayUnit[] = [];
   for (const u of units) {
     if (u.outstanding <= 0.5) continue; // fully settled — not even worth listing
+    // Muted beats everything — even a vendor screaming with eligible
+    // money stays out while dad has him silenced. Listed in "skipped"
+    // (not hidden) so the mute is always visible and reversible.
+    if (u.muteActive) {
+      skipped.push({ unit: u, reason: `🔕 ${u.muteLabel ?? "muted"}` });
+      continue;
+    }
     if (u.eligible < 500) {
       // Say exactly WHY there's nothing suggestible — inside credit,
       // on hold, or both.

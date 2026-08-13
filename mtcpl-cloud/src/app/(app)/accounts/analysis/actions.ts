@@ -71,6 +71,15 @@ export async function saveVendorPayMetaAction(
       if (!URGENCIES.includes(full.urgency)) return { ok: false, error: "Bad urgency." };
       clean.urgency = full.urgency;
     }
+    if (full?.muteUntil != null) {
+      const mu = String(full.muteUntil);
+      // "forever", or a plain date the mute runs through. Expired dates
+      // are accepted and simply read as not-muted.
+      if (mu !== "forever" && !/^\d{4}-\d{2}-\d{2}$/.test(mu)) {
+        return { ok: false, error: "Bad mute." };
+      }
+      clean.muteUntil = mu;
+    }
 
     const admin = createAdminSupabaseClient();
     const { data: row } = await admin
