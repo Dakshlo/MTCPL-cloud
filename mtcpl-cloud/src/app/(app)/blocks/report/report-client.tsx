@@ -839,18 +839,17 @@ export function ReportClient({
 
 // ── Yard preview — "cinema" (Daksh, Aug 2026) ──────────────────────
 //
-// "Add a Preview button — like the CNC logbook cinema, for blocks.
-// First show MTCPL and RIICO blocks in different areas, and in MTCPL
-// the different yards — there we can see the blocks, and blocks
-// already have colours."
+// v2 (Daksh): "make UI theme white, show RIICO and MTCPL on different
+// pages — first MTCPL, we swipe or arrow right, then RIICO. In a yard,
+// group stone-wise, and yard-wise show data on top."
 //
-// A full-screen dark stage over the report: one panel per FACILITY
-// (facility is derived from the yard number — lib/yards.ts is the
-// single source of truth), inside it one room per YARD, and inside a
-// room one tile per block. Tiles use the stone's real 3-face palette
-// (the same swatches the block cards use), are sized by volume, and
-// dim/outline by status. It draws whatever the report is currently
-// FILTERED to, so the filters upstairs drive the picture.
+// So: a light full-screen stage, ONE facility per page (segmented tabs,
+// ← → keys, swipe, and edge arrows all switch), each yard card leads
+// with its own numbers, and inside a yard the tiles cluster by stone
+// with a labelled header per cluster. Tiles keep the stone's real
+// 3-face palette and volume-scaled size; status shows as treatment
+// (reserved = gold ring, consumed = faded, deleted = faded + red).
+// Draws whatever the report is currently FILTERED to.
 //
 // Portaled to <body>: hover-lift cards create transformed ancestors,
 // and a transform becomes the containing block for position:fixed —
@@ -864,33 +863,38 @@ type CinemaProps = {
 };
 
 function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps) {
+  const [facility, setFacility] = useState<Facility>("mtcpl");
   const [picked, setPicked] = useState<Block | null>(null);
+  const [touchX, setTouchX] = useState<number | null>(null);
 
-  // Esc closes; the page behind must not scroll. Lock <html>, not
-  // <body> — this app scrolls on the document element.
+  const go = (dir: 1 | -1) => {
+    const i = FACILITIES.indexOf(facility);
+    const next = FACILITIES[Math.min(FACILITIES.length - 1, Math.max(0, i + dir))];
+    if (next !== facility) {
+      setFacility(next);
+      setPicked(null);
+    }
+  };
+
+  // Esc closes; ← → page between facilities; the page behind must not
+  // scroll. Lock <html>, not <body> — this app scrolls on the document
+  // element.
   useEffect(() => {
     const root = document.documentElement;
     const prev = root.style.overflow;
     root.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") go(1);
+      if (e.key === "ArrowLeft") go(-1);
     };
     window.addEventListener("keydown", onKey);
     return () => {
       root.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
-
-  const byYard = useMemo(() => {
-    const m = new Map<number, Block[]>();
-    for (const y of ALLOWED_YARDS) m.set(y, []);
-    for (const b of blocks) {
-      if (!m.has(Number(b.yard))) m.set(Number(b.yard), []);
-      m.get(Number(b.yard))!.push(b);
-    }
-    return m;
-  }, [blocks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, facility]);
 
   const volumeOf = (b: Block): number => {
     if (stoneCategoryMap[b.stone] === "marble") {
@@ -907,25 +911,32 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
   const sideOf = (vol: number) => Math.max(14, Math.min(44, Math.round(10 + Math.cbrt(vol) * 6)));
 
   const statusStyle = (s: string): React.CSSProperties => {
-    if (s === "reserved") return { outline: "2px solid #E8C572", outlineOffset: 1 };
+    if (s === "reserved") return { outline: "2px solid var(--gold)", outlineOffset: 1 };
     if (s === "consumed") return { opacity: 0.3 };
     if (s === "discarded") return { opacity: 0.22, outline: "2px solid #b91c1c", outlineOffset: 1 };
     return {};
   };
 
-  // Legend = stones actually on stage, biggest count first.
-  const legend = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const b of blocks) counts.set(b.stone, (counts.get(b.stone) ?? 0) + 1);
-    return [...counts.entries()].sort((a, z) => z[1] - a[1]);
+  /** yard → stone → blocks, so a yard renders as labelled stone
+   *  clusters (biggest cluster first) instead of one mixed heap. */
+  const yardStoneGroups = useMemo(() => {
+    const m = new Map<number, Map<string, Block[]>>();
+    for (const b of blocks) {
+      const y = Number(b.yard);
+      if (!m.has(y)) m.set(y, new Map());
+      const g = m.get(y)!;
+      if (!g.has(b.stone)) g.set(b.stone, []);
+      g.get(b.stone)!.push(b);
+    }
+    return m;
   }, [blocks]);
 
-  const facilityTotals = (f: Facility) => {
-    const ys = YARDS_BY_FACILITY[f];
+  const yardStats = (y: number) => {
+    const g = yardStoneGroups.get(y);
     let n = 0;
     let cft = 0;
-    for (const y of ys) {
-      for (const b of byYard.get(y) ?? []) {
+    for (const list of g?.values() ?? []) {
+      for (const b of list) {
         n += 1;
         cft += volumeOf(b);
       }
@@ -933,46 +944,117 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
     return { n, cft };
   };
 
+  const facilityStats = (f: Facility) => {
+    let n = 0;
+    let cft = 0;
+    for (const y of YARDS_BY_FACILITY[f]) {
+      const s = yardStats(y);
+      n += s.n;
+      cft += s.cft;
+    }
+    return { n, cft };
+  };
+
+  // Legend = stones on the CURRENT facility page, biggest count first.
+  const legend = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const y of YARDS_BY_FACILITY[facility]) {
+      for (const [stone, list] of yardStoneGroups.get(y) ?? []) {
+        counts.set(stone, (counts.get(stone) ?? 0) + list.length);
+      }
+    }
+    return [...counts.entries()].sort((a, z) => z[1] - a[1]);
+  }, [facility, yardStoneGroups]);
+
+  const fTotals = facilityStats(facility);
+  const idx = FACILITIES.indexOf(facility);
+
   const overlay = (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Yard preview"
-      onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 400,
-        background: "linear-gradient(160deg, #17130d 0%, #221a10 55%, #191510 100%)",
+        background: "var(--bg)",
         display: "flex",
         flexDirection: "column",
-        color: "#f3ede2",
+        color: "var(--text)",
+      }}
+      onTouchStart={(e) => setTouchX(e.touches[0]?.clientX ?? null)}
+      onTouchEnd={(e) => {
+        if (touchX == null) return;
+        const dx = (e.changedTouches[0]?.clientX ?? touchX) - touchX;
+        if (dx < -60) go(1);
+        if (dx > 60) go(-1);
+        setTouchX(null);
       }}
     >
-      {/* Header */}
+      <style>{`
+        .yc-page { animation: ycIn .28s cubic-bezier(.22,1,.36,1) both; }
+        @keyframes ycIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+        .yc-arrow { transition: background .12s ease, transform .12s ease, box-shadow .12s ease; }
+        .yc-arrow:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(45,36,16,0.16); background: var(--surface); }
+        .yc-arrow:disabled { opacity: .3; cursor: default; }
+        @media (prefers-reduced-motion: reduce) { .yc-page { animation: none; } }
+      `}</style>
+
+      {/* ── Header ── */}
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 14,
-          padding: "16px 22px",
-          borderBottom: "1px solid rgba(232,197,114,0.18)",
+          padding: "14px 22px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--surface)",
           flexWrap: "wrap",
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: "#E8C572" }}>
+        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--gold-dark)" }}>
           🎬 Yard preview
         </div>
-        <div style={{ fontSize: 12.5, color: "rgba(243,237,226,0.6)" }}>
-          {blocks.length} block{blocks.length === 1 ? "" : "s"} · follows the report&apos;s current filter
+
+        {/* Facility pager tabs */}
+        <div style={{ display: "inline-flex", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 999, padding: 4, gap: 3 }}>
+          {FACILITIES.map((f) => {
+            const t = facilityStats(f);
+            const active = f === facility;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => {
+                  setFacility(f);
+                  setPicked(null);
+                }}
+                style={{
+                  padding: "7px 16px",
+                  fontSize: 12.5,
+                  fontWeight: 800,
+                  border: "none",
+                  borderRadius: 999,
+                  cursor: active ? "default" : "pointer",
+                  background: active ? (f === "riico" ? "#7c3aed" : "var(--gold)") : "transparent",
+                  color: active ? "#fff" : "var(--muted)",
+                }}
+              >
+                {facilityLabel(f)} · {t.n}
+              </button>
+            );
+          })}
         </div>
-        {/* Legend */}
+
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>swipe or use ← → to change site</span>
+
+        {/* Legend for the current page */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
           {legend.map(([stone, n]) => {
             const p = getStonePalette(stone, palettes);
             return (
-              <span key={stone} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "rgba(243,237,226,0.75)" }}>
+              <span key={stone} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
                 <span style={{ width: 11, height: 11, borderRadius: 3, background: p.top, border: `1.5px solid ${p.front}`, display: "inline-block" }} />
                 {stoneDisplayName(stone)} · {n}
               </span>
@@ -987,9 +1069,9 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
             width: 34,
             height: 34,
             borderRadius: "50%",
-            border: "1px solid rgba(243,237,226,0.25)",
-            background: "rgba(243,237,226,0.08)",
-            color: "#f3ede2",
+            border: "1px solid var(--border)",
+            background: "var(--bg)",
+            color: "var(--text)",
             fontSize: 15,
             cursor: "pointer",
           }}
@@ -998,108 +1080,179 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
         </button>
       </div>
 
-      {/* Stage — the two sites side by side */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: 22, display: "flex", gap: 18, flexWrap: "wrap", alignContent: "flex-start" }}
-      >
-        {FACILITIES.map((f) => {
-          const t = facilityTotals(f);
-          return (
-            <section
-              key={f}
-              style={{
-                flex: f === "mtcpl" ? "3 1 560px" : "1 1 260px",
-                border: `1px solid ${f === "riico" ? "rgba(124,58,237,0.45)" : "rgba(232,197,114,0.35)"}`,
-                borderRadius: 18,
-                padding: 16,
-                background: "rgba(255,255,255,0.03)",
-                minWidth: 0,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "0.06em", color: f === "riico" ? "#c4b5fd" : "#E8C572" }}>
-                  {facilityLabel(f)}
-                </span>
-                <span style={{ fontSize: 12, color: "rgba(243,237,226,0.55)", fontVariantNumeric: "tabular-nums" }}>
-                  {t.n} blocks · {t.cft.toFixed(0)} CFT
-                </span>
-              </div>
+      {/* ── Stage: ONE facility per page ── */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "stretch" }}>
+        {/* Left arrow */}
+        <div style={{ display: "flex", alignItems: "center", padding: "0 6px 0 14px" }}>
+          <button
+            type="button"
+            className="yc-arrow"
+            onClick={() => go(-1)}
+            disabled={idx === 0}
+            aria-label="Previous site"
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              color: "var(--text)",
+              fontSize: 17,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(45,36,16,0.08)",
+            }}
+          >
+            ←
+          </button>
+        </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-                {YARDS_BY_FACILITY[f].map((y) => {
-                  const list = byYard.get(y) ?? [];
-                  return (
-                    <div
-                      key={y}
-                      style={{
-                        border: "1.5px dashed rgba(243,237,226,0.22)",
-                        borderRadius: 14,
-                        padding: 12,
-                        minHeight: 96,
-                        background: "rgba(0,0,0,0.18)",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "rgba(243,237,226,0.85)" }}>{yardLabel(y)}</span>
-                        <span style={{ fontSize: 11, color: "rgba(243,237,226,0.45)", fontVariantNumeric: "tabular-nums" }}>
-                          {list.length === 0 ? "empty" : list.length}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "flex-end" }}>
-                        {list.map((b) => {
-                          const p = getStonePalette(b.stone, palettes);
-                          const vol = volumeOf(b);
-                          const side = sideOf(vol);
-                          const isPicked = picked?.id === b.id;
-                          return (
-                            <button
-                              key={b.id}
-                              type="button"
-                              onClick={() => setPicked(isPicked ? null : b)}
-                              title={`${b.id} · ${b.stone} · ${vol.toFixed(1)} CFT${b.quality ? ` · ${b.quality}` : ""} · ${blockStatusLabel(b.status)}`}
-                              style={{
-                                width: side,
-                                height: Math.round(side * 0.72),
-                                borderRadius: 4,
-                                background: `linear-gradient(180deg, ${p.top} 0%, ${p.top} 42%, ${p.front} 100%)`,
-                                border: `1.5px solid ${isPicked ? "#fff" : p.front}`,
-                                boxShadow: isPicked ? "0 0 0 2.5px #E8C572" : "0 2px 4px rgba(0,0,0,0.45)",
-                                cursor: "pointer",
-                                padding: 0,
-                                flexShrink: 0,
-                                ...statusStyle(b.status),
-                              }}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+        <div key={facility} className="yc-page" style={{ flex: 1, minWidth: 0, overflowY: "auto", overscrollBehavior: "contain", padding: "18px 8px 24px" }}>
+          {/* Facility masthead — the page's own numbers, big and first. */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", margin: "0 8px 14px" }}>
+            <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", color: facility === "riico" ? "#7c3aed" : "var(--gold-dark)" }}>
+              {facilityLabel(facility)}
+            </span>
+            <span style={{ fontSize: 13.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+              {fTotals.n} block{fTotals.n === 1 ? "" : "s"} · {fTotals.cft.toFixed(0)} CFT
+            </span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {idx === 0 ? "page 1 of 2 · RIICO →" : "page 2 of 2 · ← MTCPL"}
+            </span>
+          </div>
+
+          {/* Yard cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14, padding: "0 8px" }}>
+            {YARDS_BY_FACILITY[facility].map((y) => {
+              const stats = yardStats(y);
+              const groups = [...(yardStoneGroups.get(y) ?? new Map<string, Block[]>()).entries()].sort(
+                (a, z) => z[1].length - a[1].length,
+              );
+              return (
+                <div
+                  key={y}
+                  style={{
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 16,
+                    boxShadow: "0 1px 2px rgba(45,36,16,0.05), 0 8px 24px rgba(45,36,16,0.05)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Yard data ON TOP (Daksh) */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 16px",
+                      borderBottom: "1px solid var(--border)",
+                      background: "var(--surface-alt)",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 800 }}>{yardLabel(y)}</span>
+                    <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                      {stats.n === 0 ? "empty" : `${stats.n} blocks · ${stats.cft.toFixed(0)} CFT`}
+                    </span>
+                  </div>
+
+                  {/* Stone-wise clusters */}
+                  <div style={{ padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12, minHeight: 64 }}>
+                    {groups.length === 0 && (
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>No blocks here under the current filter.</span>
+                    )}
+                    {groups.map(([stone, list]) => {
+                      const p = getStonePalette(stone, palettes);
+                      const cft = list.reduce((s, b) => s + volumeOf(b), 0);
+                      return (
+                        <div key={stone}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: 3, background: p.top, border: `1.5px solid ${p.front}`, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, fontWeight: 800 }}>{stoneDisplayName(stone)}</span>
+                            <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                              {list.length} · {cft.toFixed(0)} CFT
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "flex-end" }}>
+                            {list.map((b) => {
+                              const vol = volumeOf(b);
+                              const side = sideOf(vol);
+                              const isPicked = picked?.id === b.id;
+                              return (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => setPicked(isPicked ? null : b)}
+                                  title={`${b.id} · ${b.stone} · ${vol.toFixed(1)} CFT${b.quality ? ` · ${b.quality}` : ""} · ${blockStatusLabel(b.status)}`}
+                                  style={{
+                                    width: side,
+                                    height: Math.round(side * 0.72),
+                                    borderRadius: 4,
+                                    background: `linear-gradient(180deg, ${p.top} 0%, ${p.top} 42%, ${p.front} 100%)`,
+                                    border: `1.5px solid ${isPicked ? "var(--text)" : p.front}`,
+                                    boxShadow: isPicked ? "0 0 0 2.5px var(--gold)" : "0 1px 3px rgba(45,36,16,0.18)",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                    flexShrink: 0,
+                                    ...statusStyle(b.status),
+                                  }}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right arrow */}
+        <div style={{ display: "flex", alignItems: "center", padding: "0 14px 0 6px" }}>
+          <button
+            type="button"
+            className="yc-arrow"
+            onClick={() => go(1)}
+            disabled={idx === FACILITIES.length - 1}
+            aria-label="Next site"
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              color: "var(--text)",
+              fontSize: 17,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(45,36,16,0.08)",
+            }}
+          >
+            →
+          </button>
+        </div>
       </div>
 
-      {/* Picked-block detail strip */}
+      {/* ── Picked-block detail strip ── */}
       {picked && (
         <div
-          onClick={(e) => e.stopPropagation()}
           style={{
-            borderTop: "1px solid rgba(232,197,114,0.25)",
-            background: "rgba(0,0,0,0.35)",
+            borderTop: "1px solid var(--border)",
+            background: "var(--surface)",
             padding: "12px 22px",
             display: "flex",
             gap: 18,
             alignItems: "baseline",
             flexWrap: "wrap",
             fontSize: 13,
+            boxShadow: "0 -6px 18px rgba(45,36,16,0.06)",
           }}
         >
-          <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "#E8C572" }}>{picked.id}</strong>
-          <span>{picked.stone}</span>
+          <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "var(--gold-dark)" }}>{picked.id}</strong>
+          <span style={{ fontWeight: 700 }}>{picked.stone}</span>
           <span>{yardLabel(picked.yard)}</span>
           <span style={{ fontVariantNumeric: "tabular-nums" }}>
             {stoneCategoryMap[picked.stone] === "marble"
@@ -1108,11 +1261,11 @@ function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps
           </span>
           {picked.quality && <span>Grade {picked.quality}</span>}
           <span>{blockStatusLabel(picked.status)}</span>
-          {picked.vendor_name && <span style={{ color: "rgba(243,237,226,0.6)" }}>{picked.vendor_name}</span>}
+          {picked.vendor_name && <span style={{ color: "var(--muted)" }}>{picked.vendor_name}</span>}
           <button
             type="button"
             onClick={() => setPicked(null)}
-            style={{ marginLeft: "auto", border: "none", background: "transparent", color: "rgba(243,237,226,0.6)", cursor: "pointer", fontSize: 13 }}
+            style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 13 }}
           >
             ✕
           </button>
