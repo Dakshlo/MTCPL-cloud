@@ -111,6 +111,17 @@ function istHoursWindow(hoursAgo: number) {
   };
 }
 
+/** Owner-private scrub (Daksh, Aug 2026). The personal Home/Office
+ *  ledger, vendor ROYALTY entries and the passphrase vendor notes are
+ *  secret features — their audit rows must never reach the model, in
+ *  counts or samples, regardless of which activity tool pulls them or
+ *  what filters the model passes. Matched on action/entity only (a
+ *  scaffolding "ledger" component lives inside details and survives). */
+const PRIVATE_AUDIT_ACTION = /^ledger_|royalt|^vendor_notes?_/;
+function isPrivateAuditRow(row: { action?: string | null; entity_type?: string | null }): boolean {
+  return PRIVATE_AUDIT_ACTION.test(row.action ?? "") || row.entity_type === "personal_ledger";
+}
+
 // ─── Tool schemas (what Claude sees) ─────────────────────────────────────────
 
 export const AI_TOOLS = [
@@ -1856,8 +1867,12 @@ async function getUserActivity(input: Record<string, unknown>) {
   const { data: logs, error } = await q.limit(1000);
   if (error) throw new Error(error.message);
 
+  // Owner-private rows (personal ledger / royalty / vendor notes)
+  // vanish before anything is counted or sampled.
+  const visible = (logs ?? []).filter((l) => !isPrivateAuditRow(l));
+
   // Resolve user_ids to names
-  const userIds = [...new Set((logs ?? []).map((l) => l.user_id).filter(Boolean))];
+  const userIds = [...new Set(visible.map((l) => l.user_id).filter(Boolean))];
   let profileMap = new Map<string, { name: string; role: string | null }>();
   if (userIds.length > 0) {
     const { data: profiles } = await admin
@@ -1870,7 +1885,7 @@ async function getUserActivity(input: Record<string, unknown>) {
   }
 
   // Apply user_name filter after we have profiles
-  const filtered = (logs ?? []).filter((l) => {
+  const filtered = visible.filter((l) => {
     if (!userNameFilter) return true;
     const name = profileMap.get(l.user_id)?.name?.toLowerCase() ?? "";
     return name.includes(userNameFilter);
@@ -2020,8 +2035,11 @@ async function getAuditTrail(input: Record<string, unknown>) {
     .lt("created_at", to)
     .order("created_at", { ascending: false });
   if (entityFilter) q = q.eq("entity_type", entityFilter);
-  const { data: logs, error } = await q.limit(limit);
+  // Over-fetch so dropping owner-private rows (ledger / royalty /
+  // vendor notes) doesn't undercut the requested window size.
+  const { data: logsRaw, error } = await q.limit(Math.min(250, limit + 50));
   if (error) throw new Error(error.message);
+  const logs = (logsRaw ?? []).filter((l) => !isPrivateAuditRow(l)).slice(0, limit);
 
   // Resolve users
   const userIds = [...new Set((logs ?? []).map((l) => l.user_id).filter(Boolean))];
@@ -3169,6 +3187,7 @@ async function getFinanceActivity(input: Record<string, unknown>) {
   if (error) throw new Error(error.message);
 
   const events = (data ?? []).filter((e) =>
+    !isPrivateAuditRow(e) &&
     FINANCE_PREFIXES.some((p) => (e.action as string).startsWith(p)),
   ).slice(0, limit);
 
