@@ -191,6 +191,12 @@ export async function wipeLedgerHistoryAction(formData: FormData): Promise<void>
     redirect(`/x3k9q27z?toast=${encodeURIComponent("Wipe not confirmed — type WIPE to proceed")}`);
   }
 
+  // Optional (Daksh, default OFF): also reset an account's CURRENT
+  // balance to ₹0 — i.e. skip its carry-forward line entirely, so the
+  // wipe leaves that account both empty and at zero.
+  const zeroHome = txt(formData, "zero_home") === "1";
+  const zeroOffice = txt(formData, "zero_office") === "1";
+
   const admin = createAdminSupabaseClient();
 
   // Everything as of THIS moment — the delete below touches only these
@@ -229,6 +235,8 @@ export async function wipeLedgerHistoryAction(formData: FormData): Promise<void>
     : null;
 
   const carries = (["home", "office"] as const)
+    // A ticked "reset to ₹0" box means NO carry line for that account.
+    .filter((acc) => !(acc === "home" ? zeroHome : zeroOffice))
     .filter((acc) => Math.abs(balances[acc]) >= 0.005)
     .map((acc) => ({
       account: acc,
@@ -264,11 +272,14 @@ export async function wipeLedgerHistoryAction(formData: FormData): Promise<void>
     deleted: rows.length,
     home_balance: balances.home,
     office_balance: balances.office,
+    home_reset_to_zero: zeroHome,
+    office_reset_to_zero: zeroOffice,
   });
   revalidatePath("/x3k9q27z");
+  const fate = (z: boolean) => (z ? "reset to ₹0" : "carried forward");
   redirect(
     `/x3k9q27z?toast=${encodeURIComponent(
-      `History wiped — ${rows.length} entries removed, both balances carried forward`,
+      `History wiped — ${rows.length} entries removed. Home ${fate(zeroHome)}, Office ${fate(zeroOffice)}.`,
     )}`,
   );
 }

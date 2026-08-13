@@ -12,10 +12,13 @@
  *      UI can't be bypassed by posting the form early);
  *   3. the final red button, which asks once more via the browser.
  *
- * What it does is stated on the panel and mirrored in the action: every
- * entry in BOTH accounts is permanently deleted — pending ones too —
- * and each account gets one fresh "Balance carried forward" line, so
- * the numbers dad sees today don't move by a rupee.
+ * Round 2 (Daksh): two OPTIONAL checkboxes, both default OFF — "also
+ * reset Home to ₹0" / "also reset Office to ₹0". Unticked, that
+ * account's balance survives the wipe (as an invisible carry-forward
+ * row — the Details list hides it, so the card shows no entries but
+ * the same figure). Ticked, no carry is written and the account comes
+ * out empty AND at zero. The bullets re-word themselves live as the
+ * boxes change so what's about to happen is never ambiguous.
  */
 
 import { useState } from "react";
@@ -33,14 +36,50 @@ export function WipeLedgerHistory({
 }) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [word, setWord] = useState("");
+  const [zeroHome, setZeroHome] = useState(false);
+  const [zeroOffice, setZeroOffice] = useState(false);
   const armed = word.trim().toUpperCase() === "WIPE";
 
   if (entryCount === 0) return null;
 
   const red = "#b91c1c";
+  const fate = (zero: boolean, balance: number) =>
+    zero ? (
+      <strong style={{ color: red }}>reset to ₹0</strong>
+    ) : (
+      <>
+        stays <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(balance)}</strong>
+      </>
+    );
+
+  const checkRow = (label: string, checked: boolean, onChange: (v: boolean) => void) => (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        fontSize: 12.5,
+        fontWeight: 700,
+        color: checked ? red : "var(--text)",
+        cursor: "pointer",
+        padding: "8px 12px",
+        border: `1.5px solid ${checked ? "rgba(220,38,38,0.5)" : "var(--border)"}`,
+        borderRadius: 10,
+        background: checked ? "rgba(220,38,38,0.06)" : "var(--surface)",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 15, height: 15, accentColor: red, cursor: "pointer" }}
+      />
+      {label}
+    </label>
+  );
 
   return (
-    <div style={{ marginTop: 26, maxWidth: 640 }}>
+    <div style={{ marginTop: 26, maxWidth: 680 }}>
       {step === 0 ? (
         <button
           type="button"
@@ -79,12 +118,16 @@ export function WipeLedgerHistory({
               <strong>permanently</strong> — including any waiting for approval. There is no undo.
             </li>
             <li>
-              The balances stay exactly as they are now — <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(homeBalance)}</strong> Home,{" "}
-              <strong style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(officeBalance)}</strong> Office — each kept by one fresh{" "}
-              <em>“Balance carried forward”</em> line.
+              🏠 Home balance {fate(zeroHome, homeBalance)} · 🏢 Office balance {fate(zeroOffice, officeBalance)}.
             </li>
-            <li>After the wipe, each card shows just that one line.</li>
+            <li>Afterwards both cards show no entries — a kept balance is carried silently.</li>
           </ul>
+
+          {/* Optional resets — both OFF by default. */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {checkRow(`🏠 Also reset HOME to ₹0`, zeroHome, setZeroHome)}
+            {checkRow(`🏢 Also reset OFFICE to ₹0`, zeroOffice, setZeroOffice)}
+          </div>
 
           {step === 1 ? (
             <div style={{ display: "flex", gap: 8 }}>
@@ -107,13 +150,18 @@ export function WipeLedgerHistory({
             <form
               action={wipeLedgerHistoryAction}
               onSubmit={(e) => {
-                // Confirmation #3 — the browser asks one final time.
-                if (!window.confirm(`Delete all ${entryCount} entries permanently? The balances will be carried forward.`)) {
+                // Confirmation #3 — the browser asks one final time,
+                // spelling out the per-account outcome.
+                const homeMsg = zeroHome ? "Home balance RESET TO ₹0" : "Home balance kept";
+                const officeMsg = zeroOffice ? "Office balance RESET TO ₹0" : "Office balance kept";
+                if (!window.confirm(`Delete all ${entryCount} entries permanently? ${homeMsg}. ${officeMsg}.`)) {
                   e.preventDefault();
                 }
               }}
               style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
             >
+              <input type="hidden" name="zero_home" value={zeroHome ? "1" : "0"} />
+              <input type="hidden" name="zero_office" value={zeroOffice ? "1" : "0"} />
               <label style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>
                 Type <span style={{ fontFamily: "ui-monospace, monospace", color: red }}>WIPE</span> to confirm:
               </label>

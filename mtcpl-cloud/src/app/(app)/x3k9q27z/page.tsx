@@ -60,6 +60,12 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
   const viewOf = (acc: "home" | "office"): EntryView[] =>
     rows
       .filter((r) => r.account === acc)
+      // Carry-forward rows (written by the wipe) ARE the balance, but
+      // Daksh: "after wipe there should not be this message — just no
+      // entry." So they stay in balanceOf() above and never in the
+      // Details list. The prefix matches every wipe's note, past and
+      // future.
+      .filter((r) => !(r.note ?? "").startsWith("Balance carried forward"))
       .map((r) => ({ id: r.id, date: r.entry_date, direction: r.direction, amount: Number(r.amount), counterparty: r.counterparty, status: r.status, isTransfer: r.is_transfer, note: r.note }));
 
   // Pending approvals (owner/dev) — EVERY manager entry now waits here (receive

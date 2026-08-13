@@ -74,14 +74,20 @@ export function LedgerCard({
   });
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface, #fff)", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 1px 3px rgba(15,23,42,0.06)" }}>
-      {/* Balance header */}
-      <div style={{ padding: "18px 20px 16px", background: `linear-gradient(135deg, ${positive ? "rgba(22,101,52,0.08)" : "rgba(185,28,28,0.08)"}, transparent)`, borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>{emoji} {title}</div>
-        <div style={{ fontSize: 34, fontWeight: 800, marginTop: 6, color: positive ? "#15803d" : "#b91c1c", fontFamily: "ui-monospace, monospace", letterSpacing: "-0.02em" }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 20, background: "var(--surface, #fff)", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 1px 2px rgba(45,36,16,0.05), 0 10px 30px rgba(45,36,16,0.07)" }}>
+      {/* Balance header — soft signed tint + a hairline of the same colour. */}
+      <div style={{ padding: "20px 22px 17px", background: `radial-gradient(420px 130px at 12% -30%, ${positive ? "rgba(22,101,52,0.12)" : "rgba(185,28,28,0.12)"}, transparent 70%)`, borderBottom: "1px solid var(--border)", position: "relative" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: positive ? "#15803d" : "#b91c1c", opacity: 0.65 }} />
+        <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>{emoji} {title}</div>
+        <div style={{ fontSize: 34, fontWeight: 800, marginTop: 7, color: positive ? "#15803d" : "#b91c1c", fontFamily: "ui-monospace, monospace", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
           {rupee(balance)}
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>Current balance · {confirmedCount} confirmed</div>
+        {/* No "0 confirmed" beside a live figure — after a wipe the
+            carry row is real but hidden, so the count would read as a
+            contradiction. */}
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+          Current balance{confirmedCount > 0 ? ` · ${confirmedCount} confirmed` : ""}
+        </div>
       </div>
 
       {/* Receive / Pay form */}
@@ -116,7 +122,7 @@ export function LedgerCard({
 
           <FormPending />
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" onClick={openConfirm} style={{ fontSize: 14, fontWeight: 800, padding: "11px 20px", borderRadius: 11, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer", whiteSpace: "nowrap" }}>
+            <button type="button" onClick={openConfirm} style={{ fontSize: 14, fontWeight: 800, padding: "11px 20px", borderRadius: 11, border: "none", color: "#fff", background: "var(--gold)", boxShadow: "0 2px 8px rgba(201,151,58,0.35)", cursor: "pointer", whiteSpace: "nowrap" }}>
               ＋ Add entry
             </button>
           </div>
@@ -142,7 +148,7 @@ export function LedgerCard({
             )}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
               <button type="button" onClick={() => setConfirm(null)} style={{ fontSize: 13, fontWeight: 700, padding: "10px 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}>Cancel</button>
-              <button type="button" onClick={() => { setConfirm(null); formRef.current?.requestSubmit(); }} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "#0f172a", cursor: "pointer" }}>✓ Confirm &amp; add</button>
+              <button type="button" onClick={() => { setConfirm(null); formRef.current?.requestSubmit(); }} style={{ fontSize: 13, fontWeight: 800, padding: "10px 18px", borderRadius: 10, border: "none", color: "#fff", background: "var(--gold)", cursor: "pointer" }}>✓ Confirm &amp; add</button>
             </div>
           </div>
         </div>
@@ -190,7 +196,13 @@ function DetailsModal({ title, emoji, balance, positive, entries, canCancel, onC
           <div style={{ padding: 16, overflowY: "auto" }}>
             <style>{`@keyframes ledgerPending { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0.6); } 50% { box-shadow: 0 0 0 6px rgba(217,119,6,0); } }`}</style>
             {entries.length === 0 ? (
-              <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No entries yet.</div>
+              <div style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", padding: "28px 0", lineHeight: 1.6 }}>
+                {Math.abs(balance) >= 0.005 ? (
+                  <>No entries — the current balance is carried forward.</>
+                ) : (
+                  <>No entries yet.</>
+                )}
+              </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {entries.map((e) => {
