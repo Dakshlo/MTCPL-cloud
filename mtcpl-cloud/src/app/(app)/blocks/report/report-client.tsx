@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 /** Mig follow-on (Daksh, May 2026) — derive the active month value
  *  for the Month dropdown from the dateFrom/dateTo range. If the
@@ -32,7 +33,16 @@ function monthFromRange(from: string, to: string): string {
   return String(fromMonth);
 }
 import Link from "next/link";
-import { ALLOWED_YARDS, yardLabel, yardShortLabel } from "@/lib/yards";
+import {
+  ALLOWED_YARDS,
+  yardLabel,
+  yardShortLabel,
+  FACILITIES,
+  YARDS_BY_FACILITY,
+  facilityLabel,
+  type Facility,
+} from "@/lib/yards";
+import { getStonePalette, stoneDisplayName } from "@/lib/stone-utils";
 import { blockStatusLabel, blockStatusBadge, isReusedBlock } from "@/lib/blocks";
 import { cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
 
@@ -86,10 +96,13 @@ export function ReportClient({
   blocks,
   stoneNames,
   stoneCategoryMap = {},
+  stonePalettes = [],
 }: {
   blocks: Block[];
   stoneNames?: string[];
   stoneCategoryMap?: Record<string, StoneCategory>;
+  /** 3-face stone colours for the yard-preview tiles (see stone-utils). */
+  stonePalettes?: Array<{ name: string; color_top: string; color_front: string; color_side: string }>;
 }) {
   const ALL_STONES = stoneNames && stoneNames.length > 0 ? stoneNames : ["PinkStone", "WhiteStone"];
   const today = new Date().toISOString().slice(0, 10);
@@ -114,6 +127,7 @@ export function ReportClient({
   // Sort
   const [sortBy, setSortBy] = useState<SortCol>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const [exporting, setExporting] = useState(false);
 
@@ -656,10 +670,32 @@ export function ReportClient({
             </>
           )}
         </p>
-        <button className="primary-button" type="button" onClick={handleExport} disabled={exporting} style={{ gap: 6 }}>
-          {exporting ? "Exporting…" : "⬇ Export to Excel"}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* Yard preview (Daksh, Aug 2026): a cinema view of the
+              CURRENT filter — MTCPL and RIICO as separate areas, each
+              yard a room, every block a tile in its real stone colour. */}
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            style={{ gap: 6 }}
+          >
+            🎬 Preview
+          </button>
+          <button className="primary-button" type="button" onClick={handleExport} disabled={exporting} style={{ gap: 6 }}>
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}
+          </button>
+        </div>
       </div>
+
+      {previewOpen && (
+        <YardCinema
+          blocks={filtered}
+          palettes={stonePalettes}
+          stoneCategoryMap={stoneCategoryMap}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
 
       {/* ── Table ── */}
       <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
@@ -799,4 +835,291 @@ export function ReportClient({
       </p>
     </div>
   );
+}
+
+// ── Yard preview — "cinema" (Daksh, Aug 2026) ──────────────────────
+//
+// "Add a Preview button — like the CNC logbook cinema, for blocks.
+// First show MTCPL and RIICO blocks in different areas, and in MTCPL
+// the different yards — there we can see the blocks, and blocks
+// already have colours."
+//
+// A full-screen dark stage over the report: one panel per FACILITY
+// (facility is derived from the yard number — lib/yards.ts is the
+// single source of truth), inside it one room per YARD, and inside a
+// room one tile per block. Tiles use the stone's real 3-face palette
+// (the same swatches the block cards use), are sized by volume, and
+// dim/outline by status. It draws whatever the report is currently
+// FILTERED to, so the filters upstairs drive the picture.
+//
+// Portaled to <body>: hover-lift cards create transformed ancestors,
+// and a transform becomes the containing block for position:fixed —
+// the nested-modal jitter this codebase has been bitten by before.
+
+type CinemaProps = {
+  blocks: Block[];
+  palettes: Array<{ name: string; color_top: string; color_front: string; color_side: string }>;
+  stoneCategoryMap: Record<string, StoneCategory>;
+  onClose: () => void;
+};
+
+function YardCinema({ blocks, palettes, stoneCategoryMap, onClose }: CinemaProps) {
+  const [picked, setPicked] = useState<Block | null>(null);
+
+  // Esc closes; the page behind must not scroll. Lock <html>, not
+  // <body> — this app scrolls on the document element.
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = root.style.overflow;
+    root.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      root.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const byYard = useMemo(() => {
+    const m = new Map<number, Block[]>();
+    for (const y of ALLOWED_YARDS) m.set(y, []);
+    for (const b of blocks) {
+      if (!m.has(Number(b.yard))) m.set(Number(b.yard), []);
+      m.get(Number(b.yard))!.push(b);
+    }
+    return m;
+  }, [blocks]);
+
+  const volumeOf = (b: Block): number => {
+    if (stoneCategoryMap[b.stone] === "marble") {
+      return cftEquivFromTonnes(Number(b.tonnes) || 0) ?? 0;
+    }
+    const l = Number(b.length_ft) || 0;
+    const w = Number(b.width_ft) || 0;
+    const h = Number(b.height_ft) || 0;
+    return (l * w * h) / 1728;
+  };
+
+  // Tile side grows with the cube root of volume — a 60 CFT block
+  // reads clearly bigger than a 10 CFT one without dwarfing the room.
+  const sideOf = (vol: number) => Math.max(14, Math.min(44, Math.round(10 + Math.cbrt(vol) * 6)));
+
+  const statusStyle = (s: string): React.CSSProperties => {
+    if (s === "reserved") return { outline: "2px solid #E8C572", outlineOffset: 1 };
+    if (s === "consumed") return { opacity: 0.3 };
+    if (s === "discarded") return { opacity: 0.22, outline: "2px solid #b91c1c", outlineOffset: 1 };
+    return {};
+  };
+
+  // Legend = stones actually on stage, biggest count first.
+  const legend = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of blocks) counts.set(b.stone, (counts.get(b.stone) ?? 0) + 1);
+    return [...counts.entries()].sort((a, z) => z[1] - a[1]);
+  }, [blocks]);
+
+  const facilityTotals = (f: Facility) => {
+    const ys = YARDS_BY_FACILITY[f];
+    let n = 0;
+    let cft = 0;
+    for (const y of ys) {
+      for (const b of byYard.get(y) ?? []) {
+        n += 1;
+        cft += volumeOf(b);
+      }
+    }
+    return { n, cft };
+  };
+
+  const overlay = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Yard preview"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 400,
+        background: "linear-gradient(160deg, #17130d 0%, #221a10 55%, #191510 100%)",
+        display: "flex",
+        flexDirection: "column",
+        color: "#f3ede2",
+      }}
+    >
+      {/* Header */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "16px 22px",
+          borderBottom: "1px solid rgba(232,197,114,0.18)",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: "#E8C572" }}>
+          🎬 Yard preview
+        </div>
+        <div style={{ fontSize: 12.5, color: "rgba(243,237,226,0.6)" }}>
+          {blocks.length} block{blocks.length === 1 ? "" : "s"} · follows the report&apos;s current filter
+        </div>
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
+          {legend.map(([stone, n]) => {
+            const p = getStonePalette(stone, palettes);
+            return (
+              <span key={stone} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "rgba(243,237,226,0.75)" }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: p.top, border: `1.5px solid ${p.front}`, display: "inline-block" }} />
+                {stoneDisplayName(stone)} · {n}
+              </span>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close preview"
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: "50%",
+            border: "1px solid rgba(243,237,226,0.25)",
+            background: "rgba(243,237,226,0.08)",
+            color: "#f3ede2",
+            fontSize: 15,
+            cursor: "pointer",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Stage — the two sites side by side */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", padding: 22, display: "flex", gap: 18, flexWrap: "wrap", alignContent: "flex-start" }}
+      >
+        {FACILITIES.map((f) => {
+          const t = facilityTotals(f);
+          return (
+            <section
+              key={f}
+              style={{
+                flex: f === "mtcpl" ? "3 1 560px" : "1 1 260px",
+                border: `1px solid ${f === "riico" ? "rgba(124,58,237,0.45)" : "rgba(232,197,114,0.35)"}`,
+                borderRadius: 18,
+                padding: 16,
+                background: "rgba(255,255,255,0.03)",
+                minWidth: 0,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "0.06em", color: f === "riico" ? "#c4b5fd" : "#E8C572" }}>
+                  {facilityLabel(f)}
+                </span>
+                <span style={{ fontSize: 12, color: "rgba(243,237,226,0.55)", fontVariantNumeric: "tabular-nums" }}>
+                  {t.n} blocks · {t.cft.toFixed(0)} CFT
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                {YARDS_BY_FACILITY[f].map((y) => {
+                  const list = byYard.get(y) ?? [];
+                  return (
+                    <div
+                      key={y}
+                      style={{
+                        border: "1.5px dashed rgba(243,237,226,0.22)",
+                        borderRadius: 14,
+                        padding: 12,
+                        minHeight: 96,
+                        background: "rgba(0,0,0,0.18)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8, gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: "rgba(243,237,226,0.85)" }}>{yardLabel(y)}</span>
+                        <span style={{ fontSize: 11, color: "rgba(243,237,226,0.45)", fontVariantNumeric: "tabular-nums" }}>
+                          {list.length === 0 ? "empty" : list.length}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "flex-end" }}>
+                        {list.map((b) => {
+                          const p = getStonePalette(b.stone, palettes);
+                          const vol = volumeOf(b);
+                          const side = sideOf(vol);
+                          const isPicked = picked?.id === b.id;
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => setPicked(isPicked ? null : b)}
+                              title={`${b.id} · ${b.stone} · ${vol.toFixed(1)} CFT${b.quality ? ` · ${b.quality}` : ""} · ${blockStatusLabel(b.status)}`}
+                              style={{
+                                width: side,
+                                height: Math.round(side * 0.72),
+                                borderRadius: 4,
+                                background: `linear-gradient(180deg, ${p.top} 0%, ${p.top} 42%, ${p.front} 100%)`,
+                                border: `1.5px solid ${isPicked ? "#fff" : p.front}`,
+                                boxShadow: isPicked ? "0 0 0 2.5px #E8C572" : "0 2px 4px rgba(0,0,0,0.45)",
+                                cursor: "pointer",
+                                padding: 0,
+                                flexShrink: 0,
+                                ...statusStyle(b.status),
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      {/* Picked-block detail strip */}
+      {picked && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            borderTop: "1px solid rgba(232,197,114,0.25)",
+            background: "rgba(0,0,0,0.35)",
+            padding: "12px 22px",
+            display: "flex",
+            gap: 18,
+            alignItems: "baseline",
+            flexWrap: "wrap",
+            fontSize: 13,
+          }}
+        >
+          <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: "#E8C572" }}>{picked.id}</strong>
+          <span>{picked.stone}</span>
+          <span>{yardLabel(picked.yard)}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {stoneCategoryMap[picked.stone] === "marble"
+              ? `${Number(picked.tonnes ?? 0)} T (≈${volumeOf(picked).toFixed(1)} CFT)`
+              : `${picked.length_ft ?? "—"} × ${picked.width_ft ?? "—"} × ${picked.height_ft ?? "—"} in · ${volumeOf(picked).toFixed(2)} CFT`}
+          </span>
+          {picked.quality && <span>Grade {picked.quality}</span>}
+          <span>{blockStatusLabel(picked.status)}</span>
+          {picked.vendor_name && <span style={{ color: "rgba(243,237,226,0.6)" }}>{picked.vendor_name}</span>}
+          <button
+            type="button"
+            onClick={() => setPicked(null)}
+            style={{ marginLeft: "auto", border: "none", background: "transparent", color: "rgba(243,237,226,0.6)", cursor: "pointer", fontSize: 13 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return createPortal(overlay, document.body);
 }

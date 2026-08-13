@@ -43,11 +43,22 @@ export type ReportBlockRow = {
   updated_at: string | null;
 };
 
+/** 3-face colours per stone, for the yard-preview tiles (Daksh: "block
+ *  already have colors" — these are the same swatches the block cards
+ *  use, via getStonePalette). */
+export type StonePaletteRow = {
+  name: string;
+  color_top: string;
+  color_front: string;
+  color_side: string;
+};
+
 /** Every block (all statuses) + the stone palette the report filters by. */
 export async function loadReportBlocks(): Promise<{
   blocks: ReportBlockRow[];
   stoneNames: string[];
   stoneCategoryMap: Record<string, StoneCategory>;
+  stonePalettes: StonePaletteRow[];
 }> {
   const admin = createAdminSupabaseClient();
 
@@ -60,7 +71,10 @@ export async function loadReportBlocks(): Promise<{
         .order("id", { ascending: true }) // unique tiebreaker — see header note
         .range(from, to),
     ),
-    admin.from("stone_types").select("name, stone_category").order("name"),
+    admin
+      .from("stone_types")
+      .select("name, stone_category, color_top, color_front, color_side")
+      .order("name"),
   ]);
 
   const stoneNames = (stoneTypeRows ?? []).map((s) => (s as { name: string }).name);
@@ -73,5 +87,15 @@ export async function loadReportBlocks(): Promise<{
     stoneCategoryMap[(s as { name: string }).name] = cat === "marble" ? "marble" : "sandstone";
   }
 
-  return { blocks, stoneNames, stoneCategoryMap };
+  const stonePalettes: StonePaletteRow[] = (stoneTypeRows ?? []).map((s) => {
+    const r = s as StonePaletteRow;
+    return {
+      name: r.name,
+      color_top: r.color_top,
+      color_front: r.color_front,
+      color_side: r.color_side,
+    };
+  });
+
+  return { blocks, stoneNames, stoneCategoryMap, stonePalettes };
 }

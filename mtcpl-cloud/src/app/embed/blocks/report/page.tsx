@@ -17,9 +17,14 @@ import { ReportClient } from "@/app/(app)/blocks/report/report-client";
 
 export default async function EmbedBlockReportPage() {
   await requireAuth(["owner", "team_head", "developer"]);
-  const { blocks, stoneNames, stoneCategoryMap } = await loadReportBlocks();
+  const { blocks, stoneNames, stoneCategoryMap, stonePalettes } = await loadReportBlocks();
 
   return (
-    <ReportClient blocks={blocks} stoneNames={stoneNames} stoneCategoryMap={stoneCategoryMap} />
+    <ReportClient
+      blocks={blocks}
+      stoneNames={stoneNames}
+      stoneCategoryMap={stoneCategoryMap}
+      stonePalettes={stonePalettes}
+    />
   );
 }
