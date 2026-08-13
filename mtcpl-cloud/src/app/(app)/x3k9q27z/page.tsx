@@ -17,6 +17,7 @@ import { ledgerScope } from "@/lib/ledger-access";
 import { rupee } from "@/lib/challan-pricing";
 import { LedgerCard, type EntryView } from "./ledger-card";
 import { LedgerAutoRefresh } from "./auto-refresh";
+import { WipeLedgerHistory } from "./wipe-history";
 import { approveLedgerTransferAction, rejectLedgerTransferAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -149,6 +150,18 @@ export default async function LedgerPage({ searchParams }: { searchParams: Promi
           {/* Owner/dev can act on Office too (Daksh) — not just the manager. */}
           <LedgerCard account="office" title="Office" emoji="🏢" balance={balanceOf("office")} entries={viewOf("office")} canEdit canCancel={scope === "both"} options={["HOME", "OTHER"]} />
         </div>
+
+        {/* Danger zone — owner/dev only. Wipes every entry in BOTH
+            accounts after three confirmations; each balance survives as
+            one "Balance carried forward" line. The manager (office
+            scope) never sees this. */}
+        {scope === "both" && (
+          <WipeLedgerHistory
+            entryCount={rows.length}
+            homeBalance={balanceOf("home")}
+            officeBalance={balanceOf("office")}
+          />
+        )}
       </div>
     </div>
   );

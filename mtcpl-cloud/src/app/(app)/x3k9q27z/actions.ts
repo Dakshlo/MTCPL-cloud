@@ -19,6 +19,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { ledgerScope } from "@/lib/ledger-access";
+import { chunkIds } from "@/lib/paginate";
 
 function txt(fd: FormData, k: string): string {
   const v = fd.get(k);
@@ -153,4 +154,121 @@ export async function rejectLedgerTransferAction(formData: FormData): Promise<vo
   void logAudit(profile.id, "ledger_transfer_reject", "personal_ledger", group, {});
   revalidatePath("/x3k9q27z");
   redirect(`/x3k9q27z?toast=${encodeURIComponent("Rejected")}`);
+}
+
+/**
+ * Wipe the ledger's HISTORY, keep its truth (Daksh, Aug 2026): "delete
+ * all details — entries to 0 in both Office and Home — but the current
+ * balance in both stays the same."
+ *
+ * A balance here is nothing but the sum of confirmed entries, so
+ * "no entries + same balance" is squared by NETTING: each account gets
+ * ONE fresh confirmed "Balance carried forward" entry equal to its
+ * confirmed balance today, and every OLDER row — confirmed, pending,
+ * transfer halves, all of it — is permanently deleted. After the wipe
+ * each card shows exactly one line and the same figure it showed
+ * before.
+ *
+ * Safety, in layers:
+ *  • owner-Naresh / developer only (scope "both") — the manager never
+ *    sees or reaches this;
+ *  • the SERVER requires the typed word WIPE (the UI's three-step
+ *    confirmation ends in it) — a stray form post without it bounces;
+ *  • carry-forward rows are inserted BEFORE the old rows are deleted,
+ *    and the delete targets only ids captured at the start. If it
+ *    fails halfway the balance reads high (old + carry) — ugly but
+ *    recoverable: running the wipe again converges, because the next
+ *    run recomputes the true balance and its captured-id list includes
+ *    the earlier carry row. Deleting first could lose the balance
+ *    forever; that order is never acceptable here.
+ *  • the audit log records counts + both balances.
+ */
+export async function wipeLedgerHistoryAction(formData: FormData): Promise<void> {
+  const { profile } = await requireAuth();
+  if (ledgerScope(profile) !== "both") redirect("/"); // owner / developer only
+
+  if (txt(formData, "confirm").trim().toUpperCase() !== "WIPE") {
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Wipe not confirmed — type WIPE to proceed")}`);
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // Everything as of THIS moment — the delete below touches only these
+  // ids, never rows added while the wipe runs.
+  const { data: rowsRaw, error: loadErr } = await admin
+    .from("personal_ledger_entries")
+    .select("id, account, direction, amount, status");
+  if (loadErr) redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not load entries — nothing was changed")}`);
+  const rows = (rowsRaw ?? []) as Array<{
+    id: string;
+    account: "home" | "office";
+    direction: "receive" | "pay";
+    amount: number | string;
+    status: string;
+  }>;
+  if (rows.length === 0) {
+    redirect(`/x3k9q27z?toast=${encodeURIComponent("Nothing to wipe — the ledger is already empty")}`);
+  }
+
+  const balanceOf = (acc: "home" | "office") =>
+    Math.round(
+      rows
+        .filter((r) => r.account === acc && r.status === "confirmed")
+        .reduce((s, r) => s + (r.direction === "receive" ? Number(r.amount) : -Number(r.amount)), 0) * 100,
+    ) / 100;
+  const balances = { home: balanceOf("home"), office: balanceOf("office") };
+
+  const todayIst = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+
+  // The dev-bypass mock id is not a uuid — created_by must not 22P02
+  // the one insert this whole feature depends on.
+  const uid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(profile.id)
+    ? profile.id
+    : null;
+
+  const carries = (["home", "office"] as const)
+    .filter((acc) => Math.abs(balances[acc]) >= 0.005)
+    .map((acc) => ({
+      account: acc,
+      direction: balances[acc] >= 0 ? ("receive" as const) : ("pay" as const),
+      amount: Math.abs(balances[acc]),
+      counterparty: "—",
+      note: `Balance carried forward (old entries wiped ${todayIst})`,
+      status: "confirmed" as const,
+      is_transfer: false,
+      requires_approval: false,
+      created_by: uid,
+    }));
+
+  if (carries.length > 0) {
+    const { error: insErr } = await admin.from("personal_ledger_entries").insert(carries);
+    if (insErr) {
+      redirect(`/x3k9q27z?toast=${encodeURIComponent("Could not write the carried-forward balance — NOTHING was deleted")}`);
+    }
+  }
+
+  // Old rows only, in URL-safe chunks. A chunk failure leaves the rest
+  // for a re-run (see header note on convergence).
+  for (const chunk of chunkIds(rows.map((r) => r.id))) {
+    const { error: delErr } = await admin.from("personal_ledger_entries").delete().in("id", chunk);
+    if (delErr) {
+      redirect(
+        `/x3k9q27z?toast=${encodeURIComponent("Wipe stopped partway — balances are safe but some old entries remain. Run it again.")}`,
+      );
+    }
+  }
+
+  void logAudit(profile.id, "ledger_history_wipe", "personal_ledger", "all", {
+    deleted: rows.length,
+    home_balance: balances.home,
+    office_balance: balances.office,
+  });
+  revalidatePath("/x3k9q27z");
+  redirect(
+    `/x3k9q27z?toast=${encodeURIComponent(
+      `History wiped — ${rows.length} entries removed, both balances carried forward`,
+    )}`,
+  );
 }
