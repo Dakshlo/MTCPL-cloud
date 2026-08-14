@@ -15,8 +15,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { buildTemplePnl, pnlPeriodFromSearch, PNL_PRESETS } from "@/lib/temple-pnl";
 import { PnlClient } from "./pnl-client";
+import { TenderClient } from "./tender-client";
+import { TENDER_KEY, type TenderAnalysis } from "./tender-model";
 
 export const dynamic = "force-dynamic";
 
@@ -25,17 +28,39 @@ const MUTED = "#8892a4";
 const LINE = "#e6eaf0";
 const INDIGO = "#4f46e5";
 
+const tabPill = (active: boolean): React.CSSProperties => ({
+  fontSize: 12.5,
+  fontWeight: 800,
+  textDecoration: "none",
+  padding: "7px 15px",
+  borderRadius: 999,
+  color: active ? "#fff" : MUTED,
+  background: active ? INDIGO : "transparent",
+});
+
 export default async function TemplePnlPage({
   searchParams,
 }: {
-  searchParams: Promise<{ p?: string }>;
+  searchParams: Promise<{ p?: string; tab?: string }>;
 }) {
   const { profile } = await requireAuth();
   if (profile.role !== "developer") redirect("/dashboard");
 
   const sp = await searchParams;
   const period = pnlPeriodFromSearch(sp.p);
+  const tab = sp.tab === "tender" ? "tender" : "pnl";
+  // The report powers the P&L view AND seeds the tender sheet's
+  // "from rate card" template, so it's built for both tabs.
   const report = await buildTemplePnl(period);
+
+  // Saved tender sheets (app_settings jsonb — no migration).
+  let tenderSheets: TenderAnalysis[] = [];
+  if (tab === "tender") {
+    const admin = createAdminSupabaseClient();
+    const { data } = await admin.from("app_settings").select("value").eq("key", TENDER_KEY).maybeSingle();
+    const v = data?.value as { analyses?: TenderAnalysis[] } | null;
+    if (v && Array.isArray(v.analyses)) tenderSheets = v.analyses;
+  }
 
   return (
     <div style={{ width: "100%", padding: "16px 26px 60px", background: "#f6f8fb", minHeight: "100vh" }}>
@@ -58,33 +83,55 @@ export default async function TemplePnlPage({
         </span>
       </div>
 
-      {/* Period presets — analysis-style white pills, indigo active ring. */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0 18px" }}>
-        {PNL_PRESETS.map((p) => {
-          const active = p.key === report.period.key;
-          return (
-            <Link
-              key={p.key}
-              href={`/reports/temple-pnl?p=${p.key}`}
-              style={{
-                fontSize: 12.5,
-                fontWeight: 700,
-                textDecoration: "none",
-                padding: "8px 16px",
-                borderRadius: 999,
-                border: `1px solid ${active ? INDIGO : LINE}`,
-                background: "#fff",
-                color: active ? INDIGO : MUTED,
-                boxShadow: active ? `inset 0 0 0 1px ${INDIGO}, 0 1px 3px rgba(79,70,229,0.15)` : "0 1px 2px rgba(11,18,32,0.04)",
-              }}
-            >
-              {p.label}
-            </Link>
-          );
-        })}
+      {/* View tabs + (P&L only) period presets. */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "14px 0 18px" }}>
+        <div style={{ display: "flex", gap: 4, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 999, padding: 4, boxShadow: "0 1px 2px rgba(11,18,32,0.05)" }}>
+          <Link href={`/reports/temple-pnl?p=${report.period.key}`} style={tabPill(tab === "pnl")}>📊 Temple P&amp;L</Link>
+          <Link href={`/reports/temple-pnl?p=${report.period.key}&tab=tender`} style={tabPill(tab === "tender")}>🧮 Tender / Price Breakdown</Link>
+        </div>
+        {tab === "pnl" ? (
+          PNL_PRESETS.map((p) => {
+            const active = p.key === report.period.key;
+            return (
+              <Link
+                key={p.key}
+                href={`/reports/temple-pnl?p=${p.key}`}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  padding: "8px 16px",
+                  borderRadius: 999,
+                  border: `1px solid ${active ? INDIGO : LINE}`,
+                  background: "#fff",
+                  color: active ? INDIGO : MUTED,
+                  boxShadow: active ? `inset 0 0 0 1px ${INDIGO}, 0 1px 3px rgba(79,70,229,0.15)` : "0 1px 2px rgba(11,18,32,0.04)",
+                }}
+              >
+                {p.label}
+              </Link>
+            );
+          })
+        ) : (
+          <span style={{ fontSize: 11.5, color: MUTED }}>
+            sheets autosave · &quot;from rate card&quot; seeds {report.period.label} rates
+          </span>
+        )}
       </div>
 
-      <PnlClient report={report} />
+      {tab === "pnl" ? (
+        <PnlClient report={report} />
+      ) : (
+        <TenderClient
+          initial={tenderSheets}
+          seed={{
+            stone: report.rateCard.stonePerCft,
+            cutting: report.rateCard.cuttingPerCft,
+            carving: report.rateCard.carvingPerCft,
+            label: report.period.label,
+          }}
+        />
+      )}
     </div>
   );
 }
