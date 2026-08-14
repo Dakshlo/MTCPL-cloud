@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
+import { CockpitDashboard } from "./cockpit";
+import { DashViewToggle } from "./view-toggle";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canTransferPlannedSlabs } from "@/lib/cutting-permissions";
 import { AskAiEntryCard } from "@/components/ask-ai-entry-card";
@@ -102,6 +105,16 @@ export default async function DashboardPage() {
         <BlockJourneyEntryCard />
       </div>
     );
+  }
+
+  // ── Cockpit toggle (Daksh, Aug 2026) — developer only. The classic
+  // dashboard below stays untouched and remains the default; the
+  // dash_view cookie (set by /dashboard/switch-view) flips this ONE
+  // login to the new cockpit view. Early-return so the classic page's
+  // heavy queries never run when the cockpit is showing.
+  if (profile.role === "developer") {
+    const view = (await cookies()).get("dash_view")?.value;
+    if (view === "cockpit") return <CockpitDashboard profile={profile} />;
   }
 
   const admin = createAdminSupabaseClient();
@@ -233,6 +246,10 @@ export default async function DashboardPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
+
+      {/* Dev-only switch to the new Cockpit view — everyone else never
+          sees this and the classic dashboard stays exactly as-is. */}
+      {profile.role === "developer" && <DashViewToggle current="classic" />}
 
       {/* ── GREETING HEADER ── styled by .dash-hero (globals.css):
           same card, richer finish — layered gold glows, hairline ring,
