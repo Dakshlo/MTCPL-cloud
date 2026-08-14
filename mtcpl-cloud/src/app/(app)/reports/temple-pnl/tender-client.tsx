@@ -94,8 +94,9 @@ function computeSheet(a: TenderAnalysis) {
 }
 
 /** Fresh sheets. Their exact group list; the rate-card variant lands
- *  pre-filled from the live P&L window. */
-export type RateSeed = { stone: number; cutting: number; carving: number; label: string };
+ *  pre-filled from the live P&L window. `pace` is the window's REAL
+ *  cutting pace (CFT/day) — the timeline's data-driven default. */
+export type RateSeed = { stone: number; cutting: number; carving: number; label: string; pace: number | null };
 
 const STARTER_GROUPS = ["Raw Material", "Cutting", "Carving", "Transportation", "Installation", "Other Expenses"];
 
@@ -105,9 +106,25 @@ function blankSheet(): TenderAnalysis {
     id: uid(),
     name: "New project",
     qty: null,
+    paceCftPerDay: null,
+    manualDays: null,
     createdAt: now,
     updatedAt: now,
     groups: STARTER_GROUPS.map((title) => ({ id: uid(), title, items: [{ id: uid(), title: "", mode: "amount" as TenderItemMode, value: 0 }] })),
+  };
+}
+
+/** The sheet's timeline. Manual days win; otherwise qty ÷ pace, where
+ *  pace = the sheet's override or the live data pace. */
+function computeTimeline(a: TenderAnalysis, dataPace: number | null) {
+  const pace = a.paceCftPerDay ?? dataPace;
+  const derived = a.qty && pace && pace > 0 ? a.qty / pace : null;
+  const days = a.manualDays ?? derived;
+  return {
+    days,
+    pace,
+    source: (a.manualDays != null ? "manual" : a.paceCftPerDay != null ? "custom pace" : "data pace") as "manual" | "custom pace" | "data pace",
+    finish: days != null ? new Date(Date.now() + days * 86400000) : null,
   };
 }
 
@@ -331,6 +348,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
   const calc = useMemo(() => (active ? computeSheet(active) : null), [active]);
+  const timeline = useMemo(() => (active ? computeTimeline(active, seed.pace) : null), [active, seed.pace]);
 
   const patchActive = (fn: (a: TenderAnalysis) => TenderAnalysis) =>
     mutate((prev) => prev.map((s) => (s.id === activeId ? fn(s) : s)));
@@ -458,6 +476,39 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               />
               <span style={{ color: C.muted }}>CFT</span>
             </label>
+            {/* Timeline inputs — pace defaults to the LIVE data pace
+                (placeholder); typing a value overrides it. Typing days
+                directly pins the timeline (manual wins over both). */}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
+              Pace
+              <input
+                className="tn-cell"
+                type="number"
+                min={0}
+                step="any"
+                placeholder={seed.pace != null ? String(Math.round(seed.pace)) : "—"}
+                title={seed.pace != null ? `Blank = your real pace from the P&L window (${Math.round(seed.pace)} CFT/day)` : "No data pace for this window — enter your own"}
+                value={active.paceCftPerDay ?? ""}
+                onChange={(e) => patchActive((a) => ({ ...a, paceCftPerDay: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
+                style={{ ...cellInput, width: 88, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
+              />
+              <span style={{ color: C.muted }}>CFT/day</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
+              Time
+              <input
+                className="tn-cell"
+                type="number"
+                min={0}
+                step="any"
+                placeholder={timeline?.days != null && active.manualDays == null ? String(Math.ceil(timeline.days)) : "—"}
+                title="Blank = calculated from quantity ÷ pace. Type to fix the timeline manually."
+                value={active.manualDays ?? ""}
+                onChange={(e) => patchActive((a) => ({ ...a, manualDays: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
+                style={{ ...cellInput, width: 84, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
+              />
+              <span style={{ color: C.muted }}>days</span>
+            </label>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 330px", gap: 14, alignItems: "start" }}>
@@ -518,6 +569,62 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                   <br />% lines add: <strong style={{ color: C.ink2 }}>{inr(calc.pctAdd)}</strong>
                   <span title="% lines are calculated on the ₹ subtotal" style={{ marginLeft: 5, cursor: "help" }}>ⓘ</span>
                 </div>
+              </div>
+
+              {/* ⏱ Timeline — data-driven by default, manual when pinned. */}
+              <div style={{ ...card, padding: "18px 20px" }}>
+                <div style={eyebrow}>⏱ Timeline</div>
+                {timeline?.days != null ? (
+                  <>
+                    <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: C.ink, fontVariantNumeric: "tabular-nums", marginTop: 6 }}>
+                      ≈ {Math.ceil(timeline.days).toLocaleString("en-IN")} days
+                      <span style={{ fontSize: 13, fontWeight: 700, color: C.muted, marginLeft: 8 }}>
+                        ({(timeline.days / 30.44).toFixed(1)} months)
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 7, fontSize: 11.5, color: C.muted, lineHeight: 1.8 }}>
+                      {timeline.source === "manual" ? (
+                        <>Set manually{active.qty != null && timeline.days > 0 && (
+                          <> · implies <strong style={{ color: C.ink2 }}>{Math.round(active.qty / timeline.days).toLocaleString("en-IN")} CFT/day</strong></>
+                        )}</>
+                      ) : (
+                        <>
+                          {active.qty?.toLocaleString("en-IN")} CFT ÷ <strong style={{ color: C.ink2 }}>{Math.round(timeline.pace ?? 0).toLocaleString("en-IN")} CFT/day</strong>
+                          {timeline.source === "data pace" ? ` (your real pace, ${seed.label})` : " (your pace)"}
+                        </>
+                      )}
+                      {timeline.finish && (
+                        <>
+                          <br />Est. finish:{" "}
+                          <strong style={{ color: C.ink2 }}>
+                            {timeline.finish.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
+                          </strong>{" "}
+                          <span style={{ color: C.muted }}>(starting today)</span>
+                        </>
+                      )}
+                    </div>
+                    {/* Month ruler — one tick per month, filled to the estimate. */}
+                    {timeline.days > 0 && timeline.days < 3700 && (
+                      <div style={{ display: "flex", gap: 3, marginTop: 11 }}>
+                        {Array.from({ length: Math.min(24, Math.max(1, Math.ceil(timeline.days / 30.44))) }, (_, i) => {
+                          const monthsTotal = (timeline.days ?? 0) / 30.44;
+                          const fill = Math.max(0, Math.min(1, monthsTotal - i));
+                          return (
+                            <div key={i} title={`Month ${i + 1}`} style={{ flex: 1, height: 7, borderRadius: 3, background: C.wash, overflow: "hidden" }}>
+                              <div style={{ width: `${fill * 100}%`, height: "100%", background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)` }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 7, lineHeight: 1.7 }}>
+                    Set the <strong style={{ color: C.ink2 }}>project quantity</strong> (uses your real
+                    cutting pace{seed.pace != null && <> of ~{Math.round(seed.pace)} CFT/day</>}) — or type
+                    the <strong style={{ color: C.ink2 }}>days</strong> directly.
+                  </div>
+                )}
               </div>
 
               <div style={{ ...card, padding: "18px 20px" }}>

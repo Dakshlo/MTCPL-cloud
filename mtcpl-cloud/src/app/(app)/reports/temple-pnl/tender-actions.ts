@@ -37,10 +37,14 @@ export async function saveTenderAnalysesAction(
     if (profile.role !== "developer") return { ok: false, error: "Not allowed." };
     if (!Array.isArray(analyses) || analyses.length > 40) return { ok: false, error: "Too many sheets." };
 
+    const posOrNull = (v: unknown) =>
+      v == null || !Number.isFinite(Number(v)) || Number(v) <= 0 ? null : Number(v);
     const clean: TenderAnalysis[] = analyses.map((a) => ({
       id: s(a?.id, 40) || `t${Date.now()}`,
       name: s(a?.name, 120) || "Untitled",
-      qty: a?.qty == null || !Number.isFinite(Number(a.qty)) || Number(a.qty) <= 0 ? null : Number(a.qty),
+      qty: posOrNull(a?.qty),
+      paceCftPerDay: posOrNull(a?.paceCftPerDay),
+      manualDays: posOrNull(a?.manualDays),
       createdAt: s(a?.createdAt, 40),
       updatedAt: new Date().toISOString(),
       groups: (Array.isArray(a?.groups) ? a.groups : []).slice(0, 30).map((g) => ({

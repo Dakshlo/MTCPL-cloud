@@ -28,6 +28,17 @@ const MUTED = "#8892a4";
 const LINE = "#e6eaf0";
 const INDIGO = "#4f46e5";
 
+/** The window's REAL cutting pace: CFT cut ÷ elapsed days (window end
+ *  clamped to today, matching how the cost engines clip in-progress
+ *  periods). Feeds the tender sheet's data-driven timeline. */
+function dataPaceCftPerDay(startDate: string, endDate: string, producedCft: number): number | null {
+  const todayIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const end = endDate < todayIst ? endDate : todayIst;
+  const days = Math.max(1, Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000) + 1);
+  if (!Number.isFinite(producedCft) || producedCft <= 0) return null;
+  return producedCft / days;
+}
+
 const tabPill = (active: boolean): React.CSSProperties => ({
   fontSize: 12.5,
   fontWeight: 800,
@@ -129,6 +140,7 @@ export default async function TemplePnlPage({
             cutting: report.rateCard.cuttingPerCft,
             carving: report.rateCard.carvingPerCft,
             label: report.period.label,
+            pace: dataPaceCftPerDay(report.period.startDate, report.period.endDate, report.rateCard.producedCft),
           }}
         />
       )}

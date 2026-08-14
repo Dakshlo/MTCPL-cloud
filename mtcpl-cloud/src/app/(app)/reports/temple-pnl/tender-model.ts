@@ -26,6 +26,11 @@ export type TenderAnalysis = {
   /** Project quantity in CFT — powers ₹/CFT rows + the per-CFT total.
    *  null = lump-sum sheet (per_cft rows then contribute 0). */
   qty: number | null;
+  /** Production pace override, CFT/day. null = use the live pace the
+   *  page derives from the P&L window's actual cutting. */
+  paceCftPerDay: number | null;
+  /** Hard manual timeline, days. null = derive from qty ÷ pace. */
+  manualDays: number | null;
   groups: TenderGroup[];
   createdAt: string;
   updatedAt: string;
