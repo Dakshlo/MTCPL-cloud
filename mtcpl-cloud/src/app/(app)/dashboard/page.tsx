@@ -11,6 +11,7 @@ import { RoyaltySecretDot } from "./royalty-secret-dot";
 import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
+import { TemplePnlEntryCard } from "@/components/temple-pnl-entry-card";
 import {
   canViewVariousCosting,
   canViewCncCosts,
@@ -310,6 +311,9 @@ export default async function DashboardPage() {
         <TvModeEntryCard />
         {/* Owner-only market-news brief + chat (liquid-glass page). */}
         {canSeeMarketNews(profile) && <MarketNewsEntryCard />}
+        {/* Temple P&L — developer only while the cost-allocation model is
+            still being agreed (the page re-checks the role). */}
+        {profile.role === "developer" && <TemplePnlEntryCard />}
       </div>
 
       {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked
