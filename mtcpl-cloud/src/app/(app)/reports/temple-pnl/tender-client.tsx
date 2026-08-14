@@ -37,6 +37,7 @@ const C = {
   indigo: "#4f46e5",
   indigoSoft: "rgba(79,70,229,0.10)",
   red: "#c0392b",
+  redSoft: "rgba(192,57,43,0.10)",
 };
 
 /** Group accent colours, cycled — donut, bars and header dots share them. */
@@ -245,26 +246,34 @@ function GroupCard({
   const total = group.items.reduce((s, it) => s + itemRupees(it, qty, base), 0);
   const share = grand > 0 ? (total / grand) * 100 : 0;
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, background: C.paper, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", background: C.wash, borderBottom: `1px solid ${C.line}` }}>
+    <div className="tn-group" style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${color}`, borderRadius: 14, background: C.paper, overflow: "hidden", boxShadow: "0 1px 2px rgba(11,18,32,0.03)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px 9px", background: `linear-gradient(180deg, ${color}0d, transparent)`, borderBottom: `1px solid ${C.line}` }}>
         <span style={{ width: 10, height: 10, borderRadius: 3, background: color, boxShadow: `0 0 0 3px ${color}22`, flexShrink: 0 }} />
         <input
-          style={{ ...cellInput, fontWeight: 800, fontSize: 13.5, padding: "5px 8px" }}
+          style={{ ...cellInput, fontWeight: 800, fontSize: 13.5, padding: "5px 8px", letterSpacing: "-0.01em" }}
           className="tn-cell"
           placeholder="Group heading…"
           value={group.title}
           onChange={(e) => onTitle(e.target.value)}
         />
-        <div style={{ marginLeft: "auto", textAlign: "right", flexShrink: 0 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(total)}</span>
-          <span style={{ fontSize: 10.5, color: C.muted, marginLeft: 7 }}>{share > 0 ? `${share.toFixed(0)}%` : ""}</span>
+          {share > 0 && (
+            <span style={{ fontSize: 10, fontWeight: 800, color, background: `${color}14`, borderRadius: 999, padding: "2.5px 8px", fontVariantNumeric: "tabular-nums" }}>
+              {share.toFixed(0)}%
+            </span>
+          )}
         </div>
         <button type="button" className="tn-del" onClick={onDelete} title="Remove group"
           style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13, borderRadius: 8, padding: "3px 6px" }}>
           ✕
         </button>
       </div>
-      <div style={{ padding: "7px 8px", display: "flex", flexDirection: "column", gap: 1 }}>
+      {/* Column ruler — the sheet reads like a real worksheet. */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 96px 130px 110px 30px", gap: 8, padding: "6px 14px 4px", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.11em", color: "#b6bdc9" }}>
+        <span>ITEM</span><span>BASIS</span><span style={{ textAlign: "right" }}>VALUE</span><span style={{ textAlign: "right" }}>AMOUNT</span><span />
+      </div>
+      <div style={{ padding: "0 8px 7px", display: "flex", flexDirection: "column", gap: 1 }}>
         {group.items.map((it) => (
           <ItemRow
             key={it.id}
@@ -281,9 +290,10 @@ function GroupCard({
         <button
           type="button"
           onClick={onAddItem}
-          style={{ alignSelf: "flex-start", margin: "5px 6px 3px", fontSize: 11.5, fontWeight: 700, color: C.indigo, border: "none", background: "transparent", cursor: "pointer", padding: "3px 4px", borderRadius: 8 }}
+          className="tn-addline"
+          style={{ alignSelf: "flex-start", margin: "5px 6px 3px", fontSize: 11.5, fontWeight: 700, color: C.indigo, border: "none", background: "transparent", cursor: "pointer", padding: "3px 8px", borderRadius: 8 }}
         >
-          ＋ line
+          ＋ line <span style={{ fontSize: 9.5, color: "#b6bdc9", fontWeight: 600 }}>· Enter bhi chalega</span>
         </button>
       </div>
     </div>
@@ -431,30 +441,60 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
                   {inr(c.grand)}{c.perCft != null && <> · ₹{Math.round(c.perCft).toLocaleString("en-IN")}/CFT</>}
                 </div>
+                {/* Whisper-thin share bar — each sheet's cost mix at a glance. */}
+                {c.grand > 0 && (
+                  <div style={{ display: "flex", height: 3.5, borderRadius: 999, overflow: "hidden", background: C.wash, marginTop: 7 }}>
+                    {c.groups.filter((g) => g.total > 0).map((g) => (
+                      <div key={g.id} style={{ width: `${(g.total / c.grand) * 100}%`, background: g.color }} />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-        {/* Save state — quiet but always visible. */}
-        <div style={{ marginTop: 12, fontSize: 10.5, fontWeight: 700, color: saveState === "error" ? C.red : C.muted, textAlign: "right" }}>
-          {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved ✓" : saveState === "dirty" ? "…" : saveState === "error" ? "Save failed — retry by editing" : ""}
+        {/* Save state — a live status pill, like it's watching over you. */}
+        <div style={{ marginTop: 13, display: "flex", justifyContent: "flex-end" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", borderRadius: 999, padding: "4px 11px", color: saveState === "error" ? C.red : saveState === "saving" || saveState === "dirty" ? C.amber : C.green, background: saveState === "error" ? C.redSoft : saveState === "saving" || saveState === "dirty" ? "rgba(194,116,10,0.1)" : C.greenSoft }}>
+            <span className={saveState === "saving" || saveState === "dirty" ? "tn-pulse" : undefined} style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+            {saveState === "saving" ? "SAVING" : saveState === "dirty" ? "EDITING" : saveState === "error" ? "SAVE FAILED — EDIT TO RETRY" : "AUTOSAVED"}
+          </span>
         </div>
       </div>
 
       {/* ── workspace ── */}
       {!active || !calc ? (
-        <div style={{ ...card, padding: "60px 30px", textAlign: "center" }}>
-          <div style={{ fontSize: 34 }}>🧮</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, marginTop: 8 }}>Price a tender</div>
-          <div style={{ fontSize: 12.5, color: C.muted, marginTop: 5, lineHeight: 1.7 }}>
-            Start a sheet on the left — add groups like Raw Material, Cutting, Carving,<br />
-            Transportation, Installation… then lines under each as ₹, ₹/CFT or %.
+        <div className="tn-reveal" style={{ ...card, padding: "64px 30px 58px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+          <div aria-hidden style={{ position: "absolute", top: -90, left: "50%", transform: "translateX(-50%)", width: 340, height: 280, background: `radial-gradient(ellipse, ${C.indigoSoft}, transparent 70%)` }} />
+          <div style={{ position: "relative" }}>
+            <div style={{ fontSize: 40, filter: "drop-shadow(0 6px 14px rgba(79,70,229,0.25))" }}>🧮</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.ink, marginTop: 10, letterSpacing: "-0.02em" }}>Price a tender like you mean it</div>
+            <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6, lineHeight: 1.7 }}>
+              Groups → lines → live totals, share charts and a delivery timeline from your real pace.
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20, flexWrap: "wrap" }}>
+              {[
+                { n: "1", t: "Start a sheet", d: "blank, or seeded from the rate card" },
+                { n: "2", t: "Fill the lines", d: "₹ fixed · ₹/CFT · % of subtotal" },
+                { n: "3", t: "Read the quote", d: "total, ₹/CFT, split, timeline" },
+              ].map((s) => (
+                <div key={s.n} style={{ display: "flex", alignItems: "center", gap: 9, border: `1px solid ${C.line}`, background: C.wash, borderRadius: 12, padding: "9px 14px" }}>
+                  <span style={{ width: 20, height: 20, borderRadius: "50%", background: C.indigo, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{s.n}</span>
+                  <span style={{ textAlign: "left" }}>
+                    <span style={{ display: "block", fontSize: 11.5, fontWeight: 800, color: C.ink }}>{s.t}</span>
+                    <span style={{ display: "block", fontSize: 10, color: C.muted }}>{s.d}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-          {/* Sheet header: name + qty */}
-          <div style={{ ...card, padding: "16px 20px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          {/* Sheet header: name + qty. The gradient keyline on top is the
+              workspace's signature — the cost-stream colours in one strip. */}
+          <div className="tn-reveal" style={{ ...card, padding: "15px 20px 16px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", position: "relative", overflow: "hidden" }}>
+            <div aria-hidden style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${C.indigo}, #0284c7, ${C.green}, ${C.amber})` }} />
             <input
               className="tn-cell"
               style={{ ...cellInput, fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em", flex: "1 1 260px", minWidth: 200 }}
@@ -552,79 +592,70 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               </button>
             </div>
 
-            {/* Summary — sticky */}
+            {/* Summary — sticky. The COMMAND PANEL: one dark card carrying
+                the whole quote — value, unit rate, split line, timeline —
+                deliberately the only dark thing on the page. */}
             <div style={{ position: "sticky", top: 14, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ ...card, padding: "18px 20px" }}>
-                <div style={eyebrow}>Grand total</div>
-                <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", color: C.ink, fontVariantNumeric: "tabular-nums", marginTop: 6 }}>
-                  {inr(calc.grand)}
-                </div>
-                {calc.perCft != null && (
-                  <div style={{ marginTop: 4, fontSize: 12.5, fontWeight: 700, color: C.indigo }}>
-                    ₹{Math.round(calc.perCft).toLocaleString("en-IN")}/CFT over {active.qty?.toLocaleString("en-IN")} CFT
+              <div className="tn-dark tn-reveal" style={{ borderRadius: 20, padding: "20px 22px", position: "relative", overflow: "hidden", background: "linear-gradient(145deg, #0b1220 0%, #131c30 55%, #182441 100%)", boxShadow: "0 18px 44px rgba(11,18,32,0.35), inset 0 1px 0 rgba(255,255,255,0.06)" }}>
+                {/* glow accents */}
+                <div aria-hidden style={{ position: "absolute", top: -70, right: -60, width: 210, height: 210, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.35), transparent 65%)" }} />
+                <div aria-hidden style={{ position: "absolute", bottom: -80, left: -50, width: 190, height: 190, borderRadius: "50%", background: "radial-gradient(circle, rgba(2,132,199,0.22), transparent 65%)" }} />
+                <div style={{ position: "relative" }}>
+                  <div style={{ ...eyebrow, color: "rgba(255,255,255,0.55)" }}>Tender value</div>
+                  <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: "-0.035em", color: "#fff", fontVariantNumeric: "tabular-nums", marginTop: 7, lineHeight: 1 }}>
+                    {inr(calc.grand)}
                   </div>
-                )}
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.line}`, fontSize: 11.5, color: C.muted, lineHeight: 1.8 }}>
-                  ₹ lines subtotal: <strong style={{ color: C.ink2 }}>{inr(calc.base)}</strong>
-                  <br />% lines add: <strong style={{ color: C.ink2 }}>{inr(calc.pctAdd)}</strong>
-                  <span title="% lines are calculated on the ₹ subtotal" style={{ marginLeft: 5, cursor: "help" }}>ⓘ</span>
-                </div>
-              </div>
+                  {calc.perCft != null && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, fontWeight: 800, color: "#c7d2fe", background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.35)", borderRadius: 999, padding: "4px 12px", fontVariantNumeric: "tabular-nums" }}>
+                      ₹{Math.round(calc.perCft).toLocaleString("en-IN")}/CFT
+                      <span style={{ color: "rgba(255,255,255,0.45)", fontWeight: 600 }}>· {active.qty?.toLocaleString("en-IN")} CFT</span>
+                    </span>
+                  )}
 
-              {/* ⏱ Timeline — data-driven by default, manual when pinned. */}
-              <div style={{ ...card, padding: "18px 20px" }}>
-                <div style={eyebrow}>⏱ Timeline</div>
-                {timeline?.days != null ? (
-                  <>
-                    <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: C.ink, fontVariantNumeric: "tabular-nums", marginTop: 6 }}>
-                      ≈ {Math.ceil(timeline.days).toLocaleString("en-IN")} days
-                      <span style={{ fontSize: 13, fontWeight: 700, color: C.muted, marginLeft: 8 }}>
-                        ({(timeline.days / 30.44).toFixed(1)} months)
-                      </span>
-                    </div>
-                    <div style={{ marginTop: 7, fontSize: 11.5, color: C.muted, lineHeight: 1.8 }}>
-                      {timeline.source === "manual" ? (
-                        <>Set manually{active.qty != null && timeline.days > 0 && (
-                          <> · implies <strong style={{ color: C.ink2 }}>{Math.round(active.qty / timeline.days).toLocaleString("en-IN")} CFT/day</strong></>
-                        )}</>
-                      ) : (
-                        <>
-                          {active.qty?.toLocaleString("en-IN")} CFT ÷ <strong style={{ color: C.ink2 }}>{Math.round(timeline.pace ?? 0).toLocaleString("en-IN")} CFT/day</strong>
-                          {timeline.source === "data pace" ? ` (your real pace, ${seed.label})` : " (your pace)"}
-                        </>
-                      )}
-                      {timeline.finish && (
-                        <>
-                          <br />Est. finish:{" "}
-                          <strong style={{ color: C.ink2 }}>
-                            {timeline.finish.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
-                          </strong>{" "}
-                          <span style={{ color: C.muted }}>(starting today)</span>
-                        </>
-                      )}
-                    </div>
-                    {/* Month ruler — one tick per month, filled to the estimate. */}
-                    {timeline.days > 0 && timeline.days < 3700 && (
-                      <div style={{ display: "flex", gap: 3, marginTop: 11 }}>
-                        {Array.from({ length: Math.min(24, Math.max(1, Math.ceil(timeline.days / 30.44))) }, (_, i) => {
-                          const monthsTotal = (timeline.days ?? 0) / 30.44;
-                          const fill = Math.max(0, Math.min(1, monthsTotal - i));
-                          return (
-                            <div key={i} title={`Month ${i + 1}`} style={{ flex: 1, height: 7, borderRadius: 3, background: C.wash, overflow: "hidden" }}>
-                              <div style={{ width: `${fill * 100}%`, height: "100%", background: `linear-gradient(90deg, ${C.indigo}, #7c8cf8)` }} />
-                            </div>
-                          );
-                        })}
+                  {/* stat grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+                    <DarkStat label="₹ lines" value={inr(calc.base)} />
+                    <DarkStat label="% lines add" value={inr(calc.pctAdd)} hint="% lines are calculated on the ₹ subtotal" />
+                    {timeline?.days != null ? (
+                      <>
+                        <DarkStat
+                          label="⏱ Timeline"
+                          value={`≈ ${Math.ceil(timeline.days).toLocaleString("en-IN")} days`}
+                          sub={`${(timeline.days / 30.44).toFixed(1)} months · ${
+                            timeline.source === "manual"
+                              ? `manual${active.qty != null && timeline.days > 0 ? `, ${Math.round(active.qty / timeline.days).toLocaleString("en-IN")} CFT/day` : ""}`
+                              : `${Math.round(timeline.pace ?? 0).toLocaleString("en-IN")} CFT/day${timeline.source === "data pace" ? " (real pace)" : ""}`
+                          }`}
+                        />
+                        <DarkStat
+                          label="Est. finish"
+                          value={timeline.finish ? timeline.finish.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "—"}
+                          sub="starting today"
+                        />
+                      </>
+                    ) : (
+                      <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+                        ⏱ Set the <strong style={{ color: "rgba(255,255,255,0.85)" }}>project quantity</strong>
+                        {seed.pace != null && <> (real pace ~{Math.round(seed.pace)} CFT/day)</>} or type the days — the timeline lands here.
                       </div>
                     )}
-                  </>
-                ) : (
-                  <div style={{ fontSize: 12, color: C.muted, marginTop: 7, lineHeight: 1.7 }}>
-                    Set the <strong style={{ color: C.ink2 }}>project quantity</strong> (uses your real
-                    cutting pace{seed.pace != null && <> of ~{Math.round(seed.pace)} CFT/day</>}) — or type
-                    the <strong style={{ color: C.ink2 }}>days</strong> directly.
                   </div>
-                )}
+
+                  {/* Month ruler on dark */}
+                  {timeline?.days != null && timeline.days > 0 && timeline.days < 3700 && (
+                    <div style={{ display: "flex", gap: 3, marginTop: 13 }}>
+                      {Array.from({ length: Math.min(24, Math.max(1, Math.ceil(timeline.days / 30.44))) }, (_, i) => {
+                        const monthsTotal = (timeline.days ?? 0) / 30.44;
+                        const fill = Math.max(0, Math.min(1, monthsTotal - i));
+                        return (
+                          <div key={i} title={`Month ${i + 1}`} style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+                            <div style={{ width: `${fill * 100}%`, height: "100%", background: "linear-gradient(90deg, #818cf8, #38bdf8)" }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ ...card, padding: "18px 20px" }}>
@@ -684,12 +715,33 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
 .tn-cell::placeholder { color: #b6bdc9; font-weight: 500; }
 .tn-row .tn-del, .tn-sheet .tn-del { opacity: 0; transition: opacity .12s; }
 .tn-row:hover .tn-del, .tn-sheet:hover .tn-del { opacity: 1; }
+.tn-row { transition: background .12s; }
 .tn-row:hover { background: ${C.wash}; }
 .tn-del:hover { color: ${C.red} !important; }
+.tn-group { transition: box-shadow .18s, transform .18s; }
+.tn-group:focus-within { box-shadow: 0 10px 30px rgba(11,18,32,0.09); }
+.tn-sheet { transition: transform .14s, box-shadow .14s; }
+.tn-sheet:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(11,18,32,0.08); }
+.tn-addline:hover { background: ${C.indigoSoft}; }
+.tn-reveal { animation: tnReveal .45s cubic-bezier(.22,1,.36,1) both; }
+@keyframes tnReveal { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
+.tn-pulse { animation: tnPulse 1.1s ease-in-out infinite; }
+@keyframes tnPulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 input[type=number].tn-cell::-webkit-outer-spin-button, input[type=number].tn-cell::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 `,
         }}
       />
+    </div>
+  );
+}
+
+/** One cell of the command panel's stat grid. */
+function DarkStat({ label, value, sub, hint }: { label: string; value: string; sub?: string; hint?: string }) {
+  return (
+    <div title={hint} style={hint ? { cursor: "help" } : undefined}>
+      <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)" }}>{label}</div>
+      <div style={{ fontSize: 14.5, fontWeight: 800, color: "#fff", fontVariantNumeric: "tabular-nums", marginTop: 3, letterSpacing: "-0.01em" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 2, lineHeight: 1.5 }}>{sub}</div>}
     </div>
   );
 }
