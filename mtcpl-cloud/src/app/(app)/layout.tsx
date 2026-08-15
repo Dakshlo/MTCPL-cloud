@@ -547,7 +547,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // data-temple-codes). Cheap select; deduped + uppercased.
   const { data: templeCodeRows } = await supabase
     .from("temples")
-    .select("code_prefix")
+    .select("code_prefix, name")
     .eq("is_active", true);
   const tabletTempleCodes = [
     ...new Set(
@@ -556,6 +556,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         .filter(Boolean),
     ),
   ];
+  // Same list with names — feeds the DESKTOP type-ahead in Find ID
+  // (production), where typing "u" offers UMIYA- so only the number is
+  // left to type. Tablets already get this from the on-screen keyboard.
+  const templeCodeOptions = (() => {
+    const seen = new Set<string>();
+    const out: Array<{ code: string; name: string }> = [];
+    for (const r of (templeCodeRows ?? []) as Array<{ code_prefix?: string | null; name?: string | null }>) {
+      const code = (r.code_prefix ?? "").trim().toUpperCase();
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name: (r.name ?? "").trim() });
+    }
+    return out.sort((a, b) => a.code.localeCompare(b.code));
+  })();
 
   // Storekeeper (slab_transfer) + dispatch incharge — hide the menu by
   // default and serve a focused, full-width page; the hamburger drawer opens
@@ -801,7 +815,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
               if (showProduction || showProductionForVendor)
-                return <TopbarIdLookup domain="production" />;
+                return <TopbarIdLookup domain="production" templeCodes={templeCodeOptions} />;
               if (showFinance) return <TopbarIdLookup domain="finance" />;
               if (showInventory) return <TopbarIdLookup domain="inventory" />;
               return null;

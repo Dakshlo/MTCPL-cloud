@@ -25,7 +25,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lookupId, type LookupResult } from "@/app/(app)/dashboard/lookup-action";
 import { slabStatusLabel } from "@/lib/slab-status-label";
@@ -94,7 +94,35 @@ function fmtNum(n: number, digits = 1): string {
 
 type AnyLookupResult = LookupResult | FinanceLookupResult | InventoryLookupResult;
 
-export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
+/** A code the desktop type-ahead can offer: a temple's prefix, or the
+ *  block prefix. */
+export type LookupCodeOption = { code: string; name: string };
+
+/** Non-temple prefixes worth offering — blocks are looked up here too. */
+const EXTRA_CODE_OPTIONS: LookupCodeOption[] = [{ code: "MT-B", name: "Block" }];
+
+/** Shared with the tablet keyboard's quick temple-code chips, so a code
+ *  used on either surface rises to the top on both. */
+const CODE_USAGE_KEY = "mtcpl:tablet-temple-code-usage";
+
+function readCodeUsage(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CODE_USAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function TopbarIdLookup({
+  domain,
+  templeCodes = [],
+}: {
+  domain: LookupDomain;
+  /** Active temples (code + name). Desktop production type-ahead only. */
+  templeCodes?: LookupCodeOption[];
+}) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -155,6 +183,82 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
     } catch {
       /* ignore */
     }
+  }
+
+  // ── Desktop code type-ahead (Daksh, Aug 2026) ────────────────────
+  // Typing letters offers the matching temple/block prefixes; picking one
+  // fills "UMIYA-" so only the number is left to type. DESKTOP ONLY —
+  // touch tablets already get quick temple-code chips on the global
+  // on-screen keyboard, and two suggestion UIs would fight. "(pointer:
+  // fine)" is the mouse/trackpad test; it starts false so the server and
+  // first client render agree.
+  const [isFinePointer, setIsFinePointer] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(pointer: fine)");
+    const apply = () => setIsFinePointer(mq.matches);
+    apply();
+    mq.addEventListener?.("change", apply);
+    return () => mq.removeEventListener?.("change", apply);
+  }, []);
+
+  const [sugIdx, setSugIdx] = useState(0);
+  const [sugDismissed, setSugDismissed] = useState(false);
+  const [codeUsage, setCodeUsage] = useState<Record<string, number>>({});
+  useEffect(() => setCodeUsage(readCodeUsage()), []);
+
+  const suggestions = useMemo<LookupCodeOption[]>(() => {
+    if (!isFinePointer || domain !== "production") return [];
+    const q = query.trim().toUpperCase();
+    // Only while they're still on the letter part — once a dash or digit
+    // is typed the ID is being written and suggestions would be noise.
+    if (!/^[A-Z]{1,12}$/.test(q)) return [];
+    const pool = [...EXTRA_CODE_OPTIONS, ...templeCodes];
+    // Most-used first (learned, shared with the tablet keyboard), then the
+    // pool's own order — blocks, then temples alphabetically.
+    const rank = new Map(pool.map((o, i) => [o.code, i]));
+    const byUse = (a: LookupCodeOption, b: LookupCodeOption) =>
+      (codeUsage[b.code] ?? 0) - (codeUsage[a.code] ?? 0) ||
+      (rank.get(a.code) ?? 0) - (rank.get(b.code) ?? 0);
+    const starts = pool.filter((o) => o.code.startsWith(q)).sort(byUse);
+    const rest = pool
+      .filter((o) => !o.code.startsWith(q) && (o.code.includes(q) || o.name.toUpperCase().includes(q)))
+      .sort(byUse);
+    return [...starts, ...rest].slice(0, 6);
+  }, [isFinePointer, domain, query, templeCodes, codeUsage]);
+
+  // Any edit re-arms the list and re-highlights the best match.
+  useEffect(() => {
+    setSugIdx(0);
+    setSugDismissed(false);
+  }, [query]);
+
+  const showSuggestions = suggestions.length > 0 && !sugDismissed && !result && !loading;
+
+  function acceptSuggestion(opt: LookupCodeOption) {
+    setQuery(`${opt.code}-`);
+    setSugDismissed(true);
+    // Learn it — next time this code ranks higher here AND on the tablet.
+    setCodeUsage((prev) => {
+      const next = { ...prev, [opt.code]: (prev[opt.code] ?? 0) + 1 };
+      try {
+        window.localStorage.setItem(CODE_USAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* private mode — ranking just stays default */
+      }
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      try {
+        const n = el.value.length;
+        el.setSelectionRange(n, n);
+      } catch {
+        /* some input types refuse selection — focus alone is fine */
+      }
+    });
   }
 
   // Domain reset — switching active department wipes the input + result.
@@ -413,6 +517,29 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
                 // search collapsed it.
                 onFocus={() => setKeypadCollapsed(false)}
                 onClick={() => setKeypadCollapsed(false)}
+                onKeyDown={(e) => {
+                  if (!showSuggestions) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSugIdx((i) => (i + 1) % suggestions.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSugIdx((i) => (i - 1 + suggestions.length) % suggestions.length);
+                  } else if (e.key === "Enter" || e.key === "Tab") {
+                    // A bare code is never a valid ID, so Enter completing
+                    // it is always what was meant.
+                    const opt = suggestions[sugIdx];
+                    if (opt) {
+                      e.preventDefault();
+                      acceptSuggestion(opt);
+                    }
+                  } else if (e.key === "Escape") {
+                    // First Esc dismisses the list, second closes the panel.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSugDismissed(true);
+                  }
+                }}
                 placeholder={domainConfig.placeholder}
                 /* Daksh — IDs are uppercase here. inputMode is left to the
                    global tablet keyboard (it sets inputMode="none" on focus
@@ -455,6 +582,88 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
               </button>
             </form>
 
+            {/* Desktop code type-ahead — pick a prefix, type only the number. */}
+            {showSuggestions && (
+              <div
+                role="listbox"
+                aria-label="Code suggestions"
+                style={{
+                  border: "1px solid rgba(15, 23, 42, 0.10)",
+                  borderRadius: 10,
+                  background: "#fff",
+                  overflow: "hidden",
+                  boxShadow: "0 8px 22px rgba(15, 23, 42, 0.08)",
+                }}
+              >
+                {suggestions.map((opt, i) => {
+                  const active = i === sugIdx;
+                  return (
+                    <button
+                      key={opt.code}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onMouseEnter={() => setSugIdx(i)}
+                      // mousedown (not click) so the input never blurs first.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        acceptSuggestion(opt);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "8px 11px",
+                        border: "none",
+                        borderTop: i === 0 ? "none" : "1px solid rgba(15, 23, 42, 0.06)",
+                        background: active ? `${domainConfig.accent}14` : "transparent",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          color: domainConfig.accent,
+                          letterSpacing: "0.02em",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {opt.code}-
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: "rgba(15, 23, 42, 0.62)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {opt.name}
+                      </span>
+                      {active && (
+                        <span
+                          style={{
+                            marginLeft: "auto",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "rgba(15, 23, 42, 0.40)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          ↵
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Daksh (Jun 2026) — the legacy Find-ID touch keypad is RETIRED.
                 The global tablet keyboard (QWERTY + dash + quick temple-code
                 chips) now drives this search box like every other field, so
@@ -493,18 +702,8 @@ export function TopbarIdLookup({ domain }: { domain: LookupDomain }) {
             )}
             {result && <ResultPanel result={result} domain={domain} onPick={runSearch} />}
 
-            {!loading && !result && !error && (
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 11,
-                  color: "rgba(15, 23, 42, 0.55)",
-                  lineHeight: 1.5,
-                }}
-              >
-                {domainConfig.helpText}
-              </p>
-            )}
+            {/* Daksh (Aug 2026) — the explanatory paragraph under the box is
+                gone; the placeholder already shows the accepted formats. */}
           </div>
         </>,
         document.body,
@@ -756,7 +955,6 @@ const DOMAIN_CONFIG: Record<
     deptLabel: string;
     accent: string;
     placeholder: string;
-    helpText: React.ReactNode;
   }
 > = {
   production: {
@@ -764,39 +962,18 @@ const DOMAIN_CONFIG: Record<
     deptLabel: "Production",
     accent: "#c9a14a",
     placeholder: "MT-B-245 · WF-0001 · 53x29x14",
-    helpText: (
-      <>
-        Type any slab/block ID (case-insensitive, zero-pad guessed —
-        <code> mt-b-90 </code> finds <code>MT-B-090</code>) or
-        dimensions like <code>53x29x14</code>. If more than one slab
-        matches, you&apos;ll pick from a short list.
-      </>
-    ),
   },
   finance: {
     title: "Look up a bill, vendor, or payment",
     deptLabel: "Finance",
     accent: "#5e8c4e",
     placeholder: "T-2026-15 · Shree Cement · UTR1234567890",
-    helpText: (
-      <>
-        Type a bill <strong>token</strong> (T-YYYY-N), a{" "}
-        <strong>vendor name</strong>, or a <strong>payment reference</strong>{" "}
-        (UTR / cheque no). Partial matches work.
-      </>
-    ),
   },
   inventory: {
     title: "Look up a site or scaffolding component",
     deptLabel: "Inventory",
     accent: "#c87850",
     placeholder: "PLANT · Whitefield Apts · Standard · Jali",
-    helpText: (
-      <>
-        Type a <strong>site code or name</strong> (PLANT, ALPHA…) or a{" "}
-        <strong>component name</strong> (Standard, Ledger, Transom, Jali).
-      </>
-    ),
   },
 };
 
