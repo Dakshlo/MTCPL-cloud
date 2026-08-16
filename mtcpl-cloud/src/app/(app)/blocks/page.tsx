@@ -92,6 +92,12 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     width_ft: number;
     thickness_ft: number;
     priority?: boolean;
+    // Daksh (Aug 2026) — the manual-cut picker shows these so the operator
+    // can tell near-identical sizes apart before ticking them.
+    component_section: string | null;
+    component_element: string | null;
+    description: string | null;
+    additional_description: string | null;
   };
   async function fetchAllOpenSlabs(): Promise<OpenSlabRow[]> {
     const PAGE = 1000;
@@ -99,7 +105,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     for (let offset = 0; offset < 50000; offset += PAGE) {
       const { data, error: pageErr } = await admin
         .from("slab_requirements")
-        .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority")
+        .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, priority, component_section, component_element, description, additional_description")
         .eq("status", "open")
         .order("priority", { ascending: false })
         .order("created_at", { ascending: false })

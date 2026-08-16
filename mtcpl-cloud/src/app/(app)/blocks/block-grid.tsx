@@ -22,6 +22,10 @@ type OpenSlab = {
   width_ft: number;
   thickness_ft: number;
   priority?: boolean;
+  component_section?: string | null;
+  component_element?: string | null;
+  description?: string | null;
+  additional_description?: string | null;
 };
 const FALLBACK_STONES: StoneType[] = [
   { name: "PinkStone",  color_top: "#EDCFC2", color_front: "#C87A60", color_side: "#DDA88A" },

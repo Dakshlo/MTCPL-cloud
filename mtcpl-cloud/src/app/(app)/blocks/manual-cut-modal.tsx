@@ -15,6 +15,12 @@ type OpenSlab = {
   width_ft: number;
   thickness_ft: number;
   priority?: boolean;
+  /** Category 1 — e.g. MAIN TEMPLE. */
+  component_section?: string | null;
+  /** Category 2 — e.g. DOD BHUMIYA. */
+  component_element?: string | null;
+  description?: string | null;
+  additional_description?: string | null;
 };
 
 type Block = {
@@ -30,6 +36,18 @@ type Block = {
 };
 
 type RemainderEntry = { l: string; w: string; h: string };
+
+/** Small tinted chip for the two component categories on a slab row. */
+const catChip = (bg: string, fg: string): React.CSSProperties => ({
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.03em",
+  color: fg,
+  background: bg,
+  borderRadius: 999,
+  padding: "2px 8px",
+  whiteSpace: "nowrap",
+});
 
 export function ManualCutModal({
   block,
@@ -109,7 +127,13 @@ export function ManualCutModal({
     if (
       s.id.toLowerCase().includes(q) ||
       (s.temple ?? "").toLowerCase().includes(q) ||
-      (s.label ?? "").toLowerCase().includes(q)
+      (s.label ?? "").toLowerCase().includes(q) ||
+      // Category / description are on the row now, so they're searchable
+      // too — "dod bhumiya" or "panidhar" narrows the list straight away.
+      (s.component_section ?? "").toLowerCase().includes(q) ||
+      (s.component_element ?? "").toLowerCase().includes(q) ||
+      (s.description ?? "").toLowerCase().includes(q) ||
+      (s.additional_description ?? "").toLowerCase().includes(q)
     ) {
       return true;
     }
@@ -610,7 +634,7 @@ export function ManualCutModal({
                                 key={slab.id}
                                 style={{
                                   display: "flex",
-                                  alignItems: "center",
+                                  alignItems: "flex-start",
                                   gap: 12,
                                   cursor: "pointer",
                                   fontSize: 13,
@@ -624,35 +648,69 @@ export function ManualCutModal({
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => toggleSlab(slab.id)}
-                                  style={{ width: 17, height: 17, cursor: "pointer", flexShrink: 0 }}
+                                  style={{ width: 17, height: 17, cursor: "pointer", flexShrink: 0, marginTop: 1 }}
                                 />
-                                <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                  <code style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                                    {slab.id}
-                                  </code>
-                                  {slab.priority && <span style={{ fontSize: 12 }}>⚡</span>}
-                                  {slab.label && slab.label !== slab.temple && (
-                                    <span className="muted" style={{ fontSize: 12 }}>
-                                      {slab.label}
-                                    </span>
-                                  )}
-                                  <span
-                                    style={{
-                                      fontSize: 12,
-                                      fontFamily: "ui-monospace, monospace",
-                                      color: "var(--muted)",
-                                      marginLeft: "auto",
-                                    }}
-                                  >
-                                    {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
-                                  </span>
-                                  {slab.quality && (
+                                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                    <code style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                                      {slab.id}
+                                    </code>
+                                    {slab.priority && <span style={{ fontSize: 12 }}>⚡</span>}
+                                    {slab.label && slab.label !== slab.temple && (
+                                      <span className="muted" style={{ fontSize: 12 }}>
+                                        {slab.label}
+                                      </span>
+                                    )}
                                     <span
-                                      className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}
-                                      style={{ fontSize: 10 }}
+                                      style={{
+                                        fontSize: 12,
+                                        fontFamily: "ui-monospace, monospace",
+                                        color: "var(--muted)",
+                                        marginLeft: "auto",
+                                      }}
                                     >
-                                      {slab.quality}
+                                      {slab.length_ft}×{slab.width_ft}×{slab.thickness_ft} in
                                     </span>
+                                    {slab.quality && (
+                                      <span
+                                        className={`role-pill ${slab.quality === "A" ? "badge-available" : "badge-reserved"}`}
+                                        style={{ fontSize: 10 }}
+                                      >
+                                        {slab.quality}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Daksh (Aug 2026) — category 1 / 2, description and the
+                                      additional line. Dozens of slabs share one size, so the
+                                      ID + dimensions alone weren't enough to tick the right
+                                      ones. Rendered only when the slab actually has them. */}
+                                  {(slab.component_section ||
+                                    slab.component_element ||
+                                    slab.description ||
+                                    slab.additional_description) && (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                      {slab.component_section && (
+                                        <span style={catChip("rgba(99,102,241,0.10)", "#4338ca")}>
+                                          {slab.component_section}
+                                        </span>
+                                      )}
+                                      {slab.component_element && (
+                                        <span style={catChip("rgba(2,132,199,0.10)", "#0369a1")}>
+                                          {slab.component_element}
+                                        </span>
+                                      )}
+                                      {slab.description && (
+                                        <span style={{ fontSize: 11.5, color: "var(--text)", fontWeight: 600 }}>
+                                          {slab.description}
+                                        </span>
+                                      )}
+                                      {slab.additional_description && (
+                                        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                          · {slab.additional_description}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               </label>
