@@ -238,11 +238,19 @@ export function cncPeriodFromSearch(
   if (view === "yearly") {
     const today = istTodayParts();
     const year = Number(sp.year) || today.year;
+    // A year IN PROGRESS runs to TODAY, not to 31 Dec (Daksh, Aug 2026).
+    // buildCncVariousCostReport already clipped it, so the figures were
+    // right — but the window said "2026", which reads as a full year and
+    // left people thinking the unfinished months were being counted. End
+    // it and LABEL it at the current month, exactly like the monthly view.
+    const inProgress = year === today.year;
     return {
       kind: "yearly",
       startDate: `${year}-01-01`,
-      endDate: `${year}-12-31`,
-      label: `${year}`,
+      endDate: inProgress ? formatDateKey(today) : `${year}-12-31`,
+      label: inProgress
+        ? `${year} · Jan–${MONTH_SHORT[today.month - 1]}`
+        : `${year}`,
     };
   }
 
