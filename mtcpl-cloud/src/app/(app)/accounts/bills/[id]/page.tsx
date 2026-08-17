@@ -7,6 +7,7 @@ import {
   canApproveBills,
   canConfirmPayments,
   canHoldBill,
+  canSettleBills,
   canManageAccounts,
   canMarkPaid,
   canSubmitBills,
@@ -28,6 +29,7 @@ import { PartialRejectionForm } from "./partial-rejection-form";
 import { CancelBillButton } from "./cancel-bill-button";
 import { HoldBillForm } from "./hold-bill-form";
 import { ReleaseHoldButton } from "./release-hold-button";
+import { SettlementForm, ReverseSettlementButton } from "./settlement-form";
 import { ApplyAdvanceButton } from "./apply-advance-button";
 import {
   ACCOUNTS_TOKENS,
@@ -185,7 +187,7 @@ export default async function BillDetailPage({
       // Mig 053 follow-on: pull final-audit metadata so the bill
       // header can show the PAID + VERIFIED tag once all paid
       // payments are verified.
-      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id, final_audit_status, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, is_debit_settlement",
+      "id, status, proposed_amount, proposed_by, proposed_at, confirmed_by, confirmed_at, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, cancelled_by, cancelled_at, cancel_reason, bank_rejected_at, bank_rejected_by, bank_rejection_reason, previous_payment_id, final_audit_status, final_audit_at, final_audit_by, final_audit_flag_reason, final_audit_flag_note, is_debit_settlement, is_settlement, settlement_reason",
     )
     .eq("bill_id", id)
     .order("proposed_at", { ascending: false });
@@ -216,6 +218,8 @@ export default async function BillDetailPage({
     final_audit_flag_reason: string | null;
     final_audit_flag_note: string | null;
     is_debit_settlement: boolean | null;
+    is_settlement: boolean | null;
+    settlement_reason: string | null;
   }>;
 
   // Mig 053 — bill-level "PAID + VERIFIED" derivation.
@@ -314,13 +318,18 @@ export default async function BillDetailPage({
       // money already moved (it was the overpayment). Label it as a
       // debit so the audit trail reads honestly + ties to the
       // outstanding drop, rather than looking like a second payout.
+      // Mig 219 — a settlement is not a payout either; it records money
+      // that left outside the software. Daksh wants the WHO and WHEN
+      // visible right here in the timeline, with the reason.
       timeline.push({
         at: p.paid_at,
-        label: p.is_debit_settlement
-          ? `Debit ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} — overpayment settled`
-          : `Paid ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} · ${p.payment_method?.toUpperCase() ?? "—"}`,
+        label: p.is_settlement
+          ? `Settled ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} — paid outside the software${p.settlement_reason ? ` · ${p.settlement_reason}` : ""}`
+          : p.is_debit_settlement
+            ? `Debit ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} — overpayment settled`
+            : `Paid ₹${Number(p.paid_amount ?? 0).toLocaleString("en-IN")} · ${p.payment_method?.toUpperCase() ?? "—"}`,
         by: p.paid_by ? profilesMap[p.paid_by] ?? null : null,
-        tone: p.is_debit_settlement
+        tone: p.is_debit_settlement || p.is_settlement
           ? ACCOUNTS_TOKENS.accent
           : ACCOUNTS_TOKENS.success,
       });
@@ -1214,6 +1223,110 @@ export default async function BillDetailPage({
                       />
                     )}
                   </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Mig 219 — SETTLEMENT. For bills already paid outside this
+              software. Owner / developer only; clears the outstanding
+              with no bank movement, against a mandatory reason. The
+              card also lists any settlement already applied, with an
+              undo. Hidden entirely from everyone else. */}
+          {(() => {
+            const settlements = payments.filter(
+              (p) => p.is_settlement && p.status === "paid",
+            );
+            const outstanding = Number(bill.amount_outstanding ?? 0);
+            const maySettle = canSettleBills(profile) && !bill.cancelled_at;
+            const canStart = maySettle && bill.status === "approved" && outstanding > 0;
+            if (!maySettle && settlements.length === 0) return null;
+            return (
+              <div
+                style={{
+                  background: settlements.length > 0 ? "#f5f3ff" : "#faf9ff",
+                  border: `1px solid ${settlements.length > 0 ? "#7c3aed" : "#ddd6fe"}`,
+                  borderLeft: `4px solid ${settlements.length > 0 ? "#7c3aed" : "#ddd6fe"}`,
+                  borderRadius: 10,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: "#5b21b6",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  ⚖ Settlement
+                </div>
+
+                {settlements.map((s) => (
+                  <div
+                    key={s.id}
+                    style={{
+                      background: "#fff",
+                      border: "1px solid #ddd6fe",
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 14, color: "#5b21b6" }}>
+                        ₹{Number(s.paid_amount ?? 0).toLocaleString("en-IN")} settled
+                      </strong>
+                      <span style={{ fontSize: 11, color: "#64748b" }}>
+                        {s.paid_at
+                          ? new Date(s.paid_at).toLocaleString("en-IN", {
+                              timeZone: "Asia/Kolkata",
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "—"}
+                        {s.paid_by && profilesMap[s.paid_by] ? ` · ${profilesMap[s.paid_by]}` : ""}
+                      </span>
+                    </div>
+                    {s.settlement_reason && (
+                      <div style={{ fontSize: 12, color: "#334155" }}>{s.settlement_reason}</div>
+                    )}
+                    <div style={{ fontSize: 10.5, color: "#7c3aed" }}>
+                      Not a bank payment — kept out of payment reports.
+                    </div>
+                    {maySettle && (
+                      <ReverseSettlementButton
+                        paymentId={s.id}
+                        amount={Number(s.paid_amount ?? 0)}
+                      />
+                    )}
+                  </div>
+                ))}
+
+                {canStart ? (
+                  <SettlementForm
+                    billId={bill.id}
+                    outstanding={outstanding}
+                    heldAmount={Number(bill.held_amount ?? 0)}
+                  />
+                ) : (
+                  maySettle &&
+                  settlements.length === 0 && (
+                    <div style={{ fontSize: 11.5, color: "#64748b" }}>
+                      {outstanding <= 0
+                        ? "Nothing outstanding to settle."
+                        : "Only an approved bill can be settled."}
+                    </div>
+                  )
                 )}
               </div>
             );

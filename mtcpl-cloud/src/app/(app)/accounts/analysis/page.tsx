@@ -98,6 +98,8 @@ export default async function FinanceAnalysisPage() {
       admin
         .from("bill_payments")
         .select("id, bill_id, paid_amount, payment_method, paid_at")
+        // Mig 219 — settlements never counted as "the vendor was paid".
+        .eq("is_settlement", false)
         .order("id")
         .range(from, to),
     ),

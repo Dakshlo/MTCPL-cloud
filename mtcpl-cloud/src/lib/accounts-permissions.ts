@@ -134,6 +134,15 @@ export function canViewBillVendors(p: Pick<Profile, "role">): boolean {
   return false;
 }
 
+/** Mig 219 — settle a bill that was already paid OUTSIDE this software,
+ *  clearing an outstanding that isn't real. It writes off money without
+ *  any bank movement or approval step, so it is deliberately the
+ *  narrowest gate in Finance: owner and developer ONLY. Not the
+ *  accountant, not accountant_star — Daksh was explicit. */
+export function canSettleBills(p: Pick<Profile, "role">): boolean {
+  return p.role === "developer" || p.role === "owner";
+}
+
 /** Mig 053 — Final Audit gate. Verifies / flags PAID payments
  *  against the bank statement. Not an approval — the money has
  *  already moved; this is a recheck step. Flag captures a reason

@@ -308,6 +308,10 @@ export default async function AccountsHomePage({
         .from("bill_payments")
         .select("paid_at, bills!inner(bill_vendor_id)")
         .eq("status", "paid")
+        // Mig 219 — a settlement is not "we paid this vendor"; letting
+        // it set last-paid would wrongly push a real payment down the
+        // pay-today priority order.
+        .eq("is_settlement", false)
         .not("paid_at", "is", null)
         .in("bills.bill_vendor_id", vendorIds)
         .order("paid_at", { ascending: false });

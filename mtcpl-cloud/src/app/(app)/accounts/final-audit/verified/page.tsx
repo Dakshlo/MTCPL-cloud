@@ -43,6 +43,7 @@ export default async function VerifiedAuditPage() {
     .eq("final_audit_status", "verified")
     .eq("is_advance_application", false)
     .eq("is_debit_settlement", false)
+        .eq("is_settlement", false)
     .order("final_audit_at", { ascending: false })
     .limit(500);
 

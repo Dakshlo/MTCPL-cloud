@@ -30,6 +30,7 @@ import {
   canMarkPaid,
   canRecordAdvance,
   canRenameBillVendor,
+  canSettleBills,
   canSettleWithDebit,
   canSubmitBills,
   canUnapplyAdvance,
@@ -5570,4 +5571,195 @@ export async function rejectDebitSettlementFormAction(formData: FormData) {
     redirect(`/accounts/approvals?error=${encodeURIComponent(res.error)}`);
   }
   redirect(`/accounts/approvals?toast=${encodeURIComponent("Debit rejected")}`);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Mig 219 — SETTLE an already-paid bill (Daksh, Aug 2026)
+//
+// Some bills were paid to the vendor outside this software and sit in
+// Due Bills forever showing an outstanding that isn't real. Owner /
+// developer ONLY can clear it — fully or partially — against a
+// mandatory written reason.
+//
+// A settlement is NOT a new payment: no money leaves the bank now, it
+// records money that already left. Mechanically it's the same proven,
+// reversible trick as the debit settlement (mig 085) and advance
+// application (mig 073): insert a synthetic PAID bill_payments row
+// tagged is_settlement, let the recalc_bill_amount_paid trigger drop
+// the outstanding, and keep the row out of every cash report.
+// ════════════════════════════════════════════════════════════════════
+
+/** Shortest reason we'll accept — "ok" tells a future reader nothing. */
+const SETTLEMENT_REASON_MIN = 8;
+
+export async function settleBillAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canSettleBills(profile)) {
+    return { ok: false, error: "Only the owner or developer can settle a bill." };
+  }
+
+  const billId = String(formData.get("bill_id") || "").trim();
+  const mode = String(formData.get("mode") || "full");
+  const reason = String(formData.get("reason") || "").trim();
+  if (!billId) return { ok: false, error: "Missing bill." };
+  if (reason.length < SETTLEMENT_REASON_MIN) {
+    return { ok: false, error: `Give a real reason (at least ${SETTLEMENT_REASON_MIN} characters) — it is the only record of why this was written off.` };
+  }
+
+  const supabase = createAdminSupabaseClient();
+  const { data: bill, error: billErr } = await supabase
+    .from("bills")
+    .select("id, token, status, amount_outstanding, amount_payable_to_vendor, held_amount, bill_vendor_id")
+    .eq("id", billId)
+    .maybeSingle();
+  if (billErr) return { ok: false, error: billErr.message };
+  if (!bill) return { ok: false, error: "Bill not found." };
+
+  const outstanding = Number(bill.amount_outstanding ?? 0);
+  if (bill.status === "cancelled") return { ok: false, error: "This bill is cancelled." };
+  if (outstanding <= 0) return { ok: false, error: "Nothing outstanding on this bill." };
+
+  // Full = whatever is left on THIS bill (Daksh confirmed: this bill
+  // only, never the vendor's other bills). Partial = a typed amount,
+  // hard-capped at the outstanding so a settlement can never overpay.
+  let amount = outstanding;
+  if (mode === "partial") {
+    const typed = Number(formData.get("amount"));
+    if (!Number.isFinite(typed) || typed <= 0) {
+      return { ok: false, error: "Enter the amount to settle." };
+    }
+    if (typed - outstanding > 0.5) {
+      return { ok: false, error: `That is more than the ₹${outstanding.toLocaleString("en-IN")} outstanding.` };
+    }
+    amount = Math.min(typed, outstanding);
+  }
+
+  // An open proposal/confirmation would double-count against the same
+  // outstanding once it's paid — make the user resolve it first.
+  const { data: openRows } = await supabase
+    .from("bill_payments")
+    .select("id")
+    .eq("bill_id", billId)
+    .in("status", ["proposed", "confirmed"])
+    .limit(1);
+  if ((openRows ?? []).length > 0) {
+    return { ok: false, error: "This bill has a payment in progress — cancel or complete it before settling." };
+  }
+
+  const now = new Date().toISOString();
+  const { data: row, error: insErr } = await supabase
+    .from("bill_payments")
+    .insert({
+      bill_id: billId,
+      status: "paid",
+      proposed_amount: amount,
+      paid_amount: amount,
+      payment_method: "other",
+      payment_reference: "SETTLEMENT",
+      payment_note: reason,
+      proposed_by: profile.id,
+      proposed_at: now,
+      confirmed_by: profile.id,
+      confirmed_at: now,
+      paid_by: profile.id,
+      paid_at: now,
+      is_settlement: true,
+      settlement_reason: reason,
+      updated_at: now,
+    })
+    .select("id")
+    .single();
+  if (insErr) return { ok: false, error: insErr.message };
+
+  void logAudit(profile.id, "bill_settled", "bill", billId, {
+    token: bill.token,
+    amount,
+    mode,
+    reason,
+    outstanding_before: outstanding,
+    payment_row_id: row.id,
+  });
+
+  await refreshAccountsPaths();
+  revalidatePath(`/accounts/bills/${billId}`);
+  return { ok: true };
+}
+
+/** Undo a settlement done by mistake. Soft-cancels the synthetic row —
+ *  the recalc trigger only sums status='paid', so the outstanding comes
+ *  straight back. Nothing is hard-deleted; the reversal keeps its own
+ *  reason + trail. */
+export async function reverseBillSettlementAction(formData: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canSettleBills(profile)) {
+    return { ok: false, error: "Only the owner or developer can reverse a settlement." };
+  }
+
+  const paymentId = String(formData.get("payment_id") || "").trim();
+  const reason = String(formData.get("reverse_reason") || "").trim();
+  if (!paymentId) return { ok: false, error: "Missing settlement." };
+  if (reason.length < SETTLEMENT_REASON_MIN) {
+    return { ok: false, error: `Give a real reason (at least ${SETTLEMENT_REASON_MIN} characters) for reversing this settlement.` };
+  }
+
+  const supabase = createAdminSupabaseClient();
+  const { data: row, error: rowErr } = await supabase
+    .from("bill_payments")
+    .select("id, bill_id, status, paid_amount, is_settlement, bills(token)")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (rowErr) return { ok: false, error: rowErr.message };
+  if (!row) return { ok: false, error: "Settlement not found." };
+  if (!row.is_settlement) return { ok: false, error: "That row is a real payment, not a settlement — it cannot be reversed here." };
+  if (row.status !== "paid") return { ok: false, error: "This settlement is already reversed." };
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("bill_payments")
+    .update({
+      status: "cancelled",
+      cancelled_by: profile.id,
+      cancelled_at: now,
+      cancel_reason: `Settlement reversed — ${reason}`,
+      settlement_reversed_at: now,
+      settlement_reversed_by: profile.id,
+      settlement_reverse_reason: reason,
+      updated_at: now,
+    })
+    .eq("id", paymentId)
+    .eq("status", "paid"); // race guard — never double-reverse
+  if (updErr) return { ok: false, error: updErr.message };
+
+  void logAudit(profile.id, "bill_settlement_reversed", "bill", row.bill_id, {
+    token: (row.bills as { token?: string } | null)?.token ?? null,
+    amount: Number(row.paid_amount ?? 0),
+    reason,
+    payment_row_id: paymentId,
+  });
+
+  await refreshAccountsPaths();
+  revalidatePath(`/accounts/bills/${row.bill_id}`);
+  return { ok: true };
+}
+
+/** Form wrappers — the bill page posts straight to these. */
+export async function settleBillFormAction(formData: FormData) {
+  const billId = String(formData.get("bill_id") || "");
+  const res = await settleBillAction(formData);
+  if (!res.ok) {
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/bills/${billId}?toast=${encodeURIComponent("Bill settled")}`);
+}
+
+export async function reverseBillSettlementFormAction(formData: FormData) {
+  const paymentId = String(formData.get("payment_id") || "");
+  const supabase = createAdminSupabaseClient();
+  const { data } = await supabase.from("bill_payments").select("bill_id").eq("id", paymentId).maybeSingle();
+  const billId = (data as { bill_id?: string } | null)?.bill_id ?? "";
+  const res = await reverseBillSettlementAction(formData);
+  if (!res.ok) {
+    redirect(`/accounts/bills/${billId}?error=${encodeURIComponent(res.error)}`);
+  }
+  redirect(`/accounts/bills/${billId}?toast=${encodeURIComponent("Settlement reversed")}`);
 }

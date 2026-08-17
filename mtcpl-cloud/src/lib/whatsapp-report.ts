@@ -459,6 +459,8 @@ async function paymentsForWindow(admin: AdminClient, startUTC: string, endUTC: s
       .from("bill_payments")
       .select("paid_amount, bill_id, paid_at, status")
       .eq("status", "paid")
+      // Mig 219 — settlements are not cash that moved today.
+      .eq("is_settlement", false)
       .gte("paid_at", startUTC)
       .lt("paid_at", endUTC)
       .order("id", { ascending: true })

@@ -76,6 +76,7 @@ export default async function PaymentsHistoryPage({
         "id, bill_id, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, bills(id, token, vendor_bill_no, bill_vendor_id, bill_vendors(id, name))",
       )
       .eq("status", "paid")
+      .eq("is_settlement", false) // mig 219 — cash ledger only
       .gte("paid_at", fromIso)
       .lte("paid_at", toIso);
     if (methodFilter) q = q.eq("payment_method", methodFilter);

@@ -2559,6 +2559,7 @@ async function getFinanceSnapshot() {
       .from("bill_payments")
       .select("paid_amount, paid_at")
       .eq("status", "paid")
+      .eq("is_settlement", false) // mig 219 — settlements aren't cash
       .gte("paid_at", istRange("today").from)
       .lt("paid_at", istRange("today").to),
     admin

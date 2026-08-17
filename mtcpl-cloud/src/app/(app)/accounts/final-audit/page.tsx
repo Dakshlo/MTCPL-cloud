@@ -78,6 +78,7 @@ export default async function FinalAuditPage() {
       // for synthetic debit-settlement rows (the excess already moved).
       .eq("is_advance_application", false)
       .eq("is_debit_settlement", false)
+        .eq("is_settlement", false)
       .order("paid_at", { ascending: false })
       .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
       .range(from, to),
@@ -106,6 +107,7 @@ export default async function FinalAuditPage() {
       .eq("status", "paid")
       .eq("is_advance_application", false)
       .eq("is_debit_settlement", false)
+        .eq("is_settlement", false)
       .in("final_audit_status", ["verified", "flagged"])
       .not("final_audit_at", "is", null)
       .gte("final_audit_at", cutoffIso)

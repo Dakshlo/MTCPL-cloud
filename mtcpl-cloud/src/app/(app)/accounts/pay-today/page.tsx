@@ -65,6 +65,7 @@ export default async function PayTodayPage() {
       "id, bill_id, status, proposed_amount, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, confirmed_by, confirmed_at, bills(id, token, bill_vendor_id, bill_vendors(id, name))",
     )
     .eq("status", "paid")
+    .eq("is_settlement", false) // mig 219 — no bank money moved
     .gte("paid_at", todayStartIso)
     .lt("paid_at", tomorrowStartIso)
     .order("paid_at", { ascending: false });

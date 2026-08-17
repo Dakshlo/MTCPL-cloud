@@ -39,6 +39,7 @@ export default async function FlaggedAuditPage() {
     .eq("status", "paid")
     .eq("final_audit_status", "flagged")
     .eq("is_advance_application", false)
+        .eq("is_settlement", false)
     .order("final_audit_at", { ascending: false })
     .limit(500);
 
