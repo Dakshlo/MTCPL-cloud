@@ -145,26 +145,49 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
   return (
     <section className="vc-page" style={{ paddingBottom: 24 }}>
       <VcStyles />
-      <Link
-        href="/dashboard"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 12,
-          padding: "7px 13px",
-          fontSize: 13,
-          fontWeight: 700,
-          background: "var(--surface)",
-          color: "var(--text)",
-          border: "1px solid var(--border)",
-          borderRadius: 9,
-          textDecoration: "none",
-          whiteSpace: "nowrap",
-        }}
-      >
-        ← Back to dashboard
-      </Link>
+      {/* Daksh (Aug 2026) — the two costing reports are read together,
+          so each one links straight across to the other instead of
+          bouncing through the dashboard. */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 13px",
+            fontSize: 13,
+            fontWeight: 700,
+            background: "var(--surface)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
+            borderRadius: 9,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ← Back to dashboard
+        </Link>
+        <Link
+          href="/reports/various-costing/cutter"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 13px",
+            fontSize: 13,
+            fontWeight: 700,
+            background: "var(--surface)",
+            color: "var(--gold-dark)",
+            border: "1px solid var(--gold-border)",
+            borderRadius: 9,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ✂ Cutter costing →
+        </Link>
+      </div>
       {/* ── Header ───────────────────────────────────────────── */}
       <header
         style={{
