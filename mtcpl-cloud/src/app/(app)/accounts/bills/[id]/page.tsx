@@ -1595,7 +1595,21 @@ export default async function BillDetailPage({
           {/* Payment history */}
           <Section
             title={`Payment history`}
-            subtitle={`${payments.length} record${payments.length === 1 ? "" : "s"}`}
+            subtitle={
+              <>
+                {payments.length} record{payments.length === 1 ? "" : "s"}
+                {" · "}
+                {/* Daksh (Aug 2026) — a voucher covers ONE payment; a
+                    part-paid bill needs one sheet showing every
+                    instalment with the balance left. Internal only. */}
+                <Link
+                  href={`/accounts/bills/${bill.id}/statement`}
+                  style={{ fontWeight: 700, color: ACCOUNTS_TOKENS.accent, textDecoration: "none" }}
+                >
+                  📄 Full statement
+                </Link>
+              </>
+            }
           >
             {payments.length === 0 ? (
               <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", padding: "10px 4px" }}>
