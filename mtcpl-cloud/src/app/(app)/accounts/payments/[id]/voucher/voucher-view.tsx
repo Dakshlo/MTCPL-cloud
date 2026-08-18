@@ -125,7 +125,7 @@ export function VoucherView({
           .voucher-kv { gap: 3px 12px !important; font-size: 11.5px !important; }
           .voucher-letterhead-header { padding-bottom: 8px !important; }
           .voucher-title-pill { padding: 5px 14px !important; font-size: 11.5px !important; }
-          .voucher-print-title-wrap { margin: 12px 0 14px !important; }
+          .voucher-docno { font-size: 10.5px !important; margin-top: 3px !important; }
           .voucher-company-name { font-size: 12px !important; }
           .voucher-company-line { font-size: 9px !important; }
           .voucher-letterhead-header img { height: 44px !important; }
@@ -167,8 +167,22 @@ export function VoucherView({
           flex-shrink: 0;
         }
         .voucher-company {
-          text-align: right;
+          text-align: left;
           min-width: 0;
+          flex: 1;
+        }
+        /* Right-hand column: title pill + voucher number, matching the
+           tax invoice's "PREVIEW / invoice no" corner. */
+        .voucher-docid {
+          text-align: right;
+          flex-shrink: 0;
+        }
+        .voucher-docno {
+          margin-top: 4px;
+          font-size: 12.5px;
+          font-weight: 800;
+          font-family: ui-monospace, SFMono-Regular, monospace;
+          color: #111;
         }
         .voucher-company-name {
           font-size: 13px;
@@ -292,11 +306,14 @@ export function VoucherView({
         {/* Letterhead chrome — logo top-left + dark accent line.
             Mirrors the printed MTCPL letterhead so the on-screen and
             emailed PDF feel like the same document. */}
+        {/* Letterhead — logo + company on the LEFT, the document's own
+            identity on the RIGHT, one rule underneath. Daksh (Aug 2026):
+            the company block used to be repeated again at the foot of
+            the page; it now appears ONCE, in the same shape the tax
+            invoice, delivery challan and bill statement all use. */}
         <header className="voucher-letterhead-header">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-dark.png" alt="MTCPL" />
-          {/* Company block — the piece that was missing. Same entity
-              details the tax invoice and challan carry, so a vendor
-              can verify who paid them straight off the voucher. */}
           <div className="voucher-company">
             <div className="voucher-company-name">{COMPANY.name}</div>
             <div className="voucher-company-line">{COMPANY.address}</div>
@@ -305,13 +322,11 @@ export function VoucherView({
               {COMPANY.email}
             </div>
           </div>
+          <div className="voucher-docid">
+            <span className="voucher-title-pill">PAYMENT VOUCHER</span>
+            <div className="voucher-docno">{voucherNo}</div>
+          </div>
         </header>
-
-        {/* "PAYMENT VOUCHER" title as a gold pill, sitting just below
-            the letterhead logo line. */}
-        <div className="voucher-print-title-wrap" style={{ textAlign: "center", margin: "20px 0 22px" }}>
-          <span className="voucher-title-pill">PAYMENT VOUCHER</span>
-        </div>
 
         {/* Two-column key/value list (HDFC-style) */}
         <dl className="voucher-kv">
@@ -533,12 +548,6 @@ export function VoucherView({
             (matches the printed letterhead PDF), plus a tiny
             computer-generated note underneath. */}
         <footer className="voucher-letterhead-footer">
-          <div>
-            {COMPANY.name} · {COMPANY.address}
-          </div>
-          <div>
-            GSTIN: {COMPANY.gstin} · ☎ {COMPANY.phone} · ✉ {COMPANY.email}
-          </div>
           <div className="gen-note">
             Computer-generated voucher · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata",
               day: "2-digit",
