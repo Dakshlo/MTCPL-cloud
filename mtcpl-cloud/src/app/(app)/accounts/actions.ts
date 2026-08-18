@@ -1805,7 +1805,7 @@ async function sendVendorPaymentEmail(
       await import("@/lib/email");
     const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
     const { numberToIndianWords } = await import(
-      "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
+      "@/lib/number-to-words"
     );
 
     const paidAmount = Number(
@@ -2054,7 +2054,7 @@ async function buildVendorPaymentWaPayload(
 
   const { buildVoucherPdf } = await import("@/lib/voucher-pdf");
   const { numberToIndianWords } = await import(
-    "@/app/(app)/accounts/payments/[id]/voucher/number-to-words"
+    "@/lib/number-to-words"
   );
   const paidAmount = Number((paymentRow as { paid_amount?: number | null }).paid_amount ?? 0);
   const amountInWords = numberToIndianWords(paidAmount);

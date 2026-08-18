@@ -13,7 +13,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { numberToIndianWords } from "@/app/(app)/accounts/payments/[id]/voucher/number-to-words";
+import { numberToIndianWords } from "@/lib/number-to-words";
 
 const ROUTE = "/invoicing/install-contract";
 // Must match the page's ALLOWED — crosscheck (MANAGER) can view the page, so

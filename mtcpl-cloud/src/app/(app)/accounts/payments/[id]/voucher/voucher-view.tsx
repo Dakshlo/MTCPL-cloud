@@ -13,7 +13,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
-import { numberToIndianWords } from "./number-to-words";
+import { numberToIndianWords } from "@/lib/number-to-words";
 
 // Aug 2026 (Daksh: "it dont show company info like invoice and
 // challan") — the voucher header was a bare logo, so a vendor
@@ -53,10 +53,17 @@ type VendorInfo = {
   upi_id: string | null;
 };
 
+/** Rupees, 2dp — with a snap so float residue can't print "₹-0.00". */
+function formatINR(n: number): string {
+  const v = Math.abs(Number(n) || 0) < 0.005 ? 0 : Number(n) || 0;
+  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function VoucherView({
   payment,
   bill,
   vendor,
+  instalment,
 }: {
   payment: {
     id: string;
@@ -79,8 +86,12 @@ export function VoucherView({
     amountTds: number;
     amountTcs: number;
     costHead: string | null;
+    amountPaidToDate: number;
+    amountOutstanding: number;
   };
   vendor: VendorInfo;
+  /** Where this payment sits in the bill's run of instalments. */
+  instalment: { no: number | null; of: number };
 }) {
   const paidDate = payment.paidAt
     ? new Date(payment.paidAt)
@@ -402,6 +413,45 @@ export function VoucherView({
             })}
           </div>
         </div>
+
+        {/* Bill position (Daksh, Aug 2026) — a ₹50,000 advice against a
+            ₹6.71 L bill meant nothing on its own. Only rendered when the
+            bill really is being paid in parts, so a single-payment
+            voucher stays exactly as it was. */}
+        {instalment.of > 1 && (
+          <div
+            className="voucher-position"
+            style={{
+              marginTop: 10,
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              padding: "9px 14px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 18,
+              alignItems: "baseline",
+              fontSize: 11.5,
+            }}
+          >
+            <span style={{ fontWeight: 800, color: "#111" }}>
+              Instalment {instalment.no ?? "—"} of {instalment.of}
+            </span>
+            <span style={{ color: "#6b7280" }}>
+              Bill total{" "}
+              <strong style={{ color: "#111" }}>{formatINR(bill.amountPayableToVendor)}</strong>
+            </span>
+            <span style={{ color: "#6b7280" }}>
+              Paid to date{" "}
+              <strong style={{ color: "#15803d" }}>{formatINR(bill.amountPaidToDate)}</strong>
+            </span>
+            <span style={{ color: "#6b7280" }}>
+              Balance{" "}
+              <strong style={{ color: bill.amountOutstanding > 0.005 ? "#b45309" : "#15803d" }}>
+                {formatINR(bill.amountOutstanding)}
+              </strong>
+            </span>
+          </div>
+        )}
 
         {/* Salutation paragraph (mirrors HDFC's "Dear Sir/Madam …") */}
         <p

@@ -30,7 +30,7 @@ export default async function PaymentVoucherPage({ params }: { params: Params })
   const { data: paymentRaw } = await supabase
     .from("bill_payments")
     .select(
-      "id, status, proposed_amount, paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by, confirmed_by, proposed_by, bill_id, bills(id, token, vendor_bill_no, bill_date, description, amount_subtotal, amount_total, amount_payable_to_vendor, amount_tds, amount_tcs, cost_head, bill_vendor_id, bill_vendors(id, name, address, gstin, pan, phone, email, bank_name, bank_account, ifsc, upi_id))",
+      "id, status, proposed_amount, paid_amount, payment_method, payment_reference, payment_note, paid_at, paid_by, confirmed_by, proposed_by, bill_id, bills(id, token, vendor_bill_no, bill_date, description, amount_subtotal, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, amount_tds, amount_tcs, cost_head, bill_vendor_id, bill_vendors(id, name, address, gstin, pan, phone, email, bank_name, bank_account, ifsc, upi_id))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -59,6 +59,8 @@ export default async function PaymentVoucherPage({ params }: { params: Params })
     amount_subtotal: number;
     amount_total: number;
     amount_payable_to_vendor: number | null;
+    amount_paid: number | null;
+    amount_outstanding: number | null;
     amount_tds: number | null;
     amount_tcs: number | null;
     cost_head: string | null;
@@ -93,6 +95,20 @@ export default async function PaymentVoucherPage({ params }: { params: Params })
     redirect(`/accounts/bills/${bill.id}?error=Voucher+is+only+available+after+payment+is+marked+paid.`);
   }
 
+  // Daksh (Aug 2026) — a bill is usually cleared in parts, so a voucher
+  // for ₹50,000 says nothing on its own. Count where THIS payment sits in
+  // the bill's run of instalments, and carry the bill's paid/outstanding
+  // position, so the advice reads "instalment 3 of 11".
+  const { data: siblingRows } = await supabase
+    .from("bill_payments")
+    .select("id, paid_at")
+    .eq("bill_id", payment.bill_id)
+    .eq("status", "paid")
+    .order("paid_at", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true });
+  const siblings = (siblingRows ?? []) as Array<{ id: string }>;
+  const instalmentNo = siblings.findIndex((r) => r.id === payment.id) + 1;
+
   const profilesMap = await getProfilesMap();
   const paidByName = payment.paid_by ? profilesMap[payment.paid_by] ?? null : null;
 
@@ -121,7 +137,10 @@ export default async function PaymentVoucherPage({ params }: { params: Params })
         amountTds: Number(bill.amount_tds ?? 0),
         amountTcs: Number(bill.amount_tcs ?? 0),
         costHead: bill.cost_head,
+        amountPaidToDate: Number(bill.amount_paid ?? 0),
+        amountOutstanding: Number(bill.amount_outstanding ?? 0),
       }}
+      instalment={{ no: instalmentNo > 0 ? instalmentNo : null, of: siblings.length }}
       vendor={vendor}
     />
   );

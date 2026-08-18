@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { buildJobworkChallanPdf } from "@/lib/jobwork-challan-pdf";
-import { numberToIndianWords } from "@/app/(app)/accounts/payments/[id]/voucher/number-to-words";
+import { numberToIndianWords } from "@/lib/number-to-words";
 
 export const runtime = "nodejs";
 

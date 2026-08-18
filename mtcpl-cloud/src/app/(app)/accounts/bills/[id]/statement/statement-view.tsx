@@ -11,6 +11,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
+import { numberToIndianWords } from "@/lib/number-to-words";
 
 const COMPANY = {
   name: "MATESHWARI TEMPLE CONSTRUCTION PVT LTD",
@@ -50,8 +51,15 @@ type Vendor = {
   bankName: string | null; bankAccount: string | null; ifsc: string | null;
 };
 
-const inr = (n: number) =>
-  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Rupees, 2dp. Snaps float residue to zero — a balance that lands on
+ *  -2.18e-11 after the last instalment was printing as "₹-0.00". */
+const inr = (n: number) => {
+  const v = Math.abs(Number(n) || 0) < 0.005 ? 0 : Number(n) || 0;
+  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+/** Same snap, for colour/comparison decisions. */
+const clean = (n: number) => (Math.abs(Number(n) || 0) < 0.005 ? 0 : Number(n) || 0);
 
 const dmy = (iso: string | null) =>
   !iso
@@ -159,6 +167,17 @@ export function StatementView({
               BILL STATEMENT
             </div>
             <div style={{ fontSize: 9.5, color: "#9ca3af", marginTop: 5 }}>INTERNAL RECORD</div>
+            {/* Settled-state chip — the one fact you want from across a desk. */}
+            <div style={{ marginTop: 6 }}>
+              <span style={{
+                display: "inline-block", borderRadius: 999, padding: "3px 10px",
+                fontSize: 9.5, fontWeight: 800, letterSpacing: ".05em",
+                color: clean(bill.outstanding) <= 0 ? "#15803d" : "#b45309",
+                background: clean(bill.outstanding) <= 0 ? "rgba(21,128,61,.10)" : "rgba(180,83,9,.10)",
+              }}>
+                {clean(bill.outstanding) <= 0 ? "FULLY PAID" : `${pctPaid.toFixed(0)}% PAID`}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -232,7 +251,7 @@ export function StatementView({
               </thead>
               <tbody>
                 {rows.map((p, i) => (
-                  <tr key={p.id}>
+                  <tr key={p.id} style={{ background: i % 2 ? "#fafafa" : undefined }}>
                     <td>{i + 1}</td>
                     <td>{dmyTime(p.paidAt)}</td>
                     <td>
@@ -244,7 +263,7 @@ export function StatementView({
                     <td>{p.reference || "—"}</td>
                     <td>{p.who || "—"}</td>
                     <td className="r" style={{ fontWeight: 700 }}>{inr(p.amount)}</td>
-                    <td className="r" style={{ color: p.balanceAfter > 0 ? "#b45309" : "#15803d" }}>{inr(p.balanceAfter)}</td>
+                    <td className="r" style={{ color: clean(p.balanceAfter) > 0 ? "#b45309" : "#15803d" }}>{inr(p.balanceAfter)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -265,6 +284,14 @@ export function StatementView({
             </table>
           )}
         </div>
+
+        {/* Amount in words — every other MTCPL money document carries it. */}
+        {bill.paid > 0 && (
+          <div style={{ marginTop: 12, padding: "9px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 11.5 }}>
+            <span style={{ color: "#6b7280" }}>Total paid in words: </span>
+            <strong>{numberToIndianWords(bill.paid)}</strong>
+          </div>
+        )}
 
         {/* Approval trail + footer */}
         <div style={{ display: "flex", gap: 24, marginTop: 16, fontSize: 10.5, color: "#4b5563", flexWrap: "wrap" }}>
