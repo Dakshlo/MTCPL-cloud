@@ -74,7 +74,9 @@ export default async function TemplePnlPage({
   }
 
   return (
-    <div style={{ width: "100%", padding: "16px 26px 60px", background: "#f6f8fb", minHeight: "100vh" }}>
+    // The tender workspace is a worksheet — it wants every pixel, so its tab
+    // runs on tighter side padding than the P&L report (Daksh).
+    <div style={{ width: "100%", padding: tab === "tender" ? "14px 16px 60px" : "16px 26px 60px", background: "#f6f8fb", minHeight: "100vh" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap", marginBottom: 6 }}>
         <Link
@@ -125,7 +127,7 @@ export default async function TemplePnlPage({
           })
         ) : (
           <span style={{ fontSize: 11.5, color: MUTED }}>
-            sheets autosave · &quot;from rate card&quot; seeds {report.period.label} rates
+            sheets autosave · &quot;from rate card&quot; seeds {report.period.label} rates · 🖨 prints the letterhead quotation · 📌 save a version to compare a re-price
           </span>
         )}
       </div>
