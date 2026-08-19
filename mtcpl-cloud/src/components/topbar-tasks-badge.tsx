@@ -60,6 +60,10 @@ export type TopbarTask = {
   /** Owner-only approval — floated into a highlighted "Needs your approval"
    *  group at the very top of the dropdown so the owner spots his work fast. */
   ownerCritical?: boolean;
+  /** Listed in the panel but NOT added to the bell count. Final Audit is a
+   *  long-running reconciliation backlog (681 rows in Aug 2026) — counting
+   *  it drowned every real, actionable task in the badge (Daksh). */
+  excludeFromBadge?: boolean;
 };
 
 // Department accent colours used by the dropdown headers + the
@@ -111,15 +115,28 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
 
   if (items.length === 0) return null;
 
-  const total = items.reduce((s, it) => s + it.count, 0);
+  // What the BELL counts (Daksh, Aug 2026):
+  //   • owner / developer → ONLY their own "Needs your approval" queues.
+  //     Everything else in the panel belongs to someone else's desk, so
+  //     counting it made the badge read 722 when 4 things needed them.
+  //   • everyone else → all their queues EXCEPT the ones flagged
+  //     excludeFromBadge (Final Audit).
+  // The panel still LISTS everything — nothing becomes unreachable, the
+  // number just stops crying wolf.
+  const ownerItems = items.filter((it) => it.ownerCritical).sort((a, b) => b.count - a.count);
+  const countedItems =
+    ownerItems.length > 0 ? ownerItems : items.filter((it) => !it.excludeFromBadge);
+  const total = countedItems.reduce((s, it) => s + it.count, 0);
   const hasPending = total > 0;
+  /** Rows shown but deliberately not counted — surfaced as a footnote so a
+   *  mismatch between the bell and the sections never looks like a bug. */
+  const uncounted = items.filter((it) => !countedItems.includes(it) && it.count > 0);
 
   // Group items by department in render order: Production → Finance
   // → Inventory. Sections that have no items for this user (e.g.
   // an accountant doesn't get a Production row) are skipped.
   // Owner-only approvals float into a highlighted group at the very top so the
   // owner instantly sees the work only he can clear (UI only — Daksh).
-  const ownerItems = items.filter((it) => it.ownerCritical).sort((a, b) => b.count - a.count);
   const grouped: Array<{
     dept: TopbarTaskDepartment | "owner";
     items: TopbarTask[];
@@ -483,6 +500,31 @@ export function TopbarTasksBadge({ items }: { items: TopbarTask[] }) {
                 </div>
               );
             })}
+
+            {/* Why the bell and the sections disagree. Without this the
+                owner sees "4" on the pill and 681 rows below it and
+                assumes the count is broken. */}
+            {uncounted.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 7,
+                  borderTop: "1px solid rgba(15,23,42,0.08)",
+                  fontSize: 10.5,
+                  lineHeight: 1.5,
+                  color: "rgba(15,23,42,0.5)",
+                }}
+              >
+                Not counted on the bell:{" "}
+                {uncounted.map((it, i) => (
+                  <span key={it.id}>
+                    {i > 0 ? ", " : ""}
+                    {it.label} ({it.count})
+                  </span>
+                ))}
+                . Listed here, but they are not waiting on you.
+              </div>
+            )}
           </div>
         </>
       )}

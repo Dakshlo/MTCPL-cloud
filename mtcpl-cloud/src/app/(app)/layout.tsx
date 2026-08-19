@@ -1049,6 +1049,10 @@ function buildTopbarTaskItems(counts: {
       count: counts.finalAuditBadge,
       icon: "🧾",
       department: "finance",
+      // Daksh (Aug 2026) — a long-running reconciliation backlog (681 rows),
+      // not a queue anyone clears today. Counting it on the bell buried the
+      // handful of things that genuinely need action. Still listed + linked.
+      excludeFromBadge: true,
     });
   }
   // Mig 085 — Debit approval (owner / developer only). Flagged
