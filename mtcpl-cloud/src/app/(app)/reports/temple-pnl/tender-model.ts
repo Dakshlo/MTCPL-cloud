@@ -240,44 +240,63 @@ export function itemPerUnit(it: TenderItem, qty: number | null, base: number): n
   return itemRupees(it, qty, base) / qty;
 }
 
-export type QuoteRow = { sr: number; particulars: string; rate: number | null; amount: number; group: string };
+export type QuoteRow = { sr: number; particulars: string; rate: number | null; amount: number };
+/** A cost head inside a rate table, with its own sub-total rate — the printed
+ *  quotation bands its particulars by group so the client can read where the
+ *  money sits, not just a flat list of fourteen lines. */
+export type QuoteGroup = {
+  id: string;
+  title: string;
+  rows: QuoteRow[];
+  rate: number | null;
+  amount: number;
+};
 export type QuoteTable = {
   id: string;
   /** Table caption — the section's own name, or the letter's `work` fallback. */
   title: string;
   uom: TenderUom;
   qty: number | null;
+  groups: QuoteGroup[];
+  /** Every row, flat, in print order — for consumers that don't want bands. */
   rows: QuoteRow[];
   totalRate: number | null;
   totalAmount: number;
 };
 
 /** Flatten a sheet into the quotation's tables — one per master group, each a
- *  Sr. / Particulars / Uom. / Rate list closing on its own total rate. */
+ *  Sr. / Particulars / Uom. / Rate list, banded by cost head, closing on its
+ *  own total rate. Sr. runs continuously down the whole table, the way the
+ *  company's own quotation numbers it. */
 export function quoteTables(a: Parameters<typeof sectionsOf>[0], fallbackTitle: string): QuoteTable[] {
   return sectionsOf(a).map((s, si) => {
     const calc = computeSection(s);
-    const rows: QuoteRow[] = [];
+    let sr = 0;
+    const groups: QuoteGroup[] = [];
     for (const g of s.groups) {
+      const rows: QuoteRow[] = [];
+      let amount = 0;
+      let rate = 0;
+      let anyRate = false;
       for (const it of g.items) {
         const title = (it.title || "").trim();
-        const amount = itemRupees(it, s.qty, calc.base);
-        if (!title && amount <= 0) continue; // never print an empty scratch row
-        rows.push({
-          sr: rows.length + 1,
-          particulars: title || "—",
-          rate: itemPerUnit(it, s.qty, calc.base),
-          amount,
-          group: g.title || "",
-        });
+        const amt = itemRupees(it, s.qty, calc.base);
+        if (!title && amt <= 0) continue; // never print an empty scratch row
+        const r = itemPerUnit(it, s.qty, calc.base);
+        if (r != null) { rate += r; anyRate = true; }
+        amount += amt;
+        rows.push({ sr: ++sr, particulars: title || "—", rate: r, amount: amt });
       }
+      if (rows.length === 0) continue;
+      groups.push({ id: g.id, title: (g.title || "").trim(), rows, rate: anyRate ? rate : null, amount });
     }
     return {
       id: s.id || `s${si}`,
       title: (s.title || "").trim() || fallbackTitle,
       uom: s.uom,
       qty: s.qty,
-      rows,
+      groups,
+      rows: groups.flatMap((g) => g.rows),
       totalRate: calc.perCft,
       totalAmount: calc.grand,
     };

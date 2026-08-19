@@ -192,9 +192,9 @@ function computeTimeline(a: TenderAnalysis, secs: TenderSection[], dataPace: num
 
 const cellInput: React.CSSProperties = {
   border: "1px solid transparent",
-  borderRadius: 8,
-  padding: "7px 9px",
-  fontSize: 13,
+  borderRadius: 7,
+  padding: "4px 8px",
+  fontSize: 12.5,
   color: C.ink,
   background: "transparent",
   outline: "none",
@@ -205,8 +205,8 @@ const cellInput: React.CSSProperties = {
 /** One worksheet row. `perUnit` is the rate this line contributes to the
  *  printed quotation — shown so the sheet reads like the document it becomes. */
 function ItemRow({
-  item, qty, base, unit, autoFocusTitle, readOnly,
-  onChange, onDelete, onEnter,
+  item, qty, base, unit, autoFocusTitle, readOnly, dragging, dropTarget,
+  onChange, onDelete, onEnter, onDragStart, onDragOver, onDrop, onDragEnd,
 }: {
   item: TenderItem;
   qty: number | null;
@@ -215,14 +215,44 @@ function ItemRow({
   autoFocusTitle: boolean;
   /** Viewing a frozen version — the row reads, it does not take input. */
   readOnly: boolean;
+  /** This row is the one being dragged. */
+  dragging: boolean;
+  /** The dragged row would land here. */
+  dropTarget: boolean;
   onChange: (patch: Partial<TenderItem>) => void;
   onDelete: () => void;
   onEnter: () => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
 }) {
   const rupees = itemRupees(item, qty, base);
   const perUnit = itemPerUnit(item, qty, base);
   return (
-    <div className="tn-row" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 80px 100px 70px 84px 24px", alignItems: "center", gap: 8, padding: "2px 6px", borderRadius: 10 }}>
+    <div
+      className="tn-row"
+      onDragOver={(e) => { if (!readOnly) { e.preventDefault(); onDragOver(); } }}
+      onDrop={(e) => { if (!readOnly) { e.preventDefault(); onDrop(); } }}
+      style={{
+        display: "grid", gridTemplateColumns: "16px minmax(0,1fr) 78px 96px 68px 82px 22px",
+        alignItems: "center", gap: 7, padding: "1px 6px", borderRadius: 8,
+        opacity: dragging ? 0.35 : 1,
+        boxShadow: dropTarget ? `inset 0 2px 0 ${C.indigo}` : undefined,
+      }}
+    >
+      {/* Grab handle — only the handle is draggable, so the inputs keep
+          normal text selection. */}
+      {readOnly ? <span /> : (
+        <span
+          className="tn-grip"
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          title="Drag to reorder this line"
+          style={{ cursor: "grab", color: "#c8cdd6", fontSize: 12, lineHeight: 1, textAlign: "center", userSelect: "none" }}
+        >⠿</span>
+      )}
       <input
         style={cellInput}
         className="tn-cell"
@@ -237,18 +267,18 @@ function ItemRow({
         value={item.mode}
         disabled={readOnly}
         onChange={(e) => onChange({ mode: e.target.value as TenderItemMode })}
-        style={{ fontSize: 11.5, fontWeight: 700, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 5px", background: C.wash, outline: "none", cursor: "pointer" }}
+        style={{ fontSize: 11, fontWeight: 700, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 7, padding: "3px 4px", background: C.wash, outline: "none", cursor: "pointer" }}
       >
         <option value="amount">₹ fixed</option>
         <option value="per_cft">₹ / {unit}</option>
         <option value="percent">% of ₹</option>
       </select>
       <div style={{ position: "relative" }}>
-        <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: C.muted, fontWeight: 700 }}>
+        <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: C.muted, fontWeight: 700 }}>
           {item.mode === "percent" ? "%" : "₹"}
         </span>
         <input
-          style={{ ...cellInput, paddingLeft: 24, textAlign: "right", fontVariantNumeric: "tabular-nums", border: `1px solid ${C.line}`, background: C.paper }}
+          style={{ ...cellInput, paddingLeft: 21, textAlign: "right", fontVariantNumeric: "tabular-nums", border: `1px solid ${C.line}`, background: C.paper }}
           className="tn-cell"
           type="number"
           min={0}
@@ -262,10 +292,10 @@ function ItemRow({
       </div>
       {/* The quotation rate this line prints as — a lump sum spread over the
           quantity reads here exactly as the client will see it. */}
-      <div title={`Rate per ${unit} on the quotation`} style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, color: perUnit != null && perUnit > 0 ? C.indigo : "#c8cdd6", fontVariantNumeric: "tabular-nums" }}>
+      <div title={`Rate per ${unit} on the quotation`} style={{ textAlign: "right", fontSize: 11, fontWeight: 700, color: perUnit != null && perUnit > 0 ? C.indigo : "#c8cdd6", fontVariantNumeric: "tabular-nums" }}>
         {perUnit != null && perUnit > 0 ? `${Math.round(perUnit).toLocaleString("en-IN")}/-` : "—"}
       </div>
-      <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 700, color: rupees > 0 ? C.ink2 : C.muted, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, color: rupees > 0 ? C.ink2 : C.muted, fontVariantNumeric: "tabular-nums" }}>
         {rupees > 0 ? inr(rupees) : "—"}
         {item.mode === "per_cft" && qty == null && (
           <span title={`Set the project ${unit} above for ₹/${unit} lines to count.`} style={{ marginLeft: 4, color: C.amber }}>⚠</span>
@@ -273,7 +303,7 @@ function ItemRow({
       </div>
       {readOnly ? <span /> : (
         <button type="button" className="tn-del" onClick={onDelete} title="Remove line"
-          style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, borderRadius: 8, padding: "4px 5px", justifySelf: "center" }}>
+          style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 12.5, borderRadius: 7, padding: "2px 4px", justifySelf: "center" }}>
           ✕
         </button>
       )}
@@ -282,8 +312,8 @@ function ItemRow({
 }
 
 function GroupCard({
-  group, index, sr, qty, base, grand, unit, focusItemId, readOnly,
-  onTitle, onItemChange, onItemDelete, onAddItem, onDelete,
+  group, index, sr, qty, base, grand, unit, focusItemId, readOnly, drag,
+  onTitle, onItemChange, onItemDelete, onAddItem, onDelete, onDragItem,
 }: {
   group: TenderGroup;
   index: number;
@@ -296,21 +326,28 @@ function GroupCard({
   unit: string;
   focusItemId: string | null;
   readOnly: boolean;
+  /** Live drag state, shared across the sheet so a row knows if it is the
+   *  one moving or the one being dropped onto. */
+  drag: { groupId: string | null; from: number; over: number };
   onTitle: (t: string) => void;
   onItemChange: (itemId: string, patch: Partial<TenderItem>) => void;
   onItemDelete: (itemId: string) => void;
   onAddItem: () => void;
   onDelete: () => void;
+  /** "grab" starts a drag from index i, "over" marks i as the landing spot,
+   *  "drop" commits, "end" clears. One callback so the workspace owns the
+   *  whole gesture and a row stays a dumb, focus-safe component. */
+  onDragItem: (phase: "grab" | "over" | "drop" | "end", index: number) => void;
 }) {
   const color = GROUP_COLORS[index % GROUP_COLORS.length];
   const total = group.items.reduce((s, it) => s + itemRupees(it, qty, base), 0);
   const share = grand > 0 ? (total / grand) * 100 : 0;
   return (
     <div className="tn-group" style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${color}`, borderRadius: 14, background: C.paper, overflow: "hidden", boxShadow: "0 1px 2px rgba(11,18,32,0.03)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px 9px", background: `linear-gradient(180deg, ${color}0d, transparent)`, borderBottom: `1px solid ${C.line}` }}>
-        <span title={`Group ${sr}`} style={{ minWidth: 22, height: 20, padding: "0 6px", borderRadius: 6, background: color, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{sr}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 5px", background: `linear-gradient(180deg, ${color}0d, transparent)`, borderBottom: `1px solid ${C.line}` }}>
+        <span title={`Group ${sr}`} style={{ minWidth: 20, height: 18, padding: "0 5px", borderRadius: 5, background: color, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{sr}</span>
         <input
-          style={{ ...cellInput, fontWeight: 800, fontSize: 13.5, padding: "5px 8px", letterSpacing: "-0.01em" }}
+          style={{ ...cellInput, fontWeight: 800, fontSize: 12.5, padding: "3px 7px", letterSpacing: "-0.01em" }}
           className="tn-cell"
           placeholder="Group heading…"
           value={group.title}
@@ -318,7 +355,7 @@ function GroupCard({
           onChange={(e) => onTitle(e.target.value)}
         />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(total)}</span>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(total)}</span>
           {share > 0 && (
             <span style={{ fontSize: 10, fontWeight: 800, color, background: `${color}14`, borderRadius: 999, padding: "2.5px 8px", fontVariantNumeric: "tabular-nums" }}>
               {share.toFixed(0)}%
@@ -333,11 +370,11 @@ function GroupCard({
         )}
       </div>
       {/* Column ruler — the sheet reads like a real worksheet. */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 80px 100px 70px 84px 24px", gap: 8, padding: "6px 14px 4px", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.11em", color: "#b6bdc9" }}>
-        <span>ITEM</span><span>BASIS</span><span style={{ textAlign: "right" }}>VALUE</span><span style={{ textAlign: "right" }}>RATE/{unit.toUpperCase()}</span><span style={{ textAlign: "right" }}>AMOUNT</span><span />
+      <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0,1fr) 78px 96px 68px 82px 22px", gap: 7, padding: "4px 12px 2px", fontSize: 8, fontWeight: 800, letterSpacing: "0.11em", color: "#c8cdd6" }}>
+        <span /><span>ITEM</span><span>BASIS</span><span style={{ textAlign: "right" }}>VALUE</span><span style={{ textAlign: "right" }}>RATE/{unit.toUpperCase()}</span><span style={{ textAlign: "right" }}>AMOUNT</span><span />
       </div>
-      <div style={{ padding: "0 8px 7px", display: "flex", flexDirection: "column", gap: 1 }}>
-        {group.items.map((it) => (
+      <div style={{ padding: "0 6px 4px", display: "flex", flexDirection: "column", gap: 0 }}>
+        {group.items.map((it, ii) => (
           <ItemRow
             key={it.id}
             item={it}
@@ -346,16 +383,22 @@ function GroupCard({
             unit={unit}
             autoFocusTitle={focusItemId === it.id}
             readOnly={readOnly}
+            dragging={drag.groupId === group.id && drag.from === ii}
+            dropTarget={drag.groupId === group.id && drag.over === ii && drag.from !== ii}
             onChange={(patch) => onItemChange(it.id, patch)}
             onDelete={() => onItemDelete(it.id)}
             onEnter={onAddItem}
+            onDragStart={() => onDragItem("grab", ii)}
+            onDragOver={() => onDragItem("over", ii)}
+            onDrop={() => onDragItem("drop", ii)}
+            onDragEnd={() => onDragItem("end", ii)}
           />
         ))}
         {!readOnly && <button
           type="button"
           onClick={onAddItem}
           className="tn-addline"
-          style={{ alignSelf: "flex-start", margin: "5px 6px 3px", fontSize: 11.5, fontWeight: 700, color: C.indigo, border: "none", background: "transparent", cursor: "pointer", padding: "3px 8px", borderRadius: 8 }}
+          style={{ alignSelf: "flex-start", margin: "3px 6px 1px", fontSize: 11, fontWeight: 700, color: C.indigo, border: "none", background: "transparent", cursor: "pointer", padding: "2px 7px", borderRadius: 7 }}
         >
           ＋ line <span style={{ fontSize: 9.5, color: "#b6bdc9", fontWeight: 600 }}>· Enter bhi chalega</span>
         </button>}
@@ -684,6 +727,8 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
   /** Which point on the version timeline is on screen. null = the live sheet
    *  (always the LAST stop, and the default). */
   const [viewVersionId, setViewVersionId] = useState<string | null>(null);
+  /** In-flight line drag: which group, from where, hovering over where. */
+  const [drag, setDrag] = useState<{ groupId: string | null; from: number; over: number }>({ groupId: null, from: -1, over: -1 });
 
   // "Full width" means full width: it hides the app menu AND the breakdown
   // rail, so the sheet owns the window. Coming back out restores both.
@@ -769,16 +814,34 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
     patchSection(sectionId, (s) => ({ ...s, groups: s.groups.map((g) => (g.id === groupId ? { ...g, items: [...g.items, it] } : g)) }));
   };
 
-  /** Freeze the sheet as it stands — the version the team actually sent. */
-  const saveVersion = () => {
-    if (!active) return;
-    const suggested = `v${(active.versions?.length ?? 0) + 1}`;
-    const label = window.prompt("Name this version — e.g. \"v1 — sent to Shubham\"", suggested);
-    if (label == null) return;
-    const snapSections = JSON.parse(JSON.stringify(sectionsOf(active))) as TenderSection[];
-    const snap: TenderVersion = {
+  /** Move a line inside its group. The workspace owns the whole gesture so
+   *  the row components stay dumb (and focus-safe). */
+  const dragItem = (sectionId: string, groupId: string, phase: "grab" | "over" | "drop" | "end", index: number) => {
+    if (phase === "grab") { setDrag({ groupId, from: index, over: index }); return; }
+    if (phase === "over") { setDrag((d) => (d.groupId === groupId && d.over !== index ? { ...d, over: index } : d)); return; }
+    if (phase === "end") { setDrag({ groupId: null, from: -1, over: -1 }); return; }
+    // drop
+    const from = drag.from;
+    setDrag({ groupId: null, from: -1, over: -1 });
+    if (drag.groupId !== groupId || from < 0 || from === index) return;
+    patchSection(sectionId, (sec) => ({
+      ...sec,
+      groups: sec.groups.map((g) => {
+        if (g.id !== groupId) return g;
+        const items = [...g.items];
+        const [moved] = items.splice(from, 1);
+        items.splice(index, 0, moved);
+        return { ...g, items };
+      }),
+    }));
+  };
+
+  /** A snapshot of the sheet exactly as it stands. */
+  const snapshot = (label: string): TenderVersion => {
+    const snapSections = JSON.parse(JSON.stringify(sectionsOf(active!))) as TenderSection[];
+    return {
       id: uid(),
-      label: label.trim() || suggested,
+      label,
       savedAt: new Date().toISOString(),
       sections: snapSections,
       // Legacy mirror, so an older reader still sees a coherent snapshot.
@@ -786,6 +849,27 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
       groups: snapSections[0]?.groups ?? [],
       grand: computeSheetTotal({ sections: snapSections }).grand,
     };
+  };
+
+  /** 💾 Save — refresh the LATEST version in place. Pressing save repeatedly
+   *  used to stack identical chips; a new point on the timeline is now a
+   *  deliberate act (＋ New version), not a side effect of saving. */
+  const updateVersion = () => {
+    if (!active) return;
+    const latest = (active.versions ?? [])[0];
+    if (!latest) return newVersion();
+    const snap = { ...snapshot(latest.label), id: latest.id };
+    patchActive((a) => ({ ...a, versions: [snap, ...(a.versions ?? []).slice(1)] }));
+    setViewVersionId(null);
+  };
+
+  /** ＋ New version — a fresh point on the timeline. */
+  const newVersion = () => {
+    if (!active) return;
+    const suggested = `v${(active.versions?.length ?? 0) + 1}`;
+    const label = window.prompt("Name this version — e.g. \"v1 — sent to Shubham\"", suggested);
+    if (label == null) return;
+    const snap = snapshot(label.trim() || suggested);
     patchActive((a) => ({ ...a, versions: [snap, ...(a.versions ?? [])].slice(0, 12) }));
     setViewVersionId(null);
   };
@@ -972,7 +1056,18 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
             {/* Actions */}
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: "auto", flexWrap: "wrap" }}>
               <button type="button" onClick={() => setShowLetter((v) => !v)} style={ghostBtn(showLetter)}>✉️ Letter</button>
-              {!readOnly && <button type="button" onClick={saveVersion} style={ghostBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>}
+              {!readOnly && (
+                versions.length > 0 ? (
+                  <>
+                    <button type="button" onClick={updateVersion} style={ghostBtn(false)} title={`Refresh "${versions[0].label}" with the numbers as they stand now`}>
+                      💾 Save to {versions[0].label}
+                    </button>
+                    <button type="button" onClick={newVersion} style={ghostBtn(false)} title="Start a NEW point on the timeline, keeping the current one">＋ New version</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={newVersion} style={ghostBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>
+                )
+              )}
               <a href={`/reports/tender/${active.id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...ghostBtn(false), textDecoration: "none", display: "inline-block" }}>
                 🖨 Quotation
               </a>
@@ -1213,7 +1308,9 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                   </div>
                 )}
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(620px, 1fr))", gap: 11, alignItems: "start" }}>
+                {/* One column, top to bottom — a worksheet reads down, not in a
+                    grid that shuffles groups left/right as the window resizes. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {sec.groups.map((g, gi) => (
                     <GroupCard
                       key={g.id}
@@ -1226,6 +1323,8 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                       unit={unit}
                       focusItemId={focusItemId}
                       readOnly={readOnly}
+                      drag={drag}
+                      onDragItem={(phase, idx) => dragItem(sec.id, g.id, phase, idx)}
                       onTitle={(t) => patchSection(sec.id, (x) => ({ ...x, groups: x.groups.map((y) => (y.id === g.id ? { ...y, title: t } : y)) }))}
                       onItemChange={(itemId, patch) =>
                         patchSection(sec.id, (x) => ({
@@ -1301,6 +1400,10 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
 .tn-sheet { transition: transform .14s, box-shadow .14s; }
 .tn-sheet:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(11,18,32,0.08); }
 .tn-addline:hover { background: ${C.indigoSoft}; }
+.tn-grip { opacity: 0; transition: opacity .12s, color .12s; }
+.tn-row:hover .tn-grip { opacity: 1; }
+.tn-grip:hover { color: ${C.indigo} !important; }
+.tn-grip:active { cursor: grabbing; }
 .tn-reveal { animation: tnReveal .45s cubic-bezier(.22,1,.36,1) both; }
 @keyframes tnReveal { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
 .tn-pulse { animation: tnPulse 1.1s ease-in-out infinite; }

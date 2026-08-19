@@ -20,6 +20,7 @@
  * DEVELOPER ONLY — same gate as the Temple P&L page this belongs to.
  */
 
+import { Fragment } from "react";
 import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -92,11 +93,12 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         .doc-title { text-align: center; margin: 0 0 7px; }
         .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
 
-        .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 14px; font-size: 11.5px; font-weight: 700; }
+        .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 14px; font-size: 11.5px; font-weight: 700; color: #0f2540; }
         .to { margin-top: 4px; font-size: 12px; line-height: 1.55; }
         .to-k { font-weight: 700; }
         .salut { margin-top: 14px; font-size: 12px; font-weight: 700; }
         .intro { margin-top: 12px; font-size: 12px; line-height: 1.75; text-align: justify; text-indent: 34px; }
+        .qty-line { margin-top: 5px; font-size: 10.5px; color: #666; font-weight: 700; text-align: right; }
 
         /* ── the rate table ── */
         .tbl-wrap { margin: 20px auto 0; width: 92%; }
@@ -105,8 +107,11 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         table.rb th, table.rb td { border: 1px solid #d3dae3; padding: 4px 8px; }
         table.rb th { background: #eef2f7; color: #444; text-transform: uppercase; letter-spacing: 0.04em; }
         table.rb th { font-size: 11.5px; font-weight: 800; text-align: center; }
-        table.rb td.sr { text-align: center; width: 38px; }
+        table.rb td.sr { text-align: center; width: 38px; color: #777; }
         table.rb td.pt { text-align: left; }
+        /* Cost-head band — the group's name on the left, its own rate on the right. */
+        table.rb tr.band td { background: #f4f7fb; font-weight: 800; font-size: 10.5px; color: #0f2540; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; }
+        table.rb tr.band td.r { text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0; }
         table.rb td.uom { text-align: center; width: 74px; }
         table.rb td.rate { text-align: right; width: 108px; font-variant-numeric: tabular-nums; }
         table.rb td.amt { text-align: right; width: 118px; font-variant-numeric: tabular-nums; }
@@ -116,6 +121,11 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
 
         .noqty { margin: 18px auto 0; width: 92%; border: 1px solid #e0c39a; background: #fdf6ec; border-radius: 5px; padding: 9px 12px; font-size: 11.5px; color: #8a5a17; line-height: 1.6; }
 
+        .sum { margin: 14px auto 0; width: 92%; display: flex; justify-content: flex-end; }
+        .sum table { border-collapse: collapse; font-size: 11.5px; }
+        .sum td { border: 1px solid #d3dae3; padding: 4px 12px; }
+        .sum td.k { background: #eef2f7; font-weight: 700; color: #444; }
+        .sum td.v { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; color: #0f2540; }
         .terms { margin-top: 22px; }
         .terms-h { font-size: 12.5px; font-weight: 800; text-decoration: underline; }
         .terms ol { margin: 7px 0 0 20px; font-size: 12px; line-height: 1.8; }
@@ -177,6 +187,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         {/* Rate breakup — one table per master group */}
         {tables.map((t) => (
           <div className="tbl-wrap" key={t.id}>
+            {t.qty ? <div className="qty-line">Quantity: {t.qty.toLocaleString("en-IN")} {t.uom}</div> : null}
             <table className="rb">
               <caption>Rate Breakup for {t.title}</caption>
               <thead>
@@ -189,22 +200,29 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
                 </tr>
               </thead>
               <tbody>
-                {t.rows.length === 0 && (
+                {t.groups.length === 0 && (
                   <tr><td className="pt" colSpan={showAmounts ? 5 : 4} style={{ textAlign: "center", color: "#999" }}>No priced lines in this section yet.</td></tr>
                 )}
-                {t.rows.map((r) => (
-                  <tr key={r.sr}>
-                    <td className="sr">{r.sr}</td>
-                    <td className="pt">
-                      {r.particulars}
-                      {/* Internal group names never go out on the client copy —
-                          their paper quotation is a flat list of particulars. */}
-                      {showAmounts && r.group ? <span className="grp"> · {r.group}</span> : null}
-                    </td>
-                    <td className="uom">{t.uom}</td>
-                    <td className="rate">{rateCell(r.rate)}</td>
-                    {showAmounts && <td className="amt">{rupees(r.amount)}</td>}
-                  </tr>
+                {t.groups.map((g) => (
+                  <Fragment key={g.id}>
+                    {g.title && (
+                      <tr className="band">
+                        <td colSpan={2}>{g.title}</td>
+                        <td>{t.uom}</td>
+                        <td className="r">{rateCell(g.rate)}</td>
+                        {showAmounts && <td className="r">{rupees(g.amount)}</td>}
+                      </tr>
+                    )}
+                    {g.rows.map((r) => (
+                      <tr key={r.sr}>
+                        <td className="sr">{r.sr}</td>
+                        <td className="pt">{r.particulars}</td>
+                        <td className="uom">{t.uom}</td>
+                        <td className="rate">{rateCell(r.rate)}</td>
+                        {showAmounts && <td className="amt">{rupees(r.amount)}</td>}
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
@@ -221,14 +239,20 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         {/* Only a multi-table quotation needs a combined figure — a single
             breakup already closes on its own Total Rate row. */}
         {multi && showAmounts && (
-          <div className="tbl-wrap">
-            <table className="rb">
-              <tfoot>
+          <div className="sum">
+            <table>
+              <tbody>
+                {tables.map((t) => (
+                  <tr key={t.id}>
+                    <td className="k">{t.title}</td>
+                    <td className="v">{rupees(t.totalAmount)}</td>
+                  </tr>
+                ))}
                 <tr>
-                  <td className="lbl" colSpan={3}>Total estimate — all sections</td>
-                  <td className="amt">{rupees(calc.grand)}</td>
+                  <td className="k" style={{ fontWeight: 800 }}>Total estimate</td>
+                  <td className="v">{rupees(calc.grand)}</td>
                 </tr>
-              </tfoot>
+              </tbody>
             </table>
           </div>
         )}
