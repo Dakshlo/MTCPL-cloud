@@ -43,7 +43,14 @@ function numKey(code: string): number {
   return d ? Number(d[1]) : 0;
 }
 
-const money = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Mig 220 — invoices now bill on whole rupees, so a value that IS whole prints
+// without a dead ".00". Anything still carrying paise (an invoice issued before
+// mig 220, or a mixed total) keeps both decimals — the column never rounds a
+// figure it is only displaying.
+const money = (n: number) =>
+  Math.abs(n - Math.round(n)) < 0.005
+    ? Math.round(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })
+    : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qty = (n: number) => (n ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—");
 const moneyDash = (n: number) => (n ? money(n) : "—");
 const fmtDate = (d: string) => (d ? new Date(`${d}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "—");

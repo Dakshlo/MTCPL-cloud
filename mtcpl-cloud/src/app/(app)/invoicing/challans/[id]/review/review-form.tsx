@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import { saveChallanPricingAction, returnDispatchToWaitingAction } from "../../../actions";
 import { ReturnToDispatchButton } from "../../../_ui/return-to-dispatch-button";
 import { dash } from "@/lib/dispatch-grouping";
-import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type DiscountMode, type GroupedInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, roundOffText, rupeePayable, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type DiscountMode, type GroupedInvoiceTotals, type GstMode } from "@/lib/challan-pricing";
 import { DiscountControl, type DiscountModeUi } from "../../../_ui/discount-control";
 import { amountInWordsIN } from "@/lib/amount-words";
 
@@ -57,6 +57,7 @@ export function ReviewForm({
   initHeads = {},
   initTableGst = {},
   initDiscount,
+  roundTotal = false,
   hsnUseVendor = false,
 }: {
   challanId: string;
@@ -70,6 +71,8 @@ export function ReviewForm({
   freedNumbers?: number[];
   /** Jul 2026 — editing a FINAL (approved) invoice: number + approval kept. */
   editMode?: boolean;
+  /** Mig 220 — round the amount payable to a whole rupee (every new invoice). */
+  roundTotal?: boolean;
   /** Bill-To / Ship-To blocks + source challan code for the invoice preview. */
   bill?: { name: string; address: string | null; gstin: string | null } | null;
   ship?: { name: string; address: string | null } | null;
@@ -183,7 +186,7 @@ export function ReviewForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableGst, items]);
   const canSubmit = allRated && allHsn && allGst;
-  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0, roundTotal);
 
   const cell: React.CSSProperties = { padding: "7px 9px", border: "1px solid var(--border)", fontSize: 12.5, verticalAlign: "middle" };
   const head: React.CSSProperties = { padding: "7px 9px", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--muted)", textAlign: "left", border: "1px solid var(--border)", borderBottomWidth: 2, whiteSpace: "nowrap", background: "var(--surface)" };
@@ -413,18 +416,19 @@ export function ReviewForm({
           {totals.groups.map((g, i) => (
             <Row key={i} label={`${gstGroupLabel(mode, g)}${totals.multi ? ` on ${rupee(g.taxable)}` : ""}`} value={rupee(g.taxAmt)} />
           ))}
-          {disc.amt > 0 ? (
+          {disc.amt > 0 || disc.roundOff !== 0 ? (
             <>
               <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
               <Row label="Grand total" value={rupee(totals.grand)} />
-              <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />
+              {disc.amt > 0 && <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />}
+              {disc.roundOff !== 0 && <Row label="Round off" value={roundOffText(disc)} />}
               <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
-              <Row label="Amount payable" value={rupee(disc.payable)} big />
+              <Row label="Amount payable" value={rupeePayable(disc)} big />
             </>
           ) : (
             <>
               <div style={{ borderTop: "1.5px solid var(--border)", margin: "8px 0" }} />
-              <Row label="Grand total" value={rupee(totals.grand)} big />
+              <Row label="Grand total" value={rupeePayable(disc)} big />
             </>
           )}
         </div>
@@ -454,6 +458,7 @@ export function ReviewForm({
           mode={mode}
           discountMode={discMode === "off" ? null : discMode}
           discountValue={Number(discValue) || 0}
+          roundTotal={roundTotal}
           onClose={() => setShowPreview(false)}
         />
       )}
@@ -464,7 +469,7 @@ export function ReviewForm({
 /** Full tax-invoice preview (NOT VALID watermark) — renders how the FINAL invoice
  *  will read once priced + owner-approved (Bill/Ship To, covered challan, GST, tax
  *  summary, amount in words, signatures). Daksh Jul 2026. */
-function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mode, discountMode = null, discountValue = 0, onClose }: {
+function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mode, discountMode = null, discountValue = 0, roundTotal = false, onClose }: {
   bill: { name: string; address: string | null; gstin: string | null } | null;
   ship: { name: string; address: string | null } | null;
   challanCode: string;
@@ -474,6 +479,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   mode: GstMode;
   discountMode?: DiscountMode;
   discountValue?: number;
+  roundTotal?: boolean;
   onClose: () => void;
 }) {
   const pcell: React.CSSProperties = { padding: "4px 6px", border: "1px solid #e2e7ee", fontWeight: 700, color: "#1a1a1a", fontSize: 10.5 };
@@ -482,7 +488,7 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
   const party: React.CSSProperties = { flex: 1, border: "1px solid #ccc", borderRadius: 6, padding: "7px 9px", background: "#f7fafc" };
   const kk: React.CSSProperties = { fontSize: 8.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "#888" };
   const shipName = (ship?.name ?? "").trim() || bill?.name || "—";
-  const disc = applyDiscount(totals.grand, discountMode, discountValue);
+  const disc = applyDiscount(totals.grand, discountMode, discountValue, roundTotal);
   return (
     <div onMouseDown={onClose} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.5)", display: "grid", placeItems: "start center", padding: 16, overflowY: "auto" }}>
       <div onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(820px, 100%)", background: "#fff", color: "#1a1a1a", borderRadius: 12, padding: "18px 22px 22px", boxShadow: "0 24px 60px rgba(0,0,0,0.35)", position: "relative", overflow: "hidden" }}>
@@ -575,14 +581,15 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
               {totals.groups.map((g, i) => (
                 <div key={i} style={{ ...ptot, background: "#f7fafc" }}><span>{gstGroupLabel(mode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(g.taxAmt)}</span></div>
               ))}
-              {disc.amt > 0 ? (
+              {disc.amt > 0 || disc.roundOff !== 0 ? (
                 <>
                   <div style={ptot}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
-                  <div style={{ ...ptot, background: "#f7fafc" }}><span>{discountLabel(disc)}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>−{rupee(disc.amt)}</span></div>
-                  <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Amount Payable</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(disc.payable)}</span></div>
+                  {disc.amt > 0 && <div style={{ ...ptot, background: "#f7fafc" }}><span>{discountLabel(disc)}</span><span style={{ fontFamily: "ui-monospace, monospace" }}>−{rupee(disc.amt)}</span></div>}
+                  {disc.roundOff !== 0 && <div style={{ ...ptot, background: "#f7fafc" }}><span>Round Off</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{roundOffText(disc)}</span></div>}
+                  <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Amount Payable</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupeePayable(disc)}</span></div>
                 </>
               ) : (
-                <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupee(totals.grand)}</span></div>
+                <div style={{ ...ptot, background: "#0f2540", color: "#fff", fontWeight: 800, fontSize: 14 }}><span>Grand Total</span><span style={{ fontFamily: "ui-monospace, monospace" }}>{rupeePayable(disc)}</span></div>
               )}
             </div>
           </div>
@@ -590,14 +597,14 @@ function InvoicePreview({ bill, ship, challanCode, invoiceNo, groups, totals, mo
             <thead><tr><th style={ph}>Taxable Amount</th><th style={ph}>GST</th><th style={ph}>Total Tax</th><th style={ph}>Invoice Total</th></tr></thead>
             <tbody>
               {totals.groups.length === 0 ? (
-                <tr><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(totals.subtotal)}</td><td style={pcell}>—</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(0)}</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(disc.payable)}</td></tr>
+                <tr><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(totals.subtotal)}</td><td style={pcell}>—</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(0)}</td><td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupeePayable(disc)}</td></tr>
               ) : (
                 totals.groups.map((g, i) => (
                   <tr key={i}>
                     <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(g.taxable)}</td>
                     <td style={pcell}>{gstGroupLabel(mode, g)}</td>
                     <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right" }}>{rupee(g.taxAmt)}</td>
-                    {i === 0 && <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right", fontWeight: 800, verticalAlign: "middle" }} rowSpan={totals.groups.length}>{rupee(disc.payable)}</td>}
+                    {i === 0 && <td style={{ ...pcell, fontFamily: "ui-monospace, monospace", textAlign: "right", fontWeight: 800, verticalAlign: "middle" }} rowSpan={totals.groups.length}>{rupeePayable(disc)}</td>}
                   </tr>
                 ))
               )}

@@ -33,7 +33,7 @@ type PricedChallan = {
   priced_by: string | null;
   invoice_no_override: string | null;
   gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null;
-  discount_mode?: string | null; discount_value?: number | null;
+  discount_mode?: string | null; discount_value?: number | null; round_total?: boolean | null;
 };
 type LegacyInvoice = { id: string; invoice_number: string; invoice_date: string; customer_name: string; total: number };
 
@@ -72,7 +72,7 @@ export default async function InvoicingListPage() {
         .order("created_at", { ascending: false })
         .range(from, to),
     ),
-    pricedSelect(`${PRICED_COLS}, discount_mode, discount_value`).catch(() => pricedSelect(PRICED_COLS)),
+    pricedSelect(`${PRICED_COLS}, discount_mode, discount_value, round_total`).catch(() => pricedSelect(PRICED_COLS)),
   ]);
 
   // Compute each priced challan's grand total from its items + GST snapshot.
@@ -101,7 +101,7 @@ export default async function InvoicingListPage() {
         igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0,
       });
       // Mig 200 — the invoice VALUE is the payable (after discount).
-      totalByChallan.set(c.id, applyDiscount(t.grand, c.discount_mode ?? null, Number(c.discount_value) || 0).payable);
+      totalByChallan.set(c.id, applyDiscount(t.grand, c.discount_mode ?? null, Number(c.discount_value) || 0, c.round_total === true).payable);
     }
   }
 
@@ -116,12 +116,12 @@ export default async function InvoicingListPage() {
   }
 
   // Mig 173 — approved BULK invoices (best-effort).
-  type BulkRow = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; created_by: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null };
+  type BulkRow = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; created_by: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null; round_total?: boolean | null };
   let bulkApproved: BulkRow[] = [];
   {
     const BULK_COLS = "id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, created_by, gst_mode, igst_percent, cgst_percent, sgst_percent";
     let { data, error } = await supabase.from("bulk_invoices")
-      .select(`${BULK_COLS}, discount_mode, discount_value`)
+      .select(`${BULK_COLS}, discount_mode, discount_value, round_total`)
       .not("owner_approved_at", "is", null).is("cancelled_at", null)
       .order("invoice_date", { ascending: false });
     if (error) ({ data, error } = (await supabase.from("bulk_invoices")
@@ -145,7 +145,7 @@ export default async function InvoicingListPage() {
       for (const b of bulkApproved) {
         if (!chunk.includes(b.id)) continue;
         const t = computeGroupedGstTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
-        bulkTotal.set(b.id, applyDiscount(t.grand, b.discount_mode ?? null, Number(b.discount_value) || 0).payable);
+        bulkTotal.set(b.id, applyDiscount(t.grand, b.discount_mode ?? null, Number(b.discount_value) || 0, b.round_total === true).payable);
       }
     }
   }
@@ -227,7 +227,7 @@ export default async function InvoicingListPage() {
   const customRows: Row[] = [];
   {
     let { data, error } = await supabase.from("challans")
-      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, challan_custom_items(amount, quantity, rate, section_gst)")
+      .select("id, doc_fy, doc_seq, challan_date, temple, inv_fy, inv_seq, source_dispatch_id, custom_billed_by, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, challan_custom_items(amount, quantity, rate, section_gst)")
       .not("custom_billed_at", "is", null).not("inv_seq", "is", null).is("cancelled_at", null)
       .order("challan_date", { ascending: false });
     if (error) {
@@ -243,7 +243,7 @@ export default async function InvoicingListPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const gstItems = ((r.challan_custom_items ?? []) as any[]).map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null }));
         const t0 = computeGroupedGstTotals(gstItems, { mode: (r.gst_mode === "igst" || r.gst_mode === "cgst_sgst" ? r.gst_mode : null) as GstMode, igst: Number(r.igst_percent) || 0, cgst: Number(r.cgst_percent) || 0, sgst: Number(r.sgst_percent) || 0 });
-        const t = { ...t0, grand: applyDiscount(t0.grand, r.discount_mode ?? null, Number(r.discount_value) || 0).payable };
+        const t = { ...t0, grand: applyDiscount(t0.grand, r.discount_mode ?? null, Number(r.discount_value) || 0, r.round_total === true).payable };
         customRows.push({
           key: `cust:${r.id}`, code: invoiceCodeFromDoc(r.inv_fy, r.inv_seq) ?? `INV-${String(r.id).slice(0, 6).toUpperCase()}`,
           date: r.challan_date, customer: displayNameFor(billNames, r.temple), total: t.grand,
@@ -309,7 +309,7 @@ export default async function InvoicingListPage() {
   let otherRows: OtherRow[] = [];
   {
     let { data, error } = await supabase.from("other_challans")
-      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, invoice_parties(name), other_challan_items(amount, quantity, rate, section_gst)")
+      .select("id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_by, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, invoice_parties(name), other_challan_items(amount, quantity, rate, section_gst)")
       .not("converted_at", "is", null).is("cancelled_at", null)
       .order("converted_at", { ascending: false });
     if (error) {
@@ -325,7 +325,7 @@ export default async function InvoicingListPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const gstItems = ((o.other_challan_items ?? []) as any[]).map((it) => ({ amount: it.amount != null ? Number(it.amount) : (Number(it.quantity) || 0) * (Number(it.rate) || 0), gstPercent: it.section_gst != null ? Number(it.section_gst) : null }));
         const t0 = computeGroupedGstTotals(gstItems, { mode: (o.gst_mode === "igst" || o.gst_mode === "cgst_sgst" ? o.gst_mode : null) as GstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 });
-        const t = { ...t0, grand: applyDiscount(t0.grand, o.discount_mode ?? null, Number(o.discount_value) || 0).payable };
+        const t = { ...t0, grand: applyDiscount(t0.grand, o.discount_mode ?? null, Number(o.discount_value) || 0, o.round_total === true).payable };
         const party = Array.isArray(o.invoice_parties) ? o.invoice_parties[0] : o.invoice_parties;
         return {
           key: `oth:${o.id}`, code: invoiceCodeFromDoc(o.inv_fy, o.inv_seq) ?? `INV-${String(o.id).slice(0, 6).toUpperCase()}`,

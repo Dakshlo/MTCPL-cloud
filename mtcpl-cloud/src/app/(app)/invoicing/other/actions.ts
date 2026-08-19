@@ -260,6 +260,11 @@ export async function convertOtherChallanAction(formData: FormData) {
   try {
     await admin.from("other_challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", id);
   } catch { /* pre-mig-200 */ }
+  // Mig 220 — whole-rupee invoice value. Stamped at CONVERSION, not on the
+  // challan insert: the challan row can predate mig 220, the invoice cannot.
+  try {
+    await admin.from("other_challans").update({ round_total: true } as never).eq("id", id);
+  } catch { /* pre-mig-220 */ }
 
   const fy = financialYear(row.challan_date || new Date());
   // LOCKED number (Daksh Jul 2026) — always the next auto from the shared counter.

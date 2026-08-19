@@ -39,6 +39,23 @@ export function rupee(n: number): string {
   return `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Whole rupees, no paise — for a mig-220 rounded invoice value. */
+export function rupee0(n: number): string {
+  return `₹${Math.round(Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+/** The amount-payable figure, printed the way THIS invoice was billed: clean
+ *  whole rupees once it is rounded (mig 220), paise on a legacy invoice. */
+export function rupeePayable(d: DiscountResult): string {
+  return d.rounded ? rupee0(d.payable) : rupee(d.payable);
+}
+
+/** "+ ₹0.43" / "− ₹0.50" for the Round Off totals row. */
+export function roundOffText(d: DiscountResult): string {
+  const n = Math.abs(d.roundOff);
+  return `${d.roundOff < 0 ? "−" : "+"} ${rupee(n)}`;
+}
+
 // ── Mig 199 — multiple GST slabs in ONE invoice ─────────────────────────────
 // Each line item may carry ITS TABLE's slab % (section_gst / stone_gst). Items
 // without one fall back to the invoice-level %, so pre-mig-199 invoices compute
@@ -155,21 +172,50 @@ export type DiscountResult = {
   value: number;
   /** The ₹ knocked off (0 when off). */
   amt: number;
-  /** grand − amt — what the customer actually pays. */
+  /** What the customer actually pays — grand − discount, ROUNDED to a whole
+   *  rupee when the invoice carries round_total (mig 220). */
   payable: number;
+  /** grand − discount BEFORE rounding. Equals `payable` when rounding is off. */
+  preRound: number;
+  /** payable − preRound: the ± paise the "Round Off" line shows. 0 when off. */
+  roundOff: number;
+  /** True when this invoice's amount was rounded (mig 220). Drives whether the
+   *  figure prints with paise or as a clean whole rupee. */
+  rounded: boolean;
 };
+
+// ── Mig 220 — whole-rupee invoice value ─────────────────────────────────────
+// HALF-DOWN, exactly as Daksh specified: 200.43 → 200, 200.50 → 200,
+// 200.51 → 201. (Math.round would send 200.50 up to 201.) round2 first so
+// float dust like 200.4999999997 can never tip the .50 boundary the wrong way.
+
+/** Round an invoice amount to a whole rupee, ties DOWN. */
+export function roundInvoiceAmount(n: number): number {
+  const r = round2(Number(n) || 0);
+  return r < 0 ? -Math.ceil(-r - 0.5) : Math.ceil(r - 0.5);
+}
 
 export function applyDiscount(
   grand: number,
   mode: string | null | undefined,
   value: number | null | undefined,
+  /** The invoice's round_total (mig 220). Omitted / false → the exact
+   *  pre-mig-220 result, so already-issued invoices never move. */
+  roundTotal?: boolean | null,
 ): DiscountResult {
   const m: DiscountMode = mode === "amount" || mode === "percent" ? mode : null;
   const v = Math.max(0, Number(value) || 0);
   const g = round2(Number(grand) || 0);
-  if (!m || v <= 0) return { mode: null, value: 0, amt: 0, payable: g };
+  const rounded = roundTotal === true;
+  /** Shared tail so the discount-off and discount-on branches round identically. */
+  const withRound = (base: Omit<DiscountResult, "payable" | "preRound" | "roundOff" | "rounded">): DiscountResult => {
+    const preRound = round2(g - base.amt);
+    const payable = rounded ? roundInvoiceAmount(preRound) : preRound;
+    return { ...base, preRound, payable, roundOff: round2(payable - preRound), rounded };
+  };
+  if (!m || v <= 0) return withRound({ mode: null, value: 0, amt: 0 });
   const amt = m === "percent" ? round2((g * v) / 100) : round2(Math.min(v, g));
-  return { mode: m, value: v, amt, payable: round2(g - amt) };
+  return withRound({ mode: m, value: v, amt });
 }
 
 /** "Less: Discount @ 10%" / "Less: Discount" for the totals rows. */

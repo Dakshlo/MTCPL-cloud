@@ -95,16 +95,16 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   // Grand total per challan from its items + GST snapshot (same computation as
   // invoices/page.tsx so the figures agree end to end).
   // Mig 200 — the discount per challan (best-effort; pre-mig = off).
-  const discByChallan = new Map<string, { mode: string | null; value: number }>();
+  const discByChallan = new Map<string, { mode: string | null; value: number; round: boolean }>();
   {
     const ids0 = pending.map((c) => c.id);
     for (let i = 0; i < ids0.length; i += 300) {
       const chunk = ids0.slice(i, i + 300);
       if (!chunk.length) break;
-      const { data, error } = await supabase.from("challans").select("id, discount_mode, discount_value").in("id", chunk);
+      const { data, error } = await supabase.from("challans").select("id, discount_mode, discount_value, round_total").in("id", chunk);
       if (error) break;
-      for (const r of (data ?? []) as Array<{ id: string; discount_mode: string | null; discount_value: number | null }>) {
-        discByChallan.set(r.id, { mode: r.discount_mode, value: Number(r.discount_value) || 0 });
+      for (const r of (data ?? []) as Array<{ id: string; discount_mode: string | null; discount_value: number | null; round_total?: boolean | null }>) {
+        discByChallan.set(r.id, { mode: r.discount_mode, value: Number(r.discount_value) || 0, round: r.round_total === true });
       }
     }
   }
@@ -132,7 +132,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
         igst: Number(c.igst_percent) || 0, cgst: Number(c.cgst_percent) || 0, sgst: Number(c.sgst_percent) || 0,
       });
       // Mig 200 — show the payable (after discount).
-      totalByChallan.set(c.id, applyDiscount(t.grand, discByChallan.get(c.id)?.mode ?? null, discByChallan.get(c.id)?.value ?? 0).payable);
+      totalByChallan.set(c.id, applyDiscount(t.grand, discByChallan.get(c.id)?.mode ?? null, discByChallan.get(c.id)?.value ?? 0, discByChallan.get(c.id)?.round === true).payable);
     }
   }
 
@@ -159,13 +159,13 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
   })();
 
   // Mig 173 — pending BULK invoices (manual multi-challan invoices). Best-effort.
-  type BulkPending = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null };
+  type BulkPending = { id: string; temple: string; invoice_date: string; inv_fy: string | null; inv_seq: number | null; invoice_no_override: string | null; gst_mode: string | null; igst_percent: number | null; cgst_percent: number | null; sgst_percent: number | null; discount_mode?: string | null; discount_value?: number | null; round_total?: boolean | null };
   let bulkPending: BulkPending[] = [];
   {
     const BP_COLS = "id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent";
     let { data, error } = await supabase
       .from("bulk_invoices")
-      .select(`${BP_COLS}, discount_mode, discount_value`)
+      .select(`${BP_COLS}, discount_mode, discount_value, round_total`)
       .is("owner_approved_at", null).is("owner_rejected_at", null).is("cancelled_at", null)
       .order("created_at", { ascending: false });
     if (error) ({ data, error } = (await supabase
@@ -190,7 +190,7 @@ export default async function InvoiceApprovalPage({ searchParams }: { searchPara
       for (const b of bulkPending) {
         if (!chunk.includes(b.id)) continue;
         const t = computeGroupedGstTotals(byB.get(b.id) ?? [], { mode: (b.gst_mode === "igst" || b.gst_mode === "cgst_sgst" ? b.gst_mode : null) as GstMode, igst: Number(b.igst_percent) || 0, cgst: Number(b.cgst_percent) || 0, sgst: Number(b.sgst_percent) || 0 });
-        bulkTotal.set(b.id, applyDiscount(t.grand, b.discount_mode ?? null, Number(b.discount_value) || 0).payable);
+        bulkTotal.set(b.id, applyDiscount(t.grand, b.discount_mode ?? null, Number(b.discount_value) || 0, b.round_total === true).payable);
       }
     }
   }

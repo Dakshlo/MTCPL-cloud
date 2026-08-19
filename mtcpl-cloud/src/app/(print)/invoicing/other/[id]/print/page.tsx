@@ -16,7 +16,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canUseInvoicing } from "@/lib/invoicing-permissions";
 import { dash } from "@/lib/dispatch-grouping";
 import { groupBulkItems } from "@/lib/bulk-items";
-import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, roundOffText, rupeePayable, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { invoiceCodeFromDoc, challanCode } from "@/lib/doc-code";
 import { amountInWordsIN } from "@/lib/amount-words";
 import { PrintBtn } from "./print-btn";
@@ -84,7 +84,7 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
     { mode: gstMode, igst: Number(o.igst_percent) || 0, cgst: Number(o.cgst_percent) || 0, sgst: Number(o.sgst_percent) || 0 },
   );
   // Mig 200 — discount on the final amount (select("*") carries it post-mig).
-  const disc = applyDiscount(totals.grand, o.discount_mode, Number(o.discount_value) || 0);
+  const disc = applyDiscount(totals.grand, o.discount_mode, Number(o.discount_value) || 0, o.round_total === true);
 
   return (
     <>
@@ -279,14 +279,17 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                     {totals.groups.map((g, i) => (
                       <div key={i} className="row alt"><span>{gstGroupLabel(gstMode, g)}{totals.multi ? ` on ${rupee(g.taxable)}` : ""}</span><span className="mono">{rupee(g.taxAmt)}</span></div>
                     ))}
-                    {disc.amt > 0 ? (
+                    {/* Mig 220 — the amount payable is a whole rupee; the ± paise show as
+                        their own "Round Off" line so the document still adds up. */}
+                    {disc.amt > 0 || disc.roundOff !== 0 ? (
                       <>
                         <div className="row"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
-                        <div className="row alt"><span>{discountLabel(disc)}</span><span className="mono">−{rupee(disc.amt)}</span></div>
-                        <div className="row grand"><span>Amount Payable</span><span className="mono">{rupee(disc.payable)}</span></div>
+                        {disc.amt > 0 && <div className="row alt"><span>{discountLabel(disc)}</span><span className="mono">−{rupee(disc.amt)}</span></div>}
+                        {disc.roundOff !== 0 && <div className="row alt"><span>Round Off</span><span className="mono">{roundOffText(disc)}</span></div>}
+                        <div className="row grand"><span>Amount Payable</span><span className="mono">{rupeePayable(disc)}</span></div>
                       </>
                     ) : (
-                      <div className="row grand"><span>Grand Total</span><span className="mono">{rupee(totals.grand)}</span></div>
+                      <div className="row grand"><span>Grand Total</span><span className="mono">{rupeePayable(disc)}</span></div>
                     )}
                   </div>
                 </div>
@@ -295,14 +298,14 @@ export default async function OtherPrintPage({ params }: { params: Params }) {
                   <thead><tr><th>Taxable Amount</th><th>GST</th><th>Total Tax</th><th>Invoice Total</th></tr></thead>
                   <tbody>
                     {totals.groups.length === 0 ? (
-                      <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupee(disc.payable)}</td></tr>
+                      <tr><td className="mono">{rupee(totals.subtotal)}</td><td>—</td><td className="mono">{rupee(0)}</td><td className="mono">{rupeePayable(disc)}</td></tr>
                     ) : (
                       totals.groups.map((g, i) => (
                         <tr key={i}>
                           <td className="mono">{rupee(g.taxable)}</td>
                           <td>{gstGroupLabel(gstMode, g)}</td>
                           <td className="mono">{rupee(g.taxAmt)}</td>
-                          {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupee(disc.payable)}</td>}
+                          {i === 0 && <td className="mono" rowSpan={totals.groups.length} style={{ verticalAlign: "middle", fontWeight: 800 }}>{rupeePayable(disc)}</td>}
                         </tr>
                       ))
                     )}

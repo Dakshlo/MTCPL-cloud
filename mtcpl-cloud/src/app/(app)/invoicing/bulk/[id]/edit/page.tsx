@@ -84,6 +84,7 @@ export default async function BulkInvoiceEditPage({ params }: { params: Params }
           initSections={initSections}
           initGst={{ mode: gstMode, igst: Number(b.igst_percent) || 18, cgst: Number(b.cgst_percent) || 9, sgst: Number(b.sgst_percent) || 9 }}
           initDiscount={{ mode: b.discount_mode === "amount" || b.discount_mode === "percent" ? b.discount_mode : null, value: Number(b.discount_value) || 0 }}
+          roundTotal={b.round_total === true}
           initNotes={b.notes ?? ""}
           challans={pickable}
           linkedIds={linkedIds}

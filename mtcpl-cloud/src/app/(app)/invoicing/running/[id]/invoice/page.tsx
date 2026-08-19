@@ -74,11 +74,15 @@ export default async function RunningInvoicePage({ params }: { params: Params })
 
   // Mig 200 — the invoice's saved discount (best-effort; pre-mig = off).
   let initDiscount: { mode: "amount" | "percent" | null; value: number } = { mode: null, value: 0 };
+  let storedRound: boolean | null = null;
   {
-    const { data: dc, error } = await admin.from("challans").select("discount_mode, discount_value").eq("id", id).maybeSingle();
-    const d = dc as { discount_mode?: string | null; discount_value?: number | null } | null;
-    if (!error && d) initDiscount = { mode: d.discount_mode === "amount" || d.discount_mode === "percent" ? d.discount_mode : null, value: Number(d.discount_value) || 0 };
+    const { data: dc, error } = await admin.from("challans").select("discount_mode, discount_value, round_total").eq("id", id).maybeSingle();
+    const d = dc as { discount_mode?: string | null; discount_value?: number | null; round_total?: boolean | null } | null;
+    if (!error && d) { initDiscount = { mode: d.discount_mode === "amount" || d.discount_mode === "percent" ? d.discount_mode : null, value: Number(d.discount_value) || 0 }; storedRound = d.round_total === true; }
   }
+  // Mig 220 — an already-converted bill keeps what it was issued on; a first
+  // conversion always rounds to a whole rupee.
+  const roundTotal = editMode ? storedRound === true : true;
   const invFy = (c.inv_fy ?? "").trim() || financialYear(c.challan_date);
   const invPrefix = `INV-${invFy}-`;
   let autoNum = "01";
@@ -100,6 +104,7 @@ export default async function RunningInvoicePage({ params }: { params: Params })
         initSections={initSections}
         initGst={initGst}
         initDiscount={initDiscount}
+        roundTotal={roundTotal}
         bill={bill}
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}

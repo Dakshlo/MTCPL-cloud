@@ -12,7 +12,7 @@
 
 import { useMemo, useState } from "react";
 import { createBulkInvoiceAction } from "../../actions";
-import { applyDiscount, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
+import { applyDiscount, roundOffText, rupeePayable, computeGroupedGstTotals, discountLabel, gstGroupLabel, rupee, type GstMode } from "@/lib/challan-pricing";
 import { BULK_UNITS } from "@/lib/bulk-items";
 import { DiscountControl, type DiscountModeUi } from "../../_ui/discount-control";
 import { BulkInvoicePreview, type PreviewParty } from "./bulk-invoice-preview";
@@ -85,7 +85,8 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
     () => computeGroupedGstTotals(serialItems.map((i) => ({ amount: i.amount, gstPercent: i.section_gst })), { mode, igst: 0, cgst: 0, sgst: 0 }),
     [serialItems, mode],
   );
-  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0);
+  // Mig 220 — a brand-new work-order invoice always bills on a whole rupee.
+  const disc = applyDiscount(totals.grand, discMode === "off" ? null : discMode, Number(discValue) || 0, true);
 
   const challanIds = Object.keys(checked).filter((k) => checked[k]);
   const selectedChallans = (cur?.challans ?? []).filter((c) => checked[c.id]);
@@ -284,14 +285,15 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
                 {totals.groups.map((g, i) => (
                   <Row key={i} label={`${gstGroupLabel(mode, g)}${totals.multi ? ` on ${rupee(g.taxable)}` : ""}`} value={rupee(g.taxAmt)} />
                 ))}
-                {disc.amt > 0 ? (
+                {disc.amt > 0 || disc.roundOff !== 0 ? (
                   <>
                     <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupee(totals.grand)} /></div>
-                    <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />
-                    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Amount Payable" value={rupee(disc.payable)} bold /></div>
+                    {disc.amt > 0 && <Row label={discountLabel(disc)} value={`−${rupee(disc.amt)}`} />}
+                    {disc.roundOff !== 0 && <Row label="Round Off" value={roundOffText(disc)} />}
+                    <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Amount Payable" value={rupeePayable(disc)} bold /></div>
                   </>
                 ) : (
-                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupee(totals.grand)} bold /></div>
+                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 }}><Row label="Grand Total" value={rupeePayable(disc)} bold /></div>
                 )}
               </div>
             </div>
@@ -324,6 +326,7 @@ export function BulkInvoiceForm({ temples, invPrefix, autoNum }: { temples: Temp
           sgst={0}
           discountMode={discMode === "off" ? null : discMode}
           discountValue={Number(discValue) || 0}
+          roundTotal
           invoiceNo={`${invPrefix}${autoNum}`}
           invoiceDate={todayIST()}
           onClose={() => setShowPreview(false)}

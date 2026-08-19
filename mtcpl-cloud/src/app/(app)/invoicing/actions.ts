@@ -229,6 +229,14 @@ export async function saveChallanPricingAction(formData: FormData) {
   try {
     await admin.from("challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", challanId);
   } catch { /* pre-mig-200 */ }
+  // Mig 220 — this invoice is issued on a whole-rupee amount. Stamped here (not
+  // left to the column default) because the challan ROW is older than the
+  // invoice: it was created at dispatch time, possibly before mig 220 ran.
+  // Never stamped in editMode — that path returns above, so an already-issued
+  // invoice keeps whatever it was billed on.
+  try {
+    await admin.from("challans").update({ round_total: true } as never).eq("id", challanId);
+  } catch { /* pre-mig-220 */ }
 
   // Mig 169 — transport details (separate best-effort update so a pre-migration
   // schema never blocks pricing). A new company name is added to the master so
@@ -681,6 +689,11 @@ export async function convertRunningToInvoiceAction(formData: FormData) {
   try {
     await admin.from("challans").update({ discount_mode: discountMode, discount_value: discountValue } as never).eq("id", challanId);
   } catch { /* pre-mig-200 */ }
+  // Mig 220 — whole-rupee invoice value (see the purchase path for why it is
+  // stamped rather than left to the column default).
+  try {
+    await admin.from("challans").update({ round_total: true } as never).eq("id", challanId);
+  } catch { /* pre-mig-220 */ }
   // Assign the locked INV number on first conversion only.
   if (!editMode) {
     const fy = financialYear(ch!.challan_date || new Date());
@@ -760,6 +773,13 @@ export async function createCustomBillAction(formData: FormData) {
     transport_phone: txt(formData, "transport_phone") || null,
     custom_billed_at: now, custom_billed_by: profile.id,
   }).eq("id", challanId);
+  // Mig 220 — whole-rupee invoice value. Only on FIRST billing: re-editing an
+  // already-issued custom bill must not silently re-round it.
+  if (!editMode) {
+    try {
+      await admin.from("challans").update({ round_total: true } as never).eq("id", challanId);
+    } catch { /* pre-mig-220 */ }
+  }
 
   // Release the production dispatch straight to Delivered (skip On-the-road):
   // the delivered lane is gated only on delivered_at, so on_road_at stays null.
@@ -1984,7 +2004,8 @@ export async function createBulkInvoiceAction(formData: FormData): Promise<void>
   };
   if (invoiceDate) insert.invoice_date = invoiceDate;
   // Discount cols (mig 200) — retried without so a pre-mig schema still creates.
-  let { data: bi, error } = await admin.from("bulk_invoices").insert({ ...insert, discount_mode: discountMode, discount_value: discountValue }).select("id").single();
+  // round_total (mig 220) — a new invoice always bills on a whole rupee.
+  let { data: bi, error } = await admin.from("bulk_invoices").insert({ ...insert, discount_mode: discountMode, discount_value: discountValue, round_total: true }).select("id").single();
   if (error) ({ data: bi, error } = await admin.from("bulk_invoices").insert(insert).select("id").single());
   if (error || !bi) redirect(`/invoicing/bulk/new?toast=${encodeURIComponent(error?.message || "Failed to create invoice")}`);
   const bulkId = (bi as { id: string }).id;

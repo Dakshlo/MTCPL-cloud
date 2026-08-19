@@ -184,12 +184,16 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
   }
   // Mig 200 — the invoice's saved discount (best-effort; pre-mig = off).
   let initDiscount: { mode: "amount" | "percent" | null; value: number } = { mode: null, value: 0 };
+  // Mig 220 — does THIS invoice bill on a whole rupee? An already-priced one
+  // keeps whatever it was issued on; a fresh one always rounds.
+  let storedRound: boolean | null = null;
   {
     const { data: dc, error } = await (admin.from("challans") as unknown as {
-      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { discount_mode: string | null; discount_value: number | null } | null; error: unknown }> } };
-    }).select("discount_mode, discount_value").eq("id", id).maybeSingle();
+      select: (c: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { discount_mode: string | null; discount_value: number | null; round_total?: boolean | null } | null; error: unknown }> } };
+    }).select("discount_mode, discount_value, round_total").eq("id", id).maybeSingle();
     if (!error && dc) {
       initDiscount = { mode: dc.discount_mode === "amount" || dc.discount_mode === "percent" ? dc.discount_mode : null, value: Number(dc.discount_value) || 0 };
+      storedRound = dc.round_total === true;
     }
   }
   const priced = !!c.priced_at;
@@ -267,6 +271,9 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
   // Jul 2026 — "Edit invoice" mode (from the Invoices page): re-edit a FINAL
   // approved invoice; the INV number + approval stay untouched.
   const editMode = sp.edit === "1" && !!c.owner_approved_at;
+  // Mig 220 — the preview must show exactly what saving will produce: pricing
+  // stamps round_total unless this is an approval-gated edit of a live invoice.
+  const roundTotal = editMode ? storedRound === true : true;
   // The proper unified challan code (CH-<fy>-n) — legacy CHLN only as fallback.
   const chCode = challanCode(c.doc_fy, c.doc_seq) ?? c.challan_number;
 
@@ -323,6 +330,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             initHeads={initHeads}
             initTableGst={initTableGst}
             initDiscount={initDiscount}
+            roundTotal={roundTotal}
             hsnUseVendor={hsnUseVendor}
           />
         </div>
