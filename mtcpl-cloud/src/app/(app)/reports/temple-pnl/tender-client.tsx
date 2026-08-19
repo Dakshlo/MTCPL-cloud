@@ -38,8 +38,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { saveTenderAnalysesAction } from "./tender-actions";
 import {
-  GROUP_COLORS, TENDER_UOMS, blankQuote, computeSheet, diffSheets, itemRupees, itemPerUnit, uomOf, uomShort,
-  type SheetDiff, type TenderAnalysis, type TenderGroup, type TenderItem, type TenderItemMode, type TenderQuote, type TenderUom, type TenderVersion,
+  GROUP_COLORS, TENDER_UOMS, blankQuote, computeSection, computeSheetTotal, diffSheets, itemRupees, itemPerUnit, sectionsOf, uomShort,
+  type SheetCalc, type SheetDiff, type TenderAnalysis, type TenderGroup, type TenderItem, type TenderItemMode, type TenderQuote, type TenderSection, type TenderUom, type TenderVersion,
 } from "./tender-model";
 
 // ── palette (matches pnl-client) ──────────────────────────────────
@@ -100,16 +100,36 @@ const STARTER_GROUPS = ["Raw Material", "Cutting", "Carving", "Transportation", 
 
 function blankSheet(): TenderAnalysis {
   const now = new Date().toISOString();
+  const section: TenderSection = {
+    id: uid(), title: "", uom: "Cft.", qty: null,
+    groups: STARTER_GROUPS.map((title) => ({ id: uid(), title, items: [{ id: uid(), title: "", mode: "per_cft" as TenderItemMode, value: 0 }] })),
+  };
   return {
-    id: uid(),
-    name: "New project",
-    qty: null,
-    paceCftPerDay: null,
-    manualDays: null,
-    createdAt: now,
-    updatedAt: now,
-    uom: "Cft.",
-    groups: STARTER_GROUPS.map((title) => ({ id: uid(), title, items: [{ id: uid(), title: "", mode: "amount" as TenderItemMode, value: 0 }] })),
+    id: uid(), name: "New project",
+    paceCftPerDay: null, manualDays: null,
+    createdAt: now, updatedAt: now,
+    sections: [section],
+    // Legacy mirror of section 1 — kept in step by every write path.
+    qty: section.qty, uom: section.uom, groups: section.groups,
+  };
+}
+
+/** A fresh master group carrying the full quotation skeleton — the button the
+ *  office presses when the same scope repeats for another material. */
+function templateSection(title: string, uom: TenderUom, seed: RateSeed | null): TenderSection {
+  const rate = seed ? { stone: Math.round(seed.stone), cutting: Math.round(seed.cutting), carving: Math.round(seed.carving) } : null;
+  return {
+    id: uid(), title, uom, qty: seed ? 1000 : null,
+    groups: QUOTE_TEMPLATE.map((g) => ({
+      id: uid(),
+      title: g.group,
+      items: g.items.map((it) => ({
+        id: uid(),
+        title: it.seed && seed ? `${it.title} (rate card · ${seed.label})` : it.title,
+        mode: it.mode ?? "per_cft",
+        value: it.seed && rate ? rate[it.seed] : it.value ?? 0,
+      })),
+    })),
   };
 }
 
@@ -131,40 +151,38 @@ const QUOTE_TEMPLATE: Array<{ group: string; items: Array<{ title: string; seed?
 
 function seededSheet(seed: RateSeed): TenderAnalysis {
   const now = new Date().toISOString();
-  const rate = { stone: Math.round(seed.stone), cutting: Math.round(seed.cutting), carving: Math.round(seed.carving) };
+  const section = templateSection("Sandstone Carving Work", "Cft.", seed);
   return {
     id: uid(),
     name: "New project (from rate card)",
-    qty: 1000,
-    paceCftPerDay: null,
-    manualDays: null,
-    createdAt: now,
-    updatedAt: now,
-    uom: "Cft.",
+    paceCftPerDay: null, manualDays: null,
+    createdAt: now, updatedAt: now,
     quote: { ...blankQuote(), terms: "Applicable as per resubmitted quotation sheet." },
-    groups: QUOTE_TEMPLATE.map((g) => ({
-      id: uid(),
-      title: g.group,
-      items: g.items.map((it) => ({
-        id: uid(),
-        // The three seeded lines say where the number came from.
-        title: it.seed ? `${it.title} (rate card · ${seed.label})` : it.title,
-        mode: it.mode ?? (it.seed ? "per_cft" : "per_cft"),
-        value: it.seed ? rate[it.seed] : it.value ?? 0,
-      })),
-    })),
+    sections: [section],
+    qty: section.qty, uom: section.uom, groups: section.groups,
   };
 }
 
-/** The sheet's timeline. Manual days win; otherwise qty ÷ pace, where
- *  pace = the sheet's override or the live data pace. */
-function computeTimeline(a: TenderAnalysis, dataPace: number | null) {
+/** The sheet's timeline. Manual days win; otherwise quantity ÷ pace, where
+ *  pace = the sheet's override or the live data pace. The quantity is the
+ *  Cft. work across every master group (pace is a cutting rate, so Sqft. slab
+ *  sections don't belong in it); with no Cft. section at all, the first
+ *  section's quantity stands in. */
+function timelineQty(secs: TenderSection[]): number | null {
+  const cft = secs.filter((s) => s.uom === "Cft.").reduce((acc, s) => acc + (s.qty ?? 0), 0);
+  if (cft > 0) return cft;
+  return secs[0]?.qty ?? null;
+}
+
+function computeTimeline(a: TenderAnalysis, secs: TenderSection[], dataPace: number | null) {
   const pace = a.paceCftPerDay ?? dataPace;
-  const derived = a.qty && pace && pace > 0 ? a.qty / pace : null;
+  const qty = timelineQty(secs);
+  const derived = qty && pace && pace > 0 ? qty / pace : null;
   const days = a.manualDays ?? derived;
   return {
     days,
     pace,
+    qty,
     source: (a.manualDays != null ? "manual" : a.paceCftPerDay != null ? "custom pace" : "data pace") as "manual" | "custom pace" | "data pace",
     finish: days != null ? new Date(Date.now() + days * 86400000) : null,
   };
@@ -257,11 +275,14 @@ function ItemRow({
 }
 
 function GroupCard({
-  group, index, qty, base, grand, unit, focusItemId,
+  group, index, sr, qty, base, grand, unit, focusItemId,
   onTitle, onItemChange, onItemDelete, onAddItem, onDelete,
 }: {
   group: TenderGroup;
   index: number;
+  /** "3" on a single-section sheet, "2.3" when master groups are in play —
+   *  so a line can be pointed at across the sheet, the split and the print. */
+  sr: string;
   qty: number | null;
   base: number;
   grand: number;
@@ -279,7 +300,7 @@ function GroupCard({
   return (
     <div className="tn-group" style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${color}`, borderRadius: 14, background: C.paper, overflow: "hidden", boxShadow: "0 1px 2px rgba(11,18,32,0.03)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px 9px", background: `linear-gradient(180deg, ${color}0d, transparent)`, borderBottom: `1px solid ${C.line}` }}>
-        <span style={{ width: 10, height: 10, borderRadius: 3, background: color, boxShadow: `0 0 0 3px ${color}22`, flexShrink: 0 }} />
+        <span title={`Group ${sr}`} style={{ minWidth: 22, height: 20, padding: "0 6px", borderRadius: 6, background: color, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{sr}</span>
         <input
           style={{ ...cellInput, fontWeight: 800, fontSize: 13.5, padding: "5px 8px", letterSpacing: "-0.01em" }}
           className="tn-cell"
@@ -413,7 +434,7 @@ function QuoteFields({ quote, onChange }: { quote: TenderQuote; onChange: (patch
 }
 
 /** Version-vs-now diff table. */
-function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; unit: string; versionLabel: string; onClose: () => void }) {
+function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; unit?: string | null; versionLabel: string; onClose: () => void }) {
   const up = diff.delta > 0;
   const tone = Math.abs(diff.delta) < 1 ? C.muted : up ? C.red : C.green;
   const th: React.CSSProperties = { ...eyebrow, fontSize: 9, padding: "0 8px 7px", textAlign: "right" };
@@ -436,8 +457,8 @@ function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; uni
       {/* Headline movement */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 16 }}>
         {[
-          { k: "Then", v: inr(diff.oldGrand), s: diff.oldPerCft != null ? `₹${Math.round(diff.oldPerCft).toLocaleString("en-IN")}/${unit}` : "no quantity" },
-          { k: "Now", v: inr(diff.newGrand), s: diff.newPerCft != null ? `₹${Math.round(diff.newPerCft).toLocaleString("en-IN")}/${unit}` : "no quantity" },
+          { k: "Then", v: inr(diff.oldGrand), s: diff.oldPerCft != null && unit ? `₹${Math.round(diff.oldPerCft).toLocaleString("en-IN")}/${unit}` : diff.sectionsChanged ? "master groups changed" : "no unit rate" },
+          { k: "Now", v: inr(diff.newGrand), s: diff.newPerCft != null && unit ? `₹${Math.round(diff.newPerCft).toLocaleString("en-IN")}/${unit}` : diff.sectionsChanged ? "master groups changed" : "no unit rate" },
           { k: "Change", v: `${up ? "+" : ""}${inr(diff.delta)}`, s: diff.deltaPct != null ? `${up ? "+" : ""}${diff.deltaPct.toFixed(1)}%` : "—", tone },
           { k: "Lines moved", v: String(diff.changedCount), s: `of ${diff.lines.length}` },
         ].map((s) => (
@@ -449,10 +470,16 @@ function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; uni
         ))}
       </div>
 
-      {diff.oldQty !== diff.newQty && (
+      {diff.oldQty !== diff.newQty && unit && (
         <div style={{ fontSize: 11.5, color: C.amber, background: "rgba(194,116,10,0.08)", border: "1px solid rgba(194,116,10,0.25)", borderRadius: 10, padding: "8px 12px", marginBottom: 14, lineHeight: 1.6 }}>
           ⚠ The project quantity changed too — {diff.oldQty?.toLocaleString("en-IN") ?? "—"} → {diff.newQty?.toLocaleString("en-IN") ?? "—"} {unit}.
           Every ₹/{unit} line therefore moves in ₹ even where its rate is untouched.
+        </div>
+      )}
+      {diff.sectionsChanged && (
+        <div style={{ fontSize: 11.5, color: C.amber, background: "rgba(194,116,10,0.08)", border: "1px solid rgba(194,116,10,0.25)", borderRadius: 10, padding: "8px 12px", marginBottom: 14, lineHeight: 1.6 }}>
+          ⚠ The number of master groups changed between these two versions, so only the
+          totals and the line movements compare — there is no single per-unit rate to put beside them.
         </div>
       )}
 
@@ -524,6 +551,53 @@ function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; uni
   );
 }
 
+/** THE split — donut + every group, numbered so a row can be pointed at.
+ *  Deliberately the ONLY place the cost mix is drawn (it used to be in both
+ *  the dark strip and a card under the sheet, saying the same thing twice). */
+function SplitCard({ calc, multi }: { calc: SheetCalc; multi: boolean }) {
+  const rows = calc.sections.flatMap((sec, si) =>
+    sec.groups.filter((g) => g.total > 0).map((g, gi) => ({
+      ...g,
+      sr: multi ? `${si + 1}.${gi + 1}` : `${gi + 1}`,
+      section: multi ? sec.title || `Section ${si + 1}` : "",
+    })),
+  );
+  const max = Math.max(...rows.map((r) => r.total), 1);
+  return (
+    <div className="tn-reveal" style={{ ...card, padding: "15px 20px 17px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <span style={eyebrow}>Where the money goes</span>
+        <span style={{ fontSize: 11, color: C.muted }}>{rows.length} priced group{rows.length === 1 ? "" : "s"}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.muted }}>Add values to see the split.</div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+          <Donut groups={rows} grand={calc.grand} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "9px 22px", flex: 1, minWidth: 0 }}>
+            {rows.map((r) => (
+              <div key={r.id} style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7, fontSize: 11, color: C.muted, marginBottom: 3 }}>
+                  <span style={{ minWidth: 20, padding: "0 5px", borderRadius: 5, background: r.color, color: "#fff", fontSize: 9.5, fontWeight: 800, textAlign: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.sr}</span>
+                  <span style={{ fontWeight: 700, color: C.ink2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
+                  <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", flexShrink: 0, fontWeight: 700, color: C.ink }}>{inr(r.total)}</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0, width: 30, textAlign: "right" }}>
+                    {calc.grand > 0 ? `${((r.total / calc.grand) * 100).toFixed(0)}%` : "—"}
+                  </span>
+                </div>
+                <div style={{ height: 5, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
+                  <div style={{ width: `${(r.total / max) * 100}%`, height: "100%", borderRadius: 999, background: r.color }} />
+                </div>
+                {r.section && <div style={{ fontSize: 9.5, color: "#b6bdc9", marginTop: 2.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>{r.section}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── the workspace ─────────────────────────────────────────────────
 
 export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; seed: RateSeed }) {
@@ -536,9 +610,12 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
   const [showLetter, setShowLetter] = useState(false);
   const [compareId, setCompareId] = useState<string | null>(null);
 
-  // "Wide" hides the app sidebar via the same body class the vendor cockpit
-  // uses — the sheet then owns the whole window. Cleaned up on unmount so
-  // leaving the tab (or switching to the P&L tab) restores the menu.
+  // "Full width" means full width: it hides the app menu AND the breakdown
+  // rail, so the sheet owns the window. Coming back out restores both.
+  const goWide = (next: boolean) => {
+    setWide(next);
+    setRailOpen(!next);
+  };
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.classList.toggle("vendor-cockpit-fullscreen", wide);
@@ -564,19 +641,33 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
-  const calc = useMemo(() => (active ? computeSheet(active) : null), [active]);
-  const timeline = useMemo(() => (active ? computeTimeline(active, seed.pace) : null), [active, seed.pace]);
-  const unit = active ? uomShort(uomOf(active)) : "CFT";
+  const sections = useMemo(() => (active ? sectionsOf(active) : []), [active]);
+  const multiSection = sections.length > 1;
+  const calc = useMemo(() => (active ? computeSheetTotal(active) : null), [active]);
+  const timeline = useMemo(() => (active ? computeTimeline(active, sections, seed.pace) : null), [active, sections, seed.pace]);
 
   const versions = active?.versions ?? [];
   const compareVersion = versions.find((v) => v.id === compareId) ?? null;
   const diff = useMemo(
-    () => (active && compareVersion ? diffSheets({ qty: compareVersion.qty, groups: compareVersion.groups }, { qty: active.qty, groups: active.groups }) : null),
+    () => (active && compareVersion ? diffSheets(compareVersion, active) : null),
     [active, compareVersion],
   );
 
   const patchActive = (fn: (a: TenderAnalysis) => TenderAnalysis) =>
     mutate((prev) => prev.map((s) => (s.id === activeId ? fn(s) : s)));
+
+  /** THE write path for anything inside the sheet. Lifts a legacy sheet into
+   *  sections on first touch, and keeps the legacy top-level mirror of
+   *  section 1 in step with what the server writes. */
+  const patchSections = (fn: (secs: TenderSection[]) => TenderSection[]) =>
+    patchActive((a) => {
+      const next = fn(sectionsOf(a).map((s) => ({ ...s, id: s.id || uid() })));
+      const first = next[0];
+      return { ...a, sections: next, qty: first?.qty ?? null, uom: first?.uom, groups: first?.groups ?? [] };
+    });
+
+  const patchSection = (sectionId: string, fn: (s: TenderSection) => TenderSection) =>
+    patchSections((secs) => secs.map((s) => (s.id === sectionId ? fn(s) : s)));
 
   const addSheet = (fromRateCard: boolean) => {
     const a = fromRateCard ? seededSheet(seed) : blankSheet();
@@ -585,10 +676,10 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
     setCompareId(null);
   };
 
-  const addItem = (groupId: string) => {
+  const addItem = (sectionId: string, groupId: string) => {
     const it: TenderItem = { id: uid(), title: "", mode: "per_cft", value: 0 };
     setFocusItemId(it.id);
-    patchActive((a) => ({ ...a, groups: a.groups.map((g) => (g.id === groupId ? { ...g, items: [...g.items, it] } : g)) }));
+    patchSection(sectionId, (s) => ({ ...s, groups: s.groups.map((g) => (g.id === groupId ? { ...g, items: [...g.items, it] } : g)) }));
   };
 
   /** Freeze the sheet as it stands — the version the team actually sent. */
@@ -597,13 +688,16 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
     const suggested = `v${(active.versions?.length ?? 0) + 1}`;
     const label = window.prompt("Name this version — e.g. \"v1 — sent to Shubham\"", suggested);
     if (label == null) return;
+    const snapSections = JSON.parse(JSON.stringify(sectionsOf(active))) as TenderSection[];
     const snap: TenderVersion = {
       id: uid(),
       label: label.trim() || suggested,
       savedAt: new Date().toISOString(),
-      qty: active.qty,
-      groups: JSON.parse(JSON.stringify(active.groups)) as TenderGroup[],
-      grand: computeSheet(active).grand,
+      sections: snapSections,
+      // Legacy mirror, so an older reader still sees a coherent snapshot.
+      qty: snapSections[0]?.qty ?? null,
+      groups: snapSections[0]?.groups ?? [],
+      grand: computeSheetTotal({ sections: snapSections }).grand,
     };
     patchActive((a) => ({ ...a, versions: [snap, ...(a.versions ?? [])].slice(0, 12) }));
   };
@@ -634,7 +728,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               </div>
             )}
             {sheets.map((sh) => {
-              const c = computeSheet(sh);
+              const c = computeSheetTotal(sh);
               const isActive = sh.id === activeId;
               return (
                 <div
@@ -661,7 +755,12 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                         copy.id = uid();
                         copy.name = `${sh.name} (copy)`;
                         copy.versions = [];
-                        copy.groups.forEach((g) => { g.id = uid(); g.items.forEach((it) => { it.id = uid(); }); });
+                        const secs = sectionsOf(copy).map((sec) => ({
+                          ...sec, id: uid(),
+                          groups: sec.groups.map((g) => ({ ...g, id: uid(), items: g.items.map((it) => ({ ...it, id: uid() })) })),
+                        }));
+                        copy.sections = secs;
+                        copy.groups = secs[0]?.groups ?? [];
                         mutate((prev) => [copy, ...prev]);
                         setActiveId(copy.id);
                       }}
@@ -680,7 +779,9 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                     >✕</span>
                   </div>
                   <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
-                    {inr(c.grand)}{c.perCft != null && <> · ₹{Math.round(c.perCft).toLocaleString("en-IN")}/{uomShort(uomOf(sh))}</>}
+                    {inr(c.grand)}
+                    {c.perCft != null && c.uom && <> · ₹{Math.round(c.perCft).toLocaleString("en-IN")}/{uomShort(c.uom)}</>}
+                    {c.sections.length > 1 && <> · {c.sections.length} sections</>}
                     {(sh.versions?.length ?? 0) > 0 && <> · {sh.versions!.length}v</>}
                   </div>
                   {c.grand > 0 && (
@@ -708,13 +809,13 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
             <div style={{ fontSize: 40, filter: "drop-shadow(0 6px 14px rgba(79,70,229,0.25))" }}>🧮</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: C.ink, marginTop: 10, letterSpacing: "-0.02em" }}>Price a tender like you mean it</div>
             <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6, lineHeight: 1.7 }}>
-              Groups → lines → live totals, a printable rate-breakup quotation and a version-to-version compare.
+              Master groups → cost groups → lines, a printable rate-breakup quotation and a version-to-version compare.
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20, flexWrap: "wrap" }}>
               {[
                 { n: "1", t: "Start from the rate card", d: "every quotation particular, pre-titled" },
-                { n: "2", t: "Fill the rates", d: "₹ fixed · ₹/unit · % of subtotal" },
-                { n: "3", t: "Print the quotation", d: "MTCPL letterhead, Sr./Particulars/Rate" },
+                { n: "2", t: "Add a master group", d: "sandstone in Cft., marble in Sqft." },
+                { n: "3", t: "Print the quotation", d: "one rate table per master group" },
                 { n: "4", t: "Save a version", d: "re-price later and compare the swing" },
               ].map((s) => (
                 <div key={s.n} style={{ display: "flex", alignItems: "center", gap: 9, border: `1px solid ${C.line}`, background: C.wash, borderRadius: 12, padding: "9px 14px" }}>
@@ -733,7 +834,8 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 13, minWidth: 0 }}>
-          {/* Sheet header: name + unit + qty + timeline inputs + actions. */}
+          {/* Sheet header: name + timeline inputs + actions. Quantity and unit
+              now live on each master group, where they belong. */}
           <div className="tn-reveal" style={{ ...card, padding: "14px 18px 15px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", position: "relative", overflow: "hidden" }}>
             <div aria-hidden style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${C.indigo}, #0284c7, ${C.green}, ${C.amber})` }} />
             {!railOpen && (
@@ -750,24 +852,6 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               onChange={(e) => patchActive((a) => ({ ...a, name: e.target.value }))}
             />
             <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
-              Quantity
-              <input
-                className="tn-cell"
-                type="number" min={0} step="any" placeholder="—"
-                value={active.qty ?? ""}
-                onChange={(e) => patchActive((a) => ({ ...a, qty: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
-                style={{ ...cellInput, width: 100, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
-              />
-              <select
-                value={uomOf(active)}
-                onChange={(e) => patchActive((a) => ({ ...a, uom: e.target.value as TenderUom }))}
-                title="Billing unit — rides through every rate and the quotation's Uom. column"
-                style={{ fontSize: 11.5, fontWeight: 800, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 6px", background: C.wash, outline: "none", cursor: "pointer" }}
-              >
-                {TENDER_UOMS.map((u) => <option key={u} value={u}>{u}</option>)}
-              </select>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
               Pace
               <input
                 className="tn-cell"
@@ -778,7 +862,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 onChange={(e) => patchActive((a) => ({ ...a, paceCftPerDay: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
                 style={{ ...cellInput, width: 78, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
               />
-              <span style={{ color: C.muted }}>/day</span>
+              <span style={{ color: C.muted }}>CFT/day</span>
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
               Time
@@ -786,7 +870,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 className="tn-cell"
                 type="number" min={0} step="any"
                 placeholder={timeline?.days != null && active.manualDays == null ? String(Math.ceil(timeline.days)) : "—"}
-                title="Blank = calculated from quantity ÷ pace. Type to fix the timeline manually."
+                title="Blank = calculated from the Cft. quantity ÷ pace. Type to fix the timeline manually."
                 value={active.manualDays ?? ""}
                 onChange={(e) => patchActive((a) => ({ ...a, manualDays: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
                 style={{ ...cellInput, width: 74, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
@@ -801,8 +885,8 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               <a href={`/reports/tender/${active.id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...ghostBtn(false), textDecoration: "none", display: "inline-block" }}>
                 🖨 Quotation
               </a>
-              <button type="button" onClick={() => setWide((v) => !v)} title={wide ? "Bring the app menu back" : "Hide the app menu — full-width sheet"} style={ghostBtn(wide)}>
-                {wide ? "⇥ Menu" : "⛶ Full width"}
+              <button type="button" onClick={() => goWide(!wide)} title={wide ? "Bring the app menu and the breakdown list back" : "Hide the app menu and the breakdown list — full-width sheet"} style={ghostBtn(wide)}>
+                {wide ? "⇥ Exit full width" : "⛶ Full width"}
               </button>
               {!railOpen && <SavePill state={saveState} />}
             </div>
@@ -813,7 +897,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
             <div className="tn-reveal" style={{ ...card, padding: "16px 18px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                 <span style={eyebrow}>Quotation letter</span>
-                <span style={{ fontSize: 11, color: C.muted }}>printed above the rate table on MTCPL letterhead</span>
+                <span style={{ fontSize: 11, color: C.muted }}>printed above the rate tables on MTCPL letterhead</span>
                 <a href={`/reports/tender/${active.id}/print?amounts=1`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, color: C.indigo, textDecoration: "none" }}>
                   internal copy with ₹ amounts ↗
                 </a>
@@ -825,29 +909,35 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
             </div>
           )}
 
-          {/* ── COMMAND STRIP: the whole quote in one dark band across the
-                top. Was a tall right-hand column; horizontal here so the
-                worksheet keeps the full page width. ── */}
+          {/* ── COMMAND STRIP: the headline numbers, across the top. The cost
+                split is NOT here — it lives once, in the card below. ── */}
           <div className="tn-dark tn-reveal" style={{ borderRadius: 18, padding: "16px 22px", position: "relative", overflow: "hidden", background: "linear-gradient(120deg, #0b1220 0%, #131c30 52%, #182441 100%)", boxShadow: "0 14px 36px rgba(11,18,32,0.30), inset 0 1px 0 rgba(255,255,255,0.06)" }}>
             <div aria-hidden style={{ position: "absolute", top: -110, right: 60, width: 260, height: 260, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.32), transparent 65%)" }} />
             <div aria-hidden style={{ position: "absolute", bottom: -120, left: -40, width: 220, height: 220, borderRadius: "50%", background: "radial-gradient(circle, rgba(2,132,199,0.20), transparent 65%)" }} />
             <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 26, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 190 }}>
+              <div style={{ minWidth: 200 }}>
                 <div style={{ ...eyebrow, color: "rgba(255,255,255,0.55)" }}>Tender value</div>
                 <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.035em", color: "#fff", fontVariantNumeric: "tabular-nums", marginTop: 5, lineHeight: 1 }}>
                   {inr(calc.grand)}
                 </div>
-                {calc.perCft != null && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11.5, fontWeight: 800, color: "#c7d2fe", background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.35)", borderRadius: 999, padding: "3.5px 11px", fontVariantNumeric: "tabular-nums" }}>
-                    ₹{Math.round(calc.perCft).toLocaleString("en-IN")}/{unit}
-                    <span style={{ color: "rgba(255,255,255,0.45)", fontWeight: 600 }}>· {active.qty?.toLocaleString("en-IN")} {unit}</span>
-                  </span>
-                )}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                  {calc.sections.map((sec, si) => (
+                    sec.perCft == null ? null : (
+                      <span key={sec.id} title={multiSection ? sec.title || `Section ${si + 1}` : undefined}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 800, color: "#c7d2fe", background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.35)", borderRadius: 999, padding: "3.5px 11px", fontVariantNumeric: "tabular-nums" }}>
+                        {multiSection && <span style={{ color: "rgba(255,255,255,0.5)", fontWeight: 700 }}>{si + 1}</span>}
+                        ₹{Math.round(sec.perCft).toLocaleString("en-IN")}/{uomShort(sec.uom)}
+                        <span style={{ color: "rgba(255,255,255,0.45)", fontWeight: 600 }}>· {sec.qty?.toLocaleString("en-IN")}</span>
+                      </span>
+                    )
+                  ))}
+                </div>
               </div>
               <div style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,0.1)" }} />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", gap: "12px 24px", flex: "1 1 420px", minWidth: 0 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px 24px", flex: "1 1 460px", minWidth: 0 }}>
                 <DarkStat label="₹ lines" value={inr(calc.base)} />
-                <DarkStat label="% lines add" value={inr(calc.pctAdd)} hint="% lines are calculated on the ₹ subtotal" />
+                <DarkStat label="% lines add" value={inr(calc.pctAdd)} hint="% lines are calculated on their own section's ₹ subtotal" />
+                {multiSection && <DarkStat label="Master groups" value={String(calc.sections.length)} sub="each prints its own rate table" />}
                 {timeline?.days != null ? (
                   <>
                     <DarkStat
@@ -855,8 +945,8 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                       value={`≈ ${Math.ceil(timeline.days).toLocaleString("en-IN")} days`}
                       sub={`${(timeline.days / 30.44).toFixed(1)} months · ${
                         timeline.source === "manual"
-                          ? `manual${active.qty != null && timeline.days > 0 ? `, ${Math.round(active.qty / timeline.days).toLocaleString("en-IN")}/day` : ""}`
-                          : `${Math.round(timeline.pace ?? 0).toLocaleString("en-IN")}/day${timeline.source === "data pace" ? " (real pace)" : ""}`
+                          ? `manual${timeline.qty != null && timeline.days > 0 ? `, ${Math.round(timeline.qty / timeline.days).toLocaleString("en-IN")} CFT/day` : ""}`
+                          : `${Math.round(timeline.pace ?? 0).toLocaleString("en-IN")} CFT/day${timeline.source === "data pace" ? " (real pace)" : ""}`
                       }`}
                     />
                     <DarkStat
@@ -867,34 +957,11 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                   </>
                 ) : (
                   <div style={{ gridColumn: "span 2", fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
-                    ⏱ Set the <strong style={{ color: "rgba(255,255,255,0.85)" }}>quantity</strong>
+                    ⏱ Set a <strong style={{ color: "rgba(255,255,255,0.85)" }}>quantity</strong> on a master group
                     {seed.pace != null && <> (real pace ~{Math.round(seed.pace)} CFT/day)</>} or type the days.
                   </div>
                 )}
               </div>
-              {/* Split, inline — the donut lived in a separate tall card before. */}
-              {calc.grand > 0 && (
-                <>
-                  <div style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,0.1)" }} />
-                  <div style={{ flex: "1 1 230px", minWidth: 200 }}>
-                    <div style={{ ...eyebrow, color: "rgba(255,255,255,0.55)", marginBottom: 7 }}>Where the money goes</div>
-                    <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.1)" }}>
-                      {calc.groups.filter((g) => g.total > 0).map((g) => (
-                        <div key={g.id} style={{ width: `${(g.total / calc.grand) * 100}%`, background: g.color }} title={`${g.title} ${inr(g.total)}`} />
-                      ))}
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 8 }}>
-                      {calc.groups.filter((g) => g.total > 0).slice(0, 6).map((g) => (
-                        <span key={g.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "rgba(255,255,255,0.7)" }}>
-                          <span style={{ width: 7, height: 7, borderRadius: 2, background: g.color }} />
-                          {g.title}
-                          <span style={{ color: "rgba(255,255,255,0.45)", fontVariantNumeric: "tabular-nums" }}>{((g.total / calc.grand) * 100).toFixed(0)}%</span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
             {/* Month ruler */}
             {timeline?.days != null && timeline.days > 0 && timeline.days < 3700 && (
@@ -951,75 +1018,127 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
 
           {diff && compareVersion && (
             <div className="tn-reveal">
-              <DiffPanel diff={diff} unit={unit} versionLabel={compareVersion.label} onClose={() => setCompareId(null)} />
+              <DiffPanel diff={diff} unit={calc.uom ? uomShort(calc.uom) : null} versionLabel={compareVersion.label} onClose={() => setCompareId(null)} />
             </div>
           )}
 
-          {/* ── worksheet: groups flow in a responsive grid, so a wide screen
-                gets two columns instead of one narrow strip. ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(620px, 1fr))", gap: 11, alignItems: "start" }}>
-            {active.groups.map((g, gi) => (
-              <GroupCard
-                key={g.id}
-                group={g}
-                index={gi}
-                qty={active.qty}
-                base={calc.base}
-                grand={calc.grand}
-                unit={unit}
-                focusItemId={focusItemId}
-                onTitle={(t) => patchActive((a) => ({ ...a, groups: a.groups.map((x) => (x.id === g.id ? { ...x, title: t } : x)) }))}
-                onItemChange={(itemId, patch) =>
-                  patchActive((a) => ({
-                    ...a,
-                    groups: a.groups.map((x) =>
-                      x.id === g.id ? { ...x, items: x.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) } : x,
-                    ),
-                  }))
-                }
-                onItemDelete={(itemId) =>
-                  patchActive((a) => ({ ...a, groups: a.groups.map((x) => (x.id === g.id ? { ...x, items: x.items.filter((it) => it.id !== itemId) } : x)) }))
-                }
-                onAddItem={() => addItem(g.id)}
-                onDelete={() => {
-                  const hasValues = g.items.some((it) => it.value > 0 || it.title.trim());
-                  if (hasValues && !window.confirm(`Remove "${g.title || "this group"}" and its ${g.items.length} line(s)?`)) return;
-                  patchActive((a) => ({ ...a, groups: a.groups.filter((x) => x.id !== g.id) }));
-                }}
-              />
-            ))}
-          </div>
+          {/* The split — once, above the sheet so it never needs scrolling to. */}
+          <SplitCard calc={calc} multi={multiSection} />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {/* ── master groups ── */}
+          {sections.map((sec, si) => {
+            const scalc = calc.sections[si];
+            const unit = uomShort(sec.uom);
+            return (
+              <div key={sec.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Section bar — only shown once there is more than one master
+                    group, or the user has named this one. A plain single-scope
+                    sheet keeps its old, simpler face. */}
+                {(multiSection || sec.title) && (
+                  <div className="tn-reveal" style={{ ...card, padding: "11px 16px 12px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", borderLeft: `4px solid ${C.indigo}` }}>
+                    <span style={{ minWidth: 26, height: 26, borderRadius: 8, background: C.indigo, color: "#fff", fontSize: 12.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{si + 1}</span>
+                    <input
+                      className="tn-cell"
+                      style={{ ...cellInput, fontSize: 15.5, fontWeight: 800, letterSpacing: "-0.015em", flex: "1 1 200px", minWidth: 150 }}
+                      value={sec.title}
+                      placeholder="Master group — e.g. Sandstone Carving Work"
+                      onChange={(e) => patchSection(sec.id, (x) => ({ ...x, title: e.target.value }))}
+                    />
+                    <SectionQty sec={sec} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(scalc.grand)}</div>
+                      <div style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                        {scalc.perCft != null ? `₹${Math.round(scalc.perCft).toLocaleString("en-IN")} per ${sec.uom}` : `set a quantity for the ${sec.uom} rate`}
+                      </div>
+                    </div>
+                    <button type="button" className="tn-del" title="Remove this master group and everything in it"
+                      onClick={() => {
+                        if (!window.confirm(`Remove master group "${sec.title || si + 1}" and its ${sec.groups.length} group(s)?`)) return;
+                        patchSections((secs) => (secs.length <= 1 ? secs : secs.filter((x) => x.id !== sec.id)));
+                      }}
+                      style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, padding: "3px 5px" }}>✕</button>
+                  </div>
+                )}
+
+                {/* This section's quantity, when it is the only section and has
+                    no name — keeps the old single-scope header working. */}
+                {!multiSection && !sec.title && (
+                  <div className="tn-reveal" style={{ ...card, padding: "10px 16px 11px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={eyebrow}>Project quantity</span>
+                    <SectionQty sec={sec} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
+                    <button type="button" onClick={() => patchSection(sec.id, (x) => ({ ...x, title: "Sandstone Carving Work" }))}
+                      style={{ ...ghostBtn(false), marginLeft: "auto" }} title="Name this scope so a second material can be added beside it">
+                      ✎ Name this master group
+                    </button>
+                  </div>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(620px, 1fr))", gap: 11, alignItems: "start" }}>
+                  {sec.groups.map((g, gi) => (
+                    <GroupCard
+                      key={g.id}
+                      group={g}
+                      index={calc.sections.slice(0, si).reduce((acc, x) => acc + x.groups.length, 0) + gi}
+                      sr={multiSection ? `${si + 1}.${gi + 1}` : `${gi + 1}`}
+                      qty={sec.qty}
+                      base={scalc.base}
+                      grand={scalc.grand}
+                      unit={unit}
+                      focusItemId={focusItemId}
+                      onTitle={(t) => patchSection(sec.id, (x) => ({ ...x, groups: x.groups.map((y) => (y.id === g.id ? { ...y, title: t } : y)) }))}
+                      onItemChange={(itemId, patch) =>
+                        patchSection(sec.id, (x) => ({
+                          ...x,
+                          groups: x.groups.map((y) =>
+                            y.id === g.id ? { ...y, items: y.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) } : y,
+                          ),
+                        }))
+                      }
+                      onItemDelete={(itemId) =>
+                        patchSection(sec.id, (x) => ({ ...x, groups: x.groups.map((y) => (y.id === g.id ? { ...y, items: y.items.filter((it) => it.id !== itemId) } : y)) }))
+                      }
+                      onAddItem={() => addItem(sec.id, g.id)}
+                      onDelete={() => {
+                        const hasValues = g.items.some((it) => it.value > 0 || it.title.trim());
+                        if (hasValues && !window.confirm(`Remove "${g.title || "this group"}" and its ${g.items.length} line(s)?`)) return;
+                        patchSection(sec.id, (x) => ({ ...x, groups: x.groups.filter((y) => y.id !== g.id) }));
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => patchSection(sec.id, (x) => ({ ...x, groups: [...x.groups, { id: uid(), title: "", items: [{ id: uid(), title: "", mode: "per_cft", value: 0 }] }] }))}
+                  style={{ alignSelf: "flex-start", fontSize: 12.5, fontWeight: 800, color: C.indigo, background: C.indigoSoft, border: `1px dashed ${C.indigo}55`, borderRadius: 12, padding: "9px 17px", cursor: "pointer" }}
+                >
+                  ＋ Add group{multiSection || sec.title ? ` to ${sec.title || `master group ${si + 1}`}` : ""}
+                </button>
+              </div>
+            );
+          })}
+
+          {/* Add a second material / scope — the whole quotation skeleton again. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 4, borderTop: `1px dashed ${C.line}`, marginTop: 4 }}>
+            <span style={{ fontSize: 11.5, color: C.muted, paddingTop: 12 }}>
+              Same scope for another material? Add a master group — it gets its own quantity, unit and rate table on the quotation.
+            </span>
             <button
               type="button"
-              onClick={() => patchActive((a) => ({ ...a, groups: [...a.groups, { id: uid(), title: "", items: [{ id: uid(), title: "", mode: "per_cft", value: 0 }] }] }))}
-              style={{ fontSize: 12.5, fontWeight: 800, color: C.indigo, background: C.indigoSoft, border: `1px dashed ${C.indigo}55`, borderRadius: 12, padding: "10px 18px", cursor: "pointer" }}
+              onClick={() => {
+                const name = window.prompt("Name the master group — e.g. \"Marble Slab\"", "Marble Slab");
+                if (name == null) return;
+                patchSections((secs) => {
+                  // Name the first one too, so the quotation's tables are both
+                  // captioned rather than one falling back to the sheet name.
+                  const named = secs.map((x, i) => (i === 0 && !x.title ? { ...x, title: "Sandstone Carving Work" } : x));
+                  return [...named, templateSection(name.trim() || "New master group", "Sqft.", null)];
+                });
+              }}
+              style={{ marginTop: 12, marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: "#fff", background: C.indigo, border: "none", borderRadius: 12, padding: "10px 18px", cursor: "pointer" }}
             >
-              ＋ Add group
+              ＋ Add master group
             </button>
-            {/* The split, in full — the strip above only shows the top six. */}
-            {calc.grand > 0 && (
-              <div style={{ ...card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 16, flex: "1 1 380px", minWidth: 0 }}>
-                <Donut groups={calc.groups} grand={calc.grand} />
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "6px 18px", flex: 1, minWidth: 0 }}>
-                  {calc.groups.filter((g) => g.total > 0).map((g) => {
-                    const max = Math.max(...calc.groups.map((x) => x.total), 1);
-                    return (
-                      <div key={g.id} style={{ minWidth: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5, color: C.muted, marginBottom: 2.5 }}>
-                          <span style={{ fontWeight: 700, color: C.ink2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</span>
-                          <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{inr(g.total)}</span>
-                        </div>
-                        <div style={{ height: 5, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
-                          <div style={{ width: `${(g.total / max) * 100}%`, height: "100%", borderRadius: 999, background: g.color }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1048,6 +1167,29 @@ input[type=number].tn-cell::-webkit-outer-spin-button, input[type=number].tn-cel
         }}
       />
     </div>
+  );
+}
+
+/** Quantity + unit for one master group. Module level — focus-safe. */
+function SectionQty({ sec, onPatch }: { sec: TenderSection; onPatch: (patch: Partial<TenderSection>) => void }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2, flexShrink: 0 }}>
+      <input
+        className="tn-cell"
+        type="number" min={0} step="any" placeholder="—"
+        value={sec.qty ?? ""}
+        onChange={(e) => onPatch({ qty: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) })}
+        style={{ ...cellInput, width: 100, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
+      />
+      <select
+        value={sec.uom}
+        onChange={(e) => onPatch({ uom: e.target.value as TenderUom })}
+        title="Billing unit — rides through every rate and this group's Uom. column on the quotation"
+        style={{ fontSize: 11.5, fontWeight: 800, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 6px", background: C.wash, outline: "none", cursor: "pointer" }}
+      >
+        {TENDER_UOMS.map((u) => <option key={u} value={u}>{u}</option>)}
+      </select>
+    </label>
   );
 }
 

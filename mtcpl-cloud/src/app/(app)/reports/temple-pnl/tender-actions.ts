@@ -14,7 +14,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
-import { TENDER_KEY, TENDER_UOMS, computeSheet, type TenderAnalysis, type TenderGroup, type TenderQuote, type TenderUom, type TenderVersion } from "./tender-model";
+import { TENDER_KEY, TENDER_UOMS, computeSheetTotal, sectionsOf, type TenderAnalysis, type TenderGroup, type TenderQuote, type TenderSection, type TenderUom, type TenderVersion } from "./tender-model";
 
 /** app_settings.updated_by is uuid; the dev-mock id isn't one. */
 function asUuid(id: string): string | null {
@@ -73,6 +73,20 @@ export async function saveTenderAnalysesAction(
       return Object.values(out).some((v) => v) ? out : undefined;
     };
 
+    const uomOr = (v: unknown, fallback: TenderUom = "Cft."): TenderUom =>
+      TENDER_UOMS.includes(v as TenderUom) ? (v as TenderUom) : fallback;
+
+    /** Master groups. Capped at 10 — a quotation with more separate rate
+     *  breakups than that is a different document, not one sheet. */
+    const cleanSections = (raw: unknown): TenderSection[] =>
+      (Array.isArray(raw) ? raw : []).slice(0, 10).map((sec, i) => ({
+        id: s(sec?.id, 40) || `s${i}`,
+        title: s(sec?.title, 160),
+        uom: uomOr(sec?.uom),
+        qty: posOrNull(sec?.qty),
+        groups: cleanGroups(sec?.groups),
+      }));
+
     /** Saved snapshots, newest first, capped — the whole list shares one
      *  app_settings row, so unbounded history would blow the size limit. */
     const cleanVersions = (raw: unknown): TenderVersion[] | undefined => {
@@ -80,31 +94,46 @@ export async function saveTenderAnalysesAction(
       return raw.slice(0, 12).map((v) => {
         const groups = cleanGroups(v?.groups);
         const qty = posOrNull(v?.qty);
+        const sections = Array.isArray(v?.sections) && v.sections.length > 0 ? cleanSections(v.sections) : undefined;
         return {
           id: s(v?.id, 40) || "v",
           label: s(v?.label, 120) || "Version",
           savedAt: s(v?.savedAt, 40),
           qty,
           groups,
+          sections,
           // Recomputed, never trusted from the client.
-          grand: computeSheet({ qty, groups }).grand,
+          grand: computeSheetTotal({ sections, groups, qty }).grand,
         };
       });
     };
 
-    const clean: TenderAnalysis[] = analyses.map((a) => ({
-      id: s(a?.id, 40) || `t${Date.now()}`,
-      name: s(a?.name, 120) || "Untitled",
-      qty: posOrNull(a?.qty),
-      paceCftPerDay: posOrNull(a?.paceCftPerDay),
-      manualDays: posOrNull(a?.manualDays),
-      createdAt: s(a?.createdAt, 40),
-      updatedAt: new Date().toISOString(),
-      uom: TENDER_UOMS.includes(a?.uom as TenderUom) ? (a.uom as TenderUom) : undefined,
-      quote: cleanQuote(a?.quote),
-      versions: cleanVersions(a?.versions),
-      groups: cleanGroups(a?.groups),
-    }));
+    const clean: TenderAnalysis[] = analyses.map((a) => {
+      // Sections are the truth. A sheet that has never been opened since the
+      // Aug-2026 rework still arrives in the legacy shape — sectionsOf lifts it,
+      // so what lands in storage is always sectioned from here on.
+      const sections = cleanSections(
+        Array.isArray(a?.sections) && a.sections.length > 0 ? a.sections : sectionsOf({ groups: cleanGroups(a?.groups), qty: posOrNull(a?.qty), uom: uomOr(a?.uom) }),
+      );
+      const first = sections[0];
+      return {
+        id: s(a?.id, 40) || `t${Date.now()}`,
+        name: s(a?.name, 120) || "Untitled",
+        paceCftPerDay: posOrNull(a?.paceCftPerDay),
+        manualDays: posOrNull(a?.manualDays),
+        createdAt: s(a?.createdAt, 40),
+        updatedAt: new Date().toISOString(),
+        quote: cleanQuote(a?.quote),
+        versions: cleanVersions(a?.versions),
+        sections,
+        // Legacy mirror of the FIRST section. Anything still reading the old
+        // top-level fields sees a coherent single-section sheet rather than
+        // stale or doubled numbers.
+        qty: first?.qty ?? null,
+        uom: first ? first.uom : undefined,
+        groups: first?.groups ?? [],
+      };
+    });
 
     if (JSON.stringify(clean).length > 900_000) return { ok: false, error: "Sheets too large — delete an old version or sheet." };
 

@@ -24,7 +24,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
-  TENDER_KEY, computeSheet, quoteRows, uomOf,
+  TENDER_KEY, computeSheetTotal, quoteTables,
   type TenderAnalysis,
 } from "@/app/(app)/reports/temple-pnl/tender-model";
 import { PrintBtn } from "./print-btn";
@@ -53,9 +53,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
   const sheet = (v?.analyses ?? []).find((a) => a.id === id);
   if (!sheet) notFound();
 
-  const uom = uomOf(sheet);
-  const calc = computeSheet(sheet);
-  const rows = quoteRows(sheet);
+  const calc = computeSheetTotal(sheet);
   const q = sheet.quote;
 
   const letterDate = q?.date
@@ -64,6 +62,11 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
   const dateStr = letterDate.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" });
 
   const work = (q?.work || "").trim() || sheet.name || "the work";
+  // One table per master group — exactly like the paper quotation, which
+  // carries a sandstone-carving breakup and a marble-slab breakup side by side.
+  const tables = quoteTables(sheet, work);
+  const multi = tables.length > 1;
+  const noQty = tables.filter((t) => t.qty == null || t.qty <= 0);
   const intro = (q?.intro || "").trim()
     || `We are submitting to you the rate breakup analysis for ${work}${q?.toPlace ? ` at ${q.toPlace}` : ""}.`;
   const terms = (q?.terms || "").split("\n").map((t) => t.trim()).filter(Boolean);
@@ -164,53 +167,70 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         <div className="salut">Dear Respected Sir,</div>
         <div className="intro">{intro}</div>
 
-        {/* Rate breakup */}
-        <div className="tbl-wrap">
-          <table className="rb">
-            <caption>Rate Breakup for {work}</caption>
-            <thead>
-              <tr>
-                <th>Sr.</th>
-                <th>Particulars</th>
-                <th>Uom.</th>
-                <th>Rate</th>
-                {showAmounts && <th>Amount ₹</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr><td className="pt" colSpan={showAmounts ? 5 : 4} style={{ textAlign: "center", color: "#999" }}>No priced lines on this sheet yet.</td></tr>
-              )}
-              {rows.map((r) => (
-                <tr key={r.sr}>
-                  <td className="sr">{r.sr}</td>
-                  <td className="pt">
-                    {r.particulars}
-                    {/* Internal group names never go out on the client copy —
-                        their paper quotation is a flat list of particulars. */}
-                    {showAmounts && r.group ? <span className="grp"> · {r.group}</span> : null}
-                  </td>
-                  <td className="uom">{uom}</td>
-                  <td className="rate">{rateCell(r.rate)}</td>
-                  {showAmounts && <td className="amt">{rupees(r.amount)}</td>}
+        {/* Rate breakup — one table per master group */}
+        {tables.map((t) => (
+          <div className="tbl-wrap" key={t.id}>
+            <table className="rb">
+              <caption>Rate Breakup for {t.title}</caption>
+              <thead>
+                <tr>
+                  <th>Sr.</th>
+                  <th>Particulars</th>
+                  <th>Uom.</th>
+                  <th>Rate</th>
+                  {showAmounts && <th>Amount ₹</th>}
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td className="lbl" colSpan={3}>Total Rate Per {uom}</td>
-                <td className="rate">{rateCell(calc.perCft)}</td>
-                {showAmounts && <td className="amt">{rupees(calc.grand)}</td>}
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {t.rows.length === 0 && (
+                  <tr><td className="pt" colSpan={showAmounts ? 5 : 4} style={{ textAlign: "center", color: "#999" }}>No priced lines in this section yet.</td></tr>
+                )}
+                {t.rows.map((r) => (
+                  <tr key={r.sr}>
+                    <td className="sr">{r.sr}</td>
+                    <td className="pt">
+                      {r.particulars}
+                      {/* Internal group names never go out on the client copy —
+                          their paper quotation is a flat list of particulars. */}
+                      {showAmounts && r.group ? <span className="grp"> · {r.group}</span> : null}
+                    </td>
+                    <td className="uom">{t.uom}</td>
+                    <td className="rate">{rateCell(r.rate)}</td>
+                    {showAmounts && <td className="amt">{rupees(r.amount)}</td>}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="lbl" colSpan={3}>Total Rate Per {t.uom}</td>
+                  <td className="rate">{rateCell(t.totalRate)}</td>
+                  {showAmounts && <td className="amt">{rupees(t.totalAmount)}</td>}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ))}
 
-        {sheet.qty == null || sheet.qty <= 0 ? (
+        {/* Only a multi-table quotation needs a combined figure — a single
+            breakup already closes on its own Total Rate row. */}
+        {multi && showAmounts && (
+          <div className="tbl-wrap">
+            <table className="rb">
+              <tfoot>
+                <tr>
+                  <td className="lbl" colSpan={3}>Total estimate — all sections</td>
+                  <td className="amt">{rupees(calc.grand)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
+        {noQty.length > 0 ? (
           <div className="noqty">
-            This sheet has no project quantity, so lump-sum (₹ fixed) and % lines cannot be
-            expressed as a per-{uom.replace(/\.$/, "")} rate. Set the quantity on the breakdown
-            and reopen this quotation for a complete rate column.
+            {noQty.length === tables.length ? "This quotation" : `"${noQty.map((t) => t.title).join('", "')}"`} has no
+            project quantity, so lump-sum (₹ fixed) and % lines cannot be expressed as a per-unit
+            rate. Set the quantity on the breakdown and reopen this quotation for a complete rate column.
           </div>
         ) : null}
 
@@ -229,7 +249,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
 
         <div className="foot-note">
           Rate breakup generated from the internal price-breakdown sheet
-          {sheet.qty ? ` · ${sheet.qty.toLocaleString("en-IN")} ${uom} project quantity` : ""}
+          {tables.filter((t) => t.qty).map((t) => ` · ${t.qty!.toLocaleString("en-IN")} ${t.uom} ${multi ? t.title : "project quantity"}`).join("")}
           {" · "}{new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
         </div>
       </div>
