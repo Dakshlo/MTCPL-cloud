@@ -205,6 +205,7 @@ export async function CockpitDashboard({ profile }: { profile: Profile }) {
     { icon: "📄", en: "Daily Report (PDF)", hi: "दैनिक रिपोर्ट", href: "/api/whatsapp-report/preview", ext: true },
     { icon: "📒", en: "Work Diary", hi: "काम का रजिस्टर", href: "/diary", ext: false },
     { icon: "📊", en: "Temple P&L", hi: "मंदिर लाभ-हानि", href: "/reports/temple-pnl", ext: false },
+    { icon: "🧮", en: "Tender / Price Breakdown", hi: "टेंडर / रेट ब्रेकअप", href: "/reports/tender", ext: false },
     { icon: "🏭", en: "Production DPR", hi: "उत्पादन रिपोर्ट", href: "/reports/dpr", ext: false },
   ];
 

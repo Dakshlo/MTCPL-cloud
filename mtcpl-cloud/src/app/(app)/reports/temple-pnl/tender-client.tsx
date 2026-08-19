@@ -205,7 +205,7 @@ const cellInput: React.CSSProperties = {
 /** One worksheet row. `perUnit` is the rate this line contributes to the
  *  printed quotation — shown so the sheet reads like the document it becomes. */
 function ItemRow({
-  item, qty, base, unit, autoFocusTitle,
+  item, qty, base, unit, autoFocusTitle, readOnly,
   onChange, onDelete, onEnter,
 }: {
   item: TenderItem;
@@ -213,6 +213,8 @@ function ItemRow({
   base: number;
   unit: string;
   autoFocusTitle: boolean;
+  /** Viewing a frozen version — the row reads, it does not take input. */
+  readOnly: boolean;
   onChange: (patch: Partial<TenderItem>) => void;
   onDelete: () => void;
   onEnter: () => void;
@@ -226,12 +228,14 @@ function ItemRow({
         className="tn-cell"
         placeholder="Line item…"
         value={item.title}
-        autoFocus={autoFocusTitle}
+        autoFocus={autoFocusTitle && !readOnly}
+        readOnly={readOnly}
         onChange={(e) => onChange({ title: e.target.value })}
         onKeyDown={(e) => { if (e.key === "Enter") onEnter(); }}
       />
       <select
         value={item.mode}
+        disabled={readOnly}
         onChange={(e) => onChange({ mode: e.target.value as TenderItemMode })}
         style={{ fontSize: 11.5, fontWeight: 700, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 5px", background: C.wash, outline: "none", cursor: "pointer" }}
       >
@@ -249,6 +253,7 @@ function ItemRow({
           type="number"
           min={0}
           step="any"
+          readOnly={readOnly}
           value={item.value === 0 ? "" : item.value}
           placeholder="0"
           onChange={(e) => onChange({ value: Number(e.target.value) || 0 })}
@@ -266,16 +271,18 @@ function ItemRow({
           <span title={`Set the project ${unit} above for ₹/${unit} lines to count.`} style={{ marginLeft: 4, color: C.amber }}>⚠</span>
         )}
       </div>
-      <button type="button" className="tn-del" onClick={onDelete} title="Remove line"
-        style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, borderRadius: 8, padding: "4px 5px", justifySelf: "center" }}>
-        ✕
-      </button>
+      {readOnly ? <span /> : (
+        <button type="button" className="tn-del" onClick={onDelete} title="Remove line"
+          style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, borderRadius: 8, padding: "4px 5px", justifySelf: "center" }}>
+          ✕
+        </button>
+      )}
     </div>
   );
 }
 
 function GroupCard({
-  group, index, sr, qty, base, grand, unit, focusItemId,
+  group, index, sr, qty, base, grand, unit, focusItemId, readOnly,
   onTitle, onItemChange, onItemDelete, onAddItem, onDelete,
 }: {
   group: TenderGroup;
@@ -288,6 +295,7 @@ function GroupCard({
   grand: number;
   unit: string;
   focusItemId: string | null;
+  readOnly: boolean;
   onTitle: (t: string) => void;
   onItemChange: (itemId: string, patch: Partial<TenderItem>) => void;
   onItemDelete: (itemId: string) => void;
@@ -306,6 +314,7 @@ function GroupCard({
           className="tn-cell"
           placeholder="Group heading…"
           value={group.title}
+          readOnly={readOnly}
           onChange={(e) => onTitle(e.target.value)}
         />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -316,10 +325,12 @@ function GroupCard({
             </span>
           )}
         </div>
-        <button type="button" className="tn-del" onClick={onDelete} title="Remove group"
-          style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13, borderRadius: 8, padding: "3px 6px" }}>
-          ✕
-        </button>
+        {!readOnly && (
+          <button type="button" className="tn-del" onClick={onDelete} title="Remove group"
+            style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 13, borderRadius: 8, padding: "3px 6px" }}>
+            ✕
+          </button>
+        )}
       </div>
       {/* Column ruler — the sheet reads like a real worksheet. */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 80px 100px 70px 84px 24px", gap: 8, padding: "6px 14px 4px", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.11em", color: "#b6bdc9" }}>
@@ -334,19 +345,20 @@ function GroupCard({
             base={base}
             unit={unit}
             autoFocusTitle={focusItemId === it.id}
+            readOnly={readOnly}
             onChange={(patch) => onItemChange(it.id, patch)}
             onDelete={() => onItemDelete(it.id)}
             onEnter={onAddItem}
           />
         ))}
-        <button
+        {!readOnly && <button
           type="button"
           onClick={onAddItem}
           className="tn-addline"
           style={{ alignSelf: "flex-start", margin: "5px 6px 3px", fontSize: 11.5, fontWeight: 700, color: C.indigo, border: "none", background: "transparent", cursor: "pointer", padding: "3px 8px", borderRadius: 8 }}
         >
           ＋ line <span style={{ fontSize: 9.5, color: "#b6bdc9", fontWeight: 600 }}>· Enter bhi chalega</span>
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -554,44 +566,104 @@ function DiffPanel({ diff, unit, versionLabel, onClose }: { diff: SheetDiff; uni
 /** THE split — donut + every group, numbered so a row can be pointed at.
  *  Deliberately the ONLY place the cost mix is drawn (it used to be in both
  *  the dark strip and a card under the sheet, saying the same thing twice). */
-function SplitCard({ calc, multi }: { calc: SheetCalc; multi: boolean }) {
-  const rows = calc.sections.flatMap((sec, si) =>
+function splitRows(calc: SheetCalc, multi: boolean) {
+  return calc.sections.flatMap((sec, si) =>
     sec.groups.filter((g) => g.total > 0).map((g, gi) => ({
       ...g,
       sr: multi ? `${si + 1}.${gi + 1}` : `${gi + 1}`,
       section: multi ? sec.title || `Section ${si + 1}` : "",
     })),
   );
+}
+
+/** One column of the split — donut over a numbered group list. */
+function SplitBody({ calc, multi, compact }: { calc: SheetCalc; multi: boolean; compact: boolean }) {
+  const rows = splitRows(calc, multi);
   const max = Math.max(...rows.map((r) => r.total), 1);
+  if (rows.length === 0) return <div style={{ fontSize: 12, color: C.muted }}>Add values to see the split.</div>;
   return (
-    <div className="tn-reveal" style={{ ...card, padding: "15px 20px 17px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <span style={eyebrow}>Where the money goes</span>
-        <span style={{ fontSize: 11, color: C.muted }}>{rows.length} priced group{rows.length === 1 ? "" : "s"}</span>
-      </div>
-      {rows.length === 0 ? (
-        <div style={{ fontSize: 12, color: C.muted }}>Add values to see the split.</div>
-      ) : (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
-          <Donut groups={rows} grand={calc.grand} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "9px 22px", flex: 1, minWidth: 0 }}>
-            {rows.map((r) => (
-              <div key={r.id} style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 7, fontSize: 11, color: C.muted, marginBottom: 3 }}>
-                  <span style={{ minWidth: 20, padding: "0 5px", borderRadius: 5, background: r.color, color: "#fff", fontSize: 9.5, fontWeight: 800, textAlign: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.sr}</span>
-                  <span style={{ fontWeight: 700, color: C.ink2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
-                  <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", flexShrink: 0, fontWeight: 700, color: C.ink }}>{inr(r.total)}</span>
-                  <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0, width: 30, textAlign: "right" }}>
-                    {calc.grand > 0 ? `${((r.total / calc.grand) * 100).toFixed(0)}%` : "—"}
-                  </span>
-                </div>
-                <div style={{ height: 5, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
-                  <div style={{ width: `${(r.total / max) * 100}%`, height: "100%", borderRadius: 999, background: r.color }} />
-                </div>
-                {r.section && <div style={{ fontSize: 9.5, color: "#b6bdc9", marginTop: 2.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>{r.section}</div>}
-              </div>
-            ))}
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 18, flexWrap: "wrap" }}>
+      <Donut groups={rows} grand={calc.grand} />
+      <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "repeat(auto-fit, minmax(230px, 1fr))", gap: "9px 22px", flex: 1, minWidth: 0 }}>
+        {rows.map((r) => (
+          <div key={r.id} style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 7, fontSize: 11, color: C.muted, marginBottom: 3 }}>
+              <span style={{ minWidth: 20, padding: "0 5px", borderRadius: 5, background: r.color, color: "#fff", fontSize: 9.5, fontWeight: 800, textAlign: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.sr}</span>
+              <span style={{ fontWeight: 700, color: C.ink2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</span>
+              <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", flexShrink: 0, fontWeight: 700, color: C.ink }}>{inr(r.total)}</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", flexShrink: 0, width: 30, textAlign: "right" }}>
+                {calc.grand > 0 ? `${((r.total / calc.grand) * 100).toFixed(0)}%` : "—"}
+              </span>
+            </div>
+            <div style={{ height: 5, borderRadius: 999, background: C.wash, overflow: "hidden" }}>
+              <div style={{ width: `${(r.total / max) * 100}%`, height: "100%", borderRadius: 999, background: r.color }} />
+            </div>
+            {r.section && <div style={{ fontSize: 9.5, color: "#b6bdc9", marginTop: 2.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>{r.section}</div>}
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** THE split — donut + every group, numbered so a row can be pointed at.
+ *  Deliberately the ONLY place the cost mix is drawn. Pick another version at
+ *  the foot of the card and it splits into two columns, the same picture drawn
+ *  for both, so a re-price can be read side by side. */
+function SplitCard({
+  calc, multi, title, versions, compareId, compareCalc, compareLabel, onCompare,
+}: {
+  calc: SheetCalc;
+  multi: boolean;
+  title: string;
+  versions: TenderVersion[];
+  compareId: string | null;
+  compareCalc: SheetCalc | null;
+  compareLabel: string;
+  onCompare: (id: string | null) => void;
+}) {
+  const side = compareCalc != null;
+  const swing = compareCalc ? calc.grand - compareCalc.grand : 0;
+  return (
+    <div className="tn-reveal" style={{ ...card, padding: "15px 20px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={eyebrow}>Where the money goes</span>
+        <span style={{ fontSize: 11, color: C.muted }}>{splitRows(calc, multi).length} priced groups</span>
+      </div>
+
+      {side ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 20 }}>
+          <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, padding: "13px 15px", background: C.wash }}>
+            <div style={{ ...eyebrow, fontSize: 9.5, marginBottom: 9 }}>{compareLabel} · {inr(compareCalc!.grand)}</div>
+            <SplitBody calc={compareCalc!} multi={compareCalc!.sections.length > 1} compact />
+          </div>
+          <div style={{ border: `1px solid ${C.indigo}55`, borderRadius: 14, padding: "13px 15px", background: C.indigoSoft }}>
+            <div style={{ ...eyebrow, fontSize: 9.5, marginBottom: 9, color: C.indigo }}>
+              {title} · {inr(calc.grand)}
+              {Math.abs(swing) >= 1 && (
+                <span style={{ marginLeft: 7, color: swing > 0 ? C.red : C.green }}>{swing > 0 ? "▲" : "▼"} {inr(Math.abs(swing))}</span>
+              )}
+            </div>
+            <SplitBody calc={calc} multi={multi} compact />
+          </div>
+        </div>
+      ) : (
+        <SplitBody calc={calc} multi={multi} compact={false} />
+      )}
+
+      {/* Version picker — the "see this for another version too" control. */}
+      {versions.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginTop: 14, paddingTop: 11, borderTop: `1px solid ${C.line}` }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.muted }}>Show this for another version:</span>
+          <select
+            value={compareId ?? ""}
+            onChange={(e) => onCompare(e.target.value || null)}
+            style={{ fontSize: 11.5, fontWeight: 700, color: C.ink2, border: `1px solid ${compareId ? C.indigo : C.line}`, borderRadius: 9, padding: "6px 9px", background: compareId ? C.indigoSoft : C.paper, outline: "none", cursor: "pointer" }}
+          >
+            <option value="">— off —</option>
+            {versions.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+          {compareId && <span style={{ fontSize: 11, color: C.muted }}>both splits above · full line-by-line below</span>}
         </div>
       )}
     </div>
@@ -600,15 +672,18 @@ function SplitCard({ calc, multi }: { calc: SheetCalc; multi: boolean }) {
 
 // ── the workspace ─────────────────────────────────────────────────
 
-export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; seed: RateSeed }) {
+export function TenderClient({ initial, seed, defaultWide = false }: { initial: TenderAnalysis[]; seed: RateSeed; defaultWide?: boolean }) {
   const [sheets, setSheets] = useState<TenderAnalysis[]>(initial);
   const [activeId, setActiveId] = useState<string | null>(initial[0]?.id ?? null);
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
-  const [railOpen, setRailOpen] = useState(true);
-  const [wide, setWide] = useState(false);
+  const [railOpen, setRailOpen] = useState(!defaultWide);
+  const [wide, setWide] = useState(defaultWide);
   const [showLetter, setShowLetter] = useState(false);
   const [compareId, setCompareId] = useState<string | null>(null);
+  /** Which point on the version timeline is on screen. null = the live sheet
+   *  (always the LAST stop, and the default). */
+  const [viewVersionId, setViewVersionId] = useState<string | null>(null);
 
   // "Full width" means full width: it hides the app menu AND the breakdown
   // rail, so the sheet owns the window. Coming back out restores both.
@@ -641,16 +716,27 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const active = sheets.find((s) => s.id === activeId) ?? null;
-  const sections = useMemo(() => (active ? sectionsOf(active) : []), [active]);
+  const versions = active?.versions ?? [];
+
+  // The timeline runs OLDEST → newest → NOW. `viewIdx` is where you are on it;
+  // the last stop is the live sheet, which is where you land.
+  const chain = useMemo<Array<TenderVersion | null>>(() => [...[...versions].reverse(), null], [versions]);
+  const viewIdx = Math.max(0, chain.findIndex((v) => (v?.id ?? null) === viewVersionId));
+  const viewing = chain[viewIdx] ?? null;
+  /** A frozen snapshot is history — you read it, you don't edit it. */
+  const readOnly = viewing != null;
+  const shown = viewing ?? active;
+
+  const sections = useMemo(() => (shown ? sectionsOf(shown) : []), [shown]);
   const multiSection = sections.length > 1;
-  const calc = useMemo(() => (active ? computeSheetTotal(active) : null), [active]);
+  const calc = useMemo(() => (shown ? computeSheetTotal(shown) : null), [shown]);
   const timeline = useMemo(() => (active ? computeTimeline(active, sections, seed.pace) : null), [active, sections, seed.pace]);
 
-  const versions = active?.versions ?? [];
   const compareVersion = versions.find((v) => v.id === compareId) ?? null;
+  const compareCalc = useMemo(() => (compareVersion ? computeSheetTotal(compareVersion) : null), [compareVersion]);
   const diff = useMemo(
-    () => (active && compareVersion ? diffSheets(compareVersion, active) : null),
-    [active, compareVersion],
+    () => (shown && compareVersion ? diffSheets(compareVersion, shown) : null),
+    [shown, compareVersion],
   );
 
   const patchActive = (fn: (a: TenderAnalysis) => TenderAnalysis) =>
@@ -674,6 +760,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
     mutate((prev) => [a, ...prev]);
     setActiveId(a.id);
     setCompareId(null);
+    setViewVersionId(null);
   };
 
   const addItem = (sectionId: string, groupId: string) => {
@@ -700,6 +787,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
       grand: computeSheetTotal({ sections: snapSections }).grand,
     };
     patchActive((a) => ({ ...a, versions: [snap, ...(a.versions ?? [])].slice(0, 12) }));
+    setViewVersionId(null);
   };
 
   return (
@@ -734,7 +822,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 <div
                   key={sh.id}
                   className="tn-sheet"
-                  onClick={() => { setActiveId(sh.id); setCompareId(null); }}
+                  onClick={() => { setActiveId(sh.id); setCompareId(null); setViewVersionId(null); }}
                   style={{
                     padding: "10px 12px", borderRadius: 12, cursor: "pointer",
                     border: `1px solid ${isActive ? C.indigo : C.line}`,
@@ -848,6 +936,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
               className="tn-cell"
               style={{ ...cellInput, fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em", flex: "1 1 220px", minWidth: 170 }}
               value={active.name}
+              readOnly={readOnly}
               placeholder="Project / tender name…"
               onChange={(e) => patchActive((a) => ({ ...a, name: e.target.value }))}
             />
@@ -858,6 +947,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 type="number" min={0} step="any"
                 placeholder={seed.pace != null ? String(Math.round(seed.pace)) : "—"}
                 title={seed.pace != null ? `Blank = your real pace from the P&L window (${Math.round(seed.pace)} CFT/day)` : "No data pace for this window — enter your own"}
+                readOnly={readOnly}
                 value={active.paceCftPerDay ?? ""}
                 onChange={(e) => patchActive((a) => ({ ...a, paceCftPerDay: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
                 style={{ ...cellInput, width: 78, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
@@ -871,6 +961,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 type="number" min={0} step="any"
                 placeholder={timeline?.days != null && active.manualDays == null ? String(Math.ceil(timeline.days)) : "—"}
                 title="Blank = calculated from the Cft. quantity ÷ pace. Type to fix the timeline manually."
+                readOnly={readOnly}
                 value={active.manualDays ?? ""}
                 onChange={(e) => patchActive((a) => ({ ...a, manualDays: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
                 style={{ ...cellInput, width: 74, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
@@ -881,7 +972,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
             {/* Actions */}
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: "auto", flexWrap: "wrap" }}>
               <button type="button" onClick={() => setShowLetter((v) => !v)} style={ghostBtn(showLetter)}>✉️ Letter</button>
-              <button type="button" onClick={saveVersion} style={ghostBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>
+              {!readOnly && <button type="button" onClick={saveVersion} style={ghostBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>}
               <a href={`/reports/tender/${active.id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...ghostBtn(false), textDecoration: "none", display: "inline-block" }}>
                 🖨 Quotation
               </a>
@@ -979,40 +1070,78 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
             )}
           </div>
 
-          {/* ── versions ── */}
+          {/* ── version timeline: ← older · newer → , landing on NOW ── */}
           {versions.length > 0 && (
-            <div className="tn-reveal" style={{ ...card, padding: "13px 18px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={eyebrow}>Versions</span>
-              {versions.map((v) => {
-                const on = v.id === compareId;
-                const swing = calc.grand - v.grand;
-                return (
-                  <span key={v.id} className="tn-ver" style={{ display: "inline-flex", alignItems: "center", gap: 8, border: `1px solid ${on ? C.indigo : C.line}`, background: on ? C.indigoSoft : C.paper, borderRadius: 999, padding: "5px 6px 5px 12px" }}>
-                    <button type="button" onClick={() => setCompareId(on ? null : v.id)} title="Compare this version with the sheet as it stands now"
-                      style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 800, color: on ? C.indigo : C.ink }}>{v.label}</span>
-                      <span style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                        {inr(v.grand)}
-                        {Math.abs(swing) >= 1 && (
-                          <span style={{ marginLeft: 5, fontWeight: 800, color: swing > 0 ? C.red : C.green }}>
-                            {swing > 0 ? "▲" : "▼"}{inr(Math.abs(swing))}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                    <span className="tn-del" title="Delete this version"
-                      onClick={() => {
-                        if (!window.confirm(`Delete version "${v.label}"?`)) return;
-                        if (compareId === v.id) setCompareId(null);
-                        patchActive((a) => ({ ...a, versions: (a.versions ?? []).filter((x) => x.id !== v.id) }));
+            <div className="tn-reveal" style={{ ...card, padding: "10px 14px 11px", display: "flex", alignItems: "center", gap: 12 }}>
+              <button
+                type="button"
+                disabled={viewIdx === 0}
+                onClick={() => setViewVersionId(chain[viewIdx - 1]?.id ?? null)}
+                title="Older version"
+                style={arrowBtn(viewIdx === 0)}
+              >‹</button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 7, flex: 1, minWidth: 0, overflowX: "auto", justifyContent: "center" }}>
+                {chain.map((v, i) => {
+                  const on = i === viewIdx;
+                  const live = v == null;
+                  // Recomputed, not the stored `grand` — a snapshot saved before
+                  // master groups existed carries a total for its first section only.
+                  const g = v ? computeSheetTotal(v).grand : (calc?.grand ?? 0);
+                  return (
+                    <button
+                      key={v?.id ?? "now"}
+                      type="button"
+                      onClick={() => setViewVersionId(v?.id ?? null)}
+                      title={v ? `${v.label} · saved ${new Date(v.savedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}` : "The sheet as it stands now"}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0,
+                        border: `1px solid ${on ? C.indigo : C.line}`,
+                        background: on ? C.indigoSoft : C.paper,
+                        borderRadius: 999, padding: "5px 13px", cursor: "pointer",
+                        boxShadow: on ? `inset 0 0 0 1px ${C.indigo}` : "none",
                       }}
-                      style={{ fontSize: 11, color: C.muted, cursor: "pointer", padding: "0 4px" }}>✕</span>
-                  </span>
-                );
-              })}
-              <span style={{ fontSize: 11, color: C.muted, marginLeft: "auto" }}>
-                {compareId ? "comparing below" : "click a version to compare it with the numbers you have now"}
+                    >
+                      <span style={{ fontSize: 11.5, fontWeight: 800, color: on ? C.indigo : live ? C.green : C.ink }}>
+                        {live ? "● NOW" : v!.label}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>{inr(g)}</span>
+                      {v && (
+                        <span className="tn-del" title="Delete this version"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!window.confirm(`Delete version "${v.label}"?`)) return;
+                            if (compareId === v.id) setCompareId(null);
+                            if (viewVersionId === v.id) setViewVersionId(null);
+                            patchActive((a) => ({ ...a, versions: (a.versions ?? []).filter((x) => x.id !== v.id) }));
+                          }}
+                          style={{ fontSize: 10.5, color: C.muted, cursor: "pointer" }}>✕</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                disabled={viewIdx >= chain.length - 1}
+                onClick={() => setViewVersionId(chain[viewIdx + 1]?.id ?? null)}
+                title="Newer version"
+                style={arrowBtn(viewIdx >= chain.length - 1)}
+              >›</button>
+            </div>
+          )}
+
+          {/* Reading history — say so loudly, because the sheet looks editable. */}
+          {readOnly && viewing && (
+            <div className="tn-reveal" style={{ display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", border: `1px solid ${C.amber}44`, background: "rgba(194,116,10,0.07)", borderRadius: 14, padding: "10px 16px" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: C.amber }}>
+                📌 Viewing {viewing.label} — saved {new Date(viewing.savedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
               </span>
+              <span style={{ fontSize: 11.5, color: C.ink2 }}>Read only. Nothing you type here would be kept.</span>
+              <button type="button" onClick={() => setViewVersionId(null)} style={{ ...ghostBtn(false), marginLeft: "auto" }}>
+                › Back to the live sheet
+              </button>
             </div>
           )}
 
@@ -1023,7 +1152,16 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
           )}
 
           {/* The split — once, above the sheet so it never needs scrolling to. */}
-          <SplitCard calc={calc} multi={multiSection} />
+          <SplitCard
+            calc={calc}
+            multi={multiSection}
+            title={viewing ? viewing.label : "Now"}
+            versions={versions.filter((v) => v.id !== viewing?.id)}
+            compareId={compareId}
+            compareCalc={compareCalc}
+            compareLabel={compareVersion?.label ?? ""}
+            onCompare={setCompareId}
+          />
 
           {/* ── master groups ── */}
           {sections.map((sec, si) => {
@@ -1044,19 +1182,19 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                       placeholder="Master group — e.g. Sandstone Carving Work"
                       onChange={(e) => patchSection(sec.id, (x) => ({ ...x, title: e.target.value }))}
                     />
-                    <SectionQty sec={sec} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
+                    <SectionQty sec={sec} readOnly={readOnly} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(scalc.grand)}</div>
                       <div style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
                         {scalc.perCft != null ? `₹${Math.round(scalc.perCft).toLocaleString("en-IN")} per ${sec.uom}` : `set a quantity for the ${sec.uom} rate`}
                       </div>
                     </div>
-                    <button type="button" className="tn-del" title="Remove this master group and everything in it"
+                    {!readOnly && <button type="button" className="tn-del" title="Remove this master group and everything in it"
                       onClick={() => {
                         if (!window.confirm(`Remove master group "${sec.title || si + 1}" and its ${sec.groups.length} group(s)?`)) return;
                         patchSections((secs) => (secs.length <= 1 ? secs : secs.filter((x) => x.id !== sec.id)));
                       }}
-                      style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, padding: "3px 5px" }}>✕</button>
+                      style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, padding: "3px 5px" }}>✕</button>}
                   </div>
                 )}
 
@@ -1065,11 +1203,13 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                 {!multiSection && !sec.title && (
                   <div className="tn-reveal" style={{ ...card, padding: "10px 16px 11px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <span style={eyebrow}>Project quantity</span>
-                    <SectionQty sec={sec} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
-                    <button type="button" onClick={() => patchSection(sec.id, (x) => ({ ...x, title: "Sandstone Carving Work" }))}
-                      style={{ ...ghostBtn(false), marginLeft: "auto" }} title="Name this scope so a second material can be added beside it">
-                      ✎ Name this master group
-                    </button>
+                    <SectionQty sec={sec} readOnly={readOnly} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
+                    {!readOnly && (
+                      <button type="button" onClick={() => patchSection(sec.id, (x) => ({ ...x, title: "Sandstone Carving Work" }))}
+                        style={{ ...ghostBtn(false), marginLeft: "auto" }} title="Name this scope so a second material can be added beside it">
+                        ✎ Name this master group
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -1085,6 +1225,7 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                       grand={scalc.grand}
                       unit={unit}
                       focusItemId={focusItemId}
+                      readOnly={readOnly}
                       onTitle={(t) => patchSection(sec.id, (x) => ({ ...x, groups: x.groups.map((y) => (y.id === g.id ? { ...y, title: t } : y)) }))}
                       onItemChange={(itemId, patch) =>
                         patchSection(sec.id, (x) => ({
@@ -1107,39 +1248,41 @@ export function TenderClient({ initial, seed }: { initial: TenderAnalysis[]; see
                   ))}
                 </div>
 
-                <button
+                {!readOnly && <button
                   type="button"
                   onClick={() => patchSection(sec.id, (x) => ({ ...x, groups: [...x.groups, { id: uid(), title: "", items: [{ id: uid(), title: "", mode: "per_cft", value: 0 }] }] }))}
                   style={{ alignSelf: "flex-start", fontSize: 12.5, fontWeight: 800, color: C.indigo, background: C.indigoSoft, border: `1px dashed ${C.indigo}55`, borderRadius: 12, padding: "9px 17px", cursor: "pointer" }}
                 >
                   ＋ Add group{multiSection || sec.title ? ` to ${sec.title || `master group ${si + 1}`}` : ""}
-                </button>
+                </button>}
               </div>
             );
           })}
 
           {/* Add a second material / scope — the whole quotation skeleton again. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 4, borderTop: `1px dashed ${C.line}`, marginTop: 4 }}>
-            <span style={{ fontSize: 11.5, color: C.muted, paddingTop: 12 }}>
-              Same scope for another material? Add a master group — it gets its own quantity, unit and rate table on the quotation.
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                const name = window.prompt("Name the master group — e.g. \"Marble Slab\"", "Marble Slab");
-                if (name == null) return;
-                patchSections((secs) => {
-                  // Name the first one too, so the quotation's tables are both
-                  // captioned rather than one falling back to the sheet name.
-                  const named = secs.map((x, i) => (i === 0 && !x.title ? { ...x, title: "Sandstone Carving Work" } : x));
-                  return [...named, templateSection(name.trim() || "New master group", "Sqft.", null)];
-                });
-              }}
-              style={{ marginTop: 12, marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: "#fff", background: C.indigo, border: "none", borderRadius: 12, padding: "10px 18px", cursor: "pointer" }}
-            >
-              ＋ Add master group
-            </button>
-          </div>
+          {!readOnly && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 4, borderTop: `1px dashed ${C.line}`, marginTop: 4 }}>
+              <span style={{ fontSize: 11.5, color: C.muted, paddingTop: 12 }}>
+                Same scope for another material? Add a master group — it gets its own quantity, unit and rate table on the quotation.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = window.prompt("Name the master group — e.g. \"Marble Slab\"", "Marble Slab");
+                  if (name == null) return;
+                  patchSections((secs) => {
+                    // Name the first one too, so the quotation's tables are both
+                    // captioned rather than one falling back to the sheet name.
+                    const named = secs.map((x, i) => (i === 0 && !x.title ? { ...x, title: "Sandstone Carving Work" } : x));
+                    return [...named, templateSection(name.trim() || "New master group", "Sqft.", null)];
+                  });
+                }}
+                style={{ marginTop: 12, marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: "#fff", background: C.indigo, border: "none", borderRadius: 12, padding: "10px 18px", cursor: "pointer" }}
+              >
+                ＋ Add master group
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1171,18 +1314,20 @@ input[type=number].tn-cell::-webkit-outer-spin-button, input[type=number].tn-cel
 }
 
 /** Quantity + unit for one master group. Module level — focus-safe. */
-function SectionQty({ sec, onPatch }: { sec: TenderSection; onPatch: (patch: Partial<TenderSection>) => void }) {
+function SectionQty({ sec, onPatch, readOnly }: { sec: TenderSection; onPatch: (patch: Partial<TenderSection>) => void; readOnly: boolean }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2, flexShrink: 0 }}>
       <input
         className="tn-cell"
         type="number" min={0} step="any" placeholder="—"
+        readOnly={readOnly}
         value={sec.qty ?? ""}
         onChange={(e) => onPatch({ qty: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) })}
         style={{ ...cellInput, width: 100, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
       />
       <select
         value={sec.uom}
+        disabled={readOnly}
         onChange={(e) => onPatch({ uom: e.target.value as TenderUom })}
         title="Billing unit — rides through every rate and this group's Uom. column on the quotation"
         style={{ fontSize: 11.5, fontWeight: 800, color: C.ink2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "6px 6px", background: C.wash, outline: "none", cursor: "pointer" }}
@@ -1215,6 +1360,15 @@ const railBtn = (primary: boolean): React.CSSProperties => ({
   border: primary ? "none" : `1px dashed ${C.indigo}66`,
   background: primary ? C.indigo : C.indigoSoft,
   color: primary ? "#fff" : C.indigo,
+});
+
+const arrowBtn = (disabled: boolean): React.CSSProperties => ({
+  width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+  border: `1px solid ${C.line}`,
+  background: disabled ? C.wash : C.paper,
+  color: disabled ? "#c8cdd6" : C.ink,
+  fontSize: 17, fontWeight: 800, lineHeight: 1,
+  cursor: disabled ? "default" : "pointer",
 });
 
 const ghostBtn = (on: boolean): React.CSSProperties => ({

@@ -15,6 +15,7 @@ import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { TemplePnlEntryCard } from "@/components/temple-pnl-entry-card";
+import { TenderEntryCard } from "@/components/tender-entry-card";
 import {
   canViewVariousCosting,
   canViewCncCosts,
@@ -331,6 +332,7 @@ export default async function DashboardPage() {
         {/* Temple P&L — developer only while the cost-allocation model is
             still being agreed (the page re-checks the role). */}
         {profile.role === "developer" && <TemplePnlEntryCard />}
+        {profile.role === "developer" && <TenderEntryCard />}
       </div>
 
       {/* ── EMAIL SNAPSHOT (June 2026) — owner/dev only. AI-picked

@@ -83,12 +83,14 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .screen-bar a { color: rgba(255,255,255,0.75); font-size: 11.5px; font-weight: 700; text-decoration: none; }
 
-        /* ── letterhead: the company's own, in its own red ── */
-        .lh { text-align: center; }
-        .lh-name { font-size: 25px; font-weight: 800; color: #c0392b; letter-spacing: 0.01em; line-height: 1.12; }
-        .lh-addr { font-size: 11px; font-weight: 700; color: #c0392b; margin-top: 6px; }
-        .lh-contact { font-size: 10.5px; color: #c0392b; margin-top: 2px; }
-        .lh-rule { border-bottom: 1.5px dashed #c0392b; margin: 7px 0 0; }
+        /* ── letterhead: identical to the invoicing documents ── */
+        .head { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 16px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 7px; }
+        .brand-logo { height: 68px; width: auto; }
+        .company-block { text-align: center; min-width: 0; }
+        .cn { font-size: 16px; font-weight: 800; color: #0f2540; }
+        .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
+        .doc-title { text-align: center; margin: 0 0 7px; }
+        .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
 
         .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 14px; font-size: 11.5px; font-weight: 700; }
         .to { margin-top: 4px; font-size: 12px; line-height: 1.55; }
@@ -99,15 +101,16 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         /* ── the rate table ── */
         .tbl-wrap { margin: 20px auto 0; width: 92%; }
         table.rb { width: 100%; border-collapse: collapse; font-size: 12px; }
-        table.rb caption { caption-side: top; font-size: 12.5px; font-weight: 800; color: #c0392b; padding: 5px 6px; border: 1px solid #1a1a1a; border-bottom: none; text-align: center; }
-        table.rb th, table.rb td { border: 1px solid #1a1a1a; padding: 3.5px 8px; }
+        table.rb caption { caption-side: top; font-size: 12px; font-weight: 800; color: #0f2540; background: #eef2f7; padding: 5px 6px; border: 1px solid #1e3a5f; border-bottom: none; text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
+        table.rb th, table.rb td { border: 1px solid #d3dae3; padding: 4px 8px; }
+        table.rb th { background: #eef2f7; color: #444; text-transform: uppercase; letter-spacing: 0.04em; }
         table.rb th { font-size: 11.5px; font-weight: 800; text-align: center; }
         table.rb td.sr { text-align: center; width: 38px; }
         table.rb td.pt { text-align: left; }
         table.rb td.uom { text-align: center; width: 74px; }
         table.rb td.rate { text-align: right; width: 108px; font-variant-numeric: tabular-nums; }
         table.rb td.amt { text-align: right; width: 118px; font-variant-numeric: tabular-nums; }
-        table.rb tfoot td { font-weight: 800; color: #c0392b; }
+        table.rb tfoot td { font-weight: 800; background: #f3f6fa; border: 1px solid #d3dae3; color: #0f2540; }
         table.rb tfoot td.lbl { text-align: left; }
         .grp { font-size: 9px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: #999; }
 
@@ -144,12 +147,16 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
       </div>
 
       <div className="wrap">
-        {/* Letterhead */}
-        <div className="lh">
-          <div className="lh-name">MATESHWARI<br />TEMPLE CONSTRUCTION PVT. LTD.</div>
-          <div className="lh-addr">G-109, RIICO INDUSTRIAL AREA, SIROHI ROAD, PINDWARA, DISTT- SIROHI (RAJ) 307022</div>
-          <div className="lh-contact">Contact No. – 9414152740 · Email- mtcplg109@yahoo.in · Website- www.mateshwaritemples.com</div>
-          <div className="lh-rule" />
+        {/* Letterhead — the same block every MTCPL document carries. */}
+        <div className="doc-title"><span>RATE BREAKUP</span></div>
+        <div className="head">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
+          <div className="company-block">
+            <div className="cn">MATESHWARI TEMPLE CONSTRUCTION PVT LTD</div>
+            <div className="cl">G-109, RIICO Ind. Area, Sirohi Road, Teh. Pindwara, Dist. Sirohi, Rajasthan</div>
+            <div className="cl">GSTIN: 08AAFCM15Q1ZA · ☎ 759 759 1188 · temple@mtcpl.co</div>
+          </div>
         </div>
 
         <div className="letter-meta">
