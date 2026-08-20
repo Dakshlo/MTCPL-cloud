@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-badge";
 import { TopbarDiaryBadge, type DiaryBadgeItem } from "@/components/topbar-diary-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
+import { QuickSearch } from "@/components/quick-search";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
 import { Toast } from "@/components/toast";
@@ -815,7 +816,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
               if (showProduction || showProductionForVendor)
-                return <TopbarIdLookup domain="production" templeCodes={templeCodeOptions} />;
+                return (
+                  <>
+                    <TopbarIdLookup domain="production" templeCodes={templeCodeOptions} />
+                    {/* Same gate, same floor: hold ; and ' for a stage +
+                        location lookup that answers while you type. Desktop
+                        only — it decides that for itself. */}
+                    <QuickSearch />
+                  </>
+                );
               if (showFinance) return <TopbarIdLookup domain="finance" />;
               if (showInventory) return <TopbarIdLookup domain="inventory" />;
               return null;
