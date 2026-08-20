@@ -313,7 +313,8 @@ function ItemRow({
 
 function GroupCard({
   group, index, sr, qty, base, grand, unit, focusItemId, readOnly, drag,
-  onTitle, onItemChange, onItemDelete, onAddItem, onDelete, onDragItem,
+  groupDragging, groupDropTarget,
+  onTitle, onItemChange, onItemDelete, onAddItem, onDelete, onDragItem, onDragGroup,
 }: {
   group: TenderGroup;
   index: number;
@@ -329,6 +330,9 @@ function GroupCard({
   /** Live drag state, shared across the sheet so a row knows if it is the
    *  one moving or the one being dropped onto. */
   drag: { groupId: string | null; from: number; over: number };
+  /** This whole card is the one being dragged / the one it would land on. */
+  groupDragging: boolean;
+  groupDropTarget: boolean;
   onTitle: (t: string) => void;
   onItemChange: (itemId: string, patch: Partial<TenderItem>) => void;
   onItemDelete: (itemId: string) => void;
@@ -338,13 +342,36 @@ function GroupCard({
    *  "drop" commits, "end" clears. One callback so the workspace owns the
    *  whole gesture and a row stays a dumb, focus-safe component. */
   onDragItem: (phase: "grab" | "over" | "drop" | "end", index: number) => void;
+  /** Same gesture, one level up — reorder the cost heads themselves. */
+  onDragGroup: (phase: "grab" | "over" | "drop" | "end") => void;
 }) {
   const color = GROUP_COLORS[index % GROUP_COLORS.length];
   const total = group.items.reduce((s, it) => s + itemRupees(it, qty, base), 0);
   const share = grand > 0 ? (total / grand) * 100 : 0;
   return (
-    <div className="tn-group" style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${color}`, borderRadius: 14, background: C.paper, overflow: "hidden", boxShadow: "0 1px 2px rgba(11,18,32,0.03)" }}>
+    <div
+      className="tn-group"
+      onDragOver={(e) => { if (!readOnly) { e.preventDefault(); onDragGroup("over"); } }}
+      onDrop={(e) => { if (!readOnly) { e.preventDefault(); onDragGroup("drop"); } }}
+      style={{
+        border: `1px solid ${C.line}`, borderLeft: `3px solid ${color}`, borderRadius: 12,
+        background: C.paper, overflow: "hidden", boxShadow: "0 1px 2px rgba(11,18,32,0.03)",
+        opacity: groupDragging ? 0.4 : 1,
+        outline: groupDropTarget ? `2px solid ${C.indigo}` : undefined,
+        outlineOffset: groupDropTarget ? -1 : undefined,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 5px", background: `linear-gradient(180deg, ${color}0d, transparent)`, borderBottom: `1px solid ${C.line}` }}>
+        {!readOnly && (
+          <span
+            className="tn-ggrip"
+            draggable
+            onDragStart={() => onDragGroup("grab")}
+            onDragEnd={() => onDragGroup("end")}
+            title="Drag to reorder this group"
+            style={{ cursor: "grab", color: "#c8cdd6", fontSize: 12, lineHeight: 1, userSelect: "none", flexShrink: 0 }}
+          >⠿</span>
+        )}
         <span title={`Group ${sr}`} style={{ minWidth: 20, height: 18, padding: "0 5px", borderRadius: 5, background: color, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{sr}</span>
         <input
           style={{ ...cellInput, fontWeight: 800, fontSize: 12.5, padding: "3px 7px", letterSpacing: "-0.01em" }}
@@ -729,6 +756,8 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
   const [viewVersionId, setViewVersionId] = useState<string | null>(null);
   /** In-flight line drag: which group, from where, hovering over where. */
   const [drag, setDrag] = useState<{ groupId: string | null; from: number; over: number }>({ groupId: null, from: -1, over: -1 });
+  /** In-flight GROUP drag: which master group, from where, over where. */
+  const [gdrag, setGdrag] = useState<{ sectionId: string | null; from: number; over: number }>({ sectionId: null, from: -1, over: -1 });
 
   // "Full width" means full width: it hides the app menu AND the breakdown
   // rail, so the sheet owns the window. Coming back out restores both.
@@ -834,6 +863,22 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
         return { ...g, items };
       }),
     }));
+  };
+
+  /** Move a cost head inside its master group — same gesture, one level up. */
+  const dragGroup = (sectionId: string, phase: "grab" | "over" | "drop" | "end", index: number) => {
+    if (phase === "grab") { setGdrag({ sectionId, from: index, over: index }); return; }
+    if (phase === "over") { setGdrag((d) => (d.sectionId === sectionId && d.over !== index ? { ...d, over: index } : d)); return; }
+    if (phase === "end") { setGdrag({ sectionId: null, from: -1, over: -1 }); return; }
+    const from = gdrag.from;
+    setGdrag({ sectionId: null, from: -1, over: -1 });
+    if (gdrag.sectionId !== sectionId || from < 0 || from === index) return;
+    patchSection(sectionId, (sec) => {
+      const groups = [...sec.groups];
+      const [moved] = groups.splice(from, 1);
+      groups.splice(index, 0, moved);
+      return { ...sec, groups };
+    });
   };
 
   /** A snapshot of the sheet exactly as it stands. */
@@ -1006,75 +1051,68 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 13, minWidth: 0 }}>
-          {/* Sheet header: name + timeline inputs + actions. Quantity and unit
-              now live on each master group, where they belong. */}
-          <div className="tn-reveal" style={{ ...card, padding: "14px 18px 15px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", position: "relative", overflow: "hidden" }}>
-            <div aria-hidden style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${C.indigo}, #0284c7, ${C.green}, ${C.amber})` }} />
-            {!railOpen && (
-              <button type="button" onClick={() => setRailOpen(true)} title="Show the breakdown list"
-                style={{ border: `1px solid ${C.line}`, background: C.wash, color: C.ink2, borderRadius: 9, padding: "6px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>
-                ⇥
-              </button>
-            )}
-            <input
-              className="tn-cell"
-              style={{ ...cellInput, fontSize: 19, fontWeight: 800, letterSpacing: "-0.02em", flex: "1 1 220px", minWidth: 170 }}
-              value={active.name}
-              readOnly={readOnly}
-              placeholder="Project / tender name…"
-              onChange={(e) => patchActive((a) => ({ ...a, name: e.target.value }))}
-            />
-            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
-              Pace
+          {/* ── Sheet header. Two decks: identity on top, the sheet's own
+                dials underneath, so a wide toolbar stops reading as one long
+                undifferentiated strip of controls. ── */}
+          <div className="tn-reveal" style={{ ...card, padding: 0, overflow: "hidden" }}>
+            <div aria-hidden style={{ height: 3, background: `linear-gradient(90deg, ${C.indigo}, #0284c7, ${C.green}, ${C.amber})` }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 18px 10px" }}>
+              {!railOpen && (
+                <button type="button" onClick={() => setRailOpen(true)} title="Show the breakdown list"
+                  style={{ border: `1px solid ${C.line}`, background: C.wash, color: C.ink2, borderRadius: 9, padding: "6px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>
+                  ⇥
+                </button>
+              )}
               <input
                 className="tn-cell"
-                type="number" min={0} step="any"
+                style={{ ...cellInput, fontSize: 20, fontWeight: 800, letterSpacing: "-0.028em", flex: "1 1 220px", minWidth: 170, padding: "3px 8px" }}
+                value={active.name}
+                readOnly={readOnly}
+                placeholder="Project / tender name…"
+                onChange={(e) => patchActive((a) => ({ ...a, name: e.target.value }))}
+              />
+              {/* Action cluster — one segmented control, not five loose pills. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginLeft: "auto" }}>
+                <div style={{ display: "flex", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 11, overflow: "hidden", background: C.paper }}>
+                  <button type="button" onClick={() => setShowLetter((v) => !v)} style={segBtn(showLetter)} title="Addressee, work title, opening paragraph and terms for the printed quotation">✉️ Letter</button>
+                  {!readOnly && (
+                    versions.length > 0 ? (
+                      <>
+                        <button type="button" onClick={updateVersion} style={segBtn(false)} title={`Refresh "${versions[0].label}" with the numbers as they stand now`}>💾 Save to {versions[0].label}</button>
+                        <button type="button" onClick={newVersion} style={segBtn(false)} title="Start a NEW point on the timeline, keeping the current one">＋ Version</button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={newVersion} style={segBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>
+                    )
+                  )}
+                  <a href={`/reports/tender/${active.id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...segBtn(false), textDecoration: "none", display: "inline-block" }}>🖨 Quotation</a>
+                </div>
+                <button type="button" onClick={() => goWide(!wide)} title={wide ? "Bring the app menu and the breakdown list back" : "Hide the app menu and the breakdown list — full-width sheet"} style={ghostBtn(wide)}>
+                  {wide ? "⇥ Exit full width" : "⛶ Full width"}
+                </button>
+              </div>
+            </div>
+
+            {/* Dials deck */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 18px 10px", borderTop: `1px solid ${C.line}`, background: C.wash }}>
+              <Dial label="Pace" suffix="CFT/day"
                 placeholder={seed.pace != null ? String(Math.round(seed.pace)) : "—"}
                 title={seed.pace != null ? `Blank = your real pace from the P&L window (${Math.round(seed.pace)} CFT/day)` : "No data pace for this window — enter your own"}
                 readOnly={readOnly}
-                value={active.paceCftPerDay ?? ""}
-                onChange={(e) => patchActive((a) => ({ ...a, paceCftPerDay: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
-                style={{ ...cellInput, width: 78, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
+                value={active.paceCftPerDay}
+                onChange={(v) => patchActive((a) => ({ ...a, paceCftPerDay: v }))}
               />
-              <span style={{ color: C.muted }}>CFT/day</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
-              Time
-              <input
-                className="tn-cell"
-                type="number" min={0} step="any"
+              <Dial label="Time" suffix="days"
                 placeholder={timeline?.days != null && active.manualDays == null ? String(Math.ceil(timeline.days)) : "—"}
                 title="Blank = calculated from the Cft. quantity ÷ pace. Type to fix the timeline manually."
                 readOnly={readOnly}
-                value={active.manualDays ?? ""}
-                onChange={(e) => patchActive((a) => ({ ...a, manualDays: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0) }))}
-                style={{ ...cellInput, width: 74, textAlign: "right", border: `1px solid ${C.line}`, background: C.paper, fontVariantNumeric: "tabular-nums" }}
+                value={active.manualDays}
+                onChange={(v) => patchActive((a) => ({ ...a, manualDays: v }))}
               />
-              <span style={{ color: C.muted }}>days</span>
-            </label>
-
-            {/* Actions */}
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: "auto", flexWrap: "wrap" }}>
-              <button type="button" onClick={() => setShowLetter((v) => !v)} style={ghostBtn(showLetter)}>✉️ Letter</button>
-              {!readOnly && (
-                versions.length > 0 ? (
-                  <>
-                    <button type="button" onClick={updateVersion} style={ghostBtn(false)} title={`Refresh "${versions[0].label}" with the numbers as they stand now`}>
-                      💾 Save to {versions[0].label}
-                    </button>
-                    <button type="button" onClick={newVersion} style={ghostBtn(false)} title="Start a NEW point on the timeline, keeping the current one">＋ New version</button>
-                  </>
-                ) : (
-                  <button type="button" onClick={newVersion} style={ghostBtn(false)} title="Freeze today's numbers so a later re-price can be compared against them">📌 Save version</button>
-                )
-              )}
-              <a href={`/reports/tender/${active.id}/print`} target="_blank" rel="noopener noreferrer" style={{ ...ghostBtn(false), textDecoration: "none", display: "inline-block" }}>
-                🖨 Quotation
-              </a>
-              <button type="button" onClick={() => goWide(!wide)} title={wide ? "Bring the app menu and the breakdown list back" : "Hide the app menu and the breakdown list — full-width sheet"} style={ghostBtn(wide)}>
-                {wide ? "⇥ Exit full width" : "⛶ Full width"}
-              </button>
-              {!railOpen && <SavePill state={saveState} />}
+              <span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>
+                {sections.length} master group{sections.length === 1 ? "" : "s"} · {calc.groups.length} cost heads
+              </span>
+              <span style={{ marginLeft: "auto" }}><SavePill state={saveState} /></span>
             </div>
           </div>
 
@@ -1258,59 +1296,45 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
             onCompare={setCompareId}
           />
 
-          {/* ── master groups ── */}
+          {/* ── master groups ── Each one is a SHELL: its own header, then its
+                cost heads nested inside on a tinted well, so there is never a
+                question about which group belongs to which material. ── */}
           {sections.map((sec, si) => {
             const scalc = calc.sections[si];
             const unit = uomShort(sec.uom);
+            const color = GROUP_COLORS[si % GROUP_COLORS.length];
             return (
-              <div key={sec.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {/* Section bar — only shown once there is more than one master
-                    group, or the user has named this one. A plain single-scope
-                    sheet keeps its old, simpler face. */}
-                {(multiSection || sec.title) && (
-                  <div className="tn-reveal" style={{ ...card, padding: "11px 16px 12px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", borderLeft: `4px solid ${C.indigo}` }}>
-                    <span style={{ minWidth: 26, height: 26, borderRadius: 8, background: C.indigo, color: "#fff", fontSize: 12.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{si + 1}</span>
-                    <input
-                      className="tn-cell"
-                      style={{ ...cellInput, fontSize: 15.5, fontWeight: 800, letterSpacing: "-0.015em", flex: "1 1 200px", minWidth: 150 }}
-                      value={sec.title}
-                      placeholder="Master group — e.g. Sandstone Carving Work"
-                      onChange={(e) => patchSection(sec.id, (x) => ({ ...x, title: e.target.value }))}
-                    />
-                    <SectionQty sec={sec} readOnly={readOnly} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums" }}>{inr(scalc.grand)}</div>
-                      <div style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                        {scalc.perCft != null ? `₹${Math.round(scalc.perCft).toLocaleString("en-IN")} per ${sec.uom}` : `set a quantity for the ${sec.uom} rate`}
-                      </div>
+              <div key={sec.id} className="tn-reveal" style={{ ...card, padding: 0, overflow: "hidden", borderTop: `3px solid ${color}` }}>
+                {/* Master-group header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 11, flexWrap: "wrap", padding: "11px 16px 11px", background: `linear-gradient(180deg, ${color}0f, transparent)` }}>
+                  <span style={{ minWidth: 26, height: 26, borderRadius: 8, background: color, color: "#fff", fontSize: 12.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{si + 1}</span>
+                  <input
+                    className="tn-cell"
+                    style={{ ...cellInput, fontSize: 15.5, fontWeight: 800, letterSpacing: "-0.015em", flex: "1 1 190px", minWidth: 140, padding: "4px 8px" }}
+                    value={sec.title}
+                    readOnly={readOnly}
+                    placeholder={multiSection ? "Master group — e.g. Marble Slab" : "Name this scope — e.g. Sandstone Carving Work"}
+                    onChange={(e) => patchSection(sec.id, (x) => ({ ...x, title: e.target.value }))}
+                  />
+                  <SectionQty sec={sec} readOnly={readOnly} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
+                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: 110 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>{inr(scalc.grand)}</div>
+                    <div style={{ fontSize: 10.5, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                      {scalc.perCft != null ? `₹${Math.round(scalc.perCft).toLocaleString("en-IN")} per ${sec.uom}` : `set a quantity for the ${sec.uom} rate`}
                     </div>
-                    {!readOnly && <button type="button" className="tn-del" title="Remove this master group and everything in it"
+                  </div>
+                  {!readOnly && sections.length > 1 && (
+                    <button type="button" className="tn-del" title="Remove this master group and everything in it"
                       onClick={() => {
                         if (!window.confirm(`Remove master group "${sec.title || si + 1}" and its ${sec.groups.length} group(s)?`)) return;
                         patchSections((secs) => (secs.length <= 1 ? secs : secs.filter((x) => x.id !== sec.id)));
                       }}
-                      style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, padding: "3px 5px" }}>✕</button>}
-                  </div>
-                )}
+                      style={{ border: "none", background: "transparent", color: C.muted, cursor: "pointer", fontSize: 14, padding: "3px 5px" }}>✕</button>
+                  )}
+                </div>
 
-                {/* This section's quantity, when it is the only section and has
-                    no name — keeps the old single-scope header working. */}
-                {!multiSection && !sec.title && (
-                  <div className="tn-reveal" style={{ ...card, padding: "10px 16px 11px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <span style={eyebrow}>Project quantity</span>
-                    <SectionQty sec={sec} readOnly={readOnly} onPatch={(patch) => patchSection(sec.id, (x) => ({ ...x, ...patch }))} />
-                    {!readOnly && (
-                      <button type="button" onClick={() => patchSection(sec.id, (x) => ({ ...x, title: "Sandstone Carving Work" }))}
-                        style={{ ...ghostBtn(false), marginLeft: "auto" }} title="Name this scope so a second material can be added beside it">
-                        ✎ Name this master group
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* One column, top to bottom — a worksheet reads down, not in a
-                    grid that shuffles groups left/right as the window resizes. */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* The well — cost heads live in here, visibly inside the shell. */}
+                <div style={{ background: C.wash, borderTop: `1px solid ${C.line}`, padding: "9px 12px 11px", display: "flex", flexDirection: "column", gap: 7 }}>
                   {sec.groups.map((g, gi) => (
                     <GroupCard
                       key={g.id}
@@ -1324,7 +1348,10 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                       focusItemId={focusItemId}
                       readOnly={readOnly}
                       drag={drag}
+                      groupDragging={gdrag.sectionId === sec.id && gdrag.from === gi}
+                      groupDropTarget={gdrag.sectionId === sec.id && gdrag.over === gi && gdrag.from !== gi}
                       onDragItem={(phase, idx) => dragItem(sec.id, g.id, phase, idx)}
+                      onDragGroup={(phase) => dragGroup(sec.id, phase, gi)}
                       onTitle={(t) => patchSection(sec.id, (x) => ({ ...x, groups: x.groups.map((y) => (y.id === g.id ? { ...y, title: t } : y)) }))}
                       onItemChange={(itemId, patch) =>
                         patchSection(sec.id, (x) => ({
@@ -1345,15 +1372,16 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                       }}
                     />
                   ))}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => patchSection(sec.id, (x) => ({ ...x, groups: [...x.groups, { id: uid(), title: "", items: [{ id: uid(), title: "", mode: "per_cft", value: 0 }] }] }))}
+                      style={{ alignSelf: "flex-start", fontSize: 11.5, fontWeight: 800, color: C.indigo, background: C.paper, border: `1px dashed ${C.indigo}55`, borderRadius: 10, padding: "7px 14px", cursor: "pointer" }}
+                    >
+                      ＋ Add group
+                    </button>
+                  )}
                 </div>
-
-                {!readOnly && <button
-                  type="button"
-                  onClick={() => patchSection(sec.id, (x) => ({ ...x, groups: [...x.groups, { id: uid(), title: "", items: [{ id: uid(), title: "", mode: "per_cft", value: 0 }] }] }))}
-                  style={{ alignSelf: "flex-start", fontSize: 12.5, fontWeight: 800, color: C.indigo, background: C.indigoSoft, border: `1px dashed ${C.indigo}55`, borderRadius: 12, padding: "9px 17px", cursor: "pointer" }}
-                >
-                  ＋ Add group{multiSection || sec.title ? ` to ${sec.title || `master group ${si + 1}`}` : ""}
-                </button>}
               </div>
             );
           })}
@@ -1400,10 +1428,10 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
 .tn-sheet { transition: transform .14s, box-shadow .14s; }
 .tn-sheet:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(11,18,32,0.08); }
 .tn-addline:hover { background: ${C.indigoSoft}; }
-.tn-grip { opacity: 0; transition: opacity .12s, color .12s; }
-.tn-row:hover .tn-grip { opacity: 1; }
-.tn-grip:hover { color: ${C.indigo} !important; }
-.tn-grip:active { cursor: grabbing; }
+.tn-grip, .tn-ggrip { opacity: 0; transition: opacity .12s, color .12s; }
+.tn-row:hover .tn-grip, .tn-group:hover .tn-ggrip { opacity: 1; }
+.tn-grip:hover, .tn-ggrip:hover { color: ${C.indigo} !important; }
+.tn-grip:active, .tn-ggrip:active { cursor: grabbing; }
 .tn-reveal { animation: tnReveal .45s cubic-bezier(.22,1,.36,1) both; }
 @keyframes tnReveal { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
 .tn-pulse { animation: tnPulse 1.1s ease-in-out infinite; }
@@ -1463,6 +1491,41 @@ const railBtn = (primary: boolean): React.CSSProperties => ({
   border: primary ? "none" : `1px dashed ${C.indigo}66`,
   background: primary ? C.indigo : C.indigoSoft,
   color: primary ? "#fff" : C.indigo,
+});
+
+/** One labelled dial on the header's lower deck. Module level — focus-safe. */
+function Dial({ label, suffix, placeholder, title, value, readOnly, onChange }: {
+  label: string; suffix: string; placeholder: string; title: string;
+  value: number | null; readOnly: boolean; onChange: (v: number | null) => void;
+}) {
+  return (
+    <label title={title} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: C.paper, borderRadius: 10, padding: "3px 9px 3px 10px" }}>
+      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: C.muted }}>{label}</span>
+      <input
+        className="tn-cell"
+        type="number" min={0} step="any"
+        placeholder={placeholder}
+        readOnly={readOnly}
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0))}
+        style={{ ...cellInput, width: 62, textAlign: "right", padding: "2px 5px", fontVariantNumeric: "tabular-nums", fontWeight: 800 }}
+      />
+      <span style={{ fontSize: 10.5, color: C.muted, fontWeight: 700 }}>{suffix}</span>
+    </label>
+  );
+}
+
+/** A button inside the header's segmented action cluster. */
+const segBtn = (on: boolean): React.CSSProperties => ({
+  fontSize: 11.5,
+  fontWeight: 800,
+  padding: "8px 13px",
+  border: "none",
+  borderRight: `1px solid ${C.line}`,
+  background: on ? C.indigoSoft : "transparent",
+  color: on ? C.indigo : C.ink2,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
 });
 
 const arrowBtn = (disabled: boolean): React.CSSProperties => ({

@@ -110,8 +110,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         table.rb td.sr { text-align: center; width: 38px; color: #777; }
         table.rb td.pt { text-align: left; }
         /* Cost-head band — the group's name on the left, its own rate on the right. */
-        table.rb tr.band td { background: #f4f7fb; font-weight: 800; font-size: 10.5px; color: #0f2540; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; }
-        table.rb tr.band td.r { text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+        table.rb tr.band td { background: #f4f7fb; font-weight: 800; font-size: 10px; color: #4a5a70; text-transform: uppercase; letter-spacing: 0.09em; padding: 3px 8px; }
         table.rb td.uom { text-align: center; width: 74px; }
         table.rb td.rate { text-align: right; width: 108px; font-variant-numeric: tabular-nums; }
         table.rb td.amt { text-align: right; width: 118px; font-variant-numeric: tabular-nums; }
@@ -207,10 +206,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
                   <Fragment key={g.id}>
                     {g.title && (
                       <tr className="band">
-                        <td colSpan={2}>{g.title}</td>
-                        <td>{t.uom}</td>
-                        <td className="r">{rateCell(g.rate)}</td>
-                        {showAmounts && <td className="r">{rupees(g.amount)}</td>}
+                        <td colSpan={showAmounts ? 5 : 4}>{g.title}</td>
                       </tr>
                     )}
                     {g.rows.map((r) => (
