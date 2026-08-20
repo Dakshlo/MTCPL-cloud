@@ -14,7 +14,10 @@
  * OPENING IT. ⌘K / Ctrl+K, or hold ; and ' — neighbours on the home row, one
  * motion with the right hand. Esc closes. Both are ignored while you are
  * typing in a field, so the chord can never eat a legitimate apostrophe.
- * ⌘K yields on /carving, where the board bound it to its own search first.
+ * ⌘K works on EVERY production page. It used to yield on /carving, where the
+ * board had bound it to its own search box — but a global shortcut with one
+ * silent exception reads as broken, so the board gave up the duplicate and
+ * kept its `/`.
  *
  * CLICKING A RESULT OPENS IT HERE. It does not navigate — being thrown onto
  * Required Sizes was losing the very context you opened the palette to keep.
@@ -32,7 +35,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { directDispatchSlabsAction } from "@/app/(app)/carving/actions";
 
 type Detail = {
@@ -82,7 +85,6 @@ const toneFor = (stage: string) => STAGE_TONE.find(([re]) => re.test(stage))?.[1
 
 export function QuickSearch() {
   const router = useRouter();
-  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -118,14 +120,10 @@ export function QuickSearch() {
       const tag = n.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || n.isContentEditable;
     };
-    // The Carving Jobs board owns ⌘K for its own search box; the chord still
-    // works there, so nothing is lost.
-    const cmdKTaken = pathname === "/carving";
-
     const onDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setOpen(false); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        if (cmdKTaken || typing(e.target)) return;
+        if (typing(e.target)) return;
         e.preventDefault();
         setOpen(true);
         return;
@@ -149,7 +147,7 @@ export function QuickSearch() {
       window.removeEventListener("keyup", onUp);
       window.removeEventListener("blur", clear);
     };
-  }, [desktop, pathname]);
+  }, [desktop]);
 
   useEffect(() => {
     if (!open) return;

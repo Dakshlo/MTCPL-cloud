@@ -385,7 +385,12 @@ export function CarvingDashboardClient({
     }
   }, [unassignedFromDate]);
 
-  // Cmd/Ctrl-K or `/` focuses the search input — power users can fly.
+  // `/` focuses this board's own search input — power users can fly.
+  //
+  // ⌘K used to do this too, but it now belongs to the production quick-search
+  // palette, which opens on EVERY production page. A shortcut that works
+  // everywhere except one screen is worse than one page giving up a duplicate
+  // binding, so the board keeps `/` and hands ⌘K over.
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -393,11 +398,6 @@ export function CarvingDashboardClient({
         document.activeElement instanceof HTMLInputElement ||
         document.activeElement instanceof HTMLTextAreaElement;
       if (e.key === "/" && !isInput) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
       }
