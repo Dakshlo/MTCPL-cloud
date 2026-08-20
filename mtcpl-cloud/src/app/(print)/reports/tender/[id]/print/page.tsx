@@ -28,25 +28,43 @@ import {
   TENDER_KEY, canUseTender, computeSheetTotal, quoteTables,
   type TenderAnalysis,
 } from "@/app/(app)/reports/temple-pnl/tender-model";
+import { FitToPage } from "./fit-to-page";
 import { PrintBtn } from "./print-btn";
 
 export const dynamic = "force-dynamic";
 
 type Params = Promise<{ id: string }>;
-type Search = Promise<{ amounts?: string }>;
+type Search = Promise<{ amounts?: string; fit?: string }>;
 
 const rupees = (n: number) => Math.round(n).toLocaleString("en-IN");
 
 /** "1200/-" — the rate style the company's own quotations use. */
 const rateCell = (n: number | null) => (n == null ? "—" : `${rupees(n)}/-`);
 
+/** Keep both switches in the URL when either one is flipped. */
+function href(id: string, amounts: boolean, fit: boolean): string {
+  const q = [amounts ? "amounts=1" : "", fit ? "fit=1" : ""].filter(Boolean).join("&");
+  return `/reports/tender/${id}/print${q ? `?${q}` : ""}`;
+}
+
+const pageBtn = (on: boolean): React.CSSProperties => ({
+  padding: "4px 11px",
+  fontSize: 11,
+  fontWeight: 800,
+  textDecoration: "none",
+  background: on ? "#fff" : "transparent",
+  color: on ? "#1a1a1a" : "rgba(255,255,255,0.7)",
+});
+
 export default async function TenderQuotationPrint({ params, searchParams }: { params: Params; searchParams: Search }) {
   const { profile } = await requireAuth();
   if (!canUseTender(profile.role)) redirect("/dashboard");
 
   const { id } = await params;
-  const { amounts: amountsParam } = await searchParams;
+  const { amounts: amountsParam, fit: fitParam } = await searchParams;
   const showAmounts = amountsParam === "1";
+  // Long breakups run to two sheets; the office would rather hand over one.
+  const fitOnePage = fitParam === "1";
 
   const admin = createAdminSupabaseClient();
   const { data } = await admin.from("app_settings").select("value").eq("key", TENDER_KEY).maybeSingle();
@@ -85,13 +103,14 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         .screen-bar a { color: rgba(255,255,255,0.75); font-size: 11.5px; font-weight: 700; text-decoration: none; }
 
         /* ── letterhead: identical to the invoicing documents ── */
-        .head { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 16px; border-bottom: 2.5px double #1e3a5f; padding-bottom: 7px; }
-        .brand-logo { height: 68px; width: auto; }
-        .company-block { text-align: center; min-width: 0; }
+        /* The logo is taken OUT of the flow so the company block can centre on
+           the page's own axis. As a grid cell it stole width and pushed the
+           details a dozen pixels right of centre — visible, and wrong. */
+        .head { position: relative; min-height: 68px; display: flex; align-items: center; justify-content: center; border-bottom: 2.5px double #1e3a5f; padding-bottom: 7px; }
+        .brand-logo { position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 68px; width: auto; }
+        .company-block { text-align: center; min-width: 0; padding: 0 96px; }
         .cn { font-size: 16px; font-weight: 800; color: #0f2540; }
         .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
-        .doc-title { text-align: center; margin: 0 0 7px; }
-        .doc-title span { display: inline-block; font-size: 15px; font-weight: 800; letter-spacing: 0.18em; color: #fff; background: #0f2540; border-radius: 6px; padding: 4px 24px; }
 
         .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 14px; font-size: 11.5px; font-weight: 700; color: #0f2540; }
         .to { margin-top: 4px; font-size: 12px; line-height: 1.55; }
@@ -134,10 +153,18 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         .sign-line { margin-top: 42px; font-weight: 700; }
         .foot-note { margin-top: auto; padding-top: 18px; font-size: 8.5px; color: #b0b0b0; text-align: center; }
 
+        /* Fit mode: the preview IS the page — true A4 width and print padding,
+           with FitToPage setting the zoom that makes it end before the sheet
+           does. Nothing here changes the normal (multi-page) view. */
+        .wrap.fit { width: 794px; max-width: none; padding: 12mm 14mm; min-height: 0; }
+        /* In normal mode, never let a table or the signature straddle a seam. */
+        .tbl-wrap, .sum, .terms, .sign { break-inside: avoid; page-break-inside: avoid; }
+
         @media print {
           body { background: #fff; }
           .screen-bar { display: none; }
           .wrap { max-width: none; padding: 12mm 14mm; min-height: 0; box-shadow: none; }
+          .wrap.fit { width: auto; }
           @page { size: A4 portrait; margin: 0; }
         }
       `}</style>
@@ -146,18 +173,25 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         <span className="screen-bar-title">
           Rate breakup quotation — {sheet.name} · A4 portrait
           {showAmounts && " · with amounts (internal)"}
+          <span id="fit-note" style={{ marginLeft: 10, color: "rgba(255,255,255,0.5)" }} />
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <a href={`/reports/tender/${sheet.id}/print${showAmounts ? "" : "?amounts=1"}`}>
+          <a href={href(sheet.id, !showAmounts, fitOnePage)}>
             {showAmounts ? "Rates only (client copy)" : "Show ₹ amounts (internal)"}
           </a>
+          {/* Two ways to print it: let it flow, or squeeze it onto one sheet. */}
+          <span style={{ display: "inline-flex", border: "1px solid rgba(255,255,255,0.22)", borderRadius: 7, overflow: "hidden" }}>
+            <a href={href(sheet.id, showAmounts, false)} style={pageBtn(!fitOnePage)}>Normal</a>
+            <a href={href(sheet.id, showAmounts, true)} style={pageBtn(fitOnePage)}>Fit to one page</a>
+          </span>
           <PrintBtn />
         </span>
       </div>
 
-      <div className="wrap">
+      <FitToPage enabled={fitOnePage} />
+
+      <div className={fitOnePage ? "wrap fit" : "wrap"}>
         {/* Letterhead — the same block every MTCPL document carries. */}
-        <div className="doc-title"><span>RATE BREAKUP</span></div>
         <div className="head">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mtcpl.png" alt="MTCPL" className="brand-logo" />
@@ -188,7 +222,10 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
           <div className="tbl-wrap" key={t.id}>
             {t.qty ? <div className="qty-line">Quantity: {t.qty.toLocaleString("en-IN")} {t.uom}</div> : null}
             <table className="rb">
-              <caption>Rate Breakup for {t.title}</caption>
+              {/* The caption supplies "Rate Breakup for"; a master group named
+                  "Rate Breakup for Sandstone Carving Work" would otherwise print
+                  it twice. Strip the prefix rather than make them rename. */}
+              <caption>Rate Breakup for {t.title.replace(/^\s*rate\s*break-?up\s*(for\s*)?/i, "") || t.title}</caption>
               <thead>
                 <tr>
                   <th>Sr.</th>
