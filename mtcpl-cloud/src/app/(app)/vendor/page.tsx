@@ -16,6 +16,7 @@
  */
 
 import { cookies } from "next/headers";
+import { faceSftFromSlab } from "@/lib/dimensions";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { POWER_CUT_REASON } from "@/lib/carving-power-cut";
@@ -692,7 +693,7 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
         if (!dim) continue;
         // Mig 088 — double-side carving counts output x2.
         const sides = Number(r.carving_sides) === 2 ? 2 : 1;
-        const s = ((dim.l * dim.w) / 144) * sides;
+        const s = faceSftFromSlab(dim.l, dim.w, dim.t) * sides;
         const c = ((dim.l * dim.w * dim.t) / 1728) * sides;
         sft += s;
         cft += c;

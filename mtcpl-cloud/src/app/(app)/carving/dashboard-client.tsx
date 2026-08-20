@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { faceSftFromSlab } from "@/lib/dimensions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AssignModal } from "./assign-modal";
@@ -2701,7 +2702,7 @@ function JobsByTemple({
         let onHold = 0;
         for (const j of items) {
           totalCft += (j.length_ft * j.width_ft * j.thickness_ft) / 1728;
-          totalSft += (j.length_ft * j.width_ft) / 144;
+          totalSft += faceSftFromSlab(j.length_ft, j.width_ft, j.thickness_ft);
           if (j.status === "carving_in_progress") carvingNow++;
           else if (j.status === "carving_on_hold") onHold++;
           else if (j.status === "carving_assigned") {

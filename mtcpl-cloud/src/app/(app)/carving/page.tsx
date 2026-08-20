@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { faceSftFromSlab } from "@/lib/dimensions";
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -678,7 +679,7 @@ export default async function CarvingDashboardPage({
       for (const s of (sRows ?? []) as Array<{ id: string; label: string | null; description: string | null; status: string; length_ft: number | string; width_ft: number | string; thickness_ft: number | string }>) {
         const l = Number(s.length_ft) || 0, w = Number(s.width_ft) || 0, t = Number(s.thickness_ft) || 0;
         // Dims are stored in INCHES → CFT = l*w*t/1728, SFT = l*w/144.
-        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}`, cft: (l * w * t) / 1728, sft: (l * w) / 144, status: s.status });
+        woSlabMeta.set(s.id, { label: s.label, description: s.description, dims: `${l}×${w}×${t}`, cft: (l * w * t) / 1728, sft: faceSftFromSlab(l, w, t), status: s.status });
       }
     }
     // Real stage comes from the carving_item, not line_status (which only
@@ -734,7 +735,7 @@ export default async function CarvingDashboardPage({
       if (meta) { lcft = meta.cft; lsft = meta.sft; }
       else if (r.planned_length_ft != null) {
         const pl = Number(r.planned_length_ft) || 0, pw = Number(r.planned_width_ft ?? 0) || 0, pt = Number(r.planned_thickness_ft ?? 0) || 0;
-        lcft = (pl * pw * pt) / 1728; lsft = (pl * pw) / 144;
+        lcft = (pl * pw * pt) / 1728; lsft = faceSftFromSlab(pl, pw, pt);
       }
       cftByWo.set(r.work_order_id, (cftByWo.get(r.work_order_id) ?? 0) + lcft);
       sftByWo.set(r.work_order_id, (sftByWo.get(r.work_order_id) ?? 0) + lsft);

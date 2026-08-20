@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { cftFromSlab, sftFromSlab } from "@/lib/dimensions";
+import { cftFromSlab, faceSftFromSlab } from "@/lib/dimensions";
 import { NewCarvingChallanForm, type BillableSlab } from "./new-challan-form";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +85,7 @@ export default async function NewCarvingChallanPage() {
       temple: s?.temple ?? "",
       dims: s ? `${s.length}×${s.width}×${s.thickness}″` : "",
       cft: s ? Math.round(cftFromSlab(s.length, s.width, s.thickness) * 1000) / 1000 : 0,
-      sft: s ? Math.round(sftFromSlab(s.length, s.width) * 1000) / 1000 : 0,
+      sft: s ? Math.round(faceSftFromSlab(s.length, s.width, s.thickness) * 1000) / 1000 : 0,
       snapRate: i.jobwork_rate != null ? Number(i.jobwork_rate) : null,
       // Mig 100 — carry the slab's own unit (job = flat per slab). Default cft.
       snapUnit: i.jobwork_unit === "sft" ? "sft" : i.jobwork_unit === "job" ? "job" : "cft",

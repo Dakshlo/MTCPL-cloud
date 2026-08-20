@@ -13,7 +13,7 @@
  *                          at APPROVAL, not unload — rejected/reworked
  *                          slabs are excluded; see §1 below)
  *   carved_sft_in_period = Σ slab SFT for the same set
- *                          (length × width / 144)
+ *                          (face area = the two largest dims / 144)
  *   operational_cost     = Σ cnc_vendor_expenses (vendor_id, year, month)
  *                          rows that touch the period, prorated by
  *                          (days_in_window_within_month / days_in_month)
@@ -33,6 +33,7 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { faceSftFromSlab, isThinSlab } from "@/lib/dimensions";
 
 export type CncPeriodKind = "daily" | "weekly" | "monthly" | "yearly";
 
@@ -271,8 +272,12 @@ function slabCft(l: number, w: number, t: number): number {
   return (l * w * t) / 1728;
 }
 
-function slabSft(l: number, w: number): number {
-  return (l * w) / 144;
+/** Face area — the two LARGEST dims. The thickness is the smallest of the
+ *  three whatever column it sits in (see lib/dimensions), so this used to
+ *  multiply BY the thickness on a slab entered 38×3×22 and report 0.79 sft
+ *  instead of the real 5.81. */
+function slabSft(l: number, w: number, t: number): number {
+  return faceSftFromSlab(l, w, t);
 }
 
 // ── Depreciation (mirrors src/lib/cnc-monthly-report.ts) ──────────
@@ -520,8 +525,10 @@ export async function buildCncVariousCostReport(
     // ≤ 12 in thick (≤ 1 ft) is measured as SFT (area); a thicker slab is
     // measured as CFT (volume). Previously this loop added BOTH sft AND cft
     // for EVERY slab — double-counting output and understating cost-per-unit.
-    const isThick = Number(slab.thickness_ft) > 12;
-    const sft = isThick ? 0 : slabSft(slab.length_ft, slab.width_ft) * sides;
+    // Thin/thick is decided on the REAL thickness, not on whatever landed in
+    // the thickness column — 1,100 slabs on record classify the other way.
+    const isThick = !isThinSlab(slab.length_ft, slab.width_ft, slab.thickness_ft);
+    const sft = isThick ? 0 : slabSft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides;
     const cft = isThick ? slabCft(slab.length_ft, slab.width_ft, slab.thickness_ft) * sides : 0;
     const existing = carvedByVendor.get(vendorId) ?? {
       vendorName: (item.vendor_name as string) || "Unknown",

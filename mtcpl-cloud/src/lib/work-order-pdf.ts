@@ -13,6 +13,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import path from "node:path";
+import { faceSftFromSlab } from "@/lib/dimensions";
 import { readFile } from "node:fs/promises";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
@@ -51,8 +52,9 @@ function san(s: string | null | undefined): string {
 function cft(l: number, w: number, t: number) {
   return (l * w * t) / 1728;
 }
-function sft(l: number, w: number) {
-  return (l * w) / 144;
+/** Face area — the two largest dims (see lib/dimensions on why not l×w). */
+function sft(l: number, w: number, t: number) {
+  return faceSftFromSlab(l, w, t);
 }
 function rs(n: number) {
   return "Rs. " + (Math.round(n * 100) / 100).toLocaleString("en-IN");
@@ -154,7 +156,7 @@ export async function buildWorkOrderPdf(inp: WorkOrderPdfInput): Promise<Uint8Ar
       y -= 21;
     }
     const c = cft(s.lengthIn, s.widthIn, s.thicknessIn);
-    const sf = sft(s.lengthIn, s.widthIn);
+    const sf = sft(s.lengthIn, s.widthIn, s.thicknessIn);
     totCft += c;
     totSft += sf;
     text(s.code, cols.code, y, 8, font);

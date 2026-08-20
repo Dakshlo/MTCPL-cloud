@@ -16,6 +16,8 @@
  * (default) or sft.
  */
 
+import { faceSftFromSlab } from "@/lib/dimensions";
+
 export type DispatchSlabInput = {
   /** slab_requirements.id — the human code shown in the Code column. */
   id: string;
@@ -78,10 +80,9 @@ export function cftOf(lengthIn: number, widthIn: number, thicknessIn: number): n
  *  which multiplied by the thickness → 38×3 = 0.79 sft instead of the real
  *  face 38×22 = 5.81 sft — every SFT row was ~10× too small.) */
 export function sftOf(lengthIn: number, widthIn: number, thicknessIn: number): number {
-  const smallest = Math.min(lengthIn, widthIn, thicknessIn);
-  const product = lengthIn * widthIn * thicknessIn;
-  if (smallest <= 0) return 0; // degenerate/missing dim — no face to measure
-  return product / smallest / 144;
+  // The rule now lives in lib/dimensions and is shared with CNC costing and
+  // carving jobwork, so invoicing and production can no longer drift apart.
+  return faceSftFromSlab(lengthIn, widthIn, thicknessIn);
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);

@@ -12,7 +12,7 @@
  *     on that day in IST and completed_on_cnc_machine_id is set —
  *     i.e. output is counted at REVIEW APPROVAL, not at unload, so
  *     reworked / rejected slabs never count (Daksh, June 2026).
- *   • Thin slab (thickness ≤ 12") → SFT = (length × width) / 144
+ *   • Thin slab (thickness ≤ 12") → SFT = face area (two largest dims) / 144
  *   • Thick slab (thickness > 12") → CFT = (length × width × thickness) / 1728
  *
  * Mig 053 follow-on (Daksh, May 2026): the SFT vs CFT choice is
@@ -24,6 +24,7 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { faceSftFromSlab, isThinSlab } from "@/lib/dimensions";
 
 export type MachineCol = {
   id: string;
@@ -588,13 +589,15 @@ export async function buildCncReport(period: CncReportPeriod): Promise<CncMonthl
     if (!dim) continue;
     // Mig 088 — double-side carving counts output x2.
     const sides = Number(it.carving_sides) === 2 ? 2 : 1;
-    const sqft = ((dim.l * dim.w) / 144) * sides;
+    // Face area = the two largest dims; the thickness is the smallest one
+    // wherever it was typed (see lib/dimensions).
+    const sqft = faceSftFromSlab(dim.l, dim.w, dim.t) * sides;
     const cft = ((dim.l * dim.w * dim.t) / 1728) * sides;
     const dateKey = istDateKey(it.review_approved_at);
     const row = rowByDate.get(dateKey);
     if (!row) continue;
     const cell = row.values[machineId] ?? { sqft: 0, cft: 0 };
-    if (dim.t <= 12) {
+    if (isThinSlab(dim.l, dim.w, dim.t)) {
       // Thin slab → contribute to SFT only.
       cell.sqft = (cell.sqft ?? 0) + sqft;
     } else {
