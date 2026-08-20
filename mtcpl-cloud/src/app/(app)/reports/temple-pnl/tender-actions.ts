@@ -14,7 +14,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { revalidatePath } from "next/cache";
-import { TENDER_KEY, TENDER_UOMS, computeSheetTotal, sectionsOf, type TenderAnalysis, type TenderGroup, type TenderQuote, type TenderSection, type TenderUom, type TenderVersion } from "./tender-model";
+import { TENDER_KEY, TENDER_UOMS, canUseTender, computeSheetTotal, sectionsOf, type TenderAnalysis, type TenderGroup, type TenderQuote, type TenderSection, type TenderUom, type TenderVersion } from "./tender-model";
 
 /** app_settings.updated_by is uuid; the dev-mock id isn't one. */
 function asUuid(id: string): string | null {
@@ -34,7 +34,7 @@ export async function saveTenderAnalysesAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const { profile } = await requireAuth();
-    if (profile.role !== "developer") return { ok: false, error: "Not allowed." };
+    if (!canUseTender(profile.role)) return { ok: false, error: "Not allowed." };
     if (!Array.isArray(analyses) || analyses.length > 40) return { ok: false, error: "Too many sheets." };
 
     const posOrNull = (v: unknown) =>

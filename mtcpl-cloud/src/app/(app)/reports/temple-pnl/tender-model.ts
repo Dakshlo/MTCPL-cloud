@@ -123,6 +123,14 @@ export type TenderAnalysis = {
 /** app_settings key holding every sheet. */
 export const TENDER_KEY = "tender_analyses";
 
+/** Who may open the workspace, save a sheet and print its quotation. The owner
+ *  joined the developer in Aug 2026: this is a QUOTING tool the office uses,
+ *  not a diagnostic like the Temple P&L, whose allocation model is still a
+ *  judgement call — that one stays developer-only. */
+export const TENDER_ROLES = ["developer", "owner"] as const;
+export const canUseTender = (role: string | null | undefined): boolean =>
+  (TENDER_ROLES as readonly string[]).includes(role ?? "");
+
 export const uomOf = (a: { uom?: TenderUom }): TenderUom => a.uom ?? "Cft.";
 /** "Cft." → "CFT" for the compact on-screen chips. */
 export const uomShort = (u: TenderUom): string => u.replace(/\.$/, "").toUpperCase();

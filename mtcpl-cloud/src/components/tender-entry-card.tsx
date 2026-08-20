@@ -2,9 +2,13 @@ import Link from "next/link";
 
 /**
  * Dashboard entry tile for the Tender / Price Breakdown workspace
- * (Daksh, Aug 2026). DEVELOPER ONLY — gated at the call site in
- * dashboard/page.tsx, and the page itself re-checks. Visual sibling of
- * TemplePnlEntryCard so the card row stays aligned.
+ * (Daksh, Aug 2026). Developer + owner — gated at the call site in
+ * dashboard/page.tsx via canUseTender, and the page itself re-checks.
+ * Visual sibling of TemplePnlEntryCard so the card row stays aligned.
+ *
+ * Carries a softly blinking NEW flag: the tool has just been opened up to the
+ * owner, and a card that has never been there before deserves to be noticed
+ * once. Drop the badge when it stops being new.
  */
 export function TenderEntryCard() {
   return (
@@ -26,6 +30,36 @@ export function TenderEntryCard() {
         overflow: "hidden",
       }}
     >
+      {/* NEW flag — a slow opacity pulse, not a hard blink; it should catch
+          the eye on the second pass, not fight the page. */}
+      <style>{`
+        @keyframes mtcplTenderNew { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+        @media (prefers-reduced-motion: reduce) { .mtcpl-tender-new { animation: none !important } }
+      `}</style>
+      <span
+        className="mtcpl-tender-new"
+        style={{
+          position: "absolute",
+          top: 14,
+          right: 14,
+          zIndex: 2,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 9px",
+          borderRadius: 999,
+          background: "#fbbf24",
+          color: "#3b2f0b",
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: "0.1em",
+          boxShadow: "0 2px 8px rgba(251,191,36,0.45)",
+          animation: "mtcplTenderNew 1.6s ease-in-out infinite",
+        }}
+      >
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#3b2f0b" }} />
+        NEW
+      </span>
       <div
         aria-hidden
         style={{

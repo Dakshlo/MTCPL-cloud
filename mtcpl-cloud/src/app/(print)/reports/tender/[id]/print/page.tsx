@@ -17,7 +17,7 @@
  * ?amounts=1 adds the ₹ Amount column (internal estimate view). The default,
  * like the paper quotation, shows rates only.
  *
- * DEVELOPER ONLY — same gate as the Temple P&L page this belongs to.
+ * Developer + owner — the same gate as the workspace it prints from.
  */
 
 import { Fragment } from "react";
@@ -25,7 +25,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
-  TENDER_KEY, computeSheetTotal, quoteTables,
+  TENDER_KEY, canUseTender, computeSheetTotal, quoteTables,
   type TenderAnalysis,
 } from "@/app/(app)/reports/temple-pnl/tender-model";
 import { PrintBtn } from "./print-btn";
@@ -42,7 +42,7 @@ const rateCell = (n: number | null) => (n == null ? "—" : `${rupees(n)}/-`);
 
 export default async function TenderQuotationPrint({ params, searchParams }: { params: Params; searchParams: Search }) {
   const { profile } = await requireAuth();
-  if (profile.role !== "developer") redirect("/dashboard");
+  if (!canUseTender(profile.role)) redirect("/dashboard");
 
   const { id } = await params;
   const { amounts: amountsParam } = await searchParams;

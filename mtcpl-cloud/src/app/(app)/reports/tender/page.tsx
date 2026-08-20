@@ -8,7 +8,8 @@
  * The P&L report is still built server-side — but only for the rate card that
  * seeds "New from rate card" and the real cutting pace behind the timeline.
  *
- * DEVELOPER ONLY, same gate as the P&L it draws its rates from.
+ * Developer + owner. (The Temple P&L it draws its rate card from stays
+ * developer-only — that one's allocation model is still a judgement call.)
  */
 
 import Link from "next/link";
@@ -17,7 +18,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { buildTemplePnl, pnlPeriodFromSearch } from "@/lib/temple-pnl";
 import { TenderClient } from "../temple-pnl/tender-client";
-import { TENDER_KEY, type TenderAnalysis } from "../temple-pnl/tender-model";
+import { TENDER_KEY, canUseTender, type TenderAnalysis } from "../temple-pnl/tender-model";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ function dataPaceCftPerDay(startDate: string, endDate: string, producedCft: numb
 
 export default async function TenderPage({ searchParams }: { searchParams: Promise<{ p?: string }> }) {
   const { profile } = await requireAuth();
-  if (profile.role !== "developer") redirect("/dashboard");
+  if (!canUseTender(profile.role)) redirect("/dashboard");
 
   const sp = await searchParams;
   const period = pnlPeriodFromSearch(sp.p);
@@ -58,8 +59,10 @@ export default async function TenderPage({ searchParams }: { searchParams: Promi
           ← Dashboard
         </Link>
         <h1 style={{ margin: 0, fontSize: 21, letterSpacing: "-0.025em", color: INK, fontWeight: 800 }}>Tender / Price Breakdown</h1>
+        {/* The chip said DEV ONLY until the owner was let in — it would now be
+            a lie on his own screen. */}
         <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", color: MUTED, border: `1px solid ${LINE}`, background: "#fff", borderRadius: 999, padding: "4px 10px" }}>
-          DEV ONLY
+          OWNER · DEV
         </span>
       </div>
 
