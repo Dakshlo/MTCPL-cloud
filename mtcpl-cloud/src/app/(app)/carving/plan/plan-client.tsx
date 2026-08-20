@@ -15,6 +15,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { METHOD_BADGE, type CarvingMethod } from "@/lib/carving-method";
 import { setCarvingMethodBulkAction } from "./actions";
@@ -1351,8 +1352,21 @@ export function PlanClient({
         .plan-seat:hover { transform: scale(1.15); box-shadow: 0 3px 10px rgba(0,0,0,0.25); z-index: 2; }
       `}</style>
 
-      <div className="page-header">
-        <h1>CNC Logbook</h1>
+      <div className="page-header" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ margin: 0 }}>CNC Logbook</h1>
+        {/* The machines already record load→unload for every slab; this is that
+            record asked a question — "how long does a jali take?" */}
+        <Link
+          href="/carving/time"
+          style={{
+            marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 7,
+            fontSize: 12.5, fontWeight: 800, textDecoration: "none",
+            color: "#4f46e5", background: "rgba(79,70,229,0.10)",
+            border: "1px solid rgba(79,70,229,0.35)", borderRadius: 999, padding: "8px 16px",
+          }}
+        >
+          ⏱ Carving time
+        </Link>
       </div>
 
       {/* ── 1. Per-method headline cards ── */}

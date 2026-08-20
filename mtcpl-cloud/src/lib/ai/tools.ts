@@ -11,6 +11,7 @@
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { answerCarvingTime, MIN_SAMPLES } from "@/lib/carving-time";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
@@ -605,6 +606,19 @@ export const AI_TOOLS = [
     },
   },
   {
+    name: "get_carving_time",
+    description:
+      `HOW LONG A COMPONENT TAKES TO CARVE, from the CNC's own record. Every job stores when the slab went ON the machine and when it came OFF; this returns the TYPICAL (median) and average machine time for slabs carrying a component label — JALI, PILLAR, BEAM, JAGATI THAR, KAMAL, DASO, GHUMMAT, TORAN, CEILING, KAKSHASAN, BHADAR, CHAJJA, SHILA — with the usual range, hours per SFT/CFT so it can be scaled to a new size, a split by type (the slab's description) and by temple. Optionally scope to ONE temple. Use for 'khuni carve hone mein kitna time lagta hai', 'how long does a jali take', 'umiya mata ka jagati thar kitne din', 'average carving time for pillar', 'dodhiya banne mein kitna time', 'kaunsa component sabse zyada time leta hai'. IMPORTANT: a component with fewer than ${MIN_SAMPLES} completed runs comes back under \`thin\` with no time — say plainly that there is not enough data for it and do NOT invent or estimate an average from one or two slabs. Quote the MEDIAN, not the mean, and always give the run count with it. \`available\` lists every component that does have enough data.`,
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        component: { type: "string", description: "Component name or part of it — 'jali' also matches JALI SMALL, JALI BIG, CL-4 JALI. Omit to list every component with a time." },
+        temple: { type: "string", description: "Optional exact temple name to scope to, e.g. 'UMIYA MATAJI TEMPLE AHMEDABAD'. Omit for every temple." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_work_diary",
     description:
       "The shared Work Diary (kaam ka register / काम का रजिस्टर) — every team member logs tasks here; anyone tagged can close them. Returns how many entries are OPEN, how many are marked URGENT, how many were closed today, and a sample of the oldest open entries (activity, who created it, age, urgent flag). Use for 'diary mein kya pending hai', 'work diary status', 'urgent kaam kya hai', 'kitne kaam baaki hain', 'open tasks'.",
@@ -712,6 +726,13 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getSalarySnapshot(input));
       case "get_work_diary":
         return JSON.stringify(await getWorkDiary());
+      case "get_carving_time":
+        return JSON.stringify(
+          await answerCarvingTime(
+            String((input as { component?: unknown }).component ?? ""),
+            (input as { temple?: unknown }).temple ? String((input as { temple?: unknown }).temple) : null,
+          ),
+        );
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
