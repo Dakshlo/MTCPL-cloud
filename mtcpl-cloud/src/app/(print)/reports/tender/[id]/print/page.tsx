@@ -97,7 +97,7 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a1a; background: #f0f0f0; }
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 26px 40px 34px; position: relative; min-height: 1120px; display: flex; flex-direction: column; }
+        .wrap { max-width: 820px; margin: 0 auto; background: #fff; padding: 22px 40px 26px; position: relative; min-height: 1120px; display: flex; flex-direction: column; }
         .screen-bar { background: #1a1a1a; color: #fff; padding: 9px 28px; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1180px; margin: 0 auto; }
         .screen-bar-title { font-size: 12px; color: rgba(255,255,255,0.65); }
         .screen-bar a { color: rgba(255,255,255,0.75); font-size: 11.5px; font-weight: 700; text-decoration: none; }
@@ -106,21 +106,21 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         /* The logo is taken OUT of the flow so the company block can centre on
            the page's own axis. As a grid cell it stole width and pushed the
            details a dozen pixels right of centre — visible, and wrong. */
-        .head { position: relative; min-height: 68px; display: flex; align-items: center; justify-content: center; border-bottom: 2.5px double #1e3a5f; padding-bottom: 7px; }
-        .brand-logo { position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 68px; width: auto; }
+        .head { position: relative; min-height: 62px; display: flex; align-items: center; justify-content: center; border-bottom: 2.5px double #1e3a5f; padding-bottom: 5px; }
+        .brand-logo { position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 62px; width: auto; }
         .company-block { text-align: center; min-width: 0; padding: 0 96px; }
         .cn { font-size: 16px; font-weight: 800; color: #0f2540; }
-        .cl { font-size: 10.5px; color: #666; margin-top: 1.5px; line-height: 1.45; }
+        .cl { font-size: 10.5px; color: #666; margin-top: 1px; line-height: 1.35; }
 
-        .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 14px; font-size: 11.5px; font-weight: 700; color: #0f2540; }
-        .to { margin-top: 4px; font-size: 12px; line-height: 1.55; }
+        .letter-meta { display: flex; justify-content: flex-end; gap: 22px; margin-top: 9px; font-size: 11.5px; font-weight: 700; color: #0f2540; }
+        .to { margin-top: 2px; font-size: 12px; line-height: 1.45; }
         .to-k { font-weight: 700; }
-        .salut { margin-top: 14px; font-size: 12px; font-weight: 700; }
-        .intro { margin-top: 12px; font-size: 12px; line-height: 1.75; text-align: justify; text-indent: 34px; }
-        .qty-line { margin-top: 5px; font-size: 10.5px; color: #666; font-weight: 700; text-align: right; }
+        .salut { margin-top: 9px; font-size: 12px; font-weight: 700; }
+        .intro { margin-top: 7px; font-size: 12px; line-height: 1.6; text-align: justify; text-indent: 34px; }
+        .qty-line { margin-top: 3px; font-size: 10.5px; color: #666; font-weight: 700; text-align: right; }
 
         /* ── the rate table ── */
-        .tbl-wrap { margin: 20px auto 0; width: 92%; }
+        .tbl-wrap { margin: 11px auto 0; width: 92%; }
         table.rb { width: 100%; border-collapse: collapse; font-size: 12px; }
         table.rb caption { caption-side: top; font-size: 12px; font-weight: 800; color: #0f2540; background: #eef2f7; padding: 5px 6px; border: 1px solid #1e3a5f; border-bottom: none; text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
         table.rb th, table.rb td { border: 1px solid #d3dae3; padding: 4px 8px; }
@@ -137,21 +137,21 @@ export default async function TenderQuotationPrint({ params, searchParams }: { p
         table.rb tfoot td.lbl { text-align: left; }
         .grp { font-size: 9px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: #999; }
 
-        .noqty { margin: 18px auto 0; width: 92%; border: 1px solid #e0c39a; background: #fdf6ec; border-radius: 5px; padding: 9px 12px; font-size: 11.5px; color: #8a5a17; line-height: 1.6; }
+        .noqty { margin: 11px auto 0; width: 92%; border: 1px solid #e0c39a; background: #fdf6ec; border-radius: 5px; padding: 9px 12px; font-size: 11.5px; color: #8a5a17; line-height: 1.6; }
 
-        .sum { margin: 14px auto 0; width: 92%; display: flex; justify-content: flex-end; }
+        .sum { margin: 10px auto 0; width: 92%; display: flex; justify-content: flex-end; }
         .sum table { border-collapse: collapse; font-size: 11.5px; }
         .sum td { border: 1px solid #d3dae3; padding: 4px 12px; }
         .sum td.k { background: #eef2f7; font-weight: 700; color: #444; }
         .sum td.v { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; color: #0f2540; }
-        .terms { margin-top: 22px; }
+        .terms { margin-top: 13px; }
         .terms-h { font-size: 12.5px; font-weight: 800; text-decoration: underline; }
-        .terms ol { margin: 7px 0 0 20px; font-size: 12px; line-height: 1.8; }
-        .thanks { margin-top: 22px; font-size: 12px; }
-        .sign { margin-top: 30px; font-size: 12px; }
+        .terms ol { margin: 4px 0 0 20px; font-size: 12px; line-height: 1.6; }
+        .thanks { margin-top: 13px; font-size: 12px; }
+        .sign { margin-top: 16px; font-size: 12px; }
         .sign-for { font-weight: 700; }
-        .sign-line { margin-top: 42px; font-weight: 700; }
-        .foot-note { margin-top: auto; padding-top: 18px; font-size: 8.5px; color: #b0b0b0; text-align: center; }
+        .sign-line { margin-top: 34px; font-weight: 700; }
+        .foot-note { margin-top: auto; padding-top: 12px; font-size: 8.5px; color: #b0b0b0; text-align: center; }
 
         /* Fit mode: the preview IS the page — true A4 width and print padding,
            with FitToPage setting the zoom that makes it end before the sheet
