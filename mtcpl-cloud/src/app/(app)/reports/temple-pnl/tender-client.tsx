@@ -91,6 +91,14 @@ const inrExact = (v: number) => `${v < 0 ? "−" : ""}₹${Math.round(Math.abs(v
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
+const MODE_LABEL: Record<TenderItemMode, string> = { amount: "₹ fixed", per_cft: "₹ / unit", percent: "% of ₹" };
+
+/** What one line looked like on the version you are pricing against.
+ *  `prev: null` means the line is new since then. */
+export type BaselineCell = { label: string; prev: { value: number; mode: TenderItemMode } | null };
+/** itemId → its value on the baseline version. null map = no baseline. */
+type Baseline = { label: string; byItem: Map<string, { value: number; mode: TenderItemMode }> };
+
 /** Fresh sheets. Their exact group list; the rate-card variant lands
  *  pre-filled from the live P&L window. `pace` is the window's REAL
  *  cutting pace (CFT/day) — the timeline's data-driven default. */
@@ -205,7 +213,7 @@ const cellInput: React.CSSProperties = {
 /** One worksheet row. `perUnit` is the rate this line contributes to the
  *  printed quotation — shown so the sheet reads like the document it becomes. */
 function ItemRow({
-  item, qty, base, unit, autoFocusTitle, readOnly, dragging, dropTarget,
+  item, qty, base, unit, autoFocusTitle, readOnly, dragging, dropTarget, was,
   onChange, onDelete, onEnter, onDragStart, onDragOver, onDrop, onDragEnd,
 }: {
   item: TenderItem;
@@ -219,6 +227,10 @@ function ItemRow({
   dragging: boolean;
   /** The dragged row would land here. */
   dropTarget: boolean;
+  /** What this line was on the version you branched from — sits right beside
+   *  the box you type in, so a re-price shows its own working. `null` inside
+   *  the object = the line did not exist back then; `undefined` = column off. */
+  was: BaselineCell | undefined;
   onChange: (patch: Partial<TenderItem>) => void;
   onDelete: () => void;
   onEnter: () => void;
@@ -229,13 +241,18 @@ function ItemRow({
 }) {
   const rupees = itemRupees(item, qty, base);
   const perUnit = itemPerUnit(item, qty, base);
+  // Comparing raw values only means something while the BASIS is the same —
+  // 1500 as ₹/CFT and 15 as a % are different animals.
+  const wasPrev = was?.prev ?? null;
+  const sameBasis = wasPrev != null && wasPrev.mode === item.mode;
+  const delta = sameBasis ? item.value - wasPrev!.value : 0;
   return (
     <div
       className="tn-row"
       onDragOver={(e) => { if (!readOnly) { e.preventDefault(); onDragOver(); } }}
       onDrop={(e) => { if (!readOnly) { e.preventDefault(); onDrop(); } }}
       style={{
-        display: "grid", gridTemplateColumns: "16px minmax(0,1fr) 78px 96px 68px 82px 22px",
+        display: "grid", gridTemplateColumns: `16px minmax(0,1fr) 78px ${was ? "74px " : ""}96px 68px 82px 22px`,
         alignItems: "center", gap: 7, padding: "1px 6px", borderRadius: 8,
         opacity: dragging ? 0.35 : 1,
         boxShadow: dropTarget ? `inset 0 2px 0 ${C.indigo}` : undefined,
@@ -273,6 +290,30 @@ function ItemRow({
         <option value="per_cft">₹ / {unit}</option>
         <option value="percent">% of ₹</option>
       </select>
+      {was && (
+        <div
+          title={
+            wasPrev == null ? `New line — it was not in ${was.label}`
+              : !sameBasis ? `${was.label}: ${wasPrev.value.toLocaleString("en-IN")} on a different basis (${MODE_LABEL[wasPrev.mode]})`
+              : delta === 0 ? `Unchanged since ${was.label}`
+              : `${was.label}: ${wasPrev.value.toLocaleString("en-IN")} → ${item.value.toLocaleString("en-IN")}`
+          }
+          style={{ textAlign: "right", fontSize: 11, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden" }}
+        >
+          {wasPrev == null ? (
+            <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.08em", color: C.green, background: C.greenSoft, borderRadius: 5, padding: "1.5px 5px" }}>NEW</span>
+          ) : (
+            <>
+              <span style={{ color: "#aab2c0" }}>{wasPrev.value.toLocaleString("en-IN")}</span>
+              {!sameBasis ? (
+                <span title="basis changed" style={{ marginLeft: 3, color: C.amber, fontWeight: 800 }}>⚠</span>
+              ) : delta !== 0 ? (
+                <span style={{ marginLeft: 3, color: delta > 0 ? C.red : C.green, fontWeight: 800 }}>{delta > 0 ? "▲" : "▼"}</span>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
       <div style={{ position: "relative" }}>
         <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: C.muted, fontWeight: 700 }}>
           {item.mode === "percent" ? "%" : "₹"}
@@ -312,7 +353,7 @@ function ItemRow({
 }
 
 function GroupCard({
-  group, index, sr, qty, base, grand, unit, focusItemId, readOnly, drag,
+  group, index, sr, qty, base, grand, unit, focusItemId, readOnly, drag, baseline,
   groupDragging, groupDropTarget,
   onTitle, onItemChange, onItemDelete, onAddItem, onDelete, onDragItem, onDragGroup,
 }: {
@@ -330,6 +371,8 @@ function GroupCard({
   /** Live drag state, shared across the sheet so a row knows if it is the
    *  one moving or the one being dropped onto. */
   drag: { groupId: string | null; from: number; over: number };
+  /** The version each line is being compared against, or null for none. */
+  baseline: Baseline | null;
   /** This whole card is the one being dragged / the one it would land on. */
   groupDragging: boolean;
   groupDropTarget: boolean;
@@ -397,8 +440,10 @@ function GroupCard({
         )}
       </div>
       {/* Column ruler — the sheet reads like a real worksheet. */}
-      <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0,1fr) 78px 96px 68px 82px 22px", gap: 7, padding: "4px 12px 2px", fontSize: 8, fontWeight: 800, letterSpacing: "0.11em", color: "#c8cdd6" }}>
-        <span /><span>ITEM</span><span>BASIS</span><span style={{ textAlign: "right" }}>VALUE</span><span style={{ textAlign: "right" }}>RATE/{unit.toUpperCase()}</span><span style={{ textAlign: "right" }}>AMOUNT</span><span />
+      <div style={{ display: "grid", gridTemplateColumns: `16px minmax(0,1fr) 78px ${baseline ? "74px " : ""}96px 68px 82px 22px`, gap: 7, padding: "4px 12px 2px", fontSize: 8, fontWeight: 800, letterSpacing: "0.11em", color: "#c8cdd6" }}>
+        <span /><span>ITEM</span><span>BASIS</span>
+        {baseline && <span style={{ textAlign: "right", color: C.indigo }} title={`Value on ${baseline.label}`}>WAS</span>}
+        <span style={{ textAlign: "right" }}>VALUE</span><span style={{ textAlign: "right" }}>RATE/{unit.toUpperCase()}</span><span style={{ textAlign: "right" }}>AMOUNT</span><span />
       </div>
       <div style={{ padding: "0 6px 4px", display: "flex", flexDirection: "column", gap: 0 }}>
         {group.items.map((it, ii) => (
@@ -410,6 +455,7 @@ function GroupCard({
             unit={unit}
             autoFocusTitle={focusItemId === it.id}
             readOnly={readOnly}
+            was={baseline ? { label: baseline.label, prev: baseline.byItem.get(it.id) ?? null } : undefined}
             dragging={drag.groupId === group.id && drag.from === ii}
             dropTarget={drag.groupId === group.id && drag.over === ii && drag.from !== ii}
             onChange={(patch) => onItemChange(it.id, patch)}
@@ -750,6 +796,9 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
   const [railOpen, setRailOpen] = useState(!defaultWide);
   const [wide, setWide] = useState(defaultWide);
   const [showLetter, setShowLetter] = useState(false);
+  /** Show each line's value from the version you branched off, beside the box
+   *  you type in. On by default — re-pricing is the normal reason to be here. */
+  const [showWas, setShowWas] = useState(true);
   const [compareId, setCompareId] = useState<string | null>(null);
   /** Which point on the version timeline is on screen. null = the live sheet
    *  (always the LAST stop, and the default). */
@@ -807,6 +856,20 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
   const timeline = useMemo(() => (active ? computeTimeline(active, sections, seed.pace) : null), [active, sections, seed.pace]);
 
   const compareVersion = versions.find((v) => v.id === compareId) ?? null;
+
+  /** What the live sheet is being priced against: whichever version the split
+   *  card is comparing, else the newest saved one — i.e. "what it was when we
+   *  last put a number on paper". Never shown while reading history, where the
+   *  sheet IS a version and there is nothing to type into. */
+  const baseVersion = compareVersion ?? versions[0] ?? null;
+  const baseline = useMemo<Baseline | null>(() => {
+    if (!showWas || readOnly || !baseVersion) return null;
+    const byItem = new Map<string, { value: number; mode: TenderItemMode }>();
+    for (const sec of sectionsOf(baseVersion)) {
+      for (const g of sec.groups) for (const it of g.items) byItem.set(it.id, { value: it.value, mode: it.mode });
+    }
+    return { label: baseVersion.label, byItem };
+  }, [showWas, readOnly, baseVersion]);
   const compareCalc = useMemo(() => (compareVersion ? computeSheetTotal(compareVersion) : null), [compareVersion]);
   const diff = useMemo(
     () => (shown && compareVersion ? diffSheets(compareVersion, shown) : null),
@@ -1109,6 +1172,16 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                 value={active.manualDays}
                 onChange={(v) => patchActive((a) => ({ ...a, manualDays: v }))}
               />
+              {!readOnly && baseVersion && (
+                <button
+                  type="button"
+                  onClick={() => setShowWas((v) => !v)}
+                  title={showWas ? "Hide the WAS column" : `Show each line's value from ${baseVersion.label} beside the one you type`}
+                  style={{ ...ghostBtn(showWas), padding: "6px 11px" }}
+                >
+                  ⇄ vs {baseVersion.label}
+                </button>
+              )}
               <span style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>
                 {sections.length} master group{sections.length === 1 ? "" : "s"} · {calc.groups.length} cost heads
               </span>
@@ -1348,6 +1421,7 @@ export function TenderClient({ initial, seed, defaultWide = false }: { initial: 
                       focusItemId={focusItemId}
                       readOnly={readOnly}
                       drag={drag}
+                      baseline={baseline}
                       groupDragging={gdrag.sectionId === sec.id && gdrag.from === gi}
                       groupDropTarget={gdrag.sectionId === sec.id && gdrag.over === gi && gdrag.from !== gi}
                       onDragItem={(phase, idx) => dragItem(sec.id, g.id, phase, idx)}
