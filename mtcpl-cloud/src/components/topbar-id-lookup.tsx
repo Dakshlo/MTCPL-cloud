@@ -408,6 +408,23 @@ export function TopbarIdLookup({
           🔍
         </span>
         <span>Find ID</span>
+        {/* A shortcut nobody knows about is a shortcut nobody uses. The quick
+            palette (stage + location, opens instantly) lives one key away from
+            the button people already reach for, so it advertises itself here.
+            Desktop + production only — the same places the palette exists. */}
+        {isFinePointer && domain === "production" && (
+          <kbd
+            title="Quick search — stage and location only, opens instantly"
+            style={{
+              fontSize: 9.5, fontWeight: 800, letterSpacing: "0.02em",
+              color: "var(--muted)", background: "var(--card, rgba(0,0,0,0.04))",
+              border: "1px solid var(--border)", borderRadius: 5,
+              padding: "1.5px 5px", marginLeft: 2, fontFamily: "inherit",
+            }}
+          >
+            ⌘K
+          </kbd>
+        )}
       </button>
 
       {open && mounted && createPortal(

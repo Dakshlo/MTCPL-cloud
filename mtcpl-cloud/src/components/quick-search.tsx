@@ -7,10 +7,19 @@
  * answers the two questions asked mid-stride — WHERE is it, WHAT STAGE is it
  * at — and nothing else, so it can answer while you are still typing.
  *
- * OPENING IT. Hold ; and ' together. They are neighbours on the home row, so
- * it is one motion with the right hand and no modifier key to reach for. Esc
- * closes. The chord is ignored while you are typing in a field, so it can
- * never eat a legitimate apostrophe.
+ * OPENING IT. Two ways, because the chord is fast once you know it and
+ * undiscoverable until you do:
+ *
+ *   • ⌘K / Ctrl+K — what everyone tries first.
+ *   • hold ; and ' — neighbours on the home row, one motion with the right
+ *     hand, no modifier to reach for.
+ *
+ * Esc closes. Both are ignored while you are typing in a field, so the chord
+ * can never eat a legitimate apostrophe.
+ *
+ * ⌘K YIELDS ON /carving. The Carving Jobs board bound ⌘K (and /) to its own
+ * search box first, and on that page focusing the board's filter is the more
+ * useful thing. The chord still opens the palette there.
  *
  * DESKTOP ONLY, on purpose. Tablets on the floor run the app's own on-screen
  * keyboard; a chord shortcut means nothing there and a second search UI would
@@ -19,7 +28,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 type Hit = {
   kind: "slab" | "block";
@@ -46,6 +55,7 @@ const toneFor = (stage: string) => STAGE_TONE.find(([re]) => re.test(stage))?.[1
 
 export function QuickSearch() {
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
@@ -76,8 +86,20 @@ export function QuickSearch() {
       const tag = n.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || n.isContentEditable;
     };
+    // The Carving Jobs board already owns ⌘K for its own search box; the
+    // chord still works there, so nothing is lost.
+    const cmdKTaken = pathname === "/carving" || pathname.startsWith("/carving?");
+
     const onDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setOpen(false); return; }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (cmdKTaken || typing(e.target)) return;
+        e.preventDefault();
+        setOpen(true);
+        return;
+      }
+
       if (!CHORD.has(e.key)) return;
       // Never steal a keystroke from a field — including this palette's own.
       if (typing(e.target)) return;
@@ -99,7 +121,7 @@ export function QuickSearch() {
       window.removeEventListener("keyup", onUp);
       window.removeEventListener("blur", clear);
     };
-  }, [desktop]);
+  }, [desktop, pathname]);
 
   useEffect(() => {
     if (!open) return;
@@ -235,6 +257,7 @@ export function QuickSearch() {
         <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 17px", borderTop: "1px solid #e6eaf0", background: "#f6f8fb", fontSize: 10.5, color: "#8892a4" }}>
           <span>↑↓ move</span>
           <span>↵ open</span>
+          <span>esc close</span>
           <span style={{ marginLeft: "auto" }}>Stage + location only — Find ID has the full picture</span>
         </div>
       </div>
