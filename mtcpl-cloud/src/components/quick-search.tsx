@@ -40,7 +40,7 @@
  * means nothing there. Gated on (pointer: fine), not a width guess.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { directDispatchSlabsAction } from "@/app/(app)/carving/actions";
@@ -140,6 +140,12 @@ export function QuickSearch({
   const [editPins, setEditPins] = useState(false);
   const [pins, setPins] = useState<string[]>(pinned.map((p) => p.href));
   const [savingPins, setSavingPins] = useState(false);
+  /** The href we are navigating to, and whether React is still fetching it.
+   *  The global NavigationProgress bar only listens for real <a> clicks and
+   *  form submits, so a programmatic router.push gave no feedback at all —
+   *  the palette just vanished and the page changed whenever it felt like it. */
+  const [navTo, setNavTo] = useState<string | null>(null);
+  const [navPending, startNav] = useTransition();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const down = useRef<Set<string>>(new Set());
   /** Every request carries a token; only the newest may paint, so a slow early
@@ -212,6 +218,12 @@ export function QuickSearch({
     return () => { el.style.overflow = prevOverflow; el.style.paddingRight = prevPad; };
   }, [open]);
 
+  // Navigation finished — the new route's payload is in. Only now does the
+  // palette get out of the way.
+  useEffect(() => {
+    if (navTo && !navPending) { setOpen(false); setNavTo(null); }
+  }, [navTo, navPending]);
+
   useEffect(() => {
     if (!open) return;
     setSel(0);
@@ -219,6 +231,7 @@ export function QuickSearch({
     setFlash(null);
     setPageQ("");
     setEditPins(false);
+    setNavTo(null);
     const t = setTimeout(() => inputRef.current?.focus(), 20);
     return () => clearTimeout(t);
   }, [open]);
@@ -297,7 +310,11 @@ export function QuickSearch({
     ? pages.filter((p) => p.label.toLowerCase().includes(pageTerm) || p.href.toLowerCase().includes(pageTerm)).slice(0, 8)
     : [];
 
-  const goPage = (href: string) => { setOpen(false); router.push(href); };
+  const goPage = (href: string) => {
+    if (navTo) return; // one navigation at a time
+    setNavTo(href);
+    startNav(() => router.push(href));
+  };
 
   if (!mounted || !desktop || !open) return null;
 
@@ -323,6 +340,15 @@ export function QuickSearch({
           overflow: "hidden",
         }}
       >
+        {/* A stripe across the top of the panel while a route loads — the same
+            language as the app's global navigation bar, which does not fire for
+            programmatic pushes. */}
+        {navTo && (
+          <div aria-hidden style={{ height: 3, background: "rgba(79,70,229,0.15)", overflow: "hidden", flexShrink: 0 }}>
+            <div className="qs-bar" style={{ height: "100%", width: "40%", background: C.indigo, borderRadius: 999 }} />
+          </div>
+        )}
+
         {/* 1 — pinned links. Everyone, every department. */}
         <div style={{ padding: "13px 18px 11px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: livePins.length || editPins ? 9 : 0 }}>
@@ -345,21 +371,31 @@ export function QuickSearch({
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9 }}>
               {livePins.map((p) => {
                 const accent = DEPT_TINT[p.department] ?? DEPT_TINT.production;
+                const loading = navTo === p.href;
+                const dim = navTo != null && !loading;
                 return (
                   <button
                     key={p.href}
                     type="button"
+                    disabled={navTo != null}
                     onClick={() => goPage(p.href)}
-                    className="qs-pin"
+                    className={loading ? "qs-pin qs-pin-loading" : "qs-pin"}
                     style={{
                       display: "flex", flexDirection: "column", justifyContent: "space-between",
-                      gap: 10, minHeight: 84, cursor: "pointer", textAlign: "left",
+                      gap: 10, minHeight: 84, textAlign: "left",
+                      cursor: navTo ? "default" : "pointer",
+                      opacity: dim ? 0.45 : 1, transition: "opacity .15s",
                       border: "none", borderRadius: 13, padding: "12px 14px",
                       background: `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
                       boxShadow: "0 2px 10px rgba(11,18,32,0.16)",
                       overflow: "hidden", position: "relative",
                     }}
                   >
+                    {loading && (
+                      <span aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(11,18,32,0.28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <span className="qs-spin" style={{ width: 18, height: 18, borderRadius: "50%", border: "2.5px solid rgba(255,255,255,0.35)", borderTopColor: "#fff", display: "inline-block" }} />
+                      </span>
+                    )}
                     <span aria-hidden style={{ position: "absolute", top: -22, right: -22, width: 84, height: 84, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 70%)", pointerEvents: "none" }} />
                     <span style={{ position: "relative", display: "block", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.11em", textTransform: "uppercase", color: "rgba(255,255,255,0.72)" }}>
                       <span aria-hidden style={{ marginRight: 5 }}>{p.icon}</span>
@@ -538,13 +574,17 @@ export function QuickSearch({
                           </span>
                         ) : null}
 
-                        <a
-                          href={h.href}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, color: C.indigo, textDecoration: "none" }}
+                        <button
+                          type="button"
+                          disabled={navTo != null}
+                          onClick={(e) => { e.stopPropagation(); goPage(h.href); }}
+                          style={{ marginLeft: "auto", border: "none", background: "transparent", fontSize: 11.5, fontWeight: 800, color: C.indigo, cursor: navTo ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
                         >
+                          {navTo === h.href && (
+                            <span className="qs-spin" style={{ width: 11, height: 11, borderRadius: "50%", border: "2px solid #e6eaf0", borderTopColor: C.indigo, display: "inline-block" }} />
+                          )}
                           Open in {h.kind === "slab" ? "Required Sizes" : "Blocks"} ↗
-                        </a>
+                        </button>
                       </div>
 
                       {flash && flash.code === h.code && (
@@ -569,16 +609,22 @@ export function QuickSearch({
                 <button
                   key={p.href}
                   type="button"
+                  disabled={navTo != null}
                   onClick={() => goPage(p.href)}
                   className="qs-pagehit"
                   style={{
                     display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-                    border: "none", background: "transparent", cursor: "pointer",
+                    border: "none", background: "transparent",
+                    cursor: navTo ? "default" : "pointer",
+                    opacity: navTo != null && navTo !== p.href ? 0.45 : 1,
                     padding: "9px 18px", fontSize: 12.5, fontWeight: 700, color: C.ink,
                   }}
                 >
                   <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>{p.icon}</span>
                   {p.label}
+                  {navTo === p.href && (
+                    <span className="qs-spin" style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid #e6eaf0", borderTopColor: C.indigo, display: "inline-block" }} />
+                  )}
                   <span style={{ marginLeft: "auto", fontSize: 10.5, color: C.muted, fontFamily: "ui-monospace, monospace" }}>{p.href}</span>
                 </button>
               ))}
@@ -610,8 +656,11 @@ export function QuickSearch({
 .qs-panel { animation: qsIn .13s cubic-bezier(.22,1,.36,1) both; }
 @keyframes qsIn { from { opacity: 0; transform: translateY(-8px) scale(.985) } to { opacity: 1; transform: none } }
 .qs-spin { animation: qsSpin .7s linear infinite; }
+.qs-pin-loading { transform: none !important; }
+.qs-bar { animation: qsBar 1s ease-in-out infinite; }
+@keyframes qsBar { 0% { margin-left: -40% } 100% { margin-left: 100% } }
 @keyframes qsSpin { to { transform: rotate(360deg) } }
-@media (prefers-reduced-motion: reduce) { .qs-panel, .qs-spin { animation: none } }
+@media (prefers-reduced-motion: reduce) { .qs-panel, .qs-spin, .qs-bar { animation: none } }
 ` }} />
     </div>
   );
