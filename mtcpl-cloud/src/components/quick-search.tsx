@@ -1,15 +1,22 @@
 "use client";
 
 /**
- * Quick search palette (Daksh, Aug 2026) — production floor.
+ * Quick search palette (Daksh, Aug 2026) — everywhere in the app.
  *
- * Find ID answers everything about an ID and takes a moment to do it. This
- * answers the questions asked mid-stride — WHERE is it, WHAT STAGE is it at —
- * and answers them while you are still typing.
+ * Three things stacked, in the order a hand reaches for them:
  *
- * It matches on more than the code: label, either category, the description.
- * On the floor a piece is known by what it IS, not only by what is stencilled
- * on it.
+ *   1. PINNED LINKS. Up to six pages this person chose (mig 221), as buttons.
+ *      Everyone gets these, in every department.
+ *   2. SLAB / BLOCK LOOKUP. Production only, because only production has slabs.
+ *      Where is it, what stage — answered while you type, matching on code,
+ *      label, either category or description, since on the floor a piece is
+ *      known by what it IS, not only by what is stencilled on it.
+ *   3. GO TO A PAGE. Everyone. Searches the nav registry, which is exactly the
+ *      set of pages this user may open — royalty and the personal ledger are
+ *      not in it, so they cannot be found here.
+ *
+ * Outside production the middle section simply is not rendered, and the palette
+ * is pins + page search.
  *
  * OPENING IT. ⌘K / Ctrl+K, or hold ; and ' — neighbours on the home row, one
  * motion with the right hand. Esc closes. Both are ignored while you are
@@ -37,6 +44,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { directDispatchSlabsAction } from "@/app/(app)/carving/actions";
+import { saveQuickLinksAction } from "@/app/(app)/quick-links-actions";
+import { MAX_QUICK_LINKS } from "@/lib/nav-registry";
 
 type Detail = {
   label: string | null;
@@ -83,7 +92,20 @@ const STAGE_TONE: Array<[RegExp, string]> = [
 ];
 const toneFor = (stage: string) => STAGE_TONE.find(([re]) => re.test(stage))?.[1] ?? "#64748b";
 
-export function QuickSearch() {
+export type QuickPage = { href: string; label: string; icon: string; department: string };
+
+export function QuickSearch({
+  slabLookup,
+  pages,
+  pinned,
+}: {
+  /** Production only — the slab/block section is hidden without it. */
+  slabLookup: boolean;
+  /** Every page this user may open, already role-filtered on the server. */
+  pages: QuickPage[];
+  /** Their saved pins, already validated against `pages`. */
+  pinned: QuickPage[];
+}) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
@@ -95,6 +117,10 @@ export function QuickSearch() {
   const [sending, setSending] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ code: string; text: string; ok: boolean } | null>(null);
   const [desktop, setDesktop] = useState(false);
+  const [pageQ, setPageQ] = useState("");
+  const [editPins, setEditPins] = useState(false);
+  const [pins, setPins] = useState<string[]>(pinned.map((p) => p.href));
+  const [savingPins, setSavingPins] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const down = useRef<Set<string>>(new Set());
   /** Every request carries a token; only the newest may paint, so a slow early
@@ -154,6 +180,8 @@ export function QuickSearch() {
     setSel(0);
     setOpenCode(null);
     setFlash(null);
+    setPageQ("");
+    setEditPins(false);
     const t = setTimeout(() => inputRef.current?.focus(), 20);
     return () => clearTimeout(t);
   }, [open]);
@@ -210,6 +238,30 @@ export function QuickSearch() {
     }
   }, [router]);
 
+  const togglePin = (href: string) =>
+    setPins((prev) =>
+      prev.includes(href) ? prev.filter((h) => h !== href) : prev.length >= MAX_QUICK_LINKS ? prev : [...prev, href],
+    );
+
+  const savePins = async () => {
+    setSavingPins(true);
+    try {
+      const res = await saveQuickLinksAction(pins);
+      if (res.ok) { setPins(res.saved); setEditPins(false); router.refresh(); }
+    } finally {
+      setSavingPins(false);
+    }
+  };
+
+  const byHref = new Map(pages.map((p) => [p.href, p]));
+  const livePins = pins.map((h) => byHref.get(h)).filter(Boolean) as QuickPage[];
+  const pageTerm = pageQ.trim().toLowerCase();
+  const pageHits = pageTerm
+    ? pages.filter((p) => p.label.toLowerCase().includes(pageTerm) || p.href.toLowerCase().includes(pageTerm)).slice(0, 8)
+    : [];
+
+  const goPage = (href: string) => { setOpen(false); router.push(href); };
+
   if (!mounted || !desktop || !open) return null;
 
   const body = (
@@ -234,7 +286,94 @@ export function QuickSearch() {
           overflow: "hidden",
         }}
       >
-        {/* Input */}
+        {/* 1 — pinned links. Everyone, every department. */}
+        <div style={{ padding: "13px 18px 11px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: livePins.length || editPins ? 9 : 0 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: C.muted }}>
+              Your links
+            </span>
+            <button
+              type="button"
+              onClick={() => setEditPins((v) => !v)}
+              style={{ marginLeft: "auto", border: "none", background: "transparent", color: editPins ? C.indigo : C.muted, fontSize: 11, fontWeight: 800, cursor: "pointer", padding: 0 }}
+            >
+              {editPins ? "Done choosing" : livePins.length ? "Edit" : `Choose up to ${MAX_QUICK_LINKS}`}
+            </button>
+          </div>
+
+          {!editPins && livePins.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {livePins.map((p) => (
+                <button
+                  key={p.href}
+                  type="button"
+                  onClick={() => goPage(p.href)}
+                  className="qs-pin"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer",
+                    border: `1px solid ${C.line}`, background: "#fff", borderRadius: 10,
+                    padding: "7px 13px", fontSize: 12.5, fontWeight: 700, color: C.ink,
+                  }}
+                >
+                  <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>{p.icon}</span>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!editPins && livePins.length === 0 && (
+            <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.6 }}>
+              Pin the pages you live in and they become buttons here.
+            </div>
+          )}
+
+          {editPins && (
+            <div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 168, overflowY: "auto", paddingRight: 2 }}>
+                {pages.map((p) => {
+                  const on = pins.includes(p.href);
+                  const full = !on && pins.length >= MAX_QUICK_LINKS;
+                  return (
+                    <button
+                      key={p.href}
+                      type="button"
+                      disabled={full}
+                      onClick={() => togglePin(p.href)}
+                      title={full ? `${MAX_QUICK_LINKS} is the limit — remove one first` : undefined}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.4 : 1,
+                        border: `1px solid ${on ? C.indigo : C.line}`,
+                        background: on ? "rgba(79,70,229,0.08)" : "#fff",
+                        color: on ? C.indigo : C.ink2,
+                        borderRadius: 9, padding: "5px 10px", fontSize: 11.5, fontWeight: 700,
+                      }}
+                    >
+                      <span aria-hidden style={{ fontSize: 12, lineHeight: 1 }}>{p.icon}</span>
+                      {p.label}
+                      {on && <span style={{ fontSize: 10 }}>✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                <span style={{ fontSize: 11, color: C.muted }}>{pins.length} of {MAX_QUICK_LINKS} chosen</span>
+                <button
+                  type="button"
+                  onClick={() => void savePins()}
+                  disabled={savingPins}
+                  style={{ marginLeft: "auto", border: "none", borderRadius: 9, background: savingPins ? "#9aa4b5" : C.indigo, color: "#fff", fontSize: 12, fontWeight: 800, padding: "7px 16px", cursor: savingPins ? "default" : "pointer" }}
+                >
+                  {savingPins ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 2 — slab / block lookup. Production only. */}
+        {slabLookup && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "15px 18px", borderBottom: q.trim().length >= 2 ? `1px solid ${C.line}` : "none", flexShrink: 0 }}>
           <span style={{ fontSize: 17, color: C.muted, lineHeight: 1 }}>⌕</span>
           <input
@@ -260,9 +399,10 @@ export function QuickSearch() {
           {busy && <span className="qs-spin" style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #e6eaf0", borderTopColor: C.indigo, display: "inline-block", flexShrink: 0 }} />}
           <kbd style={{ fontSize: 10, fontWeight: 800, color: C.muted, background: C.wash, border: `1px solid ${C.line}`, borderRadius: 6, padding: "3px 7px", flexShrink: 0 }}>esc</kbd>
         </div>
+        )}
 
         {/* Results */}
-        {q.trim().length >= 2 && (
+        {slabLookup && q.trim().length >= 2 && (
           <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
             {hits.length === 0 && !busy && (
               <div style={{ padding: "26px 20px", fontSize: 13, color: C.muted, textAlign: "center" }}>
@@ -368,16 +508,52 @@ export function QuickSearch() {
           </div>
         )}
 
-        {/* Footer */}
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "9px 18px", borderTop: `1px solid ${C.line}`, background: C.wash, fontSize: 10.5, color: C.muted, flexShrink: 0 }}>
-          <span>↑↓ move</span>
-          <span>↵ open here</span>
-          <span>esc close</span>
-          <span style={{ marginLeft: "auto" }}>Stage + location — Find ID has the full picture</span>
+        {/* 3 — go to a page. Everyone. Searches only what this user may open;
+             royalty and the personal ledger are not in the registry at all. */}
+        <div style={{ borderTop: `1px solid ${C.line}`, background: C.wash, flexShrink: 0 }}>
+          {pageHits.length > 0 && (
+            <div style={{ maxHeight: 190, overflowY: "auto", borderBottom: `1px solid ${C.line}` }}>
+              {pageHits.map((p) => (
+                <button
+                  key={p.href}
+                  type="button"
+                  onClick={() => goPage(p.href)}
+                  className="qs-pagehit"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                    border: "none", background: "transparent", cursor: "pointer",
+                    padding: "9px 18px", fontSize: 12.5, fontWeight: 700, color: C.ink,
+                  }}
+                >
+                  <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>{p.icon}</span>
+                  {p.label}
+                  <span style={{ marginLeft: "auto", fontSize: 10.5, color: C.muted, fontFamily: "ui-monospace, monospace" }}>{p.href}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 18px" }}>
+            <span style={{ fontSize: 12, color: C.muted, lineHeight: 1 }}>⇢</span>
+            <input
+              value={pageQ}
+              onChange={(e) => setPageQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setOpen(false); return; }
+                if (e.key === "Enter" && pageHits[0]) { e.preventDefault(); goPage(pageHits[0].href); }
+              }}
+              placeholder="Go to a page…"
+              style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 12.5, fontWeight: 600, color: C.ink }}
+            />
+            <span style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap" }}>
+              {slabLookup ? "Stage + location — Find ID has the full picture" : `${pages.length} pages`}
+            </span>
+          </div>
         </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
+.qs-pin:hover { border-color: #4f46e5 !important; background: rgba(79,70,229,0.06) !important; }
+.qs-pagehit:hover { background: rgba(79,70,229,0.07) !important; }
 .qs-panel { animation: qsIn .13s cubic-bezier(.22,1,.36,1) both; }
 @keyframes qsIn { from { opacity: 0; transform: translateY(-8px) scale(.985) } to { opacity: 1; transform: none } }
 .qs-spin { animation: qsSpin .7s linear infinite; }

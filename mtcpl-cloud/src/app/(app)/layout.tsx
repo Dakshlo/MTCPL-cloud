@@ -12,6 +12,7 @@ import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-bad
 import { TopbarDiaryBadge, type DiaryBadgeItem } from "@/components/topbar-diary-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { QuickSearch } from "@/components/quick-search";
+import { pagesFor } from "@/lib/nav-registry";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
 import { Toast } from "@/components/toast";
@@ -79,6 +80,22 @@ const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge", "c
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
   const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
+
+  // ⌘K palette data (mig 221). pagesFor() is role-filtered, and the saved pins
+  // are re-validated against it — a pin to a page the user has since lost
+  // access to simply stops appearing.
+  const quickPages = pagesFor(profile.role, null, {
+    can_assign_carving: (profile as { can_assign_carving?: boolean | null }).can_assign_carving,
+  });
+  const quickHrefs = new Set(quickPages.map((p) => p.href));
+  const quickPinned = (Array.isArray((profile as { quick_links?: unknown }).quick_links)
+    ? ((profile as { quick_links?: string[] }).quick_links ?? [])
+    : []
+  )
+    .filter((h) => quickHrefs.has(h))
+    .map((h) => quickPages.find((p) => p.href === h)!)
+    .slice(0, 6);
+
 
   // "tv" — wall-display kiosk role. No dashboard, no sidebar, no top bar:
   // just the page (the carving floor TV view, which is a full-screen overlay)
@@ -816,19 +833,28 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 dept === "inventory" &&
                 (role === "developer" || role === "owner");
               if (showProduction || showProductionForVendor)
-                return (
-                  <>
-                    <TopbarIdLookup domain="production" templeCodes={templeCodeOptions} />
-                    {/* Same gate, same floor: hold ; and ' for a stage +
-                        location lookup that answers while you type. Desktop
-                        only — it decides that for itself. */}
-                    <QuickSearch />
-                  </>
-                );
+                return <TopbarIdLookup domain="production" templeCodes={templeCodeOptions} />;
               if (showFinance) return <TopbarIdLookup domain="finance" />;
               if (showInventory) return <TopbarIdLookup domain="inventory" />;
               return null;
             })()}
+
+            {/* ⌘K palette — pinned links + page search for EVERYONE, plus the
+                slab/block lookup where there are slabs to look up. Mounted
+                outside the Find ID gate on purpose: the pins and the page
+                search are not a production feature. */}
+            <QuickSearch
+              slabLookup={(() => {
+                const d = effectiveDepartment(profile.role, profile.active_department ?? null);
+                return (
+                  profile.role === "vendor" ||
+                  (d === "production" &&
+                    ["developer", "owner", "team_head", "senior_incharge", "crosscheck", "dispatch", "carving_head"].includes(profile.role))
+                );
+              })()}
+              pages={quickPages}
+              pinned={quickPinned}
+            />
 
             {/* Consolidated tasks dropdown (Mig 044 follow-on per
                 Daksh: the four separate pills were clustering the
