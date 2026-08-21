@@ -82,6 +82,25 @@ const C = {
   green: "#0f9d58",
 };
 
+/** Tile gradients, one per department — the same accents the sidebar's
+ *  department switcher wears, so a pinned tile reads as "that room". */
+const DEPT_TINT: Record<string, { from: string; to: string }> = {
+  production:  { from: "#3b2f0b", to: "#b8860b" },
+  finance:     { from: "#12301f", to: "#2f8f5b" },
+  invoicing:   { from: "#1a2540", to: "#4f6aa8" },
+  inventory:   { from: "#3a1f12", to: "#c87850" },
+  register:    { from: "#2a1c3d", to: "#8a6fb0" },
+  maintenance: { from: "#0f2b28", to: "#3f8f86" },
+  salary:      { from: "#331f26", to: "#9c5f6e" },
+  vehicles:    { from: "#182739", to: "#4f6d9c" },
+};
+
+const DEPT_LABEL: Record<string, string> = {
+  production: "Production", finance: "Finance", invoicing: "Invoicing",
+  inventory: "Inventory", register: "Register", maintenance: "Maintenance",
+  salary: "Employees", vehicles: "Vehicles",
+};
+
 const STAGE_TONE: Array<[RegExp, string]> = [
   [/dispatch/i, C.green],
   [/ready/i, C.green],
@@ -174,6 +193,24 @@ export function QuickSearch({
       window.removeEventListener("blur", clear);
     };
   }, [desktop]);
+
+  // Lock the page while the palette is up.
+  //
+  // It must be the SCROLLING element, which in this app is <html>, not <body>:
+  // body carries overflow hidden already and never scrolls, so locking it did
+  // exactly nothing and the page kept moving behind the panel. The scrollbar's
+  // width is paid back as padding, otherwise hiding it shifts the layout
+  // sideways the moment the palette opens.
+  useEffect(() => {
+    if (!open) return;
+    const el = (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+    const prevOverflow = el.style.overflow;
+    const prevPad = el.style.paddingRight;
+    const gap = window.innerWidth - document.documentElement.clientWidth;
+    el.style.overflow = "hidden";
+    if (gap > 0) el.style.paddingRight = `${gap}px`;
+    return () => { el.style.overflow = prevOverflow; el.style.paddingRight = prevPad; };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -302,23 +339,38 @@ export function QuickSearch({
           </div>
 
           {!editPins && livePins.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {livePins.map((p) => (
-                <button
-                  key={p.href}
-                  type="button"
-                  onClick={() => goPage(p.href)}
-                  className="qs-pin"
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer",
-                    border: `1px solid ${C.line}`, background: "#fff", borderRadius: 10,
-                    padding: "7px 13px", fontSize: 12.5, fontWeight: 700, color: C.ink,
-                  }}
-                >
-                  <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>{p.icon}</span>
-                  {p.label}
-                </button>
-              ))}
+            /* Tiles, not chips — these are the same doors as the dashboard
+               cards, so they wear the same clothes: department eyebrow, big
+               title, its department's colour. Three across, so six fit. */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9 }}>
+              {livePins.map((p) => {
+                const accent = DEPT_TINT[p.department] ?? DEPT_TINT.production;
+                return (
+                  <button
+                    key={p.href}
+                    type="button"
+                    onClick={() => goPage(p.href)}
+                    className="qs-pin"
+                    style={{
+                      display: "flex", flexDirection: "column", justifyContent: "space-between",
+                      gap: 10, minHeight: 84, cursor: "pointer", textAlign: "left",
+                      border: "none", borderRadius: 13, padding: "12px 14px",
+                      background: `linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
+                      boxShadow: "0 2px 10px rgba(11,18,32,0.16)",
+                      overflow: "hidden", position: "relative",
+                    }}
+                  >
+                    <span aria-hidden style={{ position: "absolute", top: -22, right: -22, width: 84, height: 84, borderRadius: "50%", background: "radial-gradient(circle, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 70%)", pointerEvents: "none" }} />
+                    <span style={{ position: "relative", display: "block", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.11em", textTransform: "uppercase", color: "rgba(255,255,255,0.72)" }}>
+                      <span aria-hidden style={{ marginRight: 5 }}>{p.icon}</span>
+                      {DEPT_LABEL[p.department] ?? p.department}
+                    </span>
+                    <span style={{ position: "relative", display: "block", fontSize: 14.5, fontWeight: 800, color: "#fff", letterSpacing: "-0.015em", lineHeight: 1.25 }}>
+                      {p.label}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -552,7 +604,8 @@ export function QuickSearch({
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-.qs-pin:hover { border-color: #4f46e5 !important; background: rgba(79,70,229,0.06) !important; }
+.qs-pin { transition: transform .12s ease, box-shadow .12s ease; }
+.qs-pin:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(11,18,32,0.26) !important; }
 .qs-pagehit:hover { background: rgba(79,70,229,0.07) !important; }
 .qs-panel { animation: qsIn .13s cubic-bezier(.22,1,.36,1) both; }
 @keyframes qsIn { from { opacity: 0; transform: translateY(-8px) scale(.985) } to { opacity: 1; transform: none } }
