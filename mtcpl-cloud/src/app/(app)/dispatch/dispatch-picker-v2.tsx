@@ -45,7 +45,14 @@ const panelFull: CSSProperties = {
   background: "var(--bg)", border: "none", borderRadius: 0, overflow: "hidden",
 };
 
-const REVIEW_W = 400;
+/** Drawer width. A CSS length rather than a number so it scales with the
+ *  screen: the review list inside is a grid, and a 400px column could only
+ *  ever hold one tile per row. ~42vw gives 2 tiles on a laptop and 3 on a
+ *  wide monitor. The SAME expression is used for the animating grid column
+ *  and for the panel inside it — they resolve against the same viewport, so
+ *  the panel keeps its full width while the column opens and the drawer
+ *  slides in rather than squeezing. */
+const REVIEW_W = "clamp(400px, 42vw, 760px)";
 
 /** Search matcher — every space-separated token must hit SOMETHING on the
  *  slab. Superset of the old one: both category levels and the additional
@@ -640,7 +647,7 @@ export function DispatchPickerV2({
             <div
               style={{
                 flex: 1, minHeight: 0, display: "grid",
-                gridTemplateColumns: reviewOpen ? `1fr ${REVIEW_W}px` : "1fr 0px",
+                gridTemplateColumns: reviewOpen ? `1fr ${REVIEW_W}` : "1fr 0px",
                 transition: "grid-template-columns .28s cubic-bezier(.4,0,.2,1)",
               }}
             >
@@ -711,39 +718,54 @@ export function DispatchPickerV2({
                     </button>
                   </div>
 
-                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7 }}>
+                  {/* Tiles, not rows — 2 per row on a laptop, 3 on a wide
+                      screen, so a 20-slab pick is one glance instead of a
+                      scroll. Reading order is still left-to-right, top-to-
+                      bottom, which is the pick order. */}
+                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px" }}>
                     {orderedSel.length === 0 ? (
                       <div className="muted" style={{ padding: "34px 10px", textAlign: "center", fontSize: 12.5, lineHeight: 1.6 }}>
                         Nothing picked yet.<br />Tick slabs on the left and they will line up here, first to last.
                       </div>
                     ) : (
-                      orderedSel.map((s, i) => (
-                        <div
-                          key={s.id}
-                          onClick={() => locate(s.id)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
-                          title="Show this slab in the grid"
-                          style={{
-                            display: "flex", alignItems: "flex-start", gap: 9,
-                            background: flashId === s.id ? "rgba(184,115,51,0.14)" : "var(--bg)",
-                            border: "1px solid var(--border)", borderLeft: `4px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
-                            borderRadius: 10, padding: "8px 9px", cursor: "pointer",
-                            transition: "background .15s ease",
-                          }}
-                        >
-                          <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 6, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: i + 1 > 9 ? 10 : 11.5, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>
-                            {i + 1}
-                          </span>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12 }}>{s.id}</code>
-                              {s.priority && <span title="Urgent" style={{ fontSize: 11 }}>⚡</span>}
-                              {s.storageSource && <span title="From storage" style={{ fontSize: 8.5, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 5px" }}>📦</span>}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(186px, 1fr))", gap: 8, alignItems: "start" }}>
+                        {orderedSel.map((s, i) => (
+                          <div
+                            key={s.id}
+                            onClick={() => locate(s.id)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
+                            title="Show this slab in the grid"
+                            style={{
+                              display: "flex", flexDirection: "column", gap: 3, minWidth: 0,
+                              background: flashId === s.id ? "rgba(184,115,51,0.14)" : "var(--bg)",
+                              border: "1px solid var(--border)", borderLeft: `4px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
+                              borderRadius: 10, padding: "7px 9px", cursor: "pointer",
+                              transition: "background .15s ease",
+                            }}
+                          >
+                            {/* number · code · untick — one row, so the tile
+                                stays readable at ~190px */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                              <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 6, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: i + 1 > 9 ? 9.5 : 11, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>
+                                {i + 1}
+                              </span>
+                              <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+                              {s.priority && <span title="Urgent" style={{ fontSize: 10.5, flexShrink: 0 }}>⚡</span>}
+                              {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 4px" }}>📦</span>}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
+                                aria-label={`Untick ${s.id}`}
+                                title="Untick this slab"
+                                style={{ marginLeft: "auto", flexShrink: 0, background: "transparent", border: "1.5px solid var(--border)", color: "#b91c1c", borderRadius: 6, width: 22, height: 22, fontSize: 11, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
+                              >
+                                ✕
+                              </button>
                             </div>
                             {(s.label || s.component_element || s.component_section) && (
-                              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.label ?? undefined}>
                                 {s.label || s.component_element || s.component_section}
                               </div>
                             )}
@@ -752,21 +774,12 @@ export function DispatchPickerV2({
                                 {[s.component_section, s.description].filter(Boolean).join(" · ")}
                               </div>
                             )}
-                            <div style={{ fontSize: 10.5, fontFamily: "ui-monospace, monospace", color: "var(--muted)", marginTop: 2 }}>
-                              {s.dimensions} · {s.cft.toFixed(2)} CFT
+                            <div style={{ fontSize: 10.5, fontFamily: "ui-monospace, monospace", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {s.dimensions} · <span style={{ color: "var(--gold-dark)", fontWeight: 700 }}>{s.cft.toFixed(2)} CFT</span>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
-                            aria-label={`Untick ${s.id}`}
-                            title="Untick this slab"
-                            style={{ flexShrink: 0, background: "transparent", border: "1.5px solid var(--border)", color: "#b91c1c", borderRadius: 7, width: 26, height: 26, fontSize: 13, fontWeight: 900, cursor: "pointer", lineHeight: 1 }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))
+                        ))}
+                      </div>
                     )}
                   </div>
 
