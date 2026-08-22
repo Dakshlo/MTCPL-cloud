@@ -45,14 +45,34 @@ const panelFull: CSSProperties = {
   background: "var(--bg)", border: "none", borderRadius: 0, overflow: "hidden",
 };
 
-/** Drawer width. A CSS length rather than a number so it scales with the
- *  screen: the review list inside is a grid, and a 400px column could only
- *  ever hold one tile per row. ~42vw gives 2 tiles on a laptop and 3 on a
- *  wide monitor. The SAME expression is used for the animating grid column
- *  and for the panel inside it — they resolve against the same viewport, so
- *  the panel keeps its full width while the column opens and the drawer
- *  slides in rather than squeezing. */
-const REVIEW_W = "clamp(400px, 42vw, 760px)";
+/* ── review drawer width ──────────────────────────────────────────────
+ * Draggable, like a window split. The starting width scales with the screen
+ * (~42vw ⇒ 2 tiles per row on a laptop, 3 on a wide monitor) and whatever the
+ * person drags it to is remembered, because how much of the screen the review
+ * deserves depends on the job: twenty slabs to read back wants a wide panel,
+ * three slabs wants the cards.
+ *
+ * The grid column and the panel inside it are always set to the SAME pixel
+ * width, so the panel holds its size while the column animates open and the
+ * drawer slides in from the right instead of squeezing.
+ */
+const REVIEW_MIN = 320;
+/** Never eat so much of the screen that the cards stop being pickable. */
+const CARDS_MIN = 420;
+const REVIEW_KEY = "dispatch-review-w";
+
+/** Bounds are a function of the viewport, so they are passed one rather than
+ *  reading window: the width is clamped on every render, and a clamp that
+ *  reads a momentarily-zero viewport would pin the drawer to its floor. */
+function clampReviewW(w: number, vw: number): number {
+  const v = vw > 0 ? vw : 1280;
+  const max = Math.max(REVIEW_MIN, Math.min(1000, v - CARDS_MIN));
+  return Math.round(Math.min(max, Math.max(REVIEW_MIN, w)));
+}
+function defaultReviewW(vw: number): number {
+  const v = vw > 0 ? vw : 1280;
+  return clampReviewW(Math.min(760, Math.max(400, v * 0.42)), v);
+}
 
 /** Search matcher — every space-separated token must hit SOMETHING on the
  *  slab. Superset of the old one: both category levels and the additional
@@ -371,6 +391,14 @@ export function DispatchPickerV2({
   const [submitting, setSubmitting] = useState(false);
   const [parking, setParking] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // The width the person ASKED for (0 = not set yet), kept separate from the
+  // width we can actually give them. Clamping the stored value instead would
+  // be a one-way ratchet: narrow the window once and the drawer stays narrow
+  // after you widen it again.
+  const [reviewWPref, setReviewWPref] = useState(0);
+  const [vw, setVw] = useState(0);
+  const [draggingSplit, setDraggingSplit] = useState(false);
+  const reviewW = clampReviewW(reviewWPref > 0 ? reviewWPref : defaultReviewW(vw), vw);
   const [flashId, setFlashId] = useState<string | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mig 163 — weigh per slab (default) OR one whole-truck weight.
@@ -426,6 +454,52 @@ export function DispatchPickerV2({
     }
   }, [selected, selKey]);
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+
+  // Remembered split + viewport tracking. Read on open rather than as a lazy
+  // initialiser so there is no server/client gap.
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(REVIEW_KEY)) || 0;
+      if (saved > 0) setReviewWPref(saved);
+    } catch { /* blocked */ }
+    const measure = () => setVw(window.innerWidth);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  /** Drag the divider. Listeners go on the window, not the handle, so the
+   *  drag survives the pointer outrunning a 8px-wide strip. */
+  function startSplitDrag(startX: number, startW: number) {
+    let last = startW;
+    setDraggingSplit(true);
+    const prevSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev: PointerEvent) => {
+      // dragging LEFT widens the drawer, so the delta is inverted
+      last = clampReviewW(startW + (startX - ev.clientX), window.innerWidth);
+      setReviewWPref(last);
+    };
+    const up = () => {
+      setDraggingSplit(false);
+      document.body.style.userSelect = prevSelect;
+      document.body.style.cursor = prevCursor;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      try { window.localStorage.setItem(REVIEW_KEY, String(last)); } catch { /* blocked */ }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+  function nudgeSplit(px: number) {
+    const next = clampReviewW(reviewW + px, vw);
+    setReviewWPref(next);
+    try { window.localStorage.setItem(REVIEW_KEY, String(next)); } catch { /* blocked */ }
+  }
 
   // Mig 125 follow-on — optionally pull this temple's storage slabs into the
   // picker: carving storage (parked cut-done) + dispatch storage (parked
@@ -640,15 +714,17 @@ export function DispatchPickerV2({
               </span>
             </div>
 
-            {/* ── grid + review drawer ──
-                The drawer is a grid COLUMN that animates from 0 → 400px, so
+            {/* ── grid │ divider │ review drawer ──
+                Three columns. The drawer animates from 0 → its width, so
                 opening it slides the panel in from the right and reflows the
-                cards rather than covering them. */}
+                cards rather than covering them; the divider between them is
+                draggable, so the split is the person's to set. The transition
+                is switched OFF while dragging or the panel lags the pointer. */}
             <div
               style={{
                 flex: 1, minHeight: 0, display: "grid",
-                gridTemplateColumns: reviewOpen ? `1fr ${REVIEW_W}` : "1fr 0px",
-                transition: "grid-template-columns .28s cubic-bezier(.4,0,.2,1)",
+                gridTemplateColumns: reviewOpen ? `1fr 14px ${reviewW}px` : "1fr 0px 0px",
+                transition: draggingSplit ? "none" : "grid-template-columns .28s cubic-bezier(.4,0,.2,1)",
               }}
             >
               {/* cards */}
@@ -694,6 +770,56 @@ export function DispatchPickerV2({
                 )}
               </div>
 
+              {/* the divider — drag to set the split, double-click to reset,
+                  ← → to nudge when focused */}
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize the review panel"
+                aria-valuenow={reviewW}
+                tabIndex={reviewOpen ? 0 : -1}
+                onPointerDown={(e) => { e.preventDefault(); startSplitDrag(e.clientX, reviewW); }}
+                onDoubleClick={() => {
+                  setReviewWPref(0);
+                  try { window.localStorage.removeItem(REVIEW_KEY); } catch { /* blocked */ }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowLeft") { e.preventDefault(); nudgeSplit(32); }
+                  else if (e.key === "ArrowRight") { e.preventDefault(); nudgeSplit(-32); }
+                }}
+                title="Drag to resize · double-click to reset"
+                style={{
+                  position: "relative", overflow: "hidden", cursor: "col-resize", userSelect: "none",
+                  background: "var(--surface)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                {/* the partition line itself */}
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute", top: 0, bottom: 0, left: "50%", width: 1, marginLeft: -0.5,
+                    background: draggingSplit ? "var(--gold-dark)" : "var(--border)",
+                    transition: "background .15s ease",
+                  }}
+                />
+                {/* grip — the visible "you can pull this" cue */}
+                <div
+                  aria-hidden
+                  style={{
+                    position: "relative", width: 14, height: 52, borderRadius: 999,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: draggingSplit ? "var(--gold-dark)" : "var(--bg)",
+                    border: `1px solid ${draggingSplit ? "var(--gold-dark)" : "var(--border)"}`,
+                    color: draggingSplit ? "#fff" : "var(--muted)",
+                    fontSize: 9, lineHeight: 1, fontWeight: 900, letterSpacing: "-0.14em",
+                    transition: "background .15s ease, border-color .15s ease, color .15s ease",
+                  }}
+                >
+                  ‹›
+                </div>
+              </div>
+
               {/* review drawer */}
               <aside
                 aria-label="Selected slabs — review"
@@ -702,7 +828,7 @@ export function DispatchPickerV2({
                   background: "var(--surface)",
                 }}
               >
-                <div style={{ width: REVIEW_W, boxSizing: "border-box", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+                <div style={{ width: reviewW, boxSizing: "border-box", display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 800 }}>✓ Review your pick</div>
