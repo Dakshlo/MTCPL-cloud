@@ -2414,6 +2414,15 @@ details.block-card[open] {
   max-width: none;
 }
 
+/* Same idea, but generic — add `page-fluid` alongside `page-card` and that
+   page alone loses the 1720px cap. The cap suits reading-width pages; a board
+   of cards or a wide table just leaves a dead strip down the side of a big
+   monitor. Opting in from the page itself means no body class to set and
+   unset across navigations (Daksh, Aug 2026 — dispatch). */
+.page-content:has(> .page-fluid) {
+  max-width: none;
+}
+
 /* 2. Table readability across every finance table at once. Zebra +
       hover can't be done from the inline TABLE_STYLES objects. Rows
       that set their own background inline (selected, flagged) win, as

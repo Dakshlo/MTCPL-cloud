@@ -373,7 +373,7 @@ export function DispatchClient({
   };
 
   return (
-    <section className="page-card">
+    <section className="page-card page-fluid">
       <div className="record-head" style={{ flexWrap: "wrap", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>🚚 Dispatch Station</h1>
