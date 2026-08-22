@@ -13,21 +13,22 @@
  * what it IS: the label (JALI), the category pair (MAIN TEMPLE / DOD BHUMIYA),
  * or the description. Any of those finds it.
  *
- * Production department only, same roles as the production Find ID.
+ * Production department only, and only the roles that get the palette
+ * (QUICK_SEARCH_ROLES) — the UI gate and this one are the same list.
  */
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { effectiveDepartment } from "@/lib/departments";
+import { canUseQuickSearch } from "@/lib/nav-registry";
 
 export const dynamic = "force-dynamic";
 
-/** Same set the topbar production Find ID uses — plus vendors, who walk the
- *  floor and have no department of their own. */
-const PRODUCTION_ROLES = [
-  "developer", "owner", "team_head", "senior_incharge", "crosscheck", "dispatch", "carving_head",
-];
+/** The palette's own role list — narrowed Aug 2026 to the four people who
+ *  actually move between screens. Kept in step with the UI deliberately: a
+ *  route that answers for roles the palette is hidden from is a door nobody
+ *  can see but anyone can knock on. */
 
 /** Who may actually run directDispatchSlabsAction — its own requireAuth list.
  *  The palette is visible to MORE roles than this (team_head, crosscheck,
@@ -86,8 +87,9 @@ const SLAB_STAGE: Record<string, string> = {
 export async function GET(req: Request) {
   const { profile } = await requireAuth();
   const dept = effectiveDepartment(profile.role, profile.active_department ?? null);
-  const allowed =
-    profile.role === "vendor" || (dept === "production" && PRODUCTION_ROLES.includes(profile.role));
+  // Both must hold: allowed to use the palette at all, AND in production —
+  // the slab lookup is meaningless anywhere else.
+  const allowed = canUseQuickSearch(profile.role) && dept === "production";
   if (!allowed) return NextResponse.json({ hits: [], error: "not_allowed" }, { status: 403 });
 
   const mayDispatch = DISPATCH_ROLES.includes(profile.role);

@@ -675,6 +675,21 @@ export const navEntries: NavEntry[] = [
  *  "use server" action file — that may export async functions only. */
 export const MAX_QUICK_LINKS = 6;
 
+/** Who gets the ⌘K palette at all (Daksh, Aug 2026).
+ *
+ *  It is a navigator, and a navigator is only useful to someone who moves
+ *  between many screens. Owner and developer go everywhere; carving_head and
+ *  senior_incharge work across cutting, carving and slabs. Everyone else lives
+ *  on one or two pages and does not need a way to jump.
+ *
+ *  This does NOT decide WHERE they may go — pagesFor() has always answered that
+ *  from each page's own roles, and always will. A carving_head's palette lists
+ *  14 pages and none of them are finance. This list only decides who sees the
+ *  palette in the first place. */
+export const QUICK_SEARCH_ROLES = ["owner", "developer", "carving_head", "senior_incharge"] as const;
+export const canUseQuickSearch = (role: string | null | undefined): boolean =>
+  (QUICK_SEARCH_ROLES as readonly string[]).includes(role ?? "");
+
 export type NavPage = { href: string; label: string; icon: string; department: Department };
 
 /** Pages that EXIST and are reachable from the dashboard, but were never given

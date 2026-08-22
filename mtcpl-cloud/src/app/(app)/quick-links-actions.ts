@@ -13,8 +13,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { pagesFor } from "@/lib/nav-registry";
-import { MAX_QUICK_LINKS } from "@/lib/nav-registry";
+import { MAX_QUICK_LINKS, canUseQuickSearch, pagesFor } from "@/lib/nav-registry";
 import { revalidatePath } from "next/cache";
 
 export async function saveQuickLinksAction(
@@ -22,6 +21,8 @@ export async function saveQuickLinksAction(
 ): Promise<{ ok: true; saved: string[] } | { ok: false; error: string }> {
   try {
     const { profile } = await requireAuth();
+    // Only roles that HAVE the palette may save pins for it.
+    if (!canUseQuickSearch(profile.role)) return { ok: false, error: "Not allowed." };
     if (!Array.isArray(hrefs)) return { ok: false, error: "Bad input." };
 
     // What this user is actually allowed to reach, by role — not by what the

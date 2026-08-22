@@ -12,7 +12,7 @@ import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-bad
 import { TopbarDiaryBadge, type DiaryBadgeItem } from "@/components/topbar-diary-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { QuickSearch } from "@/components/quick-search";
-import { pagesFor } from "@/lib/nav-registry";
+import { canUseQuickSearch, pagesFor } from "@/lib/nav-registry";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
 import { Toast } from "@/components/toast";
@@ -839,10 +839,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               return null;
             })()}
 
-            {/* ⌘K palette — pinned links + page search for EVERYONE, plus the
-                slab/block lookup where there are slabs to look up. Mounted
-                outside the Find ID gate on purpose: the pins and the page
-                search are not a production feature. */}
+            {/* ⌘K palette — owner / developer / carving_head / senior_incharge
+                only (see QUICK_SEARCH_ROLES). It is a navigator, and only
+                people who move between many screens need one. Where each of
+                them may GO is still decided per page by pagesFor(). */}
+            {canUseQuickSearch(profile.role) && (
             <QuickSearch
               slabLookup={(() => {
                 const d = effectiveDepartment(profile.role, profile.active_department ?? null);
@@ -855,6 +856,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               pages={quickPages}
               pinned={quickPinned}
             />
+            )}
 
             {/* Consolidated tasks dropdown (Mig 044 follow-on per
                 Daksh: the four separate pills were clustering the
