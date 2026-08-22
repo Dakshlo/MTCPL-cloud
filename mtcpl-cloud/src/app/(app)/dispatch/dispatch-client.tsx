@@ -930,18 +930,35 @@ function TempleDispatchPeek({
 
   // Daksh June 2026 — keep the slab selection while the user steps away
   // (browser-back to check something) and returns. Persist per temple in
-  // sessionStorage; on reopen, restore BUT intersect with the CURRENT ready
-  // list so the picker refreshes — slabs that left drop out, newly-ready
+  // sessionStorage; on reopen, restore BUT drop ids that are no longer
+  // anywhere, so the picker refreshes — slabs that left drop out, newly-ready
   // ones show up to add. Deselecting all (Clear) wipes it; so does a
   // successful dispatch (those slabs leave the list, so they drop on reopen).
   const selKey = `dispatch-sel:${group.temple}`;
+  // Restore the saved pick. MUST be declared above the persist effect below —
+  // effects fire in declaration order and that one writes on mount too, so
+  // from second place it would only ever see a key it had just emptied.
+  //
+  // Aug 2026 fix: the old restore intersected the saved ids with `group.slabs`
+  // right here, but that is only the temple's READY list — storage slabs are
+  // fetched lazily and are not in it yet, so every storage slab the user had
+  // ticked was silently dropped on reopen while the ready ones survived. An id
+  // that is NOT in the ready list can only have come from Storage, so keep it,
+  // switch Storage on, and do the pruning once that list has actually landed.
+  const [pendingPrune, setPendingPrune] = useState(false);
   useEffect(() => {
     try {
       const raw = typeof window !== "undefined" ? window.sessionStorage.getItem(selKey) : null;
       if (!raw) return;
-      const ids = JSON.parse(raw) as string[];
-      const valid = ids.filter((id) => group.slabs.some((s) => s.id === id));
-      if (valid.length > 0) setSelected(new Set(valid));
+      const ids = (JSON.parse(raw) as string[]).filter((id) => typeof id === "string");
+      if (ids.length === 0) return;
+      const readyIds = new Set(group.slabs.map((s) => s.id));
+      setSelected(new Set(ids));
+      if (ids.some((id) => !readyIds.has(id))) {
+        setInclStorage(true);
+        setPendingPrune(true);
+        void ensureStorage();
+      }
     } catch {
       /* ignore corrupt/blocked storage */
     }
@@ -976,6 +993,20 @@ function TempleDispatchPeek({
     } catch { /* leave empty — user can retry the toggle */ }
     finally { setLoadingStorage(false); }
   }
+
+  // …and the prune, once the storage list has landed. An id in neither list is
+  // genuinely gone (dispatched, cancelled) and drops out — that is what keeps
+  // the picker self-refreshing. If nothing storage-sourced survived, the
+  // toggle goes back off rather than being left on for a stale id.
+  useEffect(() => {
+    if (!pendingPrune || !storageLoaded) return;
+    const readyIds = new Set(group.slabs.map((s) => s.id));
+    const storageIds = new Set([...storage.carving, ...storage.dispatch].map((s) => s.id));
+    const kept = [...selected].filter((id) => readyIds.has(id) || storageIds.has(id));
+    setPendingPrune(false);
+    if (kept.length !== selected.size) setSelected(new Set(kept));
+    if (!kept.some((id) => !readyIds.has(id))) setInclStorage(false);
+  }, [pendingPrune, storageLoaded, selected, storage, group.slabs]);
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
