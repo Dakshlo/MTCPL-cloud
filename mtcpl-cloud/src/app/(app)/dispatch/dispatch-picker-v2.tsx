@@ -358,6 +358,9 @@ export function DispatchPickerV2({
   const [step, setStep] = useState<1 | 2>(1);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Which ids are grouped at the top of the grid. Deliberately a snapshot of
+   *  the selection, refreshed only at the moments listed on `displaySlabs`. */
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [parking, setParking] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -393,6 +396,7 @@ export function DispatchPickerV2({
       if (ids.length === 0) return;
       const readyIds = new Set(group.slabs.map((s) => s.id));
       setSelected(new Set(ids));
+      setPinned(new Set(ids));
       setReviewOpen(true);
       if (ids.some((id) => !readyIds.has(id))) {
         setInclStorage(true);
@@ -475,13 +479,21 @@ export function DispatchPickerV2({
   }, [orderedSel]);
   const selectedIds = orderedSel.map((s) => s.id);
 
-  // Cards: ticked first (so the pick stays together) unless searching.
+  // Cards: ticked first — but from a SNAPSHOT (`pinned`), not the live
+  // selection. Sorting on every tick meant the card you just touched jumped to
+  // the top of a 185-card grid, taking your place in the list with it, and you
+  // had to scroll all the way back down to carry on (Daksh, Aug 2026).
+  //
+  // So the grid re-groups only when you do something OTHER than tick a single
+  // card — open the temple, search, pull Storage in, Select all, Clear. A tick
+  // never moves anything. Seeing what is picked is the review drawer's job,
+  // and it does it better: in pick order, with an ✕ on each.
   const displaySlabs = useMemo(() => {
     if (query.trim()) return matched;
-    const sel = matched.filter((s) => selected.has(s.id));
-    const rest = matched.filter((s) => !selected.has(s.id));
+    const sel = matched.filter((s) => pinned.has(s.id));
+    const rest = matched.filter((s) => !pinned.has(s.id));
     return [...sel, ...rest];
-  }, [matched, selected, query]);
+  }, [matched, pinned, query]);
 
   // "Send → storage" only parks FRESH ready slabs; storage-sourced ones are
   // already parked and would silently no-op.
@@ -589,30 +601,29 @@ export function DispatchPickerV2({
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.6 }}>🔍</span>
                 <input
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => { setQuery(e.target.value); setPinned(new Set(selected)); }}
                   placeholder="Search code / label / category / description / size…"
                   style={{ width: "100%", padding: "10px 12px 10px 36px", fontSize: 14, border: "1.5px solid var(--border)", borderRadius: 11, background: "var(--bg)", color: "var(--text)" }}
                 />
                 {query && (
-                  <button type="button" onClick={() => setQuery("")} aria-label="Clear search" style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", background: "var(--border)", border: "none", borderRadius: 999, width: 22, height: 22, fontSize: 11, fontWeight: 800, cursor: "pointer", color: "var(--text)" }}>✕</button>
+                  <button type="button" onClick={() => { setQuery(""); setPinned(new Set(selected)); }} aria-label="Clear search" style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", background: "var(--border)", border: "none", borderRadius: 999, width: 22, height: 22, fontSize: 11, fontWeight: 800, cursor: "pointer", color: "var(--text)" }}>✕</button>
                 )}
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (allMatchedSelected) for (const s of selectableMatched) next.delete(s.id);
-                    else for (const s of selectableMatched) next.add(s.id);
-                    return next;
-                  });
+                  const next = new Set(selected);
+                  if (allMatchedSelected) for (const s of selectableMatched) next.delete(s.id);
+                  else for (const s of selectableMatched) next.add(s.id);
+                  setSelected(next);
+                  setPinned(new Set(next));
                 }}
                 style={{ padding: "10px 14px", fontSize: 12.5, fontWeight: 800, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}
               >
                 {allMatchedSelected ? "✕ Clear shown" : `✓ Select all (${selectableMatched.length})`}
               </button>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#6d28d9", border: "1.5px solid rgba(109,40,217,0.3)", background: "rgba(109,40,217,0.05)", borderRadius: 10, padding: "9px 12px", whiteSpace: "nowrap" }}>
-                <input type="checkbox" checked={inclStorage} onChange={(e) => { setInclStorage(e.target.checked); if (e.target.checked) ensureStorage(); }} />
+                <input type="checkbox" checked={inclStorage} onChange={(e) => { setInclStorage(e.target.checked); setPinned(new Set(selected)); if (e.target.checked) ensureStorage(); }} />
                 📦 Storage
                 {loadingStorage ? <span className="muted" style={{ fontWeight: 600 }}>…</span>
                   : storageLoaded && <span className="muted" style={{ fontWeight: 700 }}>· {storage.carving.length + storage.dispatch.length}</span>}
@@ -766,7 +777,7 @@ export function DispatchPickerV2({
                     {selCount > 0 && (
                       <button
                         type="button"
-                        onClick={() => { setSelected(new Set()); try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ } }}
+                        onClick={() => { setSelected(new Set()); setPinned(new Set()); try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ } }}
                         style={{ marginLeft: "auto", padding: "6px 11px", fontSize: 11.5, fontWeight: 800, borderRadius: 8, border: "1.5px solid #b91c1c", background: "rgba(185,28,28,0.06)", color: "#b91c1c", cursor: "pointer", whiteSpace: "nowrap" }}
                       >
                         ✕ Clear all
