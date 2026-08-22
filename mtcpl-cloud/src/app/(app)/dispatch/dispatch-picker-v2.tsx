@@ -120,10 +120,15 @@ function Timer({ since, reworked }: { since: string | null; reworked: boolean })
 /**
  * One temple on the Make Dispatch board. The old card said "N slabs · X CFT"
  * and stopped there, so every temple looked the same and you had to open one
- * to learn anything. This one answers, before you open it: what is in there
- * (top components), how long the oldest piece has been waiting, whether
- * anything is urgent — and whether you already started picking for this
- * temple and walked away (`draft`, from the saved selection).
+ * to learn anything. This one answers, before you open it: how much is there,
+ * what it is (top components), whether anything is urgent or locked — and
+ * whether you already started picking for this temple and walked away
+ * (`draft`, from the saved selection).
+ *
+ * It used to carry an "oldest 2 mo" chip and colour its top edge by that age.
+ * Both went in Aug 2026: almost every temple is sitting on something two
+ * months old, so a wall of red said nothing, and the chip was one more thing
+ * to read past (Daksh).
  */
 export function TempleCardV2({
   group, matched, draft, onOpen,
@@ -140,15 +145,6 @@ export function TempleCardV2({
   const hasMarble = matched.some((s) => s.isMarble);
   const blocked = matched.filter((s) => s.cancelPending).length;
 
-  // Oldest waiting slab drives the card's accent — a temple sitting on a
-  // 9-day-old piece should not look like one whose slabs arrived today.
-  const oldest = matched.reduce<string | null>((acc, s) => {
-    if (!s.readySince) return acc;
-    if (!acc) return s.readySince;
-    return new Date(s.readySince) < new Date(acc) ? s.readySince : acc;
-  }, null);
-  const pal = agePalette(oldest);
-
   // Top three components by count — "what is actually sitting here".
   const top = useMemo(() => {
     const m = new Map<string, number>();
@@ -164,7 +160,7 @@ export function TempleCardV2({
       style={{
         background: "var(--surface)",
         border: "1px solid var(--border)",
-        borderTop: `4px solid ${pal.c}`,
+        borderTop: "3px solid var(--gold-dark)",
         borderRadius: 16, padding: "14px 15px 13px",
         display: "flex", flexDirection: "column", gap: 10,
         boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
@@ -203,18 +199,11 @@ export function TempleCardV2({
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minHeight: 20 }}>
-        {oldest && (
-          <span style={{ fontSize: 10.5, fontWeight: 800, color: pal.c, background: pal.bg, border: `1px solid ${pal.b}`, borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>
-            ⏱ oldest {timeAgoLabel(oldest)}
-          </span>
-        )}
-        {blocked > 0 && (
-          <span title="Cancel requested — these can't go on a truck yet" style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", background: "rgba(185,28,28,0.08)", border: "1px solid rgba(185,28,28,0.3)", borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>
-            🚫 {blocked} locked
-          </span>
-        )}
-      </div>
+      {blocked > 0 && (
+        <span title="Cancel requested — these can't go on a truck yet" style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 800, color: "#b91c1c", background: "rgba(185,28,28,0.08)", border: "1px solid rgba(185,28,28,0.3)", borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>
+          🚫 {blocked} locked
+        </span>
+      )}
 
       {/* An unfinished pick from an earlier visit — otherwise invisible until
           you open the temple and wonder why things are already ticked. */}
@@ -349,21 +338,23 @@ function SlabCardV2({
         )}
       </div>
 
-      {/* foot row — size, CFT, stone, quality */}
-      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 11.5, borderTop: "1px dashed var(--border)", paddingTop: 6 }}>
-        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>{s.dimensions}</span>
-        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>{s.cft.toFixed(2)} CFT</span>
-        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-          <span className="muted">{s.stone ?? "—"}</span>
-          {s.quality && (
-            <span style={{ fontSize: 10, fontWeight: 800, color: s.quality === "A" ? "#15803d" : "#b45309", background: s.quality === "A" ? "rgba(22,163,74,0.1)" : "rgba(180,83,9,0.1)", borderRadius: 999, padding: "1px 8px" }}>
-              {s.quality}
-            </span>
-          )}
-          {s.isMarble && (
-            <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.04em" }}>MARBLE</span>
-          )}
-        </span>
+      {/* Size band. The dimensions are what gets read out loud at the trailer
+          and checked against the drawing, so they get the biggest type on the
+          card rather than a 11.5px footnote (Daksh, Aug 2026). */}
+      <div style={{ marginTop: "auto", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 9 }}>
+        <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 14, letterSpacing: "-0.02em", color: "var(--text)" }}>{s.dimensions}</span>
+        <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 13, color: "var(--gold-dark)", whiteSpace: "nowrap" }}>{s.cft.toFixed(2)} CFT</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11 }}>
+        <span className="muted">{s.stone ?? "—"}</span>
+        {s.quality && (
+          <span style={{ fontSize: 10, fontWeight: 800, color: s.quality === "A" ? "#15803d" : "#b45309", background: s.quality === "A" ? "rgba(22,163,74,0.1)" : "rgba(180,83,9,0.1)", borderRadius: 999, padding: "1px 8px" }}>
+            {s.quality}
+          </span>
+        )}
+        {s.isMarble && (
+          <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.04em" }}>MARBLE</span>
+        )}
       </div>
     </div>
   );

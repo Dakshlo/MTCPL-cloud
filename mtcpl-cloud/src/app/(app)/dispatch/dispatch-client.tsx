@@ -25,17 +25,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition, type CSSProperties, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
-import { createDispatchAction, undoDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
-import { FormPendingOverlay } from "@/components/form-pending-overlay";
+import { undoDispatchAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
 import { timeAgoLabel } from "./time-ago";
-// Mig 132 — long-press a slab card to request a cancel (broken slab);
-// the owner approves/rejects on /tasks/slab-cancels.
-import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
-import { SlabComponentDetail } from "@/components/slab-component-detail";
-// Aug 2026 — dispatch UI makeover, DEVELOPER ONLY while Daksh trials it.
-// Renders instead of the temple grid + TempleDispatchPeek when `newUi` is on;
-// every other role keeps the June-2026 path below, untouched.
+// Aug 2026 — the dispatch board + picker. Trialled on the developer account
+// first, now the only path: the June-2026 temple grid and TempleDispatchPeek
+// were deleted rather than left dormant behind a flag.
 import { DispatchPickerV2, TempleCardV2 } from "./dispatch-picker-v2";
 // Mig 168 — unified per-FY document code (CH-26/27-27); legacy CHLN-#### is the fallback.
 import { challanCode } from "@/lib/doc-code";
@@ -268,13 +263,6 @@ const peekPanel: CSSProperties = {
   background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 18,
   boxShadow: "0 24px 80px rgba(0,0,0,0.5)", overflow: "hidden",
 };
-// Full-screen variant — the dispatch picker uses the whole viewport so the
-// team sees as many slab cards as possible (Daksh June 2026).
-const peekPanelFull: CSSProperties = {
-  width: "100vw", height: "100dvh", maxWidth: "none", maxHeight: "none",
-  display: "flex", flexDirection: "column", background: "var(--surface)",
-  border: "none", borderRadius: 0, overflow: "hidden",
-};
 const bigSearch: CSSProperties = {
   flex: "1 1 260px", padding: "12px 16px", fontSize: 15, border: "1.5px solid var(--border)",
   borderRadius: 12, background: "var(--bg)", color: "var(--text)",
@@ -294,133 +282,6 @@ function slabMatches(s: ReadySlab, query: string): boolean {
   });
 }
 
-/** Ready-since timer chip — green when fresh, amber after 2 days, red
- *  after 5. The 🛠 marks slabs that came through the Rework Tunnel. */
-function ReadyTimer({ since, reworked }: { since: string | null; reworked: boolean }) {
-  if (!since) return null;
-  const days = (Date.now() - new Date(since).getTime()) / 86400000;
-  const pal = days >= 5
-    ? { c: "#b91c1c", bg: "rgba(220,38,38,0.09)", b: "rgba(220,38,38,0.35)" }
-    : days >= 2
-      ? { c: "#92400e", bg: "rgba(180,83,9,0.1)", b: "rgba(180,83,9,0.35)" }
-      : { c: "#15803d", bg: "rgba(22,163,74,0.09)", b: "rgba(22,163,74,0.3)" };
-  return (
-    <span
-      title={reworked ? "Ready since rework was completed" : "Ready since carving was approved"}
-      style={{ fontSize: 10.5, fontWeight: 800, color: pal.c, background: pal.bg, border: `1px solid ${pal.b}`, borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}
-    >
-      ⏱ {timeAgoLabel(since)}{reworked ? " · 🛠" : ""}
-    </span>
-  );
-}
-
-/** One slab card — used in the browse grid (read-only) and inside the
- *  dispatch peek (tap to select). Mig 132 — pending-cancel slabs render
- *  RED + locked; long-press (where wired) opens the request modal. */
-function SlabCard({
-  s, selected, onToggle, onLongPress, carvingDispatchTransfer,
-}: {
-  s: ReadySlab;
-  selected?: boolean;
-  onToggle?: () => void;
-  onLongPress?: () => void;
-  /** Carving→Dispatch lane (developer Settings). */
-  carvingDispatchTransfer?: boolean;
-}) {
-  // Carving→Dispatch lane toggle. When ON, a carving slab (hasCarving) is greyed
-  // and non-selectable until it's been brought in to the station
-  // (receivedAtDispatch set). When OFF (default), an approved carving job is
-  // DIRECTLY selectable, no bring-in. Direct-dispatch slabs (no carving row) are
-  // always exempt. (cutting→carving is a separate lane.)
-  const awaitingTransfer = !!carvingDispatchTransfer && s.hasCarving && !s.receivedAtDispatch;
-  const selectable = !!onToggle && !s.cancelPending && !awaitingTransfer;
-  const pressHandlers =
-    onLongPress && !s.cancelPending && !awaitingTransfer ? longPressHandlers(onLongPress) : {};
-  return (
-    <div
-      onClick={selectable ? onToggle : undefined}
-      {...pressHandlers}
-      role={selectable ? "button" : undefined}
-      tabIndex={selectable ? 0 : undefined}
-      onKeyDown={selectable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle!(); } } : undefined}
-      style={{
-        background: s.cancelPending ? "rgba(185,28,28,0.07)" : awaitingTransfer ? "rgba(79,70,229,0.06)" : selected ? "rgba(184,115,51,0.1)" : s.storageSource ? (s.storageSource === "carving" ? "rgba(124,58,237,0.07)" : "rgba(37,99,235,0.07)") : "var(--surface)",
-        border: s.cancelPending ? "2px solid #b91c1c" : awaitingTransfer ? "2px solid #4f46e5" : selected ? "2px solid var(--gold-dark)" : s.storageSource ? `1.5px dashed ${s.storageSource === "carving" ? "#7c3aed" : "#2563eb"}` : "1px solid var(--border)",
-        borderLeft: s.cancelPending ? "6px solid #b91c1c" : awaitingTransfer ? "6px solid #4f46e5" : selected ? "6px solid var(--gold-dark)" : s.storageSource ? `6px solid ${s.storageSource === "carving" ? "#7c3aed" : "#2563eb"}` : `5px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
-        borderRadius: 12, padding: "10px 12px",
-        display: "flex", flexDirection: "column", gap: 5,
-        opacity: awaitingTransfer ? 0.82 : 1,
-        cursor: selectable ? "pointer" : (s.cancelPending || awaitingTransfer) ? "not-allowed" : "default", userSelect: "none",
-        transition: "border-color .12s ease, background .12s ease, transform .12s ease",
-      }}
-      title={
-        s.cancelPending
-          ? "Cancel requested — locked until the owner decides"
-          : awaitingTransfer
-            ? "Awaiting carving→dispatch transfer — bring it in on the Slab Transfer page"
-            : undefined
-      }
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-        {selectable && (
-          <span
-            aria-hidden
-            style={{
-              width: 21, height: 21, borderRadius: 7, flexShrink: 0,
-              border: selected ? "none" : "2px solid var(--border)",
-              background: selected ? "var(--gold-dark)" : "transparent",
-              color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 13, fontWeight: 900,
-            }}
-          >
-            {selected ? "✓" : ""}
-          </span>
-        )}
-        <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 13.5 }}>{s.id}</code>
-        {s.storageSource && (
-          <span title="From storage" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.03em" }}>
-            📦 STORAGE
-          </span>
-        )}
-        {s.priority && <span title="Urgent" style={{ fontSize: 13 }}>⚡</span>}
-        <span style={{ marginLeft: "auto" }}><ReadyTimer since={s.readySince} reworked={s.reworked} /></span>
-      </div>
-      {/* Mig 132 — cancel-in-process banner. */}
-      {s.cancelPending && (
-        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#b91c1c", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
-          🚫 CANCEL REQUESTED — waiting for owner
-        </div>
-      )}
-      {/* Carving→Dispatch lane ON — slab not yet brought in to the station. */}
-      {awaitingTransfer && !s.cancelPending && (
-        <div style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#4f46e5", borderRadius: 4, padding: "2px 7px", alignSelf: "flex-start", letterSpacing: "0.03em" }}>
-          🚚 AWAITING DISPATCH TRANSFER — bring in on Slab Transfer
-        </div>
-      )}
-      <SlabComponentDetail
-        section={s.component_section}
-        element={s.component_element}
-        label={s.label}
-        description={s.description}
-        additional={s.additional_description}
-      />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5 }}>
-        <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>{s.dimensions} · {s.cft.toFixed(2)} CFT</span>
-        <span className="muted">{s.stone ?? "—"}</span>
-        {s.quality && (
-          <span style={{ fontSize: 10, fontWeight: 800, color: s.quality === "A" ? "#15803d" : "#b45309", background: s.quality === "A" ? "rgba(22,163,74,0.1)" : "rgba(180,83,9,0.1)", borderRadius: 999, padding: "1px 8px" }}>
-            {s.quality}
-          </span>
-        )}
-        {s.isMarble && (
-          <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.1)", borderRadius: 4, padding: "1px 6px", letterSpacing: "0.04em" }}>
-            MARBLE
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── main client ─────────────────────────────────────────────────────────
 
@@ -442,7 +303,6 @@ export function DispatchClient({
   canApprove,
   canUndo,
   carvingDispatchTransfer,
-  role,
   toast,
   error,
 }: {
@@ -475,9 +335,6 @@ export function DispatchClient({
   /** Carving→Dispatch lane (developer Settings). When true, a carving slab is
    *  greyed/non-selectable until it's been brought in to the station. */
   carvingDispatchTransfer: boolean;
-  /** Signed-in role — only "developer" gets the Aug-2026 dispatch UI while
-   *  it is on trial. Everyone else stays on the June-2026 screens. */
-  role: string;
   toast: string | null;
   error: string | null;
 }) {
@@ -520,10 +377,6 @@ export function DispatchClient({
       <div className="record-head" style={{ flexWrap: "wrap", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>🚚 Dispatch Station</h1>
-          <p className="muted" style={{ fontSize: 13.5, maxWidth: 700 }}>
-            Carving-approved slabs, ready to ship. Open a temple → press <strong>Dispatch</strong> → pick the
-            slabs → truck details → done. जो slab भेजनी है, temple खोल कर चुनें।
-          </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
           <button
@@ -625,7 +478,7 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && (
-        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} newUi={role === "developer"} />
+        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} />
       )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
@@ -650,36 +503,30 @@ export function DispatchClient({
 export type TempleGroup = { key: string; temple: string; hasMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
-  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan, carvingDispatchTransfer, newUi,
+  slabs, vendorSheds, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
 }: {
   slabs: ReadySlab[];
   vendorSheds: { id: string; name: string }[];
-  truckHistory: TruckTrip[];
   siteInfoByTemple: Record<string, SiteInfo>;
   handlingMan: { name?: string; phone?: string } | null;
   /** Carving→Dispatch lane (developer Settings) — greys un-brought-in slabs. */
   carvingDispatchTransfer?: boolean;
-  /** Aug 2026 makeover — developer only for now (see dispatch-picker-v2). */
-  newUi?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [peekGroup, setPeekGroup] = useState<TempleGroup | null>(null);
-  // Mig 132 — slab whose cancel-request modal is open (long-press on a
-  // card). Everyone with dispatch access can request (dev/owner/carving_head).
-  const [cancelTarget, setCancelTarget] = useState<ReadySlab | null>(null);
   // Mig 160 — which dispatch station to show: "main" (default), a vendor shed
   // id, or everything when showAll is on. Slabs without a station = "main".
   const [stationFilter, setStationFilter] = useState<string>("main");
   const [showAll, setShowAll] = useState(false);
-  // Aug 2026 (v2 board) — how many slabs are already ticked for each temple in
-  // an unfinished pick. The picker saves them under `dispatch-sel:<temple>`;
-  // reading it here is what lets a temple card say "4 already picked" instead
-  // of hiding a half-done selection behind the Dispatch button. Re-read every
-  // time the picker closes, since that is when the draft can have changed.
+  // How many slabs are already ticked for each temple in an unfinished pick.
+  // The picker saves them under `dispatch-sel:<temple>`; reading it here is
+  // what lets a temple card say "4 already picked" instead of hiding a
+  // half-done selection behind the Dispatch button. Re-read every time the
+  // picker closes, since that is when the draft can have changed.
   const [drafts, setDrafts] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (!newUi || peekGroup) return;
+    if (peekGroup) return;
     try {
       if (typeof window === "undefined") return;
       const next: Record<string, number> = {};
@@ -693,7 +540,7 @@ function ReadyTab({
       }
       setDrafts(next);
     } catch { /* storage blocked or corrupt — no draft hints, no harm */ }
-  }, [newUi, peekGroup]);
+  }, [peekGroup]);
 
   const stationCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -811,62 +658,20 @@ function ReadyTab({
       ) : (
         // Temples as compact cards (4–5/row, Daksh June 2026). No inline slab
         // expansion — tap Dispatch to open the full-screen picker.
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${newUi ? 262 : 240}px, 1fr))`, gap: 12 }}>
-          {newUi
-            ? visibleGroups.map((g) => (
-                <TempleCardV2
-                  key={g.key}
-                  group={g}
-                  matched={g.matched}
-                  draft={drafts[g.temple] ?? 0}
-                  onOpen={() => setPeekGroup(g)}
-                />
-              ))
-            : visibleGroups.map((g) => {
-            const totalCft = g.matched.reduce((sum, s) => sum + s.cft, 0);
-            const urgent = g.matched.filter((s) => s.priority).length;
-            // Marble cue reflects the CURRENT (filtered) matches, not the whole
-            // temple — so a sandstone-only search doesn't falsely show + MARBLE.
-            const matchedMarble = g.matched.some((s) => s.isMarble);
-            return (
-              <div
-                key={g.key}
-                style={{
-                  background: matchedMarble ? "rgba(180,83,9,0.05)" : "var(--surface)",
-                  border: `1.5px solid ${matchedMarble ? "rgba(180,83,9,0.35)" : "var(--border)"}`,
-                  borderRadius: 14, padding: "16px 16px 14px",
-                  display: "flex", flexDirection: "column", gap: 9,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 7, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.25 }}>🏛 {g.temple}</span>
-                  {matchedMarble && (
-                    <span style={{ fontSize: 9.5, fontWeight: 800, color: "#b45309", background: "rgba(180,83,9,0.12)", padding: "2px 8px", borderRadius: 5, letterSpacing: "0.04em", whiteSpace: "nowrap" }} title="This temple has marble slabs too — all stones are in one dispatch list.">
-                      + MARBLE
-                    </span>
-                  )}
-                </div>
-                <span className="muted" style={{ fontSize: 12.5, fontWeight: 600 }}>
-                  {g.matched.length} slab{g.matched.length === 1 ? "" : "s"} · {totalCft.toFixed(2)} CFT
-                  {urgent > 0 && <span style={{ color: "#dc2626", fontWeight: 800 }}> · ⚡ {urgent}</span>}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPeekGroup(g)}
-                  style={{
-                    marginTop: "auto", background: "var(--gold-dark)", color: "#fff", border: "none",
-                    borderRadius: 10, padding: "11px 16px", fontSize: 14.5, fontWeight: 800, cursor: "pointer", width: "100%",
-                  }}
-                >
-                  🚚 Dispatch
-                </button>
-              </div>
-            );
-          })}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(262px, 1fr))", gap: 12 }}>
+          {visibleGroups.map((g) => (
+            <TempleCardV2
+              key={g.key}
+              group={g}
+              matched={g.matched}
+              draft={drafts[g.temple] ?? 0}
+              onOpen={() => setPeekGroup(g)}
+            />
+          ))}
         </div>
       )}
 
-      {peekGroup && (newUi ? (
+      {peekGroup && (
         <DispatchPickerV2
           group={peekGroup}
           siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
@@ -874,529 +679,11 @@ function ReadyTab({
           onClose={() => setPeekGroup(null)}
           carvingDispatchTransfer={carvingDispatchTransfer}
         />
-      ) : (
-        <TempleDispatchPeek
-          group={peekGroup}
-          truckHistory={truckHistory}
-          siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
-          handlingMan={handlingMan}
-          onClose={() => setPeekGroup(null)}
-          carvingDispatchTransfer={carvingDispatchTransfer}
-        />
-      ))}
-
-      {/* Mig 132 — request-cancel modal (long-press on a card). */}
-      {cancelTarget && (
-        <SlabCancelRequestModal
-          slabId={cancelTarget.id}
-          temple={cancelTarget.temple}
-          label={cancelTarget.label}
-          onClose={() => setCancelTarget(null)}
-        />
       )}
     </>
   );
 }
 
-// ─── Temple dispatch peek ────────────────────────────────────────────────
-// Centre peek with two steps: ① tap-to-select slab cards (with full
-// search), ② truck details (recent-truck quick fill) → create dispatch.
-
-function TempleDispatchPeek({
-  group, truckHistory, siteInfo, handlingMan, onClose, carvingDispatchTransfer,
-}: {
-  group: TempleGroup;
-  truckHistory: TruckTrip[];
-  siteInfo: SiteInfo | null;
-  handlingMan: { name?: string; phone?: string } | null;
-  onClose: () => void;
-  /** Carving→Dispatch lane (developer Settings) — greys un-brought-in slabs. */
-  carvingDispatchTransfer?: boolean;
-}) {
-  const router = useRouter();
-  const [step, setStep] = useState<1 | 2>(1);
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
-  const [parking, setParking] = useState(false);
-  // Mig 163 — weigh per slab (default) OR one whole-truck weight. Vehicle +
-  // driver are NOT captured here any more — they're taken later at Check &
-  // verify, once the actual truck is loaded (Daksh, Jul 2026).
-  const [weightMode, setWeightMode] = useState<"slab" | "truck">("slab");
-  const [truckKg, setTruckKg] = useState("");
-  // Mig 130 — optional per-slab weight (tonnes). Keyed by slab id;
-  // empty string = not entered (stored NULL).
-  const [weights, setWeights] = useState<Record<string, string>>({});
-
-  // Daksh June 2026 — keep the slab selection while the user steps away
-  // (browser-back to check something) and returns. Persist per temple in
-  // sessionStorage; on reopen, restore BUT drop ids that are no longer
-  // anywhere, so the picker refreshes — slabs that left drop out, newly-ready
-  // ones show up to add. Deselecting all (Clear) wipes it; so does a
-  // successful dispatch (those slabs leave the list, so they drop on reopen).
-  const selKey = `dispatch-sel:${group.temple}`;
-  // Restore the saved pick. MUST be declared above the persist effect below —
-  // effects fire in declaration order and that one writes on mount too, so
-  // from second place it would only ever see a key it had just emptied.
-  //
-  // Aug 2026 fix: the old restore intersected the saved ids with `group.slabs`
-  // right here, but that is only the temple's READY list — storage slabs are
-  // fetched lazily and are not in it yet, so every storage slab the user had
-  // ticked was silently dropped on reopen while the ready ones survived. An id
-  // that is NOT in the ready list can only have come from Storage, so keep it,
-  // switch Storage on, and do the pruning once that list has actually landed.
-  const [pendingPrune, setPendingPrune] = useState(false);
-  useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? window.sessionStorage.getItem(selKey) : null;
-      if (!raw) return;
-      const ids = (JSON.parse(raw) as string[]).filter((id) => typeof id === "string");
-      if (ids.length === 0) return;
-      const readyIds = new Set(group.slabs.map((s) => s.id));
-      setSelected(new Set(ids));
-      if (ids.some((id) => !readyIds.has(id))) {
-        setInclStorage(true);
-        setPendingPrune(true);
-        void ensureStorage();
-      }
-    } catch {
-      /* ignore corrupt/blocked storage */
-    }
-    // Restore once when the peek opens; `group` is fixed for this instance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      if (selected.size === 0) window.sessionStorage.removeItem(selKey);
-      else window.sessionStorage.setItem(selKey, JSON.stringify([...selected]));
-    } catch {
-      /* ignore */
-    }
-  }, [selected, selKey]);
-
-  // Mig 125 follow-on — optionally pull this temple's storage slabs into the
-  // picker: carving storage (parked cut-done, direct-dispatch) + dispatch
-  // storage (parked completed). Lazily loaded the first time a toggle is on.
-  // One unified "Storage" toggle — carving + dispatch storage combined (Daksh).
-  const [inclStorage, setInclStorage] = useState(false);
-  const [storage, setStorage] = useState<{ carving: ReadySlab[]; dispatch: ReadySlab[] }>({ carving: [], dispatch: [] });
-  const [storageLoaded, setStorageLoaded] = useState(false);
-  const [loadingStorage, setLoadingStorage] = useState(false);
-  async function ensureStorage() {
-    if (storageLoaded || loadingStorage) return;
-    setLoadingStorage(true);
-    try {
-      const res = await fetchTempleStorageSlabsAction(group.temple);
-      setStorage({ carving: res.carving, dispatch: res.dispatch });
-      setStorageLoaded(true);
-    } catch { /* leave empty — user can retry the toggle */ }
-    finally { setLoadingStorage(false); }
-  }
-
-  // …and the prune, once the storage list has landed. An id in neither list is
-  // genuinely gone (dispatched, cancelled) and drops out — that is what keeps
-  // the picker self-refreshing. If nothing storage-sourced survived, the
-  // toggle goes back off rather than being left on for a stale id.
-  useEffect(() => {
-    if (!pendingPrune || !storageLoaded) return;
-    const readyIds = new Set(group.slabs.map((s) => s.id));
-    const storageIds = new Set([...storage.carving, ...storage.dispatch].map((s) => s.id));
-    const kept = [...selected].filter((id) => readyIds.has(id) || storageIds.has(id));
-    setPendingPrune(false);
-    if (kept.length !== selected.size) setSelected(new Set(kept));
-    if (!kept.some((id) => !readyIds.has(id))) setInclStorage(false);
-  }, [pendingPrune, storageLoaded, selected, storage, group.slabs]);
-
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
-
-  // Merge the temple's ready slabs with any toggled-in storage slabs.
-  const allSlabs = useMemo(
-    () => [
-      ...group.slabs,
-      ...(inclStorage ? [...storage.carving, ...storage.dispatch] : []),
-    ],
-    [group.slabs, inclStorage, storage],
-  );
-  const matched = useMemo(
-    () => allSlabs.filter((s) => slabMatches(s, query)),
-    [allSlabs, query],
-  );
-  // Pin selected slabs to the top — but ONLY when not searching (a search
-  // shows just the matches, no pinned block). Selection cleared → no pins.
-  const displaySlabs = useMemo(() => {
-    if (query.trim()) return matched;
-    const sel = matched.filter((s) => selected.has(s.id));
-    const rest = matched.filter((s) => !selected.has(s.id));
-    return [...sel, ...rest];
-  }, [matched, selected, query]);
-  const selSlabs = allSlabs.filter((s) => selected.has(s.id));
-  const selCft = selSlabs.reduce((sum, s) => sum + s.cft, 0);
-  // Only count/post/park slabs that are actually VISIBLE now. A storage slab
-  // selected then hidden (Storage toggle off) must not be dispatched or counted
-  // — review w0v1fyekz. Raw `selected` is kept for the per-card checkbox + the
-  // re-toggle restore; selectedIds/selCount drive everything user-facing.
-  const selectedIds = selSlabs.map((s) => s.id);
-  const selCount = selSlabs.length;
-  // "Send → storage" only parks FRESH ready slabs. Storage-sourced slabs pulled
-  // in by the Storage toggle are already parked, so parkDispatchSlabsAction skips
-  // them — exclude them from the count/action so the button can't silently no-op
-  // (review w5ft32i80).
-  const parkableSlabs = selSlabs.filter((s) => !s.storageSource);
-  const parkableIds = parkableSlabs.map((s) => s.id);
-  const parkCount = parkableSlabs.length;
-
-  // Per-slab weight is entered in KG (blank rows skipped). The challan
-  // shows the net total in tonnes; weightsParsed maps slabId → kg.
-  const weightsParsed: Record<string, number> = {};
-  for (const s of selSlabs) {
-    const n = Number(weights[s.id]);
-    if (Number.isFinite(n) && n > 0) weightsParsed[s.id] = n;
-  }
-  const totalKg = Object.values(weightsParsed).reduce((a, b) => a + b, 0);
-  const totalTonnes = totalKg / 1000;
-  // Whole-truck weight (mig 163) — entered in KG, stored/printed in tonnes.
-  const truckKgNum = Math.max(0, Number(truckKg) || 0);
-  const truckTonnes = truckKgNum / 1000;
-
-  // Group selected slabs that are IDENTICAL (same label + description +
-  // size) — they weigh the same, so the operator enters ONE weight per
-  // group and it auto-fills every slab in it (no per-slab repetition,
-  // far fewer mistakes).
-  const weightGroups: Array<{ key: string; sample: ReadySlab; ids: string[] }> = [];
-  {
-    const m = new Map<string, { key: string; sample: ReadySlab; ids: string[] }>();
-    for (const s of selSlabs) {
-      const key = `${(s.label ?? "").trim().toLowerCase()}|${(s.description ?? "").trim().toLowerCase()}|${s.dimensions}`;
-      const g = m.get(key);
-      if (g) g.ids.push(s.id);
-      else m.set(key, { key, sample: s, ids: [s.id] });
-    }
-    weightGroups.push(...m.values());
-  }
-  function setGroupWeight(ids: string[], val: string) {
-    setWeights((prev) => {
-      const next = { ...prev };
-      for (const id of ids) next[id] = val;
-      return next;
-    });
-  }
-
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
-  // Carving→Dispatch lane ON → also skip carving slabs not yet brought in.
-  const selectableMatched = matched.filter(
-    (s) => !s.cancelPending && !(carvingDispatchTransfer && s.hasCarving && !s.receivedAtDispatch),
-  );
-  const allMatchedSelected = selectableMatched.length > 0 && selectableMatched.every((s) => selected.has(s.id));
-
-  return (
-    <div style={{ ...peekOverlay, padding: 0 }}>
-      <div style={peekPanelFull} role="dialog" aria-modal="true" aria-label={`Dispatch from ${group.temple}`}>
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>
-              🚚 Dispatch — 🏛 {group.temple}
-            </div>
-            <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-              {step === 1
-                ? "Step 1 of 2 — tap the slabs going on the truck · जो slab भेजनी है उन्हें छुएँ"
-                : "Step 2 of 2 — truck & driver details · गाड़ी की जानकारी भरें"}
-            </div>
-          </div>
-          <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, color: selCount > 0 ? "var(--gold-dark)" : "var(--muted)", whiteSpace: "nowrap" }}>
-            ✓ {selCount} selected · {selCft.toFixed(2)} CFT
-          </span>
-          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close" style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "var(--muted)" }}>×</button>
-        </div>
-
-        {step === 1 ? (
-          <>
-            {/* Search + select all */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-              <div style={{ position: "relative", flex: "1 1 240px" }}>
-                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.6 }}>🔍</span>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search code / label / description / size…"
-                  style={{ ...bigSearch, width: "100%", paddingLeft: 36, padding: "10px 12px 10px 36px", fontSize: 14 }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelected((prev) => {
-                    const next = new Set(prev);
-                    if (allMatchedSelected) for (const s of selectableMatched) next.delete(s.id);
-                    else for (const s of selectableMatched) next.add(s.id);
-                    return next;
-                  });
-                }}
-                style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" }}
-              >
-                {allMatchedSelected ? "✕ Clear shown" : `✓ Select all (${selectableMatched.length})`}
-              </button>
-              {selCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setSelected(new Set()); try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ } }}
-                  title="Unselect every slab for this temple"
-                  style={{ padding: "10px 16px", fontSize: 13, fontWeight: 800, borderRadius: 10, border: "1.5px solid #b91c1c", background: "rgba(185,28,28,0.06)", color: "#b91c1c", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  ✕ Clear {selCount}
-                </button>
-              )}
-            </div>
-
-            {/* Mig 125 follow-on — pull this temple's storage slabs in too.
-                Carving storage = parked cut-done (dispatching skips carving);
-                dispatch storage = parked completed. Marked distinctly on cards. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "8px 20px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", background: "var(--surface)" }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Also include from storage:</span>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, cursor: "pointer", color: "#6d28d9" }}>
-                <input type="checkbox" checked={inclStorage} onChange={(e) => { setInclStorage(e.target.checked); if (e.target.checked) ensureStorage(); }} />
-                📦 Storage {storageLoaded && <span className="muted" style={{ fontWeight: 600 }}>· {storage.carving.length + storage.dispatch.length}</span>}
-              </label>
-              {loadingStorage && <span className="muted" style={{ fontSize: 11.5 }}>Loading…</span>}
-            </div>
-
-            {/* Cards */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 20px" }}>
-              {matched.length === 0 ? (
-                <div className="muted" style={{ padding: "30px 0", textAlign: "center", fontSize: 14 }}>No slab matches “{query}”.</div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(245px, 1fr))", gap: 10 }}>
-                  {displaySlabs.map((s) => (
-                    <SlabCard key={s.id} s={s} selected={selected.has(s.id)} onToggle={() => toggle(s.id)} carvingDispatchTransfer={carvingDispatchTransfer} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
-              <button type="button" className="ghost-button" onClick={onClose} style={{ fontSize: 14 }}>Cancel</button>
-              {/* Park selected ready slabs into Main Storage (declutter).
-                  Only fresh ready slabs are parkable — storage-sourced ones are
-                  already in storage, so they're excluded from the count/action. */}
-              <button
-                type="button"
-                disabled={parkCount === 0 || parking}
-                onClick={async () => {
-                  if (parkCount === 0) return;
-                  if (!window.confirm(`Send ${parkCount} slab${parkCount !== 1 ? "s" : ""} to storage (out of Make Dispatch)?`)) return;
-                  setParking(true);
-                  try {
-                    const res = await parkDispatchSlabsAction(parkableIds);
-                    if (res.ok) { onClose(); router.refresh(); }
-                    else window.alert(res.error);
-                  } finally { setParking(false); }
-                }}
-                style={{ fontSize: 13, fontWeight: 800, padding: "11px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: parkCount === 0 ? "var(--muted)" : "var(--text)", cursor: parkCount === 0 || parking ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
-              >
-                {parking ? "Moving…" : `🗄 Send ${parkCount || ""} → storage`}
-              </button>
-              <button
-                type="button"
-                disabled={selCount === 0}
-                onClick={() => setStep(2)}
-                style={{
-                  marginLeft: "auto", background: selCount === 0 ? "var(--border)" : "var(--gold-dark)",
-                  color: selCount === 0 ? "var(--muted)" : "#fff", border: "none", borderRadius: 12,
-                  padding: "13px 26px", fontSize: 15.5, fontWeight: 800, cursor: selCount === 0 ? "not-allowed" : "pointer",
-                }}
-              >
-                Weight &amp; send → ({selCount} slab{selCount === 1 ? "" : "s"})
-              </button>
-            </div>
-          </>
-        ) : (
-          /* ── Step 2: weight + notes (vehicle/driver come at Check & verify) ── */
-          <form
-            action={(fd) => {
-              setSubmitting(true);
-              // these slabs are leaving the ready list — drop the saved selection
-              try { window.sessionStorage.removeItem(selKey); } catch { /* ignore */ }
-              return createDispatchAction(fd);
-            }}
-            style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
-          >
-            <FormPendingOverlay label="Sending for approval…" />
-            <input type="hidden" name="temple" value={group.temple} />
-            <input type="hidden" name="slab_ids" value={JSON.stringify(selectedIds)} />
-            <input type="hidden" name="slab_weights" value={JSON.stringify(weightsParsed)} />
-            <input type="hidden" name="weight_mode" value={weightMode} />
-            <input type="hidden" name="truck_weight" value={weightMode === "truck" ? String(truckTonnes) : ""} />
-
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, WebkitOverflowScrolling: "touch" }}>
-              {/* Mig 130 — site info that will print on the challan,
-                  pulled from Settings → Temple Codes. */}
-              <div style={{ background: "rgba(184,115,51,0.06)", border: "1.5px solid rgba(184,115,51,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.6 }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                  📍 Site info — prints on the challan
-                </div>
-                {siteInfo?.site_location || siteInfo?.site_incharge_name || siteInfo?.installer_name ? (
-                  <>
-                    {siteInfo.site_location && <div><strong>Site:</strong> {siteInfo.site_location}</div>}
-                    {siteInfo.site_incharge_name && (
-                      <div><strong>Client incharge:</strong> {siteInfo.site_incharge_name}{siteInfo.site_incharge_phone ? ` · ${siteInfo.site_incharge_phone}` : ""}</div>
-                    )}
-                    {siteInfo.installer_name && (
-                      <div><strong>Installation by:</strong> {siteInfo.installer_name}{siteInfo.installer_phone ? ` · ${siteInfo.installer_phone}` : ""}</div>
-                    )}
-                  </>
-                ) : (
-                  <div className="muted">
-                    No site info saved for this temple yet — add it in <strong>Settings → Temple Codes</strong> (site location, client incharge, installer) and it will auto-print on every challan.
-                  </div>
-                )}
-                {handlingMan?.name && (
-                  <div><strong>Dispatch incharge (MTCPL):</strong> {handlingMan.name}{handlingMan.phone ? ` · ${handlingMan.phone}` : ""}</div>
-                )}
-              </div>
-
-              {/* Vehicle no + driver are captured at Check & verify (once the
-                  truck is actually loaded) — not here. */}
-              <div style={{ background: "rgba(37,99,235,0.06)", border: "1px solid rgba(37,99,235,0.25)", borderRadius: 10, padding: "9px 13px", fontSize: 12, color: "var(--muted)" }}>
-                🚚 Vehicle no. &amp; driver are added later on the <strong>Check &amp; verify</strong> page, when the truck is loaded.
-              </div>
-
-              <label className="stack">
-                <span style={{ fontSize: 13.5, fontWeight: 700 }}>Notes (optional)</span>
-                <textarea name="notes" rows={2} style={{ resize: "vertical", fontFamily: "inherit", fontSize: 14 }} />
-              </label>
-
-              {/* Per-slab weight (mig 130) — entered ONCE per identical
-                  group (same label + size). Optional; fills the challan's
-                  Net Weight. */}
-              <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg)", padding: "12px 14px" }}>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    ⚖ Weight <span style={{ fontWeight: 600, textTransform: "none" }}>(kg · optional)</span>
-                  </span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700 }}>
-                    {selSlabs.length} slab{selSlabs.length === 1 ? "" : "s"} · {selCft.toFixed(2)} CFT
-                    {weightMode === "truck"
-                      ? truckKgNum > 0 && <span style={{ color: "#0d9488" }}> · 🚚 {Math.round(truckKgNum).toLocaleString("en-IN")} kg ({truckTonnes.toFixed(3)} T)</span>
-                      : totalKg > 0 && <span style={{ color: "#15803d" }}> · {Math.round(totalKg).toLocaleString("en-IN")} kg ({totalTonnes.toFixed(3)} T)</span>}
-                  </span>
-                </div>
-                {/* Per-slab (default) OR one whole-truck weight (mig 163). */}
-                <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-                  {([["slab", "Per slab"], ["truck", "Whole truck"]] as const).map(([m, label]) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setWeightMode(m)}
-                      style={{
-                        padding: "6px 14px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", border: "none",
-                        background: weightMode === m ? (m === "truck" ? "#0d9488" : "#2563eb") : "var(--bg)",
-                        color: weightMode === m ? "#fff" : "var(--muted)",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
-                  {weightMode === "truck"
-                    ? "Enter ONE weight for the whole truck load. Challan totals in tonnes."
-                    : "Enter the weight of ONE slab — same-size slabs auto-fill. Challan totals in tonnes."}
-                </div>
-                {weightMode === "truck" ? (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700 }}>
-                    🚚 Truck load weight
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={truckKg}
-                      onChange={(e) => setTruckKg(e.target.value.replace(/[^\d]/g, ""))}
-                      placeholder="kg"
-                      style={{ width: 130, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 14, padding: "9px 11px" }}
-                    />
-                    <span style={{ color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{truckKgNum > 0 ? `= ${truckTonnes.toFixed(3)} T` : "kg"}</span>
-                  </label>
-                ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {weightGroups.map((g) => {
-                    const each = Number((weights[g.ids[0]] ?? "").replace(/[^\d]/g, "")) || 0;
-                    const lineKg = each > 0 ? each * g.ids.length : 0;
-                    const multi = g.ids.length > 1;
-                    return (
-                      <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 11px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, flexWrap: "wrap" }}>
-                        <div style={{ minWidth: 0, flex: "1 1 200px" }}>
-                          <div style={{ fontSize: 13, fontWeight: 700 }}>
-                            {g.sample.label || "—"}
-                            <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--muted)", fontWeight: 500 }}> · {g.sample.dimensions}</span>
-                          </div>
-                          {g.sample.description && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{g.sample.description}</div>}
-                          {/* All slabs in the group, shown as chips (not collapsed to ×N). */}
-                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
-                            {g.ids.map((id) => (
-                              <span key={id} style={{ fontSize: 10.5, fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, padding: "1px 7px" }}>{id}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="0"
-                              value={weights[g.ids[0]] ?? ""}
-                              onChange={(e) => setGroupWeight(g.ids, e.target.value.replace(/[^\d]/g, ""))}
-                              style={{ width: 92, fontSize: 14, padding: "8px 10px", textAlign: "right", fontFamily: "ui-monospace, monospace" }}
-                            />
-                            <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)", whiteSpace: "nowrap" }}>kg{multi ? " / slab" : ""}</span>
-                          </label>
-                          {lineKg > 0 && multi && (
-                            <span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>{g.ids.length} × {each.toLocaleString("en-IN")} = {lineKg.toLocaleString("en-IN")} kg</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
-              <button type="button" className="ghost-button" onClick={() => setStep(1)} disabled={submitting} style={{ fontSize: 14 }}>
-                ← Change slabs
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  marginLeft: "auto", background: submitting ? "var(--border)" : "#15803d", color: "#fff",
-                  border: "none", borderRadius: 12, padding: "13px 26px", fontSize: 15.5, fontWeight: 800,
-                  cursor: submitting ? "wait" : "pointer",
-                }}
-              >
-                {submitting ? "Creating dispatch…" : `🚚 Send for approval (${selCount})`}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Provisional tab ─────────────────────────────────────────────────────
 
 function ProvisionalTab({
   rows,

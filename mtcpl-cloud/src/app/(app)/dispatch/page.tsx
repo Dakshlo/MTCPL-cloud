@@ -634,7 +634,6 @@ export default async function DispatchPage({
       canApprove={canApprove}
       canUndo={canUndo}
       carvingDispatchTransfer={slabTransferStages.carvingToDispatch}
-      role={profile.role}
       toast={toastParam ?? null}
       error={errorParam ?? null}
     />
