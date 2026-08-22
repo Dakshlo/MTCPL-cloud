@@ -33,6 +33,10 @@ import { timeAgoLabel } from "./time-ago";
 // the owner approves/rejects on /tasks/slab-cancels.
 import { SlabCancelRequestModal, longPressHandlers } from "@/components/slab-cancel-request-modal";
 import { SlabComponentDetail } from "@/components/slab-component-detail";
+// Aug 2026 — dispatch UI makeover, DEVELOPER ONLY while Daksh trials it.
+// Renders instead of the temple grid + TempleDispatchPeek when `newUi` is on;
+// every other role keeps the June-2026 path below, untouched.
+import { DispatchPickerV2, TempleCardV2 } from "./dispatch-picker-v2";
 // Mig 168 — unified per-FY document code (CH-26/27-27); legacy CHLN-#### is the fallback.
 import { challanCode } from "@/lib/doc-code";
 
@@ -438,6 +442,7 @@ export function DispatchClient({
   canApprove,
   canUndo,
   carvingDispatchTransfer,
+  role,
   toast,
   error,
 }: {
@@ -470,6 +475,9 @@ export function DispatchClient({
   /** Carving→Dispatch lane (developer Settings). When true, a carving slab is
    *  greyed/non-selectable until it's been brought in to the station. */
   carvingDispatchTransfer: boolean;
+  /** Signed-in role — only "developer" gets the Aug-2026 dispatch UI while
+   *  it is on trial. Everyone else stays on the June-2026 screens. */
+  role: string;
   toast: string | null;
   error: string | null;
 }) {
@@ -617,7 +625,7 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && (
-        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} />
+        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} truckHistory={truckHistory} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} newUi={role === "developer"} />
       )}
       {tab === "provisional" && (
         <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
@@ -639,10 +647,10 @@ export function DispatchClient({
 // Temples collapsed by default. Search opens matching groups. One big
 // Dispatch button per temple opens the selection peek.
 
-type TempleGroup = { key: string; temple: string; hasMarble: boolean; slabs: ReadySlab[] };
+export type TempleGroup = { key: string; temple: string; hasMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
-  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
+  slabs, vendorSheds, truckHistory, siteInfoByTemple, handlingMan, carvingDispatchTransfer, newUi,
 }: {
   slabs: ReadySlab[];
   vendorSheds: { id: string; name: string }[];
@@ -651,6 +659,8 @@ function ReadyTab({
   handlingMan: { name?: string; phone?: string } | null;
   /** Carving→Dispatch lane (developer Settings) — greys un-brought-in slabs. */
   carvingDispatchTransfer?: boolean;
+  /** Aug 2026 makeover — developer only for now (see dispatch-picker-v2). */
+  newUi?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -662,6 +672,28 @@ function ReadyTab({
   // id, or everything when showAll is on. Slabs without a station = "main".
   const [stationFilter, setStationFilter] = useState<string>("main");
   const [showAll, setShowAll] = useState(false);
+  // Aug 2026 (v2 board) — how many slabs are already ticked for each temple in
+  // an unfinished pick. The picker saves them under `dispatch-sel:<temple>`;
+  // reading it here is what lets a temple card say "4 already picked" instead
+  // of hiding a half-done selection behind the Dispatch button. Re-read every
+  // time the picker closes, since that is when the draft can have changed.
+  const [drafts, setDrafts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!newUi || peekGroup) return;
+    try {
+      if (typeof window === "undefined") return;
+      const next: Record<string, number> = {};
+      for (let i = 0; i < window.sessionStorage.length; i++) {
+        const k = window.sessionStorage.key(i);
+        if (!k || !k.startsWith("dispatch-sel:")) continue;
+        const raw = window.sessionStorage.getItem(k);
+        if (!raw) continue;
+        const ids = JSON.parse(raw) as string[];
+        if (Array.isArray(ids) && ids.length > 0) next[k.slice("dispatch-sel:".length)] = ids.length;
+      }
+      setDrafts(next);
+    } catch { /* storage blocked or corrupt — no draft hints, no harm */ }
+  }, [newUi, peekGroup]);
 
   const stationCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -779,8 +811,18 @@ function ReadyTab({
       ) : (
         // Temples as compact cards (4–5/row, Daksh June 2026). No inline slab
         // expansion — tap Dispatch to open the full-screen picker.
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-          {visibleGroups.map((g) => {
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${newUi ? 262 : 240}px, 1fr))`, gap: 12 }}>
+          {newUi
+            ? visibleGroups.map((g) => (
+                <TempleCardV2
+                  key={g.key}
+                  group={g}
+                  matched={g.matched}
+                  draft={drafts[g.temple] ?? 0}
+                  onOpen={() => setPeekGroup(g)}
+                />
+              ))
+            : visibleGroups.map((g) => {
             const totalCft = g.matched.reduce((sum, s) => sum + s.cft, 0);
             const urgent = g.matched.filter((s) => s.priority).length;
             // Marble cue reflects the CURRENT (filtered) matches, not the whole
@@ -824,7 +866,15 @@ function ReadyTab({
         </div>
       )}
 
-      {peekGroup && (
+      {peekGroup && (newUi ? (
+        <DispatchPickerV2
+          group={peekGroup}
+          siteInfo={siteInfoByTemple[peekGroup.temple] ?? null}
+          handlingMan={handlingMan}
+          onClose={() => setPeekGroup(null)}
+          carvingDispatchTransfer={carvingDispatchTransfer}
+        />
+      ) : (
         <TempleDispatchPeek
           group={peekGroup}
           truckHistory={truckHistory}
@@ -833,7 +883,7 @@ function ReadyTab({
           onClose={() => setPeekGroup(null)}
           carvingDispatchTransfer={carvingDispatchTransfer}
         />
-      )}
+      ))}
 
       {/* Mig 132 — request-cancel modal (long-press on a card). */}
       {cancelTarget && (
