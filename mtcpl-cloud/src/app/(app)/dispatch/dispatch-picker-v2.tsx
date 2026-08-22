@@ -249,11 +249,10 @@ function SlabCardV2({
     : s.storageSource === "dispatch" ? "#2563eb"
     : s.isMarble ? "#b45309" : "#0d9488";
 
-  const c1 = s.component_section?.trim();
-  const c2 = s.component_element?.trim();
-  const lbl = s.label?.trim();
-  const desc = s.description?.trim();
-  const add = s.additional_description?.trim();
+  const cat = [s.component_section?.trim(), s.component_element?.trim()].filter(Boolean).join(" › ");
+  const lbl = s.label?.trim() ?? "";
+  // the extra note rides on the description line rather than adding a fourth
+  const note = [s.description?.trim(), s.additional_description?.trim() ? `+ ${s.additional_description.trim()}` : ""].filter(Boolean).join(" · ");
 
   return (
     <div
@@ -318,24 +317,31 @@ function SlabCardV2({
         </div>
       )}
 
-      {/* what it IS — the part the old card whispered at 9.5px */}
+      {/* What it IS — the part the old card whispered at 9.5px. Exactly three
+          lines, ALWAYS: category ▸ label ▸ description. A slab missing one
+          still reserves the line (hidden, not em-dashed), so every card in the
+          grid is the same box no matter how much each piece happens to carry
+          — a wall of cards that jump height is harder to scan than the saved
+          few pixels are worth (Daksh, Aug 2026). */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        {(c1 || c2) && (
-          <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={[c1, c2].filter(Boolean).join(" › ")}>
-            {c1}{c1 && c2 ? " › " : ""}{c2}
-          </div>
-        )}
-        {lbl && (
-          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lbl}>
-            {lbl}
-          </div>
-        )}
-        {desc && (
-          <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.35 }} title={desc}>{desc}</div>
-        )}
-        {add && (
-          <div style={{ fontSize: 11, fontStyle: "italic", color: "var(--muted-light)", lineHeight: 1.3 }} title={add}>+ {add}</div>
-        )}
+        <div
+          style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", visibility: cat ? "visible" : "hidden" }}
+          title={cat || undefined}
+        >
+          {cat || "\u00a0"}
+        </div>
+        <div
+          style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", visibility: lbl ? "visible" : "hidden" }}
+          title={lbl || undefined}
+        >
+          {lbl || "\u00a0"}
+        </div>
+        <div
+          style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", visibility: note ? "visible" : "hidden" }}
+          title={note || undefined}
+        >
+          {note || "\u00a0"}
+        </div>
       </div>
 
       {/* Size band. The dimensions are what gets read out loud at the trailer
@@ -382,6 +388,8 @@ export function DispatchPickerV2({
   const [submitting, setSubmitting] = useState(false);
   const [parking, setParking] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** How the review reads: in the order ticked, or gathered by type. */
+  const [reviewMode, setReviewMode] = useState<"order" | "groups">("order");
   // The width the person ASKED for (0 = not set yet), kept separate from the
   // width we can actually give them. Clamping the stored value instead would
   // be a one-way ratchet: narrow the window once and the drawer stays narrow
@@ -551,6 +559,25 @@ export function DispatchPickerV2({
   }, [orderedSel]);
   const selectedIds = orderedSel.map((s) => s.id);
 
+  /** The same pick, gathered by TYPE — same label + description + size, which
+   *  is what makes two slabs interchangeable on the floor (and is already the
+   *  key step 2 groups weights by). Search "25x34", tick five, and this view
+   *  shows them as one block of five instead of five entries to count.
+   *
+   *  Map keeps insertion order, so groups appear in first-picked order and the
+   *  pick numbers inside them still run 1..N across the whole selection. */
+  const reviewGroups = useMemo(() => {
+    const m = new Map<string, { key: string; sample: ReadySlab; items: Array<{ s: ReadySlab; n: number }>; cft: number }>();
+    orderedSel.forEach((s, i) => {
+      const key = `${(s.label ?? "").trim().toLowerCase()}|${(s.description ?? "").trim().toLowerCase()}|${s.dimensions}`;
+      let g = m.get(key);
+      if (!g) { g = { key, sample: s, items: [], cft: 0 }; m.set(key, g); }
+      g.items.push({ s, n: i + 1 });
+      g.cft += s.cft;
+    });
+    return [...m.values()];
+  }, [orderedSel]);
+
   // Cards: ticked first — but from a SNAPSHOT (`pinned`), not the live
   // selection. Sorting on every tick meant the card you just touched jumped to
   // the top of a 185-card grid, taking your place in the list with it, and you
@@ -622,6 +649,57 @@ export function DispatchPickerV2({
     setFlashId(id);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashId(null), 1300);
+  }
+
+  /** One review tile. Every row is rendered whether or not the slab has that
+   *  field, so all tiles are the same box — a grid whose tiles jump in height
+   *  according to how much text each slab happens to carry is harder to read
+   *  than the extra line is worth. `n` is the pick number. */
+  function reviewTile(s: ReadySlab, n: number) {
+    const line2 = s.label || s.component_element || s.component_section || "";
+    const line3 = [s.component_section, s.description].filter(Boolean).join(" · ");
+    return (
+      <div
+        key={s.id}
+        onClick={() => locate(s.id)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
+        title="Show this slab in the grid"
+        style={{
+          display: "flex", flexDirection: "column", gap: 3, minWidth: 0,
+          background: flashId === s.id ? "rgba(184,115,51,0.14)" : "var(--bg)",
+          border: "1px solid var(--border)", borderLeft: `4px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
+          borderRadius: 10, padding: "7px 9px 8px", cursor: "pointer",
+          transition: "background .15s ease",
+        }}
+      >
+        {/* number · code · untick — one row, so the tile stays readable at ~190px */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 6, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: n > 9 ? 9.5 : 11, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>
+            {n}
+          </span>
+          <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+          {s.priority && <span title="Urgent" style={{ fontSize: 10.5, flexShrink: 0 }}>⚡</span>}
+          {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 4px" }}>📦</span>}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
+            aria-label={`Untick ${s.id}`}
+            title="Untick this slab"
+            style={{ marginLeft: "auto", flexShrink: 0, background: "transparent", border: "1.5px solid var(--border)", color: "#b91c1c", borderRadius: 6, width: 22, height: 22, fontSize: 11, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", visibility: line2 ? "visible" : "hidden" }} title={line2 || undefined}>{line2 || "\u00a0"}</div>
+        <div className="muted" style={{ fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", visibility: line3 ? "visible" : "hidden" }} title={line3 || undefined}>{line3 || "\u00a0"}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1, overflow: "hidden" }}>
+          <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.dimensions}</span>
+          <span style={{ marginLeft: "auto", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11, color: "var(--gold-dark)", whiteSpace: "nowrap" }}>{s.cft.toFixed(2)} CFT</span>
+        </div>
+      </div>
+    );
   }
 
   // Mig 132 — pending-cancel slabs can't go on a truck; Select-all skips them.
@@ -823,13 +901,34 @@ export function DispatchPickerV2({
                   <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 800 }}>✓ Review your pick</div>
-                      <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>In the order you ticked them</div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>
+                        {reviewMode === "order"
+                          ? "In the order you ticked them"
+                          : `Gathered by type · ${reviewGroups.length} kind${reviewGroups.length === 1 ? "" : "s"}`}
+                      </div>
+                    </div>
+                    <div style={{ marginLeft: "auto", display: "inline-flex", border: "1.5px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
+                      {([["order", "Order"], ["groups", "Groups"]] as const).map(([m, label]) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setReviewMode(m)}
+                          title={m === "order" ? "List every slab in the order you ticked it" : "Gather slabs of the same type together"}
+                          style={{
+                            padding: "7px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", border: "none",
+                            background: reviewMode === m ? "var(--gold-dark)" : "var(--bg)",
+                            color: reviewMode === m ? "#fff" : "var(--muted)",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
                     <button
                       type="button"
                       onClick={() => setReviewOpen(false)}
                       title="Hide review"
-                      style={{ marginLeft: "auto", background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 9, padding: "7px 11px", fontSize: 13, fontWeight: 800, cursor: "pointer", color: "var(--text)" }}
+                      style={{ background: "var(--bg)", border: "1.5px solid var(--border)", borderRadius: 9, padding: "7px 11px", fontSize: 13, fontWeight: 800, cursor: "pointer", color: "var(--text)" }}
                     >
                       ›
                     </button>
@@ -837,62 +936,69 @@ export function DispatchPickerV2({
 
                   {/* Tiles, not rows — 2 per row on a laptop, 3 on a wide
                       screen, so a 20-slab pick is one glance instead of a
-                      scroll. Reading order is still left-to-right, top-to-
-                      bottom, which is the pick order. */}
+                      scroll. Every row of a tile is ALWAYS rendered, with an
+                      em-dash where a slab has no description: a grid of tiles
+                      that change height depending on how much each slab
+                      happens to carry is harder to scan than the information
+                      is worth (Daksh, Aug 2026). */}
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px" }}>
                     {orderedSel.length === 0 ? (
                       <div className="muted" style={{ padding: "34px 10px", textAlign: "center", fontSize: 12.5, lineHeight: 1.6 }}>
                         Nothing picked yet.<br />Tick slabs on the left and they will line up here, first to last.
                       </div>
+                    ) : reviewMode === "order" ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
+                        {orderedSel.map((s, i) => reviewTile(s, i + 1))}
+                      </div>
                     ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(186px, 1fr))", gap: 8, alignItems: "start" }}>
-                        {orderedSel.map((s, i) => (
-                          <div
-                            key={s.id}
-                            onClick={() => locate(s.id)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
-                            title="Show this slab in the grid"
-                            style={{
-                              display: "flex", flexDirection: "column", gap: 3, minWidth: 0,
-                              background: flashId === s.id ? "rgba(184,115,51,0.14)" : "var(--bg)",
-                              border: "1px solid var(--border)", borderLeft: `4px solid ${s.isMarble ? "#b45309" : "#0d9488"}`,
-                              borderRadius: 10, padding: "7px 9px", cursor: "pointer",
-                              transition: "background .15s ease",
-                            }}
-                          >
-                            {/* number · code · untick — one row, so the tile
-                                stays readable at ~190px */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                              <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 6, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: i + 1 > 9 ? 9.5 : 11, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>
-                                {i + 1}
+                      /* Grouped — one block per type, so "what did I pick, and
+                         how many of each" is answered without counting. */
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {reviewGroups.map((g) => (
+                          <div key={g.key} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--bg)" }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "8px 11px", background: "var(--surface)", borderBottom: "1px solid var(--border)", borderLeft: `4px solid ${g.sample.isMarble ? "#b45309" : "#0d9488"}` }}>
+                              <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={[g.sample.label, g.sample.description].filter(Boolean).join(" · ") || undefined}>
+                                {g.sample.label || g.sample.component_element || g.sample.component_section || "—"}
                               </span>
-                              <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
-                              {s.priority && <span title="Urgent" style={{ fontSize: 10.5, flexShrink: 0 }}>⚡</span>}
-                              {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8.5, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 4px" }}>📦</span>}
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
-                                aria-label={`Untick ${s.id}`}
-                                title="Untick this slab"
-                                style={{ marginLeft: "auto", flexShrink: 0, background: "transparent", border: "1.5px solid var(--border)", color: "#b91c1c", borderRadius: 6, width: 22, height: 22, fontSize: 11, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
-                              >
-                                ✕
-                              </button>
+                              {g.sample.description && (
+                                <span className="muted" style={{ fontSize: 10.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.sample.description}</span>
+                              )}
+                              <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "baseline", gap: 8, whiteSpace: "nowrap" }}>
+                                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 12.5 }}>{g.sample.dimensions}</span>
+                                <span style={{ fontSize: 11.5, fontWeight: 900, color: "#fff", background: "var(--gold-dark)", borderRadius: 999, padding: "1px 9px" }}>×{g.items.length}</span>
+                                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, color: "var(--gold-dark)" }}>{g.cft.toFixed(2)} CFT</span>
+                              </span>
                             </div>
-                            {(s.label || s.component_element || s.component_section) && (
-                              <div style={{ fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.label ?? undefined}>
-                                {s.label || s.component_element || s.component_section}
-                              </div>
-                            )}
-                            {(s.component_section || s.description) && (
-                              <div className="muted" style={{ fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={[s.component_section, s.component_element, s.description].filter(Boolean).join(" · ")}>
-                                {[s.component_section, s.description].filter(Boolean).join(" · ")}
-                              </div>
-                            )}
-                            <div style={{ fontSize: 10.5, fontFamily: "ui-monospace, monospace", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {s.dimensions} · <span style={{ color: "var(--gold-dark)", fontWeight: 700 }}>{s.cft.toFixed(2)} CFT</span>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6, padding: "8px 9px" }}>
+                              {g.items.map(({ s, n }) => (
+                                <div
+                                  key={s.id}
+                                  onClick={() => locate(s.id)}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
+                                  title="Show this slab in the grid"
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 6, minWidth: 0, height: 30,
+                                    background: flashId === s.id ? "rgba(184,115,51,0.16)" : "var(--surface)",
+                                    border: "1px solid var(--border)", borderRadius: 8, padding: "0 5px 0 5px",
+                                    cursor: "pointer", transition: "background .15s ease",
+                                  }}
+                                >
+                                  <span style={{ flexShrink: 0, width: 18, height: 18, borderRadius: 5, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: n > 9 ? 8.5 : 10, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{n}</span>
+                                  <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
+                                  {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 3px" }}>📦</span>}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
+                                    aria-label={`Untick ${s.id}`}
+                                    title="Untick this slab"
+                                    style={{ marginLeft: "auto", flexShrink: 0, background: "transparent", border: "1px solid var(--border)", color: "#b91c1c", borderRadius: 5, width: 20, height: 20, fontSize: 10, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ))}
