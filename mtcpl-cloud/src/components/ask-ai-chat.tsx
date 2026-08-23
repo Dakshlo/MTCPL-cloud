@@ -85,6 +85,13 @@ function resizeToDataUrl(file: File, maxDim = 1024, quality = 0.8): Promise<stri
   });
 }
 
+/** How wide the conversation column may get. The page itself now fills the
+ *  window (see `page-fluid` on the shell below), but the transcript keeps a
+ *  cap: a line of prose running the full width of a 2000px monitor is
+ *  genuinely hard to read back, which is why every chat UI caps it. 1100 is
+ *  ~45% more than the old 760 and still a comfortable measure. */
+const COL_MAX = 1100;
+
 const PRESET_QUESTIONS = [
   "आज का काम क्या हुआ?",
   "Dispatch ke liye kitna ready hai?",
@@ -162,6 +169,35 @@ export function AskAiChat({
   const [provider, setProvider] = useState<"claude" | "openai">("claude");
   const [listening, setListening] = useState(false);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialRecentSessions);
+
+  /** The starter chips on the empty screen, led by what this person has
+   *  actually been asking. A session's title IS the question that opened it,
+   *  so the four most recent distinct ones become chips and the canned
+   *  presets fill whatever is left — a brand-new account still gets six.
+   *
+   *  Only `isMine` sessions count: a developer's recent list also carries
+   *  other people's chats, and offering someone else's question back as
+   *  "yours" would be wrong. */
+  const recentAsks = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of sessions) {
+      if (!s.isMine) continue;
+      const t = (s.title ?? "").trim();
+      // very short titles ("hi") and very long ones make poor chips
+      if (t.length < 8 || t.length > 80) continue;
+      const k = t.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(t);
+      if (out.length === 4) break;
+    }
+    return out;
+  }, [sessions]);
+  const starters = useMemo(() => {
+    const seen = new Set(recentAsks.map((q) => q.toLowerCase()));
+    return [...recentAsks, ...PRESET_QUESTIONS.filter((q) => !seen.has(q.toLowerCase()))].slice(0, 8);
+  }, [recentAsks]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   /** When non-null, the current user is viewing someone else's chat —
    *  developer-only scenario. The input is locked and a banner appears. */
@@ -526,6 +562,10 @@ export function AskAiChat({
 
   return (
     <div
+      // `page-fluid` lifts .page-content's 1720px cap for this page only, so
+      // the dark skin reaches the window edges instead of leaving a lit strip
+      // down both sides of a wide monitor (Daksh, Aug 2026).
+      className="page-fluid"
       style={{
         // Break out of .page-content padding so the dark skin hits the edges
         // of the content area. The app sidebar on the left stays untouched.
@@ -595,7 +635,14 @@ export function AskAiChat({
           }}
         >
           {isEmpty ? (
-            <EmptyHero greeting={greeting} userName={userName} onPick={handlePreset} disabled={streaming} />
+            <EmptyHero
+              greeting={greeting}
+              userName={userName}
+              onPick={handlePreset}
+              disabled={streaming}
+              recent={recentAsks}
+              presets={starters.slice(recentAsks.length)}
+            />
           ) : (
             <MessageList
               messages={messages}
@@ -611,7 +658,7 @@ export function AskAiChat({
           <div
             style={{
               margin: "0 auto 10px",
-              maxWidth: 760,
+              maxWidth: COL_MAX,
               width: "calc(100% - 32px)",
               padding: "10px 14px",
               background: C.errorBg,
@@ -646,7 +693,7 @@ export function AskAiChat({
             <div
               style={{
                 width: "100%",
-                maxWidth: 760,
+                maxWidth: COL_MAX,
                 padding: "14px 18px",
                 background: "rgba(232,197,114,0.08)",
                 border: "1px solid rgba(232,197,114,0.3)",
@@ -691,12 +738,12 @@ export function AskAiChat({
                 gap: 6,
                 flexWrap: "wrap",
                 justifyContent: "center",
-                maxWidth: 760,
+                maxWidth: COL_MAX,
                 width: "100%",
                 marginBottom: 10,
               }}
             >
-              {PRESET_QUESTIONS.slice(0, 4).map((q) => (
+              {starters.slice(0, 4).map((q) => (
                 <Chip key={q} label={q} onClick={() => handlePreset(q)} disabled={streaming} compact />
               ))}
             </div>
@@ -706,7 +753,7 @@ export function AskAiChat({
             onSubmit={handleSubmit}
             style={{
               width: "100%",
-              maxWidth: 760,
+              maxWidth: COL_MAX,
               background: C.surface,
               border: `1px solid ${C.border}`,
               borderRadius: 18,
@@ -1215,11 +1262,17 @@ function EmptyHero({
   userName,
   onPick,
   disabled,
+  recent,
+  presets,
 }: {
   greeting: string;
   userName: string;
   onPick: (text: string) => void;
   disabled: boolean;
+  /** This person's own most recent questions, newest first. */
+  recent: string[];
+  /** Canned starters, already de-duplicated against `recent`. */
+  presets: string[];
 }) {
   return (
     <div
@@ -1248,10 +1301,36 @@ function EmptyHero({
       <div style={{ fontSize: 20, color: C.textMuted, marginBottom: 36, textAlign: "center", fontWeight: 400 }}>
         How can I help today?
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 640 }}>
-        {PRESET_QUESTIONS.map((q) => (
-          <Chip key={q} label={q} onClick={() => onPick(q)} disabled={disabled} />
-        ))}
+      {/* What you asked last, then the standing ones. Kept as two labelled
+          rows rather than one shuffled pile so it is obvious which chips are
+          your own history and which are suggestions. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, alignItems: "center", maxWidth: 820, width: "100%" }}>
+        {recent.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 9, alignItems: "center", width: "100%" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMuted, opacity: 0.75 }}>
+              ↺ You asked recently
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+              {recent.map((q) => (
+                <Chip key={q} label={q} onClick={() => onPick(q)} disabled={disabled} />
+              ))}
+            </div>
+          </div>
+        )}
+        {presets.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 9, alignItems: "center", width: "100%" }}>
+            {recent.length > 0 && (
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMuted, opacity: 0.75 }}>
+                Or try
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+              {presets.map((q) => (
+                <Chip key={q} label={q} onClick={() => onPick(q)} disabled={disabled} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1322,7 +1401,7 @@ function MessageList({
     <div
       style={{
         width: "100%",
-        maxWidth: 760,
+        maxWidth: COL_MAX,
         margin: "0 auto",
         padding: "28px 20px",
         display: "flex",
