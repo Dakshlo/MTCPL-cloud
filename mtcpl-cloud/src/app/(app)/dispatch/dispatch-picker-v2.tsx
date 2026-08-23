@@ -952,56 +952,104 @@ export function DispatchPickerV2({
                       </div>
                     ) : (
                       /* Grouped — one block per type, so "what did I pick, and
-                         how many of each" is answered without counting. */
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        {reviewGroups.map((g) => (
-                          <div key={g.key} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", background: "var(--bg)" }}>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "8px 11px", background: "var(--surface)", borderBottom: "1px solid var(--border)", borderLeft: `4px solid ${g.sample.isMarble ? "#b45309" : "#0d9488"}` }}>
-                              <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={[g.sample.label, g.sample.description].filter(Boolean).join(" · ") || undefined}>
-                                {g.sample.label || g.sample.component_element || g.sample.component_section || "—"}
-                              </span>
-                              {g.sample.description && (
-                                <span className="muted" style={{ fontSize: 10.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.sample.description}</span>
-                              )}
-                              <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "baseline", gap: 8, whiteSpace: "nowrap" }}>
-                                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 12.5 }}>{g.sample.dimensions}</span>
-                                <span style={{ fontSize: 11.5, fontWeight: 900, color: "#fff", background: "var(--gold-dark)", borderRadius: 999, padding: "1px 9px" }}>×{g.items.length}</span>
-                                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, color: "var(--gold-dark)" }}>{g.cft.toFixed(2)} CFT</span>
-                              </span>
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6, padding: "8px 9px" }}>
-                              {g.items.map(({ s, n }) => (
-                                <div
-                                  key={s.id}
-                                  onClick={() => locate(s.id)}
-                                  role="button"
-                                  tabIndex={0}
-                                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
-                                  title="Show this slab in the grid"
+                         how many of each" is answered without counting.
+
+                         One card per kind, not a header band stacked on a body
+                         band: a pick is mostly singletons (13 kinds, 22 slabs
+                         is typical) and the two-band version spent ~95px on
+                         each of them. The quantity leads on the left because
+                         that is the question this view exists to answer, and
+                         the codes flow at their natural width instead of
+                         sitting in a 150px grid that wasted half the row. */
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                        {reviewGroups.map((g) => {
+                          const multi = g.items.length > 1;
+                          const accent = g.sample.isMarble ? "#b45309" : "#0d9488";
+                          return (
+                            <div
+                              key={g.key}
+                              style={{
+                                border: "1px solid var(--border)", borderLeft: `3px solid ${accent}`,
+                                borderRadius: 10, background: "var(--bg)", padding: "7px 9px 8px",
+                                display: "flex", flexDirection: "column", gap: 6,
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+                                <span
+                                  title={`${g.items.length} slab${multi ? "s" : ""} of this kind`}
                                   style={{
-                                    display: "flex", alignItems: "center", gap: 6, minWidth: 0, height: 30,
-                                    background: flashId === s.id ? "rgba(184,115,51,0.16)" : "var(--surface)",
-                                    border: "1px solid var(--border)", borderRadius: 8, padding: "0 5px 0 5px",
-                                    cursor: "pointer", transition: "background .15s ease",
+                                    flexShrink: 0, minWidth: 26, height: 21, padding: "0 6px", borderRadius: 7,
+                                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                    fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: multi ? 12 : 11,
+                                    background: multi ? "var(--gold-dark)" : "transparent",
+                                    color: multi ? "#fff" : "var(--muted)",
+                                    border: multi ? "none" : "1px solid var(--border)",
                                   }}
                                 >
-                                  <span style={{ flexShrink: 0, width: 18, height: 18, borderRadius: 5, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: n > 9 ? 8.5 : 10, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{n}</span>
-                                  <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}</code>
-                                  {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 3px" }}>📦</span>}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
-                                    aria-label={`Untick ${s.id}`}
-                                    title="Untick this slab"
-                                    style={{ marginLeft: "auto", flexShrink: 0, background: "transparent", border: "1px solid var(--border)", color: "#b91c1c", borderRadius: 5, width: 20, height: 20, fontSize: 10, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
+                                  {g.items.length}×
+                                </span>
+                                <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.sample.label ?? undefined}>
+                                  {g.sample.label || g.sample.component_element || g.sample.component_section || "—"}
+                                </span>
+                                {g.sample.description && (
+                                  <span className="muted" style={{ fontSize: 10.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.sample.description}>
+                                    {g.sample.description}
+                                  </span>
+                                )}
+                                <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+                                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 900, fontSize: 12 }}>{g.sample.dimensions}</span>
+                                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11.5, color: "var(--gold-dark)" }}>{g.cft.toFixed(2)} CFT</span>
+                                  {multi && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelected((prev) => {
+                                        const next = new Set(prev);
+                                        for (const { s } of g.items) next.delete(s.id);
+                                        return next;
+                                      })}
+                                      aria-label={`Untick all ${g.items.length}`}
+                                      title={`Untick all ${g.items.length} of these`}
+                                      style={{ background: "transparent", border: "1px solid var(--border)", color: "#b91c1c", borderRadius: 6, height: 21, padding: "0 7px", fontSize: 10.5, fontWeight: 800, cursor: "pointer", lineHeight: 1 }}
+                                    >
+                                      ✕ all
+                                    </button>
+                                  )}
+                                </span>
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                                {g.items.map(({ s, n }) => (
+                                  <div
+                                    key={s.id}
+                                    onClick={() => locate(s.id)}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); locate(s.id); } }}
+                                    title="Show this slab in the grid"
+                                    style={{
+                                      flex: "0 0 auto", display: "flex", alignItems: "center", gap: 5, height: 26,
+                                      background: flashId === s.id ? "rgba(184,115,51,0.18)" : "var(--surface)",
+                                      border: "1px solid var(--border)", borderRadius: 7, padding: "0 3px 0 4px",
+                                      cursor: "pointer", transition: "background .15s ease",
+                                    }}
                                   >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
+                                    <span style={{ flexShrink: 0, width: 17, height: 17, borderRadius: 5, background: "var(--gold-dark)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: n > 9 ? 8.5 : 10, fontWeight: 900, fontFamily: "ui-monospace, monospace" }}>{n}</span>
+                                    <code style={{ fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 11, whiteSpace: "nowrap" }}>{s.id}</code>
+                                    {s.storageSource && <span title="From storage" style={{ flexShrink: 0, fontSize: 8, fontWeight: 800, color: "#fff", background: s.storageSource === "carving" ? "#7c3aed" : "#2563eb", borderRadius: 3, padding: "1px 3px" }}>📦</span>}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); toggle(s.id); }}
+                                      aria-label={`Untick ${s.id}`}
+                                      title="Untick this slab"
+                                      style={{ flexShrink: 0, background: "transparent", border: "none", color: "#b91c1c", borderRadius: 4, width: 18, height: 18, fontSize: 10, fontWeight: 900, cursor: "pointer", lineHeight: 1, padding: 0 }}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
