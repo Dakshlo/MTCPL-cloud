@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import { BlockMiniPreview, SlabMiniPreview } from "@/components/stone-previews";
 import { getStonePalette } from "@/lib/stone-utils";
 import type { StoneTypeDef } from "@/lib/stone-utils";
@@ -51,6 +51,19 @@ export function sclr(id: string) {
 
 // ─── 3D Isometric Block Preview ────────────────────────────────────────────────
 
+/** Lighten (amt > 0) or darken (amt < 0) a #rrggbb by a fraction. Presentation
+ *  only — used to derive gradient stops from the stone's own three colours so
+ *  the faces read as lit surfaces instead of flat fills. */
+function shade(hex: string, amt: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) =>
+    Math.max(0, Math.min(255, Math.round(amt >= 0 ? c + (255 - c) * amt : c * (1 + amt)))),
+  );
+  return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSlabIds, extraIds }: { block: PlanBlock["blk"]; placed: PlacedSlab[]; stoneTypes?: StoneTypeDef[]; onHoverSlab?: (id: string | null) => void;
   /**
    * Optional set of slab IDs that should be visually marked as "new"
@@ -79,6 +92,9 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
   const dragRef = useRef({ active: false, lastX: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const hoveredSlab = placed.find(p => p.id === hoveredId) ?? null;
+  // Gradient/filter ids must be unique per instance — several previews render
+  // on the planning page at once and duplicate ids would cross-wire them.
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
 
   // Build layer list from placed slabs (group by zBot–zTop range)
   const layers = (() => {
@@ -208,25 +224,36 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
     {hoveredSlab && tooltipPos && (
       <div style={{
         position: "absolute",
-        left: Math.min(tooltipPos.x + 12, 240),
-        top: tooltipPos.y + 12,
+        // Flip to the other side of the cursor near the right edge instead of
+        // pinning at a hardcoded 240 — the old clamp parked the card mid-view
+        // on wide previews.
+        left: (svgRef.current && tooltipPos.x > svgRef.current.clientWidth - 210)
+          ? Math.max(4, tooltipPos.x - 202)
+          : tooltipPos.x + 14,
+        top: tooltipPos.y + 14,
         zIndex: 10,
         background: "var(--surface)",
         border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "6px 10px",
+        borderLeft: `3px solid ${sclr(hoveredSlab.id)}`,
+        borderRadius: 9,
+        padding: "7px 11px",
         fontSize: 12,
         pointerEvents: "none",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
-        maxWidth: 180,
-        lineHeight: 1.5
+        boxShadow: "0 6px 20px rgba(0,0,0,0.22)",
+        maxWidth: 196,
+        lineHeight: 1.45
       }}>
-        <strong style={{ color: sclr(hoveredSlab.id) }}>{hoveredSlab.id}</strong>
-        {hoveredSlab.label ? <div className="muted">{hoveredSlab.label}</div> : null}
-        {hoveredSlab.temple ? <div className="muted" style={{ fontSize: 11 }}>{hoveredSlab.temple}</div> : null}
-        <div>{hoveredSlab.sw} × {hoveredSlab.sh} in{hoveredSlab.sd ? ` · T: ${hoveredSlab.sd} in` : ""}</div>
-        {hoveredSlab.rot ? <div className="muted" style={{ fontSize: 11 }}>Rotated 90°</div> : null}
-        {hoveredSlab.zTop != null ? <div className="muted" style={{ fontSize: 11 }}>Layer depth {hoveredSlab.zBot?.toFixed(1)}–{hoveredSlab.zTop.toFixed(1)}</div> : null}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 2, background: sclr(hoveredSlab.id) }} />
+          <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5, letterSpacing: "-0.01em" }}>{hoveredSlab.id}</strong>
+        </div>
+        {hoveredSlab.label ? <div style={{ fontSize: 12, fontWeight: 700, marginTop: 2 }}>{hoveredSlab.label}</div> : null}
+        {hoveredSlab.temple ? <div className="muted" style={{ fontSize: 10.5 }}>{hoveredSlab.temple}</div> : null}
+        <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed var(--border)", fontFamily: "ui-monospace, monospace", fontWeight: 800, fontSize: 12 }}>
+          {hoveredSlab.sw} × {hoveredSlab.sh} in{hoveredSlab.sd ? ` · T: ${hoveredSlab.sd} in` : ""}
+        </div>
+        {hoveredSlab.rot ? <div className="muted" style={{ fontSize: 10.5 }}>Rotated 90°</div> : null}
+        {hoveredSlab.zTop != null ? <div className="muted" style={{ fontSize: 10.5 }}>Layer depth {hoveredSlab.zBot?.toFixed(1)}–{hoveredSlab.zTop.toFixed(1)}</div> : null}
       </div>
     )}
     <svg
@@ -243,23 +270,70 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
       onTouchMove={onTouchMoveReact}
       onTouchEnd={onTouchEnd}
     >
+      {/* Presentation only — every gradient below is derived from the stone's
+          own three palette colours, so a block still reads as its stone. */}
+      <defs>
+        <linearGradient id={`bt${uid}`} x1="0" y1="0" x2="0.55" y2="1">
+          <stop offset="0%" stopColor={shade(pal.top, 0.16)} />
+          <stop offset="100%" stopColor={shade(pal.top, -0.04)} />
+        </linearGradient>
+        <linearGradient id={`bf${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={shade(pal.front, 0.06)} />
+          <stop offset="100%" stopColor={shade(pal.front, -0.16)} />
+        </linearGradient>
+        <linearGradient id={`bs${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={shade(pal.side, 0.02)} />
+          <stop offset="100%" stopColor={shade(pal.side, -0.20)} />
+        </linearGradient>
+        {/* One shared sheen reused by every slab top — a single overlay node
+            per slab rather than a gradient per colour. */}
+        <linearGradient id={`sheen${uid}`} x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0%" stopColor="#fff" stopOpacity="0.28" />
+          <stop offset="60%" stopColor="#fff" stopOpacity="0.04" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0.06" />
+        </linearGradient>
+        <radialGradient id={`shadow${uid}`} cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor="#000" stopOpacity="0.22" />
+          <stop offset="70%" stopColor="#000" stopOpacity="0.07" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
       {/* Zoom group — scale around centre of block area */}
       <g transform={`translate(${cx},${cy}) scale(${zoom}) translate(${-cx},${-cy})`}>
+        {/* Contact shadow — sits the block on a surface instead of letting it
+            float on the page. Sized from the block's own footprint. */}
+        <ellipse
+          cx={ptObj(L / 2, W / 2, 0).x}
+          cy={ptObj(L / 2, W / 2, 0).y + 3}
+          rx={(Math.abs(ptObj(L, W, 0).x - ptObj(0, 0, 0).x) + Math.abs(ptObj(L, 0, 0).x - ptObj(0, W, 0).x)) / 3.4}
+          ry={(Math.abs(ptObj(L, W, 0).y - ptObj(0, 0, 0).y) + Math.abs(ptObj(L, 0, 0).y - ptObj(0, W, 0).y)) / 5}
+          fill={`url(#shadow${uid})`}
+          pointerEvents="none"
+        />
         {/* Block side face (front Y) */}
         <polygon
           points={[ptn(0,bY,0),ptn(L,bY,0),ptn(L,bY,H),ptn(0,bY,H)].join(" ")}
-          fill={pal.front}
+          fill={`url(#bf${uid})`}
         />
         {/* Block side face (right X) */}
         <polygon
           points={[ptn(bX,0,0),ptn(bX,W,0),ptn(bX,W,H),ptn(bX,0,H)].join(" ")}
-          fill={pal.side}
+          fill={`url(#bs${uid})`}
         />
         {/* Block top face */}
         <polygon
           points={[ptn(0,0,H),ptn(L,0,H),ptn(L,W,H),ptn(0,W,H)].join(" ")}
-          fill={pal.top}
+          fill={`url(#bt${uid})`}
         />
+        {/* Edges — the silhouette plus the three visible corner seams. A flat
+            fill with no outline is what made the block read as a paper cut-out
+            rather than stone. */}
+        <g fill="none" stroke={shade(pal.front, -0.42)} strokeLinejoin="round" pointerEvents="none">
+          <polygon points={[ptn(0,bY,0),ptn(L,bY,0),ptn(L,bY,H),ptn(0,bY,H)].join(" ")} strokeWidth="0.7" opacity="0.5" />
+          <polygon points={[ptn(bX,0,0),ptn(bX,W,0),ptn(bX,W,H),ptn(bX,0,H)].join(" ")} strokeWidth="0.7" opacity="0.5" />
+          <polygon points={[ptn(0,0,H),ptn(L,0,H),ptn(L,W,H),ptn(0,W,H)].join(" ")} strokeWidth="0.9" opacity="0.65" />
+        </g>
 
         {/* Slab 3D boxes — sorted back-to-front */}
         {sortedSlabs.map((item) => {
@@ -339,10 +413,43 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
                 ].join(" ")}
                 fill={color}
                 opacity={topAlpha}
-                stroke={isNew ? "#f59e0b" : (isHovered ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)")}
-                strokeWidth={isNew ? "1.8" : (isHovered ? "2" : "0.8")}
+                stroke={isNew ? "#f59e0b" : (isHovered ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.55)")}
+                strokeWidth={isNew ? "1.8" : (isHovered ? "2.2" : "0.8")}
                 strokeDasharray={isNew ? "3 2" : undefined}
               />
+              {/* Shared sheen over the top face — one overlay node per slab,
+                  no per-colour gradients. Skipped while dimmed so a faded
+                  slab stays faded. */}
+              {!dimmed && (
+                <polygon
+                  points={[
+                    ptn(item.px, item.py, slabZTop),
+                    ptn(item.px + item.pw, item.py, slabZTop),
+                    ptn(item.px + item.pw, item.py + item.ph, slabZTop),
+                    ptn(item.px, item.py + item.ph, slabZTop)
+                  ].join(" ")}
+                  fill={`url(#sheen${uid})`}
+                  pointerEvents="none"
+                />
+              )}
+              {/* Hovered slab gets a bright outline of its own colour on the
+                  top edge, so it reads as picked out rather than merely
+                  "the one that isn't dimmed". */}
+              {isHovered && (
+                <polygon
+                  points={[
+                    ptn(item.px, item.py, slabZTop),
+                    ptn(item.px + item.pw, item.py, slabZTop),
+                    ptn(item.px + item.pw, item.py + item.ph, slabZTop),
+                    ptn(item.px, item.py + item.ph, slabZTop)
+                  ].join(" ")}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="0.9"
+                  opacity={0.9}
+                  pointerEvents="none"
+                />
+              )}
               {/* "NEW" badge floating above the top centre, only for
                   recommended slabs in the fit-fill preview. */}
               {isNew && (
@@ -408,10 +515,11 @@ export function IsoBlockPreview({ block, placed, stoneTypes, onHoverSlab, newSla
         y={Number(vbH) - 3}
         textAnchor="middle"
         fill="var(--muted, #7A6A52)"
-        fontSize={9}
-        style={{ pointerEvents: "none" }}
+        fontSize={8.5}
+        opacity={0.75}
+        style={{ pointerEvents: "none", letterSpacing: "0.04em" }}
       >
-        drag to rotate · scroll to zoom · hover slab for details
+        drag to rotate · scroll to zoom · hover a slab for details
       </text>
     </svg>
 
