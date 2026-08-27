@@ -24,6 +24,8 @@
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
+import { SecretHover } from "@/components/secret-hover";
+import { useRouter } from "next/navigation";
 
 type RoyaltyEntry = {
   date: string;
@@ -439,6 +441,7 @@ export function RoyaltySummaryClient({
 }: {
   summaryAction: (fd: FormData) => Promise<SummaryResult>;
 }) {
+  const router = useRouter();
   const [passphrase, setPassphrase] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -598,8 +601,16 @@ export function RoyaltySummaryClient({
         >
           Owner View
         </div>
+        {/* Aug 2026 — the by-vendor browser used to be a card sitting
+            in plain sight. Now the word "Royalty" IS the door: hover it
+            and type the code. Nothing about it looks different, which
+            is the point. */}
         <h1 style={{ margin: "2px 0 0", fontSize: 25, fontWeight: 800, letterSpacing: "-0.015em" }}>
-          🏷️ Royalty Summary
+          🏷️{" "}
+          <SecretHover onUnlock={() => router.push("/accounts/royalty-vendors")}>
+            Royalty
+          </SecretHover>{" "}
+          Summary
         </h1>
       </header>
 
@@ -1444,36 +1455,6 @@ export function RoyaltySummaryClient({
               </div>
             </div>
           )}
-
-          {/* Aug 2026 (Daksh, for his dad) — the summary answers "how
-              much in total"; this answers "what does THIS vendor look
-              like", without walking Finance → vendor → passphrase for
-              each one in turn. */}
-          <Link
-            href="/accounts/royalty-vendors"
-            style={{
-              textDecoration: "none",
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "13px 16px",
-              borderRadius: 12,
-              border: "1.5px solid var(--gold-dark)",
-              background: "rgba(184,115,51,0.07)",
-              color: "var(--text)",
-            }}
-          >
-            <span style={{ fontSize: 20 }}>🏷</span>
-            <span style={{ minWidth: 0 }}>
-              <span style={{ display: "block", fontSize: 13.5, fontWeight: 800 }}>
-                Open royalty by vendor
-              </span>
-              <span className="muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>
-                Search every vendor with points and switch between them — passphrase once, not per vendor.
-              </span>
-            </span>
-            <span style={{ marginLeft: "auto", fontSize: 15, color: "var(--gold-dark)", fontWeight: 800 }}>→</span>
-          </Link>
 
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <Link
