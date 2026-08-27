@@ -1,4 +1,5 @@
 import { requireAuth } from "@/lib/auth";
+import { istDayRange } from "@/lib/ist";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { addTempleAction, updateTempleAction, deleteTempleAction, updateUserAction, deleteUserAction, updateOwnNameAction, addStoneTypeAction, deleteStoneTypeAction, setStoneCategoryAction, addTransferTruckAction, setTransferTruckActiveAction, deleteDevTransferAction, deleteAllDevTransferAction } from "./actions";
 import { AddUserForm } from "./add-user-form";
@@ -245,10 +246,10 @@ export default async function SettingsPage() {
   const systemUpdatedByName = nameOfUpdater(systemStatus.updatedBy);
 
   // Screen time — developer only
-  const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const todayIST = `${istNow.getFullYear()}-${String(istNow.getMonth() + 1).padStart(2, "0")}-${String(istNow.getDate()).padStart(2, "0")}`;
-  const todayStart = new Date(`${todayIST}T00:00:00+05:30`).toISOString();
-  const todayEnd = new Date(`${todayIST}T23:59:59.999+05:30`).toISOString();
+  // Same helper as the dashboard — the old inline version read back a
+  // wall clock it had embedded, which only worked on a UTC server.
+  const { start: todayStart, end: todayEnd, label: todayIST } = istDayRange();
+  void todayIST;
 
   const [{ data: temples }, { data: users }, { data: stoneTypes }, { data: blockStones }, { data: slabStones }, { data: templeSlabCounts }, { data: vendorRows }] = await Promise.all([
     admin.from("temples").select("*").order("name"),

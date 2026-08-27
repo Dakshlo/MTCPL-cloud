@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { istDateLabel, istDayRange, istHour } from "@/lib/ist";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { requireAuth, getDefaultRouteForRole } from "@/lib/auth";
@@ -28,19 +29,12 @@ import { PeekIframe } from "@/components/peek-iframe";
 
 /**
  * IST midnight today / start / end — used to scope Screen Time pings.
+ * Delegates to lib/ist so the timezone maths lives in one place; the
+ * old inline version read the right day on a UTC server and the wrong
+ * one on an IST laptop.
  */
 function istToday(daysAgo = 0) {
-  const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  ist.setDate(ist.getDate() - daysAgo);
-  const y = ist.getFullYear();
-  const m = String(ist.getMonth() + 1).padStart(2, "0");
-  const d = String(ist.getDate()).padStart(2, "0");
-  const label = `${y}-${m}-${d}`;
-  return {
-    start: new Date(`${label}T00:00:00+05:30`).toISOString(),
-    end:   new Date(`${label}T23:59:59.999+05:30`).toISOString(),
-    label,
-  };
+  return istDayRange(daysAgo);
 }
 
 /** "PARESH KUMAR" → "PK" — for the hero's online-user avatars. */
@@ -75,15 +69,10 @@ export default async function DashboardPage() {
   // login path stays fast and zero-cost.
   const fullName = (profile.full_name ?? "").toUpperCase();
   if (fullName.includes("RAJESH")) {
-    const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-    const hr = istObj.getHours();
+    // Same double-offset fix as the main hero below.
+    const hr = istHour();
     const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
-    const dateDisplay = istObj.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    const dateDisplay = istDateLabel();
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 32 }}>
         {/* Lightweight greeting header — same .dash-hero chrome as the
@@ -228,16 +217,15 @@ export default async function DashboardPage() {
   }));
   const onlineList = onlineUsers ?? [];
 
-  const istObj = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const hr = istObj.getHours();
+  // Aug 2026 — this read the IST wall clock into a string, parsed it
+  // back as server-local time, then formatted it into IST again. The
+  // +5:30 landed twice, so after 18:30 IST production showed tomorrow
+  // ("Friday, 28 August" at 23:14 on Thursday the 27th). Format the
+  // instant directly instead.
+  const hr = istHour();
   const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
   const ownerName = profile.full_name || "there";
-  const dateDisplay = istObj.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const dateDisplay = istDateLabel();
 
   // Priority count is passed to PushPanel via `pushableSlabs` so PushPanel
   // can show its own urgent-list state. We just need the raw query on the page
