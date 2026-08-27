@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { markActivityNow } from "@/components/idle-logout";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { setOtpChannelAction } from "@/lib/otp-channel-action";
+import { verifyLoginOtpAction } from "@/lib/short-otp-action";
 // Type-only: erased at compile, so lib/otp-channel's server-side
 // Supabase admin client never reaches the browser bundle.
 import type { OtpChannel } from "@/lib/otp-channel";
@@ -13,6 +14,9 @@ type Step = "phone" | "otp";
 
 /** Wrong tries allowed on one code before it must be re-sent. */
 const MAX_OTP_ATTEMPTS = 3;
+/** Digits people actually type now. The six-digit code Supabase issues
+ *  still verifies, so a fallback SMS is never a dead end. */
+const OTP_LEN = 4;
 
 function normalizePhone(raw: string): string {
   // Strip all non-digits
@@ -131,12 +135,20 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
 
     try {
       const normalized = normalizePhone(phone);
-      const { error: err } = await supabase.auth.verifyOtp({
-        phone: normalized,
-        token: otp.trim(),
-        type: "sms",
-      });
-      if (err) throw err;
+      // Aug 2026 — verify on the SERVER. The browser used to call
+      // supabase.auth.verifyOtp itself, which put the attempt limit in
+      // React state where a script could ignore it. The action counts
+      // attempts, enforces the cooldown, and (for a 4-digit code)
+      // replays the real six-digit one to Supabase, which still mints
+      // every session and sets the cookies.
+      const res = await verifyLoginOtpAction(normalized, otp.trim());
+      if (!res.ok) {
+        setAttemptsLeft(res.attemptsLeft ?? 0);
+        if (res.burned) { setCodeBurned(true); setOtp(""); }
+        setError(res.error);
+        setPending(false);
+        return;
+      }
       // Fresh login = fresh idle clock. When the previous session expired
       // on its own, its last-activity stamp was never cleared — and
       // IdleLogout's mount check then judged THIS login "idle" and kicked
@@ -156,17 +168,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
       }, 2000);
       return;
     } catch (err) {
-      const left = attemptsLeft - 1;
-      setAttemptsLeft(left);
-      if (left <= 0) {
-        setCodeBurned(true);
-        setOtp("");
-        setError("That code is finished after 3 wrong tries. Send a new one to continue.");
-      } else {
-        setError(
-          `${err instanceof Error ? err.message : "Invalid or expired code."} ${left} ${left === 1 ? "try" : "tries"} left.`,
-        );
-      }
+      setError(err instanceof Error ? err.message : "Could not check that code. Try again.");
       setPending(false);
     }
   }
@@ -175,7 +177,8 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
   // and feels modern (matches what users see on banking apps).
   useEffect(() => {
     if (step !== "otp") return;
-    if (otp.length !== 6) return;
+    // Fires at 4 (the short code) and at 6 (the fallback), not at 5.
+    if (otp.length !== OTP_LEN && otp.length !== 6) return;
     if (pending || succeeded || codeBurned) return;
     // Fake form-submit event so the existing handler runs.
     const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
@@ -460,10 +463,10 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
           </div>
 
           <label className="stack">
-            <span>6-digit OTP</span>
+            <span>{OTP_LEN}-digit code</span>
             <input
               type="text"
-              placeholder="– – – – – –"
+              placeholder="– – – –"
               value={otp}
               onChange={e => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
               required
@@ -499,7 +502,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
 
           <button
             className="primary-button"
-            disabled={pending || succeeded || codeBurned || otp.length < 6}
+            disabled={pending || succeeded || codeBurned || otp.length < OTP_LEN}
             type="submit"
             style={{
               marginTop: 4,

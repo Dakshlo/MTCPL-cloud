@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { sendOtpSms, sendOtpWhatsApp, isWhatsAppOtpEnabled } from "@/lib/msg91";
 import { readOtpChannel } from "@/lib/otp-channel";
+import { issueShortCode } from "@/lib/short-otp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +108,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Short code (Daksh, Aug 2026) ───────────────────────────────
+  // Everyone here logs in on a desktop and types the code by hand, so
+  // he asked for four easy digits instead of Supabase's random six.
+  // We can't change what Supabase generates — only what we send. So
+  // mint a short code, remember it against the real one, and send the
+  // short one. See lib/short-otp.ts for the trade this makes.
+  //
+  // issueShortCode returns null on ANY problem (store down, phone in
+  // a guessing cooldown), and then we send Supabase's own six-digit
+  // code, which has always worked. Nobody is ever left without a way
+  // in because this feature had a bad day.
+  const shortCode = await issueShortCode(phone, otp);
+  const sendCode = shortCode ?? otp;
+
   // ── Channel routing (Daksh, Aug 2026) ──────────────────────────
   // The login screen offers two buttons and records the choice via
   // setOtpChannelAction; Supabase's payload can't carry it, so we read
@@ -117,7 +132,7 @@ export async function POST(req: NextRequest) {
   try {
     if (isWhatsAppOtpEnabled() && (await readOtpChannel(phone)) === "whatsapp") {
       try {
-        await sendOtpWhatsApp(phone, otp);
+        await sendOtpWhatsApp(phone, sendCode);
         return NextResponse.json({});
       } catch (waErr) {
         console.error(
@@ -126,7 +141,7 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    await sendOtpSms(phone, otp);
+    await sendOtpSms(phone, sendCode);
   } catch (err) {
     const message = err instanceof Error ? err.message : "SMS send failed.";
     console.error("[sms-hook] MSG91 send failed:", message);
