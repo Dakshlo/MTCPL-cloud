@@ -3841,6 +3841,79 @@ export async function addVendorRoyaltyEntryAction(
  * away. Recovering later is a developer + SQL job on purpose.
  */
 
+/** Every vendor that has royalty points, with its net — the left-hand
+ *  list of the Royalty Vendors browser (Aug 2026, Daksh for his dad).
+ *
+ *  Why it exists: to look at one vendor's points the owner had to open
+ *  Finance → that vendor → private data → passphrase, and repeat the
+ *  whole walk for the next vendor. This returns the whole list once so
+ *  the browser can switch vendors with a click and no re-prompt.
+ *
+ *  Gated exactly like the rest of the royalty surface: the same
+ *  passphrase that unlocks a vendor's royalty tab, verified here so a
+ *  page that never shows a vendor cannot enumerate them either.
+ */
+export async function listRoyaltyVendorsAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; vendors: Array<{ id: string; name: string; net: number; received: number; given: number; entryCount: number; lastEntryAt: string | null }> }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "owner" && profile.role !== "developer") {
+    return { ok: false, error: "Only owner / developer." };
+  }
+  const plain = String(formData.get("passphrase") || "");
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) return { ok: false, error: "Passphrase has not been set yet." };
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("vendor_royalty_entries")
+    .select("bill_vendor_id, amount, entry_type, status, cancelled_at, entry_date, created_at, bill_vendors!inner(name)")
+    .eq("status", "approved")
+    .is("cancelled_at", null)
+    .is("wiped_at", null)
+    .limit(20000);
+  if (error) return { ok: false, error: error.message };
+
+  type Row = {
+    bill_vendor_id: string; amount: number | string; entry_type: string;
+    entry_date: string | null; created_at: string;
+    bill_vendors: { name: string } | { name: string }[] | null;
+  };
+  const byVendor = new Map<string, { id: string; name: string; received: number; given: number; entryCount: number; lastEntryAt: string | null }>();
+  for (const r of (data ?? []) as Row[]) {
+    const nameRaw = Array.isArray(r.bill_vendors) ? r.bill_vendors[0]?.name : r.bill_vendors?.name;
+    let g = byVendor.get(r.bill_vendor_id);
+    if (!g) {
+      g = { id: r.bill_vendor_id, name: nameRaw ?? "(unnamed)", received: 0, given: 0, entryCount: 0, lastEntryAt: null };
+      byVendor.set(r.bill_vendor_id, g);
+    }
+    const v = Number(r.amount);
+    if (r.entry_type === "received") g.received += v;
+    else if (r.entry_type === "given") g.given += v;
+    g.entryCount += 1;
+    const when = r.entry_date ?? r.created_at;
+    if (when && (!g.lastEntryAt || when > g.lastEntryAt)) g.lastEntryAt = when;
+  }
+
+  const vendors = [...byVendor.values()]
+    // Same convention as the vendor tab: net = paid − received.
+    .map((g) => ({ ...g, net: g.given - g.received }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  void logAudit(profile.id, "royalty_vendor_browser_viewed", "bill_vendor", "all", {
+    vendor_count: vendors.length,
+  });
+
+  return { ok: true, vendors };
+}
+
 /** Hard-delete every wiped batch whose 48h undo window has closed.
  *
  *  Daksh's call (Aug 2026), revising the mig-051 "no hard delete"

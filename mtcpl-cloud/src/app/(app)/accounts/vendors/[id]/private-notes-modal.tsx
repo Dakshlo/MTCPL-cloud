@@ -113,6 +113,10 @@ export function PrivateNotesModal({
   canCancelRoyalty = false,
   canWipeRoyalty = false,
   canRecoverRoyalty = false,
+  embedded = false,
+  presetPassphrase = null,
+  initialTab = "notes",
+  onChanged,
 }: {
   vendorId: string;
   canShow: boolean;
@@ -125,10 +129,26 @@ export function PrivateNotesModal({
   /** Mig 222 — only the developer can put a cleared ledger back, and
    *  only for 48h. The owner is never even told a wipe happened. */
   canRecoverRoyalty?: boolean;
+  /** Aug 2026 — render inline instead of as a secret-dot + portal
+   *  modal. Used by the Royalty Vendors browser, which supplies its
+   *  own page chrome and an already-verified passphrase so the owner
+   *  can switch vendor after vendor without re-entering it. Same
+   *  component, so the panel is identical on both surfaces by
+   *  construction rather than by two lists of styles agreeing. */
+  embedded?: boolean;
+  /** Passphrase the caller has already verified. When set (and
+   *  `embedded`), the unlock step is skipped entirely. */
+  presetPassphrase?: string | null;
+  /** Which tab to land on. The browser wants Royalty, not Notes. */
+  initialTab?: Tab;
+  /** Fired after anything that moves this vendor's totals (add, cancel,
+   *  clear-all, recover) so a host page can refresh its own summary.
+   *  A stale vendor list beside a fresh ledger reads as a bug. */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("closed");
-  const [tab, setTab] = useState<Tab>("notes");
+  const [mode, setMode] = useState<Mode>(embedded ? "loading" : "closed");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [content, setContent] = useState<string>("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [updatedByName, setUpdatedByName] = useState<string | null>(null);
@@ -249,6 +269,7 @@ export function PrivateNotesModal({
       if (!res.ok) { setError(res.error); return; }
       setWipeStep(0);
       await loadRoyalty(passphrase);
+      onChanged?.();
       router.refresh();
     } finally {
       setWipeBusy(false);
@@ -268,6 +289,7 @@ export function PrivateNotesModal({
       if (!res.ok) { setError(res.error); return; }
       setWipeBatch(null);
       await loadRoyalty(passphrase);
+      onChanged?.();
       router.refresh();
     } finally {
       setWipeBusy(false);
@@ -334,8 +356,25 @@ export function PrivateNotesModal({
       // the date again per row — most adds are for "today".)
       setNewEntryDate(todayIstYmd());
       await loadRoyalty(passphrase);
+      onChanged?.();
     });
   }
+
+  // Embedded mode — no secret dot, no unlock. Load this vendor with
+  // the passphrase the page already holds, and re-load whenever the
+  // page switches vendor. That switch is the whole point of the
+  // browser: same passphrase, different vendor, no prompt.
+  useEffect(() => {
+    if (!embedded || !presetPassphrase) return;
+    setMode("loading");
+    setError(null);
+    setJustAdded(null);
+    setWipeBatch(null);
+    void loadContent(presetPassphrase);
+    // loadContent is stable enough for this purpose; re-running on
+    // vendor/passphrase change is exactly the intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, presetPassphrase, vendorId]);
 
   // Clear the just-added banner + row flash after a few seconds.
   useEffect(() => {
@@ -362,6 +401,7 @@ export function PrivateNotesModal({
         return;
       }
       await loadRoyalty(passphrase);
+      onChanged?.();
     });
   }
 
@@ -516,7 +556,7 @@ export function PrivateNotesModal({
   // sequence above (its last two taps land here via onTap). Never a plain click.
   const triggerButton = <SecretDot onUnlock={() => { void open(); }} onTap={() => bumpRef.current("dot")} />;
 
-  if (mode === "closed") return triggerButton;
+  if (!embedded && mode === "closed") return triggerButton;
 
   // ── Modal backdrop ───────────────────────────────────────────────
   // Rendered via React Portal into document.body so click events
@@ -526,41 +566,22 @@ export function PrivateNotesModal({
   // interacted with the modal).
   //
   // typeof document check guards SSR — portal can't run server-side.
-  if (typeof document === "undefined") return triggerButton;
+  if (!embedded && typeof document === "undefined") return triggerButton;
 
-  const modalContent = (
-    <>
-      <div
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) close();
-        }}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(15, 23, 42, 0.5)",
-          backdropFilter: "blur(6px)",
-          WebkitBackdropFilter: "blur(6px)",
-          // Daksh (May 2026): grid + place-items + overflow-y:auto so
-          // a too-tall modal on a small laptop screen scrolls within
-          // the backdrop instead of pushing the page behind it.
-          display: "grid",
-          placeItems: "center",
-          overflowY: "auto",
-          zIndex: 1000,
-          padding: 16,
-        }}
-      >
+  // ONE panel, two surfaces: the portal modal wraps it in a backdrop,
+  // the Royalty Vendors browser drops it straight on the page. Sharing
+  // the node is what makes the two look the same — not two style
+  // objects that have to be kept in agreement by hand.
+  const panel = (
         <div
           style={{
             width: "100%",
-            maxWidth: mode === "edit" ? (tab === "royalty" ? 1040 : 880) : 560,
+            maxWidth: embedded ? "none" : mode === "edit" ? (tab === "royalty" ? 1040 : 880) : 560,
             background: "var(--surface, #fff)",
-            border: "1px solid var(--border)",
-            borderRadius: 14,
-            boxShadow: "0 20px 60px rgba(15, 23, 42, 0.35)",
-            padding: 20,
+            border: embedded ? "none" : "1px solid var(--border)",
+            borderRadius: embedded ? 0 : 14,
+            boxShadow: embedded ? "none" : "0 20px 60px rgba(15, 23, 42, 0.35)",
+            padding: embedded ? 0 : 20,
             display: "flex",
             flexDirection: "column",
             gap: 12,
@@ -1128,18 +1149,49 @@ export function PrivateNotesModal({
                     </div>
                   )}
 
-                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button type="button" onClick={close} style={SECONDARY_BUTTON_STYLE}>
-                      Close
-                    </button>
-                  </div>
+                  {!embedded && (
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button type="button" onClick={close} style={SECONDARY_BUTTON_STYLE}>
+                        Close
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
-      </div>
-    </>
+  );
+
+  // Inline: same panel, no backdrop and no portal — the page around it
+  // supplies the chrome.
+  if (embedded) return panel;
+
+  const modalContent = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15, 23, 42, 0.5)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        // Daksh (May 2026): grid + place-items + overflow-y:auto so
+        // a too-tall modal on a small laptop screen scrolls within
+        // the backdrop instead of pushing the page behind it.
+        display: "grid",
+        placeItems: "center",
+        overflowY: "auto",
+        zIndex: 1000,
+        padding: 16,
+      }}
+    >
+      {panel}
+    </div>
   );
 
   return (

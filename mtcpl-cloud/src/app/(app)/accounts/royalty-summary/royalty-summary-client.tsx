@@ -1445,6 +1445,36 @@ export function RoyaltySummaryClient({
             </div>
           )}
 
+          {/* Aug 2026 (Daksh, for his dad) — the summary answers "how
+              much in total"; this answers "what does THIS vendor look
+              like", without walking Finance → vendor → passphrase for
+              each one in turn. */}
+          <Link
+            href="/accounts/royalty-vendors"
+            style={{
+              textDecoration: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "13px 16px",
+              borderRadius: 12,
+              border: "1.5px solid var(--gold-dark)",
+              background: "rgba(184,115,51,0.07)",
+              color: "var(--text)",
+            }}
+          >
+            <span style={{ fontSize: 20 }}>🏷</span>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 13.5, fontWeight: 800 }}>
+                Open royalty by vendor
+              </span>
+              <span className="muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>
+                Search every vendor with points and switch between them — passphrase once, not per vendor.
+              </span>
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 15, color: "var(--gold-dark)", fontWeight: 800 }}>→</span>
+          </Link>
+
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <Link
               href="/accounts"
