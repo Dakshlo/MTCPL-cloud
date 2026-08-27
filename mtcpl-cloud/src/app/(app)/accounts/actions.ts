@@ -3617,6 +3617,9 @@ export async function getVendorRoyaltyEntriesAction(
   }
 
   const admin = createAdminSupabaseClient();
+  // Sweep this vendor's expired batches before reading — keeps the
+  // purge self-maintaining even if the cron never runs.
+  void purgeExpiredRoyaltyWipes(vendorId);
   const { data, error } = await admin
     .from("vendor_royalty_entries")
     .select("*")
@@ -3838,6 +3841,97 @@ export async function addVendorRoyaltyEntryAction(
  * away. Recovering later is a developer + SQL job on purpose.
  */
 
+/** Hard-delete every wiped batch whose 48h undo window has closed.
+ *
+ *  Daksh's call (Aug 2026), revising the mig-051 "no hard delete"
+ *  rule for this one path: once the developer can no longer bring a
+ *  cleared ledger back, the rows should go for real rather than sit
+ *  hidden forever. Standard trash-can lifecycle — hide, undo window,
+ *  purge.
+ *
+ *  The audit_logs entry written by the wipe SURVIVES the purge: it
+ *  records the vendor, the actor, the entry count and the cleared
+ *  net balance. So the values go, but the fact that a clear happened
+ *  and what it was worth stays on the record. That costs nothing
+ *  against the intent and is what keeps this defensible later.
+ *
+ *  Runs lazily (any read of a vendor's ledger sweeps that vendor) and
+ *  from the nightly cron (sweeps everyone), so the data goes whether
+ *  or not anyone visits the page.
+ *
+ *  @param vendorId scope to one vendor, or omit to sweep all.
+ */
+export async function purgeExpiredRoyaltyWipes(
+  vendorId?: string,
+): Promise<{ purged: number; batches: number }> {
+  const admin = createAdminSupabaseClient();
+  const cutoff = new Date(Date.now() - ROYALTY_WIPE_UNDO_MS).toISOString();
+
+  let q = admin
+    .from("vendor_royalty_entries")
+    .select("id, bill_vendor_id, wipe_batch_id, amount, entry_type, status, cancelled_at")
+    .not("wiped_at", "is", null)
+    .lt("wiped_at", cutoff);
+  if (vendorId) q = q.eq("bill_vendor_id", vendorId);
+  const { data, error } = await q.limit(5000);
+  if (error || !data || data.length === 0) return { purged: 0, batches: 0 };
+
+  const rows = data as Array<{
+    id: string; bill_vendor_id: string; wipe_batch_id: string;
+    amount: number | string; entry_type: string; status: string; cancelled_at: string | null;
+  }>;
+
+  // Group by batch so the audit line for each purge carries the same
+  // shape as the wipe that created it.
+  const byBatch = new Map<string, { vendorId: string; ids: string[]; received: number; given: number }>();
+  for (const r of rows) {
+    let g = byBatch.get(r.wipe_batch_id);
+    if (!g) { g = { vendorId: r.bill_vendor_id, ids: [], received: 0, given: 0 }; byBatch.set(r.wipe_batch_id, g); }
+    g.ids.push(r.id);
+    if (!r.cancelled_at && r.status === "approved") {
+      const v = Number(r.amount);
+      if (r.entry_type === "received") g.received += v;
+      else if (r.entry_type === "given") g.given += v;
+    }
+  }
+
+  let purged = 0;
+  for (const [batchId, g] of byBatch) {
+    const { data: gone, error: delErr } = await admin
+      .from("vendor_royalty_entries")
+      .delete()
+      // Re-assert the window on the DELETE itself — never trust the
+      // read above to still be true by the time we get here.
+      .in("id", g.ids)
+      .not("wiped_at", "is", null)
+      .lt("wiped_at", cutoff)
+      .select("id");
+    if (delErr) continue;
+    const n = (gone ?? []).length;
+    purged += n;
+    if (n > 0) {
+      // Written straight through rather than via logAudit: the purge
+      // has no human actor when the cron runs it, and audit_logs
+      // .user_id is nullable for exactly that case.
+      await admin.from("audit_logs").insert({
+        user_id: null,
+        action: "vendor_royalty_wipe_purged",
+        entity_type: "bill_vendor",
+        entity_id: g.vendorId,
+        details: {
+          batch_id: batchId,
+          entry_count: n,
+          cleared_received: g.received,
+          cleared_given: g.given,
+          cleared_net_balance: g.given - g.received,
+          note: "48h recovery window closed — entries permanently deleted. This audit line is the surviving record of what was cleared.",
+        },
+      });
+    }
+  }
+  return { purged, batches: byBatch.size };
+}
+
 /** Everything the UI needs to decide whether to offer a recover
  *  button: the most recent wipe for this vendor, if it is still
  *  inside the undo window. Developer only — the owner is not shown
@@ -3858,6 +3952,7 @@ export async function getVendorRoyaltyWipeStatusAction(
   if (!vendorId) return { ok: false, error: "Missing vendor_id." };
 
   const admin = createAdminSupabaseClient();
+  await purgeExpiredRoyaltyWipes(vendorId);
   const since = new Date(Date.now() - ROYALTY_WIPE_UNDO_MS).toISOString();
   const { data, error } = await admin
     .from("vendor_royalty_entries")
@@ -3970,7 +4065,7 @@ export async function wipeVendorRoyaltyAction(
     cleared_given: given,
     cleared_net_balance: given - received,
     recoverable_until: new Date(Date.now() + ROYALTY_WIPE_UNDO_MS).toISOString(),
-    note: "Entries hidden, not deleted — rows remain in vendor_royalty_entries stamped with this batch id.",
+    note: "Entries hidden and recoverable by the developer for 48h; permanently deleted after that. This audit line survives the purge and is the lasting record of what was cleared.",
   });
   await refreshAccountsPaths();
   return { ok: true, wipedCount };

@@ -930,8 +930,8 @@ export function PrivateNotesModal({
                           </div>
                           <div style={{ fontSize: 12, lineHeight: 1.55 }}>
                             {royaltyEntries.length} {royaltyEntries.length === 1 ? "entry" : "entries"} will disappear
-                            from this tab and the net balance will read 0. Nothing is deleted — the developer can put it
-                            all back for 48 hours.
+                            from this tab and the net balance will read 0. The developer can put it all back for
+                            48 hours — after that they are deleted for good.
                           </div>
                           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                             <button type="button" onClick={() => setWipeStep(0)} style={SECONDARY_BUTTON_STYLE}>
@@ -959,6 +959,7 @@ export function PrivateNotesModal({
                           <div style={{ fontSize: 12, lineHeight: 1.55 }}>
                             Received <strong>{royaltyReceived}</strong> · Paid <strong>{royaltyGiven}</strong> ·
                             Net <strong>{royaltyNet >= 0 ? "+" : "−"}{Math.abs(royaltyNet)}</strong> will all read 0.
+                            Recoverable for 48 hours, then permanently deleted.
                           </div>
                           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                             <button type="button" onClick={() => setWipeStep(0)} disabled={wipeBusy} style={SECONDARY_BUTTON_STYLE}>
@@ -999,7 +1000,7 @@ export function PrivateNotesModal({
                         </div>
                         <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>
                           Cleared {new Date(wipeBatch.wipedAt).toLocaleString("en-IN")}
-                          {wipeBatch.wipedByName ? ` by ${wipeBatch.wipedByName}` : ""} · window closes{" "}
+                          {wipeBatch.wipedByName ? ` by ${wipeBatch.wipedByName}` : ""} · deleted for good{" "}
                           {new Date(wipeBatch.expiresAt).toLocaleString("en-IN")}
                         </div>
                       </div>
