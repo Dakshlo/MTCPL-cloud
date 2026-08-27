@@ -34,6 +34,9 @@ import {
   getVendorRoyaltyEntriesAction,
   addVendorRoyaltyEntryAction,
   cancelVendorRoyaltyEntryAction,
+  wipeVendorRoyaltyAction,
+  recoverVendorRoyaltyWipeAction,
+  getVendorRoyaltyWipeStatusAction,
 } from "../../actions";
 
 // Mig 050 follow-on (Daksh, May 2026): session-scoped unlock removed
@@ -108,6 +111,8 @@ export function PrivateNotesModal({
   vendorId,
   canShow,
   canCancelRoyalty = false,
+  canWipeRoyalty = false,
+  canRecoverRoyalty = false,
 }: {
   vendorId: string;
   canShow: boolean;
@@ -115,6 +120,11 @@ export function PrivateNotesModal({
    *  to anyone with private-notes access, but DELETING (cancelling)
    *  one is dev / owner only. Hides the × on each row when false. */
   canCancelRoyalty?: boolean;
+  /** Mig 222 — "Clear all points" is owner / developer only. */
+  canWipeRoyalty?: boolean;
+  /** Mig 222 — only the developer can put a cleared ledger back, and
+   *  only for 48h. The owner is never even told a wipe happened. */
+  canRecoverRoyalty?: boolean;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("closed");
@@ -143,6 +153,12 @@ export function PrivateNotesModal({
   // so adding "right now" is one less click; the user can adjust if
   // they're back-filling a past day.
   const [newEntryDate, setNewEntryDate] = useState<string>(todayIstYmd);
+  // Mig 222 — clear-all + its 48h undo.
+  const [wipeStep, setWipeStep] = useState<0 | 1 | 2>(0);
+  const [wipeBusy, setWipeBusy] = useState(false);
+  const [wipeBatch, setWipeBatch] = useState<
+    { batchId: string; entryCount: number; wipedAt: string; expiresAt: string; wipedByName: string | null } | null
+  >(null);
 
   if (!canShow) return null;
 
@@ -200,6 +216,54 @@ export function PrivateNotesModal({
     setRoyaltyNet(result.netBalance);
     setRoyaltyReceived(result.receivedTotal);
     setRoyaltyGiven(result.givenTotal);
+    void loadWipeStatus();
+  }
+
+  /** Is there a cleared batch still inside its 48h window? Developer
+   *  only — the server returns null for everyone else, so the owner's
+   *  screen can't reveal that a wipe ever happened. */
+  async function loadWipeStatus() {
+    if (!canRecoverRoyalty) return;
+    const fd = new FormData();
+    fd.set("vendor_id", vendorId);
+    const res = await getVendorRoyaltyWipeStatusAction(fd);
+    if (res.ok) setWipeBatch(res.batch);
+  }
+
+  async function handleWipeRoyalty() {
+    setError(null);
+    setWipeBusy(true);
+    try {
+      const fd = new FormData();
+      fd.set("vendor_id", vendorId);
+      fd.set("passphrase", passphrase);
+      const res = await wipeVendorRoyaltyAction(fd);
+      if (!res.ok) { setError(res.error); return; }
+      setWipeStep(0);
+      await loadRoyalty(passphrase);
+      router.refresh();
+    } finally {
+      setWipeBusy(false);
+    }
+  }
+
+  async function handleRecoverRoyalty() {
+    if (!wipeBatch) return;
+    setError(null);
+    setWipeBusy(true);
+    try {
+      const fd = new FormData();
+      fd.set("vendor_id", vendorId);
+      fd.set("batch_id", wipeBatch.batchId);
+      fd.set("passphrase", passphrase);
+      const res = await recoverVendorRoyaltyWipeAction(fd);
+      if (!res.ok) { setError(res.error); return; }
+      setWipeBatch(null);
+      await loadRoyalty(passphrase);
+      router.refresh();
+    } finally {
+      setWipeBusy(false);
+    }
   }
 
   async function handleAddRoyaltyEntry() {
@@ -822,6 +886,137 @@ export function PrivateNotesModal({
                       canCancel={canCancelRoyalty}
                     />
                   </div>
+
+                  {/* Mig 222 — clear the whole ledger. Two presses, and
+                      the second one spells out exactly what is about to
+                      go. Deliberately the last thing in the tab and
+                      styled as a danger zone: it should take effort to
+                      reach and never sit next to the Add button. */}
+                  {canWipeRoyalty && (
+                    <div
+                      style={{
+                        border: `1px ${wipeStep > 0 ? "solid" : "dashed"} rgba(220,38,38,0.45)`,
+                        background: wipeStep > 0 ? "rgba(220,38,38,0.07)" : "transparent",
+                        borderRadius: 10,
+                        padding: wipeStep > 0 ? "12px 14px" : "9px 12px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 9,
+                      }}
+                    >
+                      {wipeStep === 0 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                            Clear this vendor&rsquo;s royalty points — received and paid together.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setWipeStep(1)}
+                            style={{
+                              marginLeft: "auto", padding: "7px 13px", fontSize: 12.5, fontWeight: 800,
+                              borderRadius: 8, border: "1.5px solid #b91c1c", background: "transparent",
+                              color: "#b91c1c", cursor: "pointer", whiteSpace: "nowrap",
+                            }}
+                          >
+                            🗑 Clear all points
+                          </button>
+                        </div>
+                      )}
+
+                      {wipeStep === 1 && (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>
+                            Clear all royalty points for this vendor?
+                          </div>
+                          <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+                            {royaltyEntries.length} {royaltyEntries.length === 1 ? "entry" : "entries"} will disappear
+                            from this tab and the net balance will read 0. Nothing is deleted — the developer can put it
+                            all back for 48 hours.
+                          </div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button type="button" onClick={() => setWipeStep(0)} style={SECONDARY_BUTTON_STYLE}>
+                              Keep them
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setWipeStep(2)}
+                              style={{
+                                padding: "8px 14px", fontSize: 12.5, fontWeight: 800, borderRadius: 8,
+                                border: "1.5px solid #b91c1c", background: "transparent", color: "#b91c1c", cursor: "pointer",
+                              }}
+                            >
+                              Yes, continue →
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {wipeStep === 2 && (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>
+                            Last check — this empties the tab for everyone.
+                          </div>
+                          <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+                            Received <strong>{royaltyReceived}</strong> · Paid <strong>{royaltyGiven}</strong> ·
+                            Net <strong>{royaltyNet >= 0 ? "+" : "−"}{Math.abs(royaltyNet)}</strong> will all read 0.
+                          </div>
+                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                            <button type="button" onClick={() => setWipeStep(0)} disabled={wipeBusy} style={SECONDARY_BUTTON_STYLE}>
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleWipeRoyalty}
+                              disabled={wipeBusy}
+                              style={{
+                                padding: "8px 16px", fontSize: 12.5, fontWeight: 800, borderRadius: 8,
+                                border: "none", background: "#b91c1c", color: "#fff",
+                                cursor: wipeBusy ? "wait" : "pointer",
+                              }}
+                            >
+                              {wipeBusy ? "Clearing…" : "Clear all points"}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mig 222 — developer-only recovery. Invisible to the
+                      owner, who is not told a wipe happened at all. */}
+                  {canRecoverRoyalty && wipeBatch && (
+                    <div
+                      style={{
+                        border: "1.5px solid rgba(37,99,235,0.45)",
+                        background: "rgba(37,99,235,0.06)",
+                        borderRadius: 10, padding: "11px 13px",
+                        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: "#1d4ed8" }}>
+                          ↺ {wipeBatch.entryCount} {wipeBatch.entryCount === 1 ? "entry" : "entries"} cleared — recoverable
+                        </div>
+                        <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>
+                          Cleared {new Date(wipeBatch.wipedAt).toLocaleString("en-IN")}
+                          {wipeBatch.wipedByName ? ` by ${wipeBatch.wipedByName}` : ""} · window closes{" "}
+                          {new Date(wipeBatch.expiresAt).toLocaleString("en-IN")}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRecoverRoyalty}
+                        disabled={wipeBusy}
+                        style={{
+                          marginLeft: "auto", padding: "8px 14px", fontSize: 12.5, fontWeight: 800,
+                          borderRadius: 8, border: "none", background: "#1d4ed8", color: "#fff",
+                          cursor: wipeBusy ? "wait" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {wipeBusy ? "Restoring…" : "Bring them back"}
+                      </button>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button type="button" onClick={close} style={SECONDARY_BUTTON_STYLE}>

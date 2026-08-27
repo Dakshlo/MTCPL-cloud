@@ -3554,7 +3554,14 @@ type RoyaltyEntryRow = {
   // Mig 175 — on-screen vendor signature (PNG/JPEG data-URL). NULL on
   // legacy rows added before the signature capture existed.
   signature_data?: string | null;
+  // Mig 222 — "clear all" stamp. Wiped rows are hidden everywhere the
+  // ledger is read; they are NOT deleted.
+  wiped_at?: string | null;
+  wipe_batch_id?: string | null;
 };
+
+/** Mig 222 — how long a cleared royalty ledger stays recoverable. */
+const ROYALTY_WIPE_UNDO_MS = 48 * 60 * 60 * 1000;
 
 /** Mig 064 — extra passphrase the owner enters to view the Royalty
  *  Approval queue. Distinct from the private-notes passphrase
@@ -3614,6 +3621,10 @@ export async function getVendorRoyaltyEntriesAction(
     .from("vendor_royalty_entries")
     .select("*")
     .eq("bill_vendor_id", vendorId)
+    // Mig 222 — a cleared ledger reads as empty for everyone, owner
+    // included. The rows are still there; only the developer's
+    // recover button knows about them, and only for 48h.
+    .is("wiped_at", null)
     .order("created_at", { ascending: false })
     .limit(500);
   if (error) return { ok: false, error: error.message };
@@ -3806,6 +3817,209 @@ export async function addVendorRoyaltyEntryAction(
     },
   );
   return { ok: true };
+}
+
+/* ── Mig 222 — clear the whole royalty ledger, with a 48h undo ────
+ *
+ * Daksh + his dad wanted one button that empties a vendor's royalty
+ * points, received and paid together, so the net reads 0 and both
+ * lists read empty — then a developer-only way to put it all back
+ * for two days.
+ *
+ * It is a HIDE, not a delete. Mig 051 set this table's ground rules
+ * and "soft-cancel only, no hard delete" was one of them; nothing
+ * here removes a row. A wipe stamps every live entry with a shared
+ * batch id, and every read of the ledger filters those out — so the
+ * owner genuinely sees an empty tab while the values sit safely in
+ * the table. Both the wipe and the recovery write the vendor, the
+ * actor, the entry count and the cleared net balance to audit_logs.
+ *
+ * After 48h the rows stay stamped and hidden; only the button goes
+ * away. Recovering later is a developer + SQL job on purpose.
+ */
+
+/** Everything the UI needs to decide whether to offer a recover
+ *  button: the most recent wipe for this vendor, if it is still
+ *  inside the undo window. Developer only — the owner is not shown
+ *  that a wipe ever happened. */
+export async function getVendorRoyaltyWipeStatusAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; batch: null }
+  | { ok: true; batch: { batchId: string; entryCount: number; wipedAt: string; expiresAt: string; wipedByName: string | null } }
+  | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  // Deliberately developer-only. Dad presses the button; only Daksh
+  // can undo it, which is the whole point of the two-key design.
+  if (profile.role !== "developer") return { ok: true, batch: null };
+
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+
+  const admin = createAdminSupabaseClient();
+  const since = new Date(Date.now() - ROYALTY_WIPE_UNDO_MS).toISOString();
+  const { data, error } = await admin
+    .from("vendor_royalty_entries")
+    .select("wipe_batch_id, wiped_at, wiped_by")
+    .eq("bill_vendor_id", vendorId)
+    .not("wiped_at", "is", null)
+    .gte("wiped_at", since)
+    .order("wiped_at", { ascending: false })
+    .limit(500);
+  if (error) return { ok: false, error: error.message };
+
+  const rows = (data ?? []) as Array<{ wipe_batch_id: string; wiped_at: string; wiped_by: string | null }>;
+  if (rows.length === 0) return { ok: true, batch: null };
+
+  // Newest batch only — an older one inside the window stays put.
+  const newest = rows[0];
+  const inBatch = rows.filter((r) => r.wipe_batch_id === newest.wipe_batch_id);
+
+  let wipedByName: string | null = null;
+  if (newest.wiped_by) {
+    const { data: prof } = await admin
+      .from("profiles")
+      .select("full_name")
+      .eq("id", newest.wiped_by)
+      .maybeSingle();
+    wipedByName = (prof as { full_name: string | null } | null)?.full_name ?? null;
+  }
+
+  return {
+    ok: true,
+    batch: {
+      batchId: newest.wipe_batch_id,
+      entryCount: inBatch.length,
+      wipedAt: newest.wiped_at,
+      expiresAt: new Date(new Date(newest.wiped_at).getTime() + ROYALTY_WIPE_UNDO_MS).toISOString(),
+      wipedByName,
+    },
+  };
+}
+
+/** Hide every live royalty entry for one vendor under a fresh batch
+ *  id. Owner / developer only, behind the same passphrase as the
+ *  rest of the tab — the two on-screen confirmations are the UI's
+ *  job, this is the server's. */
+export async function wipeVendorRoyaltyAction(
+  formData: FormData,
+): Promise<ActionResult & { wipedCount?: number }> {
+  const { profile } = await requireAuth();
+  // Same gate as cancelling a single entry: five hands may add, only
+  // two may remove.
+  if (profile.role !== "developer" && profile.role !== "owner") {
+    return { ok: false, error: "Only developer or owner can clear the royalty ledger." };
+  }
+
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId) return { ok: false, error: "Missing vendor_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) return { ok: false, error: "Passphrase has not been set yet." };
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // Read first so the audit entry can record exactly what was cleared
+  // — a count alone would not let anyone reconstruct the balance.
+  const { data: live, error: readErr } = await admin
+    .from("vendor_royalty_entries")
+    .select("id, amount, entry_type, status, cancelled_at")
+    .eq("bill_vendor_id", vendorId)
+    .is("wiped_at", null);
+  if (readErr) return { ok: false, error: readErr.message };
+  const liveRows = (live ?? []) as Array<{
+    id: string; amount: number | string; entry_type: string; status: string; cancelled_at: string | null;
+  }>;
+  if (liveRows.length === 0) {
+    return { ok: false, error: "Nothing to clear — this vendor has no royalty entries." };
+  }
+
+  let received = 0;
+  let given = 0;
+  for (const r of liveRows) {
+    if (r.cancelled_at || r.status !== "approved") continue;
+    const v = Number(r.amount);
+    if (r.entry_type === "received") received += v;
+    else if (r.entry_type === "given") given += v;
+  }
+
+  const batchId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const { data: updated, error: updErr } = await admin
+    .from("vendor_royalty_entries")
+    .update({ wiped_at: now, wiped_by: profile.id, wipe_batch_id: batchId })
+    .eq("bill_vendor_id", vendorId)
+    .is("wiped_at", null)
+    .select("id");
+  if (updErr) return { ok: false, error: updErr.message };
+  const wipedCount = (updated ?? []).length;
+  if (wipedCount === 0) {
+    return { ok: false, error: "Nothing was cleared — someone may have cleared it a moment ago. Reopen and check." };
+  }
+
+  await logAudit(profile.id, "vendor_royalty_wiped", "bill_vendor", vendorId, {
+    batch_id: batchId,
+    entry_count: wipedCount,
+    cleared_received: received,
+    cleared_given: given,
+    cleared_net_balance: given - received,
+    recoverable_until: new Date(Date.now() + ROYALTY_WIPE_UNDO_MS).toISOString(),
+    note: "Entries hidden, not deleted — rows remain in vendor_royalty_entries stamped with this batch id.",
+  });
+  await refreshAccountsPaths();
+  return { ok: true, wipedCount };
+}
+
+/** Put one wiped batch back. Developer only, inside the 48h window. */
+export async function recoverVendorRoyaltyWipeAction(
+  formData: FormData,
+): Promise<ActionResult & { restoredCount?: number }> {
+  const { profile } = await requireAuth();
+  if (profile.role !== "developer") {
+    return { ok: false, error: "Only the developer can restore a cleared royalty ledger." };
+  }
+
+  const vendorId = String(formData.get("vendor_id") || "").trim();
+  const batchId = String(formData.get("batch_id") || "").trim();
+  const plain = String(formData.get("passphrase") || "");
+  if (!vendorId || !batchId) return { ok: false, error: "Missing vendor_id or batch_id." };
+
+  const row = await readPassphraseRow();
+  if (!row || row.hash === null) return { ok: false, error: "Passphrase has not been set yet." };
+  const { verifyPassphrase } = await import("@/lib/private-notes");
+  if (!verifyPassphrase(plain, row.salt, row.hash)) {
+    return { ok: false, error: "Incorrect passphrase." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const since = new Date(Date.now() - ROYALTY_WIPE_UNDO_MS).toISOString();
+  const { data: restored, error: updErr } = await admin
+    .from("vendor_royalty_entries")
+    .update({ wiped_at: null, wiped_by: null, wipe_batch_id: null })
+    .eq("bill_vendor_id", vendorId)
+    .eq("wipe_batch_id", batchId)
+    // The window is enforced HERE, not just in the UI — a stale page
+    // must not be able to restore a batch whose 48h has run out.
+    .gte("wiped_at", since)
+    .select("id");
+  if (updErr) return { ok: false, error: updErr.message };
+  const restoredCount = (restored ?? []).length;
+  if (restoredCount === 0) {
+    return { ok: false, error: "Nothing restored — the 48-hour window has passed, or this batch was already restored." };
+  }
+
+  await logAudit(profile.id, "vendor_royalty_wipe_recovered", "bill_vendor", vendorId, {
+    batch_id: batchId,
+    entry_count: restoredCount,
+  });
+  await refreshAccountsPaths();
+  return { ok: true, restoredCount };
 }
 
 export async function cancelVendorRoyaltyEntryAction(
@@ -4013,7 +4227,8 @@ export async function getRoyaltySummaryAction(
       "amount, entry_type, entry_date, created_at, bill_vendor_id, bill_vendors!inner(name)",
     )
     .eq("status", "approved")
-    .is("cancelled_at", null);
+    .is("cancelled_at", null)
+    .is("wiped_at", null);
   if (fromDate) {
     // Match rows where the effective bucket date (entry_date or
     // created_at) is >= fromDate. Supabase can't OR across columns
@@ -4309,6 +4524,7 @@ export async function listPendingRoyaltyEntriesAction(
     )
     .eq("status", "pending_approval")
     .is("cancelled_at", null)
+    .is("wiped_at", null)
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) return { ok: false, error: error.message };
@@ -4405,7 +4621,8 @@ export async function countPendingRoyaltyApprovalsAction(): Promise<number> {
     .from("vendor_royalty_entries")
     .select("id", { count: "exact", head: true })
     .eq("status", "pending_approval")
-    .is("cancelled_at", null);
+    .is("cancelled_at", null)
+    .is("wiped_at", null);
   return count ?? 0;
 }
 

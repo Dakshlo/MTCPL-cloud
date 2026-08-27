@@ -551,6 +551,10 @@ export default async function BillVendorDetailPage({
             canCancelRoyalty={
               profile.role === "developer" || profile.role === "owner"
             }
+            canWipeRoyalty={
+              profile.role === "developer" || profile.role === "owner"
+            }
+            canRecoverRoyalty={profile.role === "developer"}
           />
         </div>
       )}
