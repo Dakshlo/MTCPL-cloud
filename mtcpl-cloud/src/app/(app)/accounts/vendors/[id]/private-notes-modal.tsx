@@ -156,6 +156,14 @@ export function PrivateNotesModal({
   // Mig 222 — clear-all + its 48h undo.
   const [wipeStep, setWipeStep] = useState<0 | 1 | 2>(0);
   const [wipeBusy, setWipeBusy] = useState(false);
+  // Aug 2026 — adding an entry used to be a spinner on a button and
+  // nothing else: no confirmation, and the new row appeared somewhere
+  // in a list of twenty identical-looking cards. `justAdded` drives a
+  // success banner AND a flash on the row it created, so you can see
+  // what you just did without hunting for it.
+  const [justAdded, setJustAdded] = useState<
+    { key: string; type: "received" | "given"; amount: number; date: string } | null
+  >(null);
   const [wipeBatch, setWipeBatch] = useState<
     { batchId: string; entryCount: number; wipedAt: string; expiresAt: string; wipedByName: string | null } | null
   >(null);
@@ -309,6 +317,15 @@ export function PrivateNotesModal({
         setError(r.error);
         return;
       }
+      // Flash-key matches on type + amount + date so the reloaded list
+      // can pick out the row this add created without the action
+      // having to return an id.
+      setJustAdded({
+        key: `${newEntryType}|${amount}|${newEntryDate}`,
+        type: newEntryType,
+        amount,
+        date: newEntryDate,
+      });
       setNewEntryAmount("");
       setNewEntryDescription("");
       setNewEntrySignature(null);
@@ -319,6 +336,13 @@ export function PrivateNotesModal({
       await loadRoyalty(passphrase);
     });
   }
+
+  // Clear the just-added banner + row flash after a few seconds.
+  useEffect(() => {
+    if (!justAdded) return;
+    const t = setTimeout(() => setJustAdded(null), 4200);
+    return () => clearTimeout(t);
+  }, [justAdded]);
 
   async function handleCancelRoyaltyEntry(entryId: string, amount: number) {
     setError(null);
@@ -531,7 +555,7 @@ export function PrivateNotesModal({
         <div
           style={{
             width: "100%",
-            maxWidth: mode === "edit" ? 880 : 560,
+            maxWidth: mode === "edit" ? (tab === "royalty" ? 1040 : 880) : 560,
             background: "var(--surface, #fff)",
             border: "1px solid var(--border)",
             borderRadius: 14,
@@ -840,8 +864,29 @@ export function PrivateNotesModal({
                       type="button"
                       onClick={handleAddRoyaltyEntry}
                       disabled={pending || !newEntryAmount}
-                      style={{ ...PRIMARY_BUTTON_STYLE, padding: "8px 14px", fontSize: 12 }}
+                      style={{
+                        ...PRIMARY_BUTTON_STYLE,
+                        padding: "8px 16px",
+                        fontSize: 12,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 7,
+                        cursor: pending ? "wait" : !newEntryAmount ? "not-allowed" : "pointer",
+                        whiteSpace: "nowrap",
+                      }}
                     >
+                      {pending && (
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 11, height: 11, borderRadius: "50%",
+                            border: "2px solid rgba(255,255,255,0.35)",
+                            borderTopColor: "#fff",
+                            animation: "pvd-spin 0.7s linear infinite",
+                            display: "inline-block",
+                          }}
+                        />
+                      )}
                       {pending ? "Adding…" : "+ Add"}
                     </button>
                   </div>
@@ -849,12 +894,74 @@ export function PrivateNotesModal({
                   {/* On-screen vendor signature (mig 175) — MANDATORY since Jul
                       2026 (Daksh); the owner sees it when approving. Works on
                       tablet (finger/stylus) + desktop; 📷 photo-of-paper too. */}
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "7px 10px", borderRadius: 9, border: `1.5px ${newEntrySignature ? "solid rgba(22,101,52,0.35)" : "dashed #dc2626"}`, background: newEntrySignature ? "rgba(22,101,52,0.05)" : "rgba(220,38,38,0.04)" }}>
-                    <span style={{ fontSize: 11.5, color: newEntrySignature ? "#15803d" : "#b91c1c", fontWeight: 800 }}>
-                      Vendor signature <span style={{ fontWeight: 700 }}>*</span>{newEntrySignature ? " ✓" : " — required before adding"}
-                    </span>
-                    <SignatureCaptureButton value={newEntrySignature} onChange={setNewEntrySignature} />
-                  </div>
+                  {/* Aug 2026 — this band used to shout in red the whole
+                      time the tab was open, so the alarm meant nothing by
+                      the time it mattered. It is neutral until you start
+                      an entry (an amount typed), red only then, and green
+                      with a thumbnail once the vendor has signed. */}
+                  {(() => {
+                    const started = newEntryAmount.trim().length > 0;
+                    const signed = !!newEntrySignature;
+                    const tone = signed
+                      ? { fg: "#15803d", bd: "solid rgba(22,101,52,0.4)", bg: "rgba(34,197,94,0.07)" }
+                      : started
+                        ? { fg: "#b91c1c", bd: "dashed #dc2626", bg: "rgba(220,38,38,0.05)" }
+                        : { fg: "var(--muted)", bd: "dashed var(--border)", bg: "transparent" };
+                    return (
+                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 11px", borderRadius: 10, border: `1.5px ${tone.bd}`, background: tone.bg, transition: "background .15s ease, border-color .15s ease" }}>
+                        <span style={{ fontSize: 11.5, color: tone.fg, fontWeight: 800 }}>
+                          {signed
+                            ? "✓ Vendor signed"
+                            : started
+                              ? "Vendor signature * — required before adding"
+                              : "Vendor signature * — needed on every entry"}
+                        </span>
+                        {signed && (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={newEntrySignature}
+                            alt="Captured vendor signature"
+                            style={{ height: 26, maxWidth: 120, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 5, background: "#fff" }}
+                          />
+                        )}
+                        <span style={{ marginLeft: "auto" }}>
+                          <SignatureCaptureButton value={newEntrySignature} onChange={setNewEntrySignature} />
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Aug 2026 — say plainly what just happened. The old
+                      flow gave a spinner and then silence; you had to
+                      go and count the list to know it worked. */}
+                  {justAdded && (
+                    <div
+                      role="status"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap",
+                        padding: "9px 12px", borderRadius: 9,
+                        border: `1.5px solid ${justAdded.type === "given" ? "rgba(22,101,52,0.4)" : "rgba(185,28,28,0.4)"}`,
+                        background: justAdded.type === "given" ? "rgba(34,197,94,0.09)" : "rgba(220,38,38,0.07)",
+                        animation: "pvd-slide-in 0.22s ease-out",
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>✓</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: justAdded.type === "given" ? "#15803d" : "#b91c1c" }}>
+                        Added — {fmtNum(justAdded.amount)} {justAdded.type === "given" ? "paid" : "received"}
+                      </span>
+                      <span className="muted" style={{ fontSize: 11.5 }}>
+                        {formatEntryDate(justAdded.date, justAdded.date)} · highlighted below
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setJustAdded(null)}
+                        aria-label="Dismiss"
+                        style={{ marginLeft: "auto", background: "transparent", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", padding: 2 }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
 
                   {error && <ErrorBox text={error} />}
 
@@ -875,6 +982,7 @@ export function PrivateNotesModal({
                       entries={royaltyEntries.filter((e) => e.entryType === "received")}
                       onCancel={handleCancelRoyaltyEntry}
                       canCancel={canCancelRoyalty}
+                      flashKey={justAdded?.key ?? null}
                     />
                     <RoyaltyColumn
                       title="PAID  (+)"
@@ -884,6 +992,7 @@ export function PrivateNotesModal({
                       entries={royaltyEntries.filter((e) => e.entryType === "given")}
                       onCancel={handleCancelRoyaltyEntry}
                       canCancel={canCancelRoyalty}
+                      flashKey={justAdded?.key ?? null}
                     />
                   </div>
 
@@ -1163,8 +1272,10 @@ function SummaryStat({
       </span>
       <span
         style={{
-          fontSize: bold ? 18 : 15,
-          fontWeight: 700,
+          fontSize: bold ? 26 : 16,
+          fontWeight: bold ? 900 : 700,
+          lineHeight: 1.1,
+          letterSpacing: bold ? "-0.02em" : undefined,
           color,
           fontFamily: "ui-monospace, monospace",
         }}
@@ -1184,6 +1295,7 @@ function RoyaltyColumn({
   entries,
   onCancel,
   canCancel,
+  flashKey = null,
 }: {
   title: string;
   color: string;
@@ -1192,6 +1304,9 @@ function RoyaltyColumn({
   entries: RoyaltyEntry[];
   onCancel: (entryId: string, amount: number) => void;
   canCancel: boolean;
+  /** `type|amount|date` of the entry just added, so the row it created
+   *  can be picked out of a list of near-identical cards. */
+  flashKey?: string | null;
 }) {
   // Tap a card's signature → open it big for a proper look (mig 175).
   const [zoom, setZoom] = useState<string | null>(null);
@@ -1217,12 +1332,15 @@ function RoyaltyColumn({
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 6,
-        padding: 10,
+        gap: 7,
+        padding: 11,
         background: bg,
         border: `1px solid ${border}`,
-        borderRadius: 8,
-        minHeight: 200,
+        borderRadius: 12,
+        // Was a flat 200px floor, which left a tall empty box on the
+        // side that had nothing in it. Let the column size to its
+        // content and cap the scroll instead.
+        minHeight: 0,
       }}
     >
       <div
@@ -1263,43 +1381,62 @@ function RoyaltyColumn({
             </span>
           )}
         </span>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            color,
-            fontFamily: "ui-monospace, monospace",
-          }}
-        >
-          {fmtNum(sum)}
-        </span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {liveEntries.length === 0 && (
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 7 }}>
+          <span className="muted" style={{ fontSize: 10, fontWeight: 700 }}>
+            {liveEntries.length} {liveEntries.length === 1 ? "entry" : "entries"}
+          </span>
           <span
             style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              fontStyle: "italic",
+              fontSize: 14,
+              fontWeight: 900,
+              color,
+              fontFamily: "ui-monospace, monospace",
             }}
           >
-            No entries yet.
+            {fmtNum(sum)}
           </span>
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 420, overflowY: "auto", paddingRight: 2 }}>
+        {liveEntries.length === 0 && (
+          <div
+            style={{
+              fontSize: 11.5,
+              color: "var(--muted)",
+              textAlign: "center",
+              padding: "18px 8px",
+              border: "1px dashed var(--border)",
+              borderRadius: 9,
+              background: "rgba(255,255,255,0.5)",
+            }}
+          >
+            Nothing here yet.
+          </div>
         )}
         {liveEntries.map((e) => {
           const isPending = e.status === "pending_approval";
+          // Freshly added row — matched on type+amount+date because the
+          // add action doesn't hand back an id.
+          const isFlash =
+            !!flashKey &&
+            flashKey === `${e.entryType}|${e.amount}|${e.entryDate ?? ""}`;
           return (
             <div
               key={e.id}
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 2,
-                padding: "6px 8px",
+                gap: 3,
+                padding: "8px 10px",
                 background: isPending ? "#f3f4f6" : "#fff",
-                border: isPending ? "1px dashed #9ca3af" : "1px solid var(--border)",
-                borderRadius: 6,
+                border: isFlash
+                  ? `2px solid ${color}`
+                  : isPending ? "1px dashed #9ca3af" : "1px solid var(--border)",
+                borderLeft: isPending ? undefined : `3px solid ${color}`,
+                borderRadius: 9,
+                boxShadow: isFlash ? `0 0 0 3px ${color}22` : "none",
                 fontSize: 12,
+                transition: "box-shadow .2s ease, border-color .2s ease",
                 // Mig 064 follow-on (Daksh) — pending entries render
                 // grayscale so they read as "not real yet" while
                 // still being visible. Filter desaturates the row's
@@ -1317,7 +1454,9 @@ function RoyaltyColumn({
                 <span
                   style={{
                     fontFamily: "ui-monospace, monospace",
-                    fontWeight: 700,
+                    fontWeight: 900,
+                    fontSize: 15,
+                    letterSpacing: "-0.02em",
                     color,
                     display: "inline-flex",
                     alignItems: "center",
@@ -1325,6 +1464,11 @@ function RoyaltyColumn({
                   }}
                 >
                   {fmtNum(e.amount)}
+                  {isFlash && (
+                    <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", background: color, borderRadius: 999, padding: "1px 7px", letterSpacing: "0.05em" }}>
+                      NEW
+                    </span>
+                  )}
                   {isPending && (
                     <span
                       style={{
@@ -1361,7 +1505,7 @@ function RoyaltyColumn({
                 )}
               </div>
               {e.description && (
-                <span style={{ fontSize: 11, color: "var(--text)" }}>
+                <span style={{ fontSize: 11.5, color: "var(--text)", fontWeight: 600, lineHeight: 1.35 }}>
                   {e.description}
                 </span>
               )}
@@ -1370,28 +1514,27 @@ function RoyaltyColumn({
                   createdAt date so they keep reading sensibly without
                   any backfill. Format is "21 May 2026" — short,
                   unambiguous. */}
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "var(--muted)",
-                  fontFamily: "ui-monospace, monospace",
-                  fontWeight: 600,
-                }}
-                title={
-                  e.entryDate
-                    ? "Date this entry happened"
-                    : "Date entry was added (legacy — no explicit business date stored)"
-                }
-              >
-                {formatEntryDate(e.entryDate, e.createdAt)}
-              </span>
-              {/* Mig 064 — every row labels who added it. Helps the
-                  owner approve faster ("oh, this is Govind's entry"). */}
-              {e.createdByName && (
-                <span style={{ fontSize: 10, color: "var(--muted)", fontStyle: "italic" }}>
-                  by {e.createdByName}
+              {/* Date + who added it on ONE line — they were two stacked
+                  rows, which made every card two lines taller than it
+                  needed to be. */}
+              <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 10, color: "var(--muted)" }}>
+                <span
+                  style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700 }}
+                  title={
+                    e.entryDate
+                      ? "Date this entry happened"
+                      : "Date entry was added (legacy — no explicit business date stored)"
+                  }
+                >
+                  {formatEntryDate(e.entryDate, e.createdAt)}
                 </span>
-              )}
+                {e.createdByName && (
+                  <>
+                    <span style={{ opacity: 0.5 }}>·</span>
+                    <span style={{ fontStyle: "italic" }}>{e.createdByName}</span>
+                  </>
+                )}
+              </span>
               {/* Mig 175 — vendor signature on this entry (if any). Tap to
                   open it full-size. */}
               {e.signature && (
@@ -1399,11 +1542,11 @@ function RoyaltyColumn({
                   type="button"
                   onClick={() => setZoom(e.signature)}
                   title="Tap to view the vendor's signature full-size"
-                  style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 0", border: "none", background: "transparent", cursor: "zoom-in", alignSelf: "flex-start" }}
+                  style={{ marginTop: 2, display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 7px 2px 3px", border: "1px solid var(--border)", borderRadius: 7, background: "#fff", cursor: "zoom-in", alignSelf: "flex-start" }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={e.signature} alt="Vendor signature" style={{ height: 32, maxWidth: 130, objectFit: "contain", border: "1px solid var(--border)", borderRadius: 5, background: "#fff" }} />
-                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)" }}>✍️ sign</span>
+                  <img src={e.signature} alt="Vendor signature" style={{ height: 22, maxWidth: 96, objectFit: "contain", borderRadius: 4, background: "#fff" }} />
+                  <span style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", letterSpacing: "0.04em" }}>SIGNED</span>
                 </button>
               )}
             </div>
