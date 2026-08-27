@@ -11,6 +11,9 @@ import type { OtpChannel } from "@/lib/otp-channel";
 
 type Step = "phone" | "otp";
 
+/** Wrong tries allowed on one code before it must be re-sent. */
+const MAX_OTP_ATTEMPTS = 3;
+
 function normalizePhone(raw: string): string {
   // Strip all non-digits
   const digits = raw.replace(/\D/g, "");
@@ -28,6 +31,18 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
+  // Aug 2026 (Daksh) — three wrong tries and this code is dead; you
+  // must fetch a new one. Two reasons. For a real person it replaces
+  // "Invalid code" over and over with a clear "that code is finished,
+  // here's a fresh one". For anyone guessing, it caps a single code at
+  // 3 of 1,000,000 rather than letting them sit on it.
+  //
+  // Honest about what this is: the browser calls Supabase's verifyOtp
+  // directly, so a script can ignore this counter entirely. Supabase's
+  // own rate limits are the control that actually stops automated
+  // guessing — this is the layer that helps the person at the keyboard.
+  const [attemptsLeft, setAttemptsLeft] = useState(MAX_OTP_ATTEMPTS);
+  const [codeBurned, setCodeBurned] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   // Daksh May 2026 — success overlay state. Set true the moment
@@ -80,6 +95,8 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
       const err = (result as { error?: { message: string } | null }).error;
       if (err) throw err;
       setStep("otp");
+      setAttemptsLeft(MAX_OTP_ATTEMPTS);
+      setCodeBurned(false);
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       // Surface raw Supabase error verbatim so the operator can act on
@@ -139,7 +156,17 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
       }, 2000);
       return;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid or expired code. Try again.");
+      const left = attemptsLeft - 1;
+      setAttemptsLeft(left);
+      if (left <= 0) {
+        setCodeBurned(true);
+        setOtp("");
+        setError("That code is finished after 3 wrong tries. Send a new one to continue.");
+      } else {
+        setError(
+          `${err instanceof Error ? err.message : "Invalid or expired code."} ${left} ${left === 1 ? "try" : "tries"} left.`,
+        );
+      }
       setPending(false);
     }
   }
@@ -149,7 +176,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
   useEffect(() => {
     if (step !== "otp") return;
     if (otp.length !== 6) return;
-    if (pending || succeeded) return;
+    if (pending || succeeded || codeBurned) return;
     // Fake form-submit event so the existing handler runs.
     const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
     handleVerifyOtp(fakeEvent);
@@ -415,7 +442,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
             </span>
             <button
               type="button"
-              onClick={() => { setStep("phone"); setOtp(""); setError(""); }}
+              onClick={() => { setStep("phone"); setOtp(""); setError(""); setAttemptsLeft(MAX_OTP_ATTEMPTS); setCodeBurned(false); }}
               disabled={succeeded}
               style={{
                 background: "none",
@@ -454,7 +481,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
               // no typing at all. Without it the phone doesn't know
               // this box wants the code.
               autoComplete="one-time-code"
-              disabled={succeeded}
+              disabled={succeeded || codeBurned}
               style={{
                 letterSpacing: 12,
                 fontSize: 24,
@@ -472,7 +499,7 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
 
           <button
             className="primary-button"
-            disabled={pending || succeeded || otp.length < 6}
+            disabled={pending || succeeded || codeBurned || otp.length < 6}
             type="submit"
             style={{
               marginTop: 4,
@@ -494,12 +521,12 @@ export function AuthForm({ whatsappEnabled = false }: { whatsappEnabled?: boolea
 
           <button
             type="button"
-            className="ghost-button"
+            className={codeBurned ? "primary-button" : "ghost-button"}
             onClick={handleSendOtp}
             disabled={pending || succeeded}
             style={{ fontSize: 13 }}
           >
-            Resend code
+            {codeBurned ? "Send a new code" : "Resend code"}
           </button>
         </form>
       )}
