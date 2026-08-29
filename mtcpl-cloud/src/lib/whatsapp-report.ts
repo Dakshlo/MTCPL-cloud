@@ -192,24 +192,21 @@ function reportMonthFor(y: number, m: number, d: number) {
 
 // ── Data ────────────────────────────────────────────────────────────
 
-/* Aug 2026 — Daksh: "in blocks added and cutting done show 2-2 cards, one
-   for marble and one for sandstone; for marble show tonnes and for sandstone
-   CFT". The two stones are bought and measured differently — marble comes in
-   by the truck in TONNES and its blocks carry no dimensions, sandstone is
-   CFT throughout — so one blended number was never a number he could use.
-   Cutting splits the same way but stays CFT on both sides: slabs come off
-   the machine with real dimensions whatever the stone. */
+/* Aug 2026 — Daksh: "in blocks added show 2 cards, one for marble and one
+   for sandstone; for marble tonnes, for sandstone CFT". The two stones are
+   BOUGHT differently — marble comes in by the truck in TONNES and its blocks
+   carry no dimensions at all, sandstone is CFT throughout — so one blended
+   blocks number was never a number he could use.
+   Cutting stays a single blended card ("both stone, no separate"): a cut
+   slab has real dimensions whatever it came from, so CFT already adds up
+   across the two. */
 type DayTotals = {
   blocks: {
     count: number; cft: number;
     marble: { count: number; tonnes: number };
     sandstone: { count: number; cft: number };
   };
-  cutting: {
-    slabs: number; cft: number;
-    marble: { slabs: number; cft: number };
-    sandstone: { slabs: number; cft: number };
-  };
+  cutting: { slabs: number; cft: number };
   carving: { slabs: number; cft: number };
   dispatch: { slabs: number; cft: number; tonnes: number; trucks: number };
 };
@@ -318,7 +315,7 @@ async function cftBySlab(admin: AdminClient, ids: string[]): Promise<Map<string,
 
 const emptyTotals = (): DayTotals => ({
   blocks: { count: 0, cft: 0, marble: { count: 0, tonnes: 0 }, sandstone: { count: 0, cft: 0 } },
-  cutting: { slabs: 0, cft: 0, marble: { slabs: 0, cft: 0 }, sandstone: { slabs: 0, cft: 0 } },
+  cutting: { slabs: 0, cft: 0 },
   carving: { slabs: 0, cft: 0 },
   dispatch: { slabs: 0, cft: 0, tonnes: 0, trucks: 0 },
 });
@@ -440,10 +437,6 @@ async function aggregateDay(
       for (const s of slabs) {
         const c = cft(Number(s.length_ft), Number(s.width_ft), Number(s.thickness_ft));
         totals.cutting.slabs += 1; totals.cutting.cft += c;
-        // Cut slabs are CFT on both stones — a marble slab comes off the
-        // machine with real dimensions, unlike the block it came from.
-        const side = isMarble(s.stone, categoryMap) ? totals.cutting.marble : totals.cutting.sandstone;
-        side.slabs += 1; side.cft += c;
         const k = stoneLabel(s.stone);
         const g = byStone.get(k) ?? { slabs: 0, cft: 0 };
         g.slabs += 1; g.cft += c; byStone.set(k, g);
@@ -1234,13 +1227,14 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
        confusing. Just show 2 numbers — that day on the left, month so
        far on the right." Then: "dad is more interested in CFT, not
        blocks or slabs." Then: "in blocks added and cutting done show
-       2-2 cards, one for marble and one for sandstone — for marble
-       tonnes, for sandstone CFT."
+       2 cards on blocks added, one for marble and one for sandstone —
+       for marble tonnes, for sandstone CFT." Cutting he wants left as
+       one card: "both stone, no separate."
 
-       So: six cards, each one metric for one stone, each card exactly
-       two numbers. Marble blocks are stated in TONNES because that is
-       how they are bought and the blocks carry no dimensions at all;
-       everything downstream is CFT, cut marble included.
+       So: five cards, each exactly two numbers. Marble BLOCKS are
+       stated in tonnes because that is how they are bought and those
+       blocks carry no dimensions at all; everything downstream is CFT,
+       cut marble included, which is why cutting adds up as one figure.
 
        Everything that used to crowd these cards (prev-day pill,
        sparkline, vs-last-month, pace projection) is gone. The 24 h
@@ -1264,14 +1258,9 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         month: fmt0(data.mtd.blocks.sandstone.cft),   monthSub: `${fmt0(data.mtd.blocks.sandstone.count)} blocks`,
       },
       {
-        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE", stone: "MARBLE", unit: "CFT",
-        today: fmt0(data.today.cutting.marble.cft), todaySub: `${data.today.cutting.marble.slabs} slabs`,
-        month: fmt0(data.mtd.cutting.marble.cft),   monthSub: `${fmt0(data.mtd.cutting.marble.slabs)} slabs`,
-      },
-      {
-        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE", stone: "SANDSTONE", unit: "CFT",
-        today: fmt0(data.today.cutting.sandstone.cft), todaySub: `${data.today.cutting.sandstone.slabs} slabs`,
-        month: fmt0(data.mtd.cutting.sandstone.cft),   monthSub: `${fmt0(data.mtd.cutting.sandstone.slabs)} slabs`,
+        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE", stone: "", unit: "CFT",
+        today: fmt0(data.today.cutting.cft), todaySub: `${data.today.cutting.slabs} slabs`,
+        month: fmt0(data.mtd.cutting.cft),   monthSub: `${fmt0(data.mtd.cutting.slabs)} slabs`,
       },
       {
         c: COL.amber, wash: WASH.amber, label: "CARVING DONE", stone: "", unit: "CFT",
@@ -1287,28 +1276,28 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       },
     ];
 
-    // Six cards on one phone page: 118 pt each clears the footer with the
-    // numbers still the biggest thing on the sheet.
-    const ch = 118, gap = 10;
+    // Five cards on one phone page: 142 pt each clears the footer and
+    // leaves the numbers the biggest thing on the sheet.
+    const ch = 142, gap = 12;
     const midX = M + cw / 2;
     for (const k of cards) {
       P.glass(M, y, cw, ch, 13, k.c, k.wash);
-      P.t(k.label, M + 18, y - 25, 12.5, bold, k.c);
-      if (k.stone) P.t(`· ${k.stone}`, M + 18 + bold.widthOfTextAtSize(k.label, 12.5) + 6, y - 25, 12.5, bold, muted);
-      P.pg.drawLine({ start: { x: midX, y: y - 38 }, end: { x: midX, y: y - ch + 12 }, thickness: 0.7, color: k.c, opacity: 0.3 });
+      P.t(k.label, M + 18, y - 28, 13.5, bold, k.c);
+      if (k.stone) P.t(`· ${k.stone}`, M + 18 + bold.widthOfTextAtSize(k.label, 13.5) + 6, y - 28, 13.5, bold, muted);
+      P.pg.drawLine({ start: { x: midX, y: y - 42 }, end: { x: midX, y: y - ch + 14 }, thickness: 0.7, color: k.c, opacity: 0.3 });
 
-      const NUM = 27;
+      const NUM = 32;
       // LEFT — that day.
-      P.t("LAST 24 H", M + 18, y - 48, 8.5, bold, muted);
-      P.t(k.today, M + 18, y - 82, NUM, bold, C_24H);
-      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.today, NUM) + 6, y - 82, 11, bold, C_24H);
-      P.t(k.todaySub, M + 18, y - 100, 9, bold, muted);
+      P.t("LAST 24 H", M + 18, y - 56, 9, bold, muted);
+      P.t(k.today, M + 18, y - 96, NUM, bold, C_24H);
+      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.today, NUM) + 7, y - 96, 12, bold, C_24H);
+      P.t(k.todaySub, M + 18, y - 116, 9.5, bold, muted);
 
       // RIGHT — the month so far, and exactly how many days that is.
-      P.t(moLabel, midX + 16, y - 48, 8.5, bold, C_MTD);
-      P.t(k.month, midX + 16, y - 82, NUM, bold, C_MTD);
-      P.t(k.unit, midX + 16 + bold.widthOfTextAtSize(k.month, NUM) + 6, y - 82, 11, bold, C_MTD);
-      P.t(k.monthSub, midX + 16, y - 100, 9, bold, muted);
+      P.t(moLabel, midX + 16, y - 56, 9, bold, C_MTD);
+      P.t(k.month, midX + 16, y - 96, NUM, bold, C_MTD);
+      P.t(k.unit, midX + 16 + bold.widthOfTextAtSize(k.month, NUM) + 7, y - 96, 12, bold, C_MTD);
+      P.t(k.monthSub, midX + 16, y - 116, 9.5, bold, muted);
 
       y -= ch + gap;
     }
