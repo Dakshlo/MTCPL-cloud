@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { PassphraseInput } from "@/components/passphrase-input";
 import { useRouter } from "next/navigation";
 
 const SPOT_CODE: Record<string, string> = { owner: "home", office: "aadesh" };
@@ -100,12 +101,11 @@ export function LedgerSecretTrigger() {
         style={{ width: "min(320px, 100%)", background: "var(--surface, #fff)", borderRadius: 14, padding: 20, boxShadow: "0 24px 60px rgba(0,0,0,0.35)" }}
       >
         <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10, color: "var(--text)" }}>🔒 Enter password</div>
-        <input
+        <PassphraseInput
           autoFocus
-          type="password"
           inputMode="numeric"
           value={pwd}
-          onChange={(e) => { setPwd(e.target.value); setErr(false); }}
+          onChange={(v) => { setPwd(v); setErr(false); }}
           style={{ width: "100%", padding: "11px 12px", borderRadius: 9, border: `1px solid ${err ? "#dc2626" : "var(--border)"}`, background: "var(--bg)", color: "var(--text)", fontSize: 18, letterSpacing: "0.25em", textAlign: "center" }}
         />
         {err && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 6, fontWeight: 700 }}>Wrong password</div>}

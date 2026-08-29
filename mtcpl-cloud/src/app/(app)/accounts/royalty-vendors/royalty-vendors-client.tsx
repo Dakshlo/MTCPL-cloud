@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { PassphraseInput } from "@/components/passphrase-input";
 import Link from "next/link";
 import { listRoyaltyVendorsAction } from "../actions";
 import { PrivateNotesModal } from "../vendors/[id]/private-notes-modal";
@@ -112,12 +113,12 @@ export function RoyaltyVendorsClient({
             </p>
           </div>
           <form onSubmit={unlock} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <input
-              type="password"
+            <PassphraseInput
               value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
+              onChange={setPassphrase}
               placeholder="Passphrase"
               autoFocus
+              inputMode="numeric"
               style={{ padding: "10px 12px", fontSize: 14, border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
             />
             {error && (

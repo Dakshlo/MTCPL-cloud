@@ -22,6 +22,7 @@
  */
 
 import Link from "next/link";
+import { PassphraseInput } from "@/components/passphrase-input";
 import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import { SecretHover } from "@/components/secret-hover";
@@ -663,10 +664,9 @@ export function RoyaltySummaryClient({
               </div>
             </div>
           </div>
-          <input
-            type="password"
+          <PassphraseInput
             value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
+            onChange={setPassphrase}
             placeholder="Passphrase"
             autoFocus
             inputMode="numeric"

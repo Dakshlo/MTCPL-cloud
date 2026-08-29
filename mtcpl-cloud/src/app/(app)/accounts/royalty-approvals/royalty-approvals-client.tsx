@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useState, useTransition } from "react";
+import { PassphraseInput } from "@/components/passphrase-input";
 import Link from "next/link";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 
@@ -241,10 +242,9 @@ export function RoyaltyApprovalsClient({
               the same number every time.
             </div>
           </div>
-          <input
-            type="password"
+          <PassphraseInput
             value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
+            onChange={setPassphrase}
             placeholder="Passphrase"
             autoFocus
             inputMode="numeric"

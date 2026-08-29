@@ -20,6 +20,7 @@
 // of the client flag (defence in depth).
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { PassphraseInput } from "@/components/passphrase-input";
 import { SecretDot } from "./secret-dot";
 import { SignatureCaptureButton } from "@/components/signature-pad";
 import { createPortal } from "react-dom";
@@ -650,18 +651,16 @@ export function PrivateNotesModal({
                 First time setting up. Pick a passphrase to lock private notes across all vendors.
                 Min 6 characters. Don't lose it — recovery requires a developer to reset the lock.
               </p>
-              <input
-                type="password"
+              <PassphraseInput
                 value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                onChange={setPassphrase}
                 placeholder="New passphrase"
                 autoFocus
                 style={INPUT_STYLE}
               />
-              <input
-                type="password"
+              <PassphraseInput
                 value={passphrase2}
-                onChange={(e) => setPassphrase2(e.target.value)}
+                onChange={setPassphrase2}
                 placeholder="Confirm passphrase"
                 style={INPUT_STYLE}
               />
@@ -685,10 +684,9 @@ export function PrivateNotesModal({
               <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>
                 Enter the notes passphrase. Lasts for this browser tab session.
               </p>
-              <input
-                type="password"
+              <PassphraseInput
                 value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                onChange={setPassphrase}
                 placeholder="Passphrase"
                 autoFocus
                 style={INPUT_STYLE}
