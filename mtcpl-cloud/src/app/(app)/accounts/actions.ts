@@ -4224,10 +4224,14 @@ export async function cancelVendorRoyaltyEntryAction(
   // Fetch prior values for the audit row before cancelling.
   const { data: prior } = await admin
     .from("vendor_royalty_entries")
-    .select("bill_vendor_id, amount, entry_type, cancelled_at")
+    .select("bill_vendor_id, amount, entry_type, cancelled_at, wiped_at")
     .eq("id", entryId)
     .maybeSingle();
   if (!prior) return { ok: false, error: "Entry not found." };
+  if ((prior as { wiped_at?: string | null }).wiped_at) {
+    // Mig 222 — the ledger was cleared out from under this screen.
+    return { ok: false, error: "This ledger was cleared. Reopen the vendor to see the current entries." };
+  }
   if ((prior as { cancelled_at?: string | null }).cancelled_at) {
     return { ok: false, error: "Entry is already cancelled." };
   }
@@ -4813,10 +4817,15 @@ export async function approveRoyaltyEntryAction(
   // already approved / rejected / cancelled.
   const { data: prior } = await admin
     .from("vendor_royalty_entries")
-    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at")
+    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at, wiped_at")
     .eq("id", entryId)
     .maybeSingle();
   if (!prior) return { ok: false, error: "Entry not found." };
+  if ((prior as { wiped_at?: string | null }).wiped_at) {
+    // Mig 222 — a wipe takes pending entries too. Someone holding a
+    // stale approval queue must not act on one that is no longer there.
+    return { ok: false, error: "That vendor's ledger was cleared — this entry is no longer in the queue." };
+  }
   const p = prior as {
     bill_vendor_id: string;
     amount: number;
@@ -4871,10 +4880,15 @@ export async function rejectRoyaltyEntryAction(
   const admin = createAdminSupabaseClient();
   const { data: prior } = await admin
     .from("vendor_royalty_entries")
-    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at")
+    .select("id, bill_vendor_id, amount, entry_type, status, cancelled_at, wiped_at")
     .eq("id", entryId)
     .maybeSingle();
   if (!prior) return { ok: false, error: "Entry not found." };
+  if ((prior as { wiped_at?: string | null }).wiped_at) {
+    // Mig 222 — a wipe takes pending entries too. Someone holding a
+    // stale approval queue must not act on one that is no longer there.
+    return { ok: false, error: "That vendor's ledger was cleared — this entry is no longer in the queue." };
+  }
   const p = prior as {
     bill_vendor_id: string;
     amount: number;

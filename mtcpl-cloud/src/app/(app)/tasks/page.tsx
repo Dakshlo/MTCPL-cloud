@@ -123,7 +123,9 @@ export default async function TasksPage() {
       .from("vendor_royalty_entries")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending_approval")
-      .is("cancelled_at", null);
+      .is("cancelled_at", null)
+      // Mig 222 — see the sidebar badge: wiped pending entries are gone.
+      .is("wiped_at", null);
     if (error) return null;
     return count ?? 0;
   }

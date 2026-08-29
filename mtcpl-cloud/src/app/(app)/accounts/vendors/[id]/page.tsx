@@ -188,7 +188,12 @@ export default async function BillVendorDetailPage({
       .select("amount, entry_type, cancelled_at, status")
       .eq("bill_vendor_id", id)
       .eq("status", "approved")
-      .is("cancelled_at", null);
+      .is("cancelled_at", null)
+      // Mig 222 — a cleared ledger must read 0 HERE too, not just in the
+      // modal. Without this the hover net kept showing the old total
+      // until the 48h purge deleted the rows, so "clear all" looked
+      // half-done for two days (Daksh, Aug 2026).
+      .is("wiped_at", null);
     if (!royaltyErr && royaltyRows) {
       let received = 0;
       let paid = 0;

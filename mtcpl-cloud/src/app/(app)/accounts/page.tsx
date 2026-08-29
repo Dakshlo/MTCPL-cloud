@@ -358,7 +358,10 @@ export default async function AccountsHomePage({
         .select("bill_vendor_id, amount, entry_type")
         .in("bill_vendor_id", vendorIds)
         .eq("status", "approved")
-        .is("cancelled_at", null);
+        .is("cancelled_at", null)
+        // Mig 222 — same as the vendor page: wiped entries are gone from
+        // the ledger, so they must be gone from this dot's net too.
+        .is("wiped_at", null);
       if (!royaltyErr && royaltyRows) {
         // paid − received per vendor; matches the modal's formula.
         const received = new Map<string, number>();

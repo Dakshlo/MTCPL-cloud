@@ -327,7 +327,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .from("vendor_royalty_entries")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending_approval")
-      .is("cancelled_at", null);
+      .is("cancelled_at", null)
+      // Mig 222 — a wipe takes pending entries too; the badge must not
+      // keep counting a queue item the queue itself no longer lists.
+      .is("wiped_at", null);
     if (royaltyErr) return null;
     return count ?? 0;
   }
