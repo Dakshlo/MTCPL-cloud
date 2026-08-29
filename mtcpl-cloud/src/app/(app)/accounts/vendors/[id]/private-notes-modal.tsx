@@ -160,6 +160,12 @@ export function PrivateNotesModal({
 
   // Royalty tab state
   const [royaltyEntries, setRoyaltyEntries] = useState<RoyaltyEntry[]>([]);
+  // Aug 2026 — loadContent flips to "edit" and fires loadRoyalty WITHOUT
+  // awaiting it, so the tab painted with an empty list and read "Nothing
+  // here yet" for a beat. On a vendor with twenty entries that says the
+  // opposite of the truth. Track the fetch so the columns can say
+  // "loading" instead of "empty".
+  const [royaltyLoading, setRoyaltyLoading] = useState(true);
   const [royaltyNet, setRoyaltyNet] = useState<number>(0);
   const [royaltyReceived, setRoyaltyReceived] = useState<number>(0);
   const [royaltyGiven, setRoyaltyGiven] = useState<number>(0);
@@ -230,6 +236,7 @@ export function PrivateNotesModal({
   }
 
   async function loadRoyalty(plain: string) {
+    setRoyaltyLoading(true);
     const fd = new FormData();
     fd.set("vendor_id", vendorId);
     fd.set("passphrase", plain);
@@ -238,12 +245,14 @@ export function PrivateNotesModal({
       // Soft fail — keep current entries, surface error if user is
       // on the royalty tab.
       console.warn("[private-notes-modal] royalty load failed", result.error);
+      setRoyaltyLoading(false);
       return;
     }
     setRoyaltyEntries(result.entries);
     setRoyaltyNet(result.netBalance);
     setRoyaltyReceived(result.receivedTotal);
     setRoyaltyGiven(result.givenTotal);
+    setRoyaltyLoading(false);
     void loadWipeStatus();
   }
 
@@ -370,6 +379,7 @@ export function PrivateNotesModal({
     setError(null);
     setJustAdded(null);
     setWipeBatch(null);
+    setRoyaltyLoading(true);
     void loadContent(presetPassphrase);
     // loadContent is stable enough for this purpose; re-running on
     // vendor/passphrase change is exactly the intent.
@@ -1004,6 +1014,8 @@ export function PrivateNotesModal({
                       onCancel={handleCancelRoyaltyEntry}
                       canCancel={canCancelRoyalty}
                       flashKey={justAdded?.key ?? null}
+                      loading={royaltyLoading}
+                      embedded={embedded}
                     />
                     <RoyaltyColumn
                       title="PAID  (+)"
@@ -1014,6 +1026,8 @@ export function PrivateNotesModal({
                       onCancel={handleCancelRoyaltyEntry}
                       canCancel={canCancelRoyalty}
                       flashKey={justAdded?.key ?? null}
+                      loading={royaltyLoading}
+                      embedded={embedded}
                     />
                   </div>
 
@@ -1348,6 +1362,8 @@ function RoyaltyColumn({
   onCancel,
   canCancel,
   flashKey = null,
+  loading = false,
+  embedded = false,
 }: {
   title: string;
   color: string;
@@ -1359,6 +1375,10 @@ function RoyaltyColumn({
   /** `type|amount|date` of the entry just added, so the row it created
    *  can be picked out of a list of near-identical cards. */
   flashKey?: string | null;
+  /** Entries are still being fetched — show that, not "empty". */
+  loading?: boolean;
+  /** Inline on a page (no inner scroller) vs inside the capped modal. */
+  embedded?: boolean;
 }) {
   // Tap a card's signature → open it big for a proper look (mig 175).
   const [zoom, setZoom] = useState<string | null>(null);
@@ -1449,8 +1469,32 @@ function RoyaltyColumn({
           </span>
         </span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 420, overflowY: "auto", paddingRight: 2 }}>
-        {liveEntries.length === 0 && (
+      {/* The modal is height-capped, so its lists scroll inside. On the
+          Royalty-by-vendor page the panel sits in normal page flow, and
+          an inner scroller there just swallows the wheel — the page
+          never moved and the Clear-all row below could not be reached
+          (Daksh, Aug 2026). Embedded: let it grow, let the page scroll. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: embedded ? undefined : 420, overflowY: embedded ? "visible" : "auto", paddingRight: 2 }}>
+        {loading ? (
+          /* Three grey bars rather than a spinner: the list keeps its
+             shape while it fills, so nothing jumps when entries land. */
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }} aria-label="Loading entries">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                style={{
+                  height: 58,
+                  borderRadius: 9,
+                  border: "1px solid var(--border)",
+                  background: "linear-gradient(90deg, rgba(255,255,255,0.55) 25%, rgba(0,0,0,0.045) 50%, rgba(255,255,255,0.55) 75%)",
+                  backgroundSize: "200% 100%",
+                  animation: "pvd-shimmer 1.1s ease-in-out infinite",
+                  opacity: 1 - i * 0.25,
+                }}
+              />
+            ))}
+          </div>
+        ) : liveEntries.length === 0 ? (
           <div
             style={{
               fontSize: 11.5,
@@ -1464,7 +1508,7 @@ function RoyaltyColumn({
           >
             Nothing here yet.
           </div>
-        )}
+        ) : null}
         {liveEntries.map((e) => {
           const isPending = e.status === "pending_approval";
           // Freshly added row — matched on type+amount+date because the
