@@ -1064,7 +1064,8 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     P.t("Daily Work Report", M, top - 44, 17, bold, ink);
     P.t("MATESHWARI TEMPLE CONSTRUCTION PVT LTD", M, top - 57, 7.5, bold, brown);
     let y = top - 57;
-    if (withSubtitle) { P.t(`${data.month.label} to date · (+n) pill = last 24 h · trend = last 10 days`, M, y - 12, 8, font, muted); y -= 12; }
+    // Says what the two colours mean, since that is now the whole page.
+    if (withSubtitle) { P.t(`Left = last 24 h · Right = ${data.month.label} to date (day ${data.month.days} of ${data.month.monthLen})`, M, y - 12, 8, bold, muted); y -= 12; }
     y -= 9;
     P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 2.5, color: COL.gold });
     P.pg.drawLine({ start: { x: M, y: y - 2 }, end: { x: W - M, y: y - 2 }, thickness: 0.5, color: brown });
@@ -1118,95 +1119,59 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     const P = newPage();
     let y = header(P, H - 26, true);
     const mo = data.month;
-    /* Every number in the pill carries its unit. Read on a phone the pill sits
-       away from the big figure, so a bare "0  (+16)" left you guessing whether
-       it counted blocks, slabs or CFT (Daksh, Aug 2026). The unit is stated
-       once and governs both halves. */
-    const delta = (cur: number, prevC: number, unit: string) => { const d = cur - prevC; return `Prev day ${prevC} ${unit}  (${d > 0 ? "+" : ""}${d})`; };
-    // "(+5%)" vs the previous month at the same day-of-month; omitted when
-    // last month had nothing to compare against.
-    const pctTxt = (cur: number, prevV: number) => (prevV > 0 ? ` (${cur >= prevV ? "+" : ""}${Math.round(((cur - prevV) / prevV) * 100)}%)` : "");
-    // Month-end projection only once the month has some shape. On the 2nd/3rd
-    // (day 1-2 of the new month) one day extrapolated across 31 would print a
-    // wild number, so show the honest running average until day 5.
-    const paceLine = (v: number) =>
-      mo.days >= 5
-        ? `Pace: ~${fmt0((v / mo.days) * mo.monthLen)} slabs by ${mo.monthName} end`
-        : `Avg ${(v / Math.max(1, mo.days)).toFixed(1)} slabs/day so far`;
-    const vsLine = (cur: number, prevV: number) => `vs ${mo.prevMonthName} same day: ${fmt0(prevV)} slabs${pctTxt(cur, prevV)}`;
-    const spark = (vals: number[], xs: number, xe: number, yBot: number, hgt: number) => {
-      const n = vals.length; if (n < 2) return;
-      const peak = Math.max(...vals, 1);
-      const xAt = (i: number) => xs + ((xe - xs) * i) / (n - 1);
-      const yAt = (v: number) => yBot + hgt * Math.min(1, v / peak);
-      P.pg.drawLine({ start: { x: xs, y: yBot }, end: { x: xe, y: yBot }, thickness: 0.5, color: white, opacity: 0.25 });
-      for (let i = 0; i < n - 1; i++)
-        P.pg.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 1.6, color: white, opacity: 0.9 });
-      P.pg.drawCircle({ x: xAt(n - 1), y: yAt(vals[n - 1]), size: 2.2, color: white });
-    };
-    // Blocks = the last 24 h intake + month + live stock. Cutting / Carving /
-    // Dispatch headline the REPORT-MONTH total (Daksh's dad wants the running
-    // month), with the last-24 h figure in the pill and two insight lines.
-    const monthCap = `${mo.label} · day ${mo.days} of ${mo.monthLen}`;
-    const cards: Array<{ c: ReturnType<typeof rgb>; label: string; caption: string; big: string; unit: string; sub: string; pill: string; line1: string; line2: string; spark: number[] }> = [
-      {
-        c: COL.blue, label: "BLOCKS ADDED", caption: "Last 24 hours",
-        big: String(data.today.blocks.count), unit: "blocks", sub: `${fmt1(data.today.blocks.cft)} CFT received`,
-        pill: delta(data.today.blocks.count, data.prev.blocks.count, "blocks"),
-        line1: `${mo.monthName} so far: ${fmt0(data.mtd.blocks.count)} blocks · ${fmt0(data.mtd.blocks.cft)} CFT`,
-        line2: data.stock ? `In stock: Sandstone ${fmt0(data.stock.sandstoneCft)} CFT · Marble ${fmt1(data.stock.marbleTonnes)} T` : "",
-        spark: data.trend.map((d) => d.blocks),
-      },
-      {
-        c: COL.cyan, label: "CUTTING DONE", caption: monthCap,
-        big: fmt0(data.mtd.cutting.slabs), unit: "slabs", sub: `${fmt1(data.mtd.cutting.cft)} CFT cut`,
-        pill: `+${data.today.cutting.slabs} slabs in 24 h`,
-        line1: vsLine(data.mtd.cutting.slabs, data.mtdPrev.cutting.slabs),
-        line2: paceLine(data.mtd.cutting.slabs),
-        spark: data.trend.map((d) => d.cutting),
-      },
-      {
-        c: COL.amber, label: "CARVING DONE", caption: monthCap,
-        big: fmt0(data.mtd.carving.slabs), unit: "slabs", sub: `${fmt1(data.mtd.carving.cft)} CFT carved`,
-        pill: `+${data.today.carving.slabs} slabs in 24 h`,
-        line1: vsLine(data.mtd.carving.slabs, data.mtdPrev.carving.slabs),
-        line2: paceLine(data.mtd.carving.slabs),
-        spark: data.trend.map((d) => d.carving),
-      },
-      {
-        c: COL.green, label: "DISPATCHED", caption: monthCap,
-        // Tonnes only when meaningfully recorded — near-zero would print as
-        // "0.0 T", which is just noise on sandstone-heavy months.
-        big: fmt0(data.mtd.dispatch.slabs), unit: "slabs",
-        sub: [`${fmt1(data.mtd.dispatch.cft)} CFT`, data.mtd.dispatch.tonnes >= 0.05 ? `${fmt1(data.mtd.dispatch.tonnes)} T` : "", `${data.mtd.dispatch.trucks} trucks`].filter(Boolean).join(" · "),
-        pill: `+${data.today.dispatch.slabs} slabs in 24 h`,
-        line1: vsLine(data.mtd.dispatch.slabs, data.mtdPrev.dispatch.slabs),
-        line2: paceLine(data.mtd.dispatch.slabs),
-        spark: data.trend.map((d) => d.dispatch),
-      },
+
+    /* Aug 2026 — Daksh, relaying his dad: "too much on the card, it's
+       confusing. Just show 2 numbers — that day on the left, month so
+       far on the right."
+
+       So each card is now exactly that: the last-24 h figure and the
+       month-to-date figure, side by side, both large and bold. The pill,
+       the sparkline, the CFT sub-line, the vs-last-month line and the
+       pace projection are all gone from here.
+
+       Nothing is lost from the REPORT, only from this page: the 24 h
+       detail by stone / vendor / temple is still page 4, and the 10-day
+       trend charts are still page 5. This page is now the glance. */
+    // The two colours have to separate on ALL FOUR card tints. Gold was
+    // tried first and vanished on the amber card. White vs near-black is
+    // the widest gap available, and both stay legible on blue, cyan,
+    // amber and green alike.
+    const C_24H = white;                       // today
+    const C_MTD = rgb(0.09, 0.12, 0.18);       // month so far
+    const cards: Array<{ c: ReturnType<typeof rgb>; label: string; today: string; month: string; unit: string }> = [
+      { c: COL.blue,  label: "BLOCKS ADDED", today: String(data.today.blocks.count),  month: fmt0(data.mtd.blocks.count),  unit: "blocks" },
+      { c: COL.cyan,  label: "CUTTING DONE", today: String(data.today.cutting.slabs), month: fmt0(data.mtd.cutting.slabs), unit: "slabs" },
+      { c: COL.amber, label: "CARVING DONE", today: String(data.today.carving.slabs), month: fmt0(data.mtd.carving.slabs), unit: "slabs" },
+      { c: COL.green, label: "DISPATCHED",   today: String(data.today.dispatch.slabs),month: fmt0(data.mtd.dispatch.slabs),unit: "slabs" },
     ];
-    const ch = 178, gap = 13;
+
+    // Sized to fill the page rather than leave a third of it empty —
+    // bigger numbers, which is the point of the redesign.
+    const ch = 176, gap = 16;
+    const midX = M + cw / 2;
     for (const k of cards) {
       P.glass(M, y, cw, ch, 18, k.c);
       P.card(M + 20, y - 15, 32, 5, 2.5, white, { opacity: 0.55 });
-      P.t(k.label, M + 20, y - 34, 13, bold, white);
-      P.t(k.caption, M + 20, y - 48, 9, font, white);
-      const pw = font.widthOfTextAtSize(k.pill, 9) + 18;
-      P.card(W - M - pw - 14, y - 26, pw, 19, 7, white, { opacity: 0.22 });
-      P.t(k.pill, W - M - pw - 5, y - 38.5, 9, font, white);
-      // 10-day sparkline, right side — the shape of the last stretch at a
-      // glance; the trends page carries the full charts.
-      spark(k.spark, W - M - 146, W - M - 22, y - 96, 30);
-      P.r("last 10 days", W - M - 22, y - 107, 6.5, font, white);
-      P.t(k.big, M + 18, y - 106, 44, bold, white);
-      // Unit label sits to the right of the big number, baseline-aligned, so
-      // "506" reads unambiguously as "506 slabs".
-      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.big, 44) + 8, y - 106, 14, bold, white);
-      P.t(k.sub, M + 20, y - 128, 11.5, font, white);
-      P.t(k.line1, M + 20, y - 148, 9.5, font, white);
-      if (k.line2) P.t(k.line2, M + 20, y - 164, 9.5, font, white);
+      P.t(k.label, M + 20, y - 42, 17, bold, white);
+
+      // A hairline between the two halves so the eye splits them without
+      // having to read the captions first.
+      P.pg.drawLine({ start: { x: midX, y: y - 60 }, end: { x: midX, y: y - ch + 20 }, thickness: 0.7, color: white, opacity: 0.30 });
+
+      const NUM = 46;
+      // LEFT — that day.
+      P.t("LAST 24 H", M + 20, y - 78, 10, bold, C_24H);
+      P.t(k.today, M + 20, y - 128, NUM, bold, C_24H);
+      P.t(k.unit, M + 20 + bold.widthOfTextAtSize(k.today, NUM) + 7, y - 128, 13, bold, C_24H);
+
+      // RIGHT — month so far, in its own colour so the two never blur.
+      P.t(`${mo.monthName.toUpperCase()} SO FAR`, midX + 18, y - 78, 10, bold, C_MTD);
+      P.t(k.month, midX + 18, y - 128, NUM, bold, C_MTD);
+      P.t(k.unit, midX + 18 + bold.widthOfTextAtSize(k.month, NUM) + 7, y - 128, 13, bold, C_MTD);
+
       y -= ch + gap;
     }
+
     footer(P, 1, PAGES);
   }
 
