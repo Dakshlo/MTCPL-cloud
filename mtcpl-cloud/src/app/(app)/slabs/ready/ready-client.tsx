@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useDeferredValue } from "react";
 
 import { slabStatusLabel, type SlabDispatchState } from "@/lib/slab-status-label";
 import Link from "next/link";
-import { slabSearchMatch } from "@/lib/slab-search";
+import { parseDimTriple, dimPermutations } from "@/lib/slab-search";
 
 /** Mig follow-on (Daksh, May 2026) — derive the Month dropdown's
  *  current value from the Cut From / Cut To range. Returns the
@@ -173,45 +173,76 @@ export function ReadySlabsClient({
   // ALL OTHER active filters. Selecting Stone=PinkStone narrows the
   // Temple dropdown to only temples where PinkStone slabs exist.
   // (See slab-selector.tsx for the same pattern + why.)
-  const availableStones = useMemo(() => {
-    let rows = slabs;
-    if (templeFilter !== "all") rows = rows.filter((s) => s.temple === templeFilter);
-    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
-    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
-    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
-    if (search) {
-      rows = rows.filter((s) =>
-        slabSearchMatch(
-          search,
-          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
-          [s.id, s.label, s.temple, s.stone, s.source_block_id],
-        ),
-      );
+  // Aug 2026 — search was rebuilding, per keystroke, for EACH of ~12,800
+  // slabs, in THREE separate memos: six dimension permutations, a joined
+  // string, and a toLowerCase. That is the search lag; useDeferredValue
+  // kept typing smooth but the results still crawled in.
+  //
+  // Build each slab's haystack ONCE instead, keyed on `slabs` (which only
+  // changes on navigation). A keystroke then costs one `includes` per
+  // row. The dimension triple is kept numeric because that path is an
+  // orientation-agnostic compare, not a substring test.
+  const searchIndex = useMemo(
+    () =>
+      slabs.map((s) => ({
+        hay: [s.id, s.label, s.temple, s.stone, s.source_block_id]
+          .filter(Boolean)
+          .concat(
+            dimPermutations({ length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft }),
+          )
+          .join(" · ")
+          .toLowerCase(),
+        dims: [s.length_ft, s.width_ft, s.thickness_ft]
+          .map((n) => Number(n) || 0)
+          .sort((a, b) => a - b) as [number, number, number],
+      })),
+    [slabs],
+  );
+
+  /** Does row `i` match the current query? Cheap: a prebuilt string. */
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return () => true;
+    const triple = parseDimTriple(q);
+    if (triple) {
+      // Same orientation-agnostic numeric compare slabSearchMatch does,
+      // against dims sorted once up front.
+      return (i: number) => {
+        const d = searchIndex[i].dims;
+        return d[0] === triple[0] && d[1] === triple[1] && d[2] === triple[2];
+      };
     }
+    const qn = q.replace(/[×*]/g, "x");
+    return (i: number) => searchIndex[i].hay.includes(qn);
+  }, [search, searchIndex]);
+
+  const availableStones = useMemo(() => {
     const set = new Set<string>();
-    for (const s of rows) if (s.stone) set.add(s.stone);
+    for (let i = 0; i < slabs.length; i++) {
+      const s = slabs[i];
+      if (templeFilter !== "all" && s.temple !== templeFilter) continue;
+      if (qualityFilter === "A" && s.quality !== "A") continue;
+      if (qualityFilter === "B" && s.quality !== "B") continue;
+      if (qualityFilter === "none" && s.quality) continue;
+      if (!matches(i)) continue;
+      if (s.stone) set.add(s.stone);
+    }
     return [...set].sort();
-  }, [slabs, templeFilter, qualityFilter, search]);
+  }, [slabs, templeFilter, qualityFilter, matches]);
 
   const availableTemples = useMemo(() => {
-    let rows = slabs;
-    if (stoneFilter !== "all") rows = rows.filter((s) => s.stone === stoneFilter);
-    if (qualityFilter === "A") rows = rows.filter((s) => s.quality === "A");
-    else if (qualityFilter === "B") rows = rows.filter((s) => s.quality === "B");
-    else if (qualityFilter === "none") rows = rows.filter((s) => !s.quality);
-    if (search) {
-      rows = rows.filter((s) =>
-        slabSearchMatch(
-          search,
-          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
-          [s.id, s.label, s.temple, s.stone, s.source_block_id],
-        ),
-      );
-    }
     const set = new Set<string>();
-    for (const s of rows) if (s.temple) set.add(s.temple);
+    for (let i = 0; i < slabs.length; i++) {
+      const s = slabs[i];
+      if (stoneFilter !== "all" && s.stone !== stoneFilter) continue;
+      if (qualityFilter === "A" && s.quality !== "A") continue;
+      if (qualityFilter === "B" && s.quality !== "B") continue;
+      if (qualityFilter === "none" && s.quality) continue;
+      if (!matches(i)) continue;
+      if (s.temple) set.add(s.temple);
+    }
     return [...set].sort();
-  }, [slabs, stoneFilter, qualityFilter, search]);
+  }, [slabs, stoneFilter, qualityFilter, matches]);
 
   // Auto-reset orphaned selections: if user picked Stone=X then
   // narrowed by Temple=Y where Y has no X, clear the orphan to "all".
@@ -227,7 +258,9 @@ export function ReadySlabsClient({
   }, [availableTemples, templeFilter]);
 
   const filtered = useMemo(() => {
-    let rows = [...slabs];
+    // One pass over the indices so the search test stays the cheap
+    // prebuilt one, then the usual filters.
+    let rows = slabs.filter((_, i) => matches(i));
     if (stoneFilter !== "all") rows = rows.filter(s => s.stone === stoneFilter);
     if (templeFilter !== "all") rows = rows.filter(s => s.temple === templeFilter);
     if (qualityFilter === "A") rows = rows.filter(s => s.quality === "A");
@@ -239,15 +272,6 @@ export function ReadySlabsClient({
     // chip row so statusFilter stays "all" and this is a no-op.
     if (mode === "for-carving" && statusFilter !== "all") {
       rows = rows.filter((s) => s.status === statusFilter);
-    }
-    if (search) {
-      rows = rows.filter(s =>
-        slabSearchMatch(
-          search,
-          { length_ft: s.length_ft, width_ft: s.width_ft, thickness_ft: s.thickness_ft },
-          [s.id, s.label, s.temple, s.stone, s.source_block_id],
-        )
-      );
     }
     if (dateFrom) rows = rows.filter(s => s.cut_done_at && s.cut_done_at >= dateFrom);
     if (dateTo) rows = rows.filter(s => s.cut_done_at && s.cut_done_at <= dateTo + "T23:59:59Z");
@@ -268,14 +292,22 @@ export function ReadySlabsClient({
     });
 
     return rows;
-  }, [slabs, stoneFilter, templeFilter, qualityFilter, statusFilter, mode, search, dateFrom, dateTo, sortBy, sortDir]);
+  }, [slabs, stoneFilter, templeFilter, qualityFilter, statusFilter, mode, matches, dateFrom, dateTo, sortBy, sortDir]);
 
   const totalCft = filtered.reduce((sum, s) => sum + calcCft(s.length_ft, s.width_ft, s.thickness_ft), 0);
 
   // Cap rendered rows so a multi-thousand match set doesn't build a giant
   // DOM (the count + CFT above stay over ALL matches; Export gives them all).
-  const RENDER_CAP = 500;
-  const visibleRows = filtered.slice(0, RENDER_CAP);
+  // Daksh asked for 100. 500 rows x 11 columns is 5,500 cells to build on
+  // every filter change; 100 is a screenful and change, and the count +
+  // CFT above still cover ALL matches so nothing is hidden from the
+  // totals. "Show more" steps another 100 for the rare deep scroll, and
+  // Export still gives every row.
+  const RENDER_STEP = 100;
+  const [renderCap, setRenderCap] = useState(RENDER_STEP);
+  // A new search should show its first 100, not inherit a deep scroll.
+  useEffect(() => { setRenderCap(RENDER_STEP); }, [search, stoneFilter, templeFilter, qualityFilter, statusFilter, dateFrom, dateTo]);
+  const visibleRows = filtered.slice(0, renderCap);
 
   function toggleSort(col: SortCol) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -577,9 +609,9 @@ export function ReadySlabsClient({
         <p className="muted" style={{ fontSize: 13 }}>
           Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {slabs.length} ready sizes ·{" "}
           Total <strong style={{ color: "var(--text)" }}>{totalCft.toFixed(2)} CFT</strong>
-          {filtered.length > RENDER_CAP && (
+          {filtered.length > renderCap && (
             <span style={{ color: "var(--gold-dark)" }}>
-              {" "}· showing first {RENDER_CAP} — refine the search or Export to see all
+              {" "}· showing first {renderCap}
             </span>
           )}
         </p>
@@ -736,6 +768,29 @@ export function ReadySlabsClient({
             )}
           </tbody>
         </table>
+
+      {/* Aug 2026 — the cap used to be a dead end ("refine the search or
+          Export"). 100 rows is the right default for speed, but someone
+          scanning a block's output needs the next hundred without
+          leaving the page. */}
+      {filtered.length > renderCap && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 4px" }}>
+          <button
+            type="button"
+            onClick={() => setRenderCap((c) => c + RENDER_STEP)}
+            style={{
+              padding: "9px 18px", fontSize: 13, fontWeight: 700, borderRadius: 10,
+              border: "1.5px solid var(--border)", background: "var(--surface)",
+              color: "var(--text)", cursor: "pointer",
+            }}
+          >
+            Show {Math.min(RENDER_STEP, filtered.length - renderCap)} more
+            <span className="muted" style={{ fontWeight: 500 }}>
+              {" "}· {filtered.length - renderCap} left
+            </span>
+          </button>
+        </div>
+      )}
       </div>
 
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>

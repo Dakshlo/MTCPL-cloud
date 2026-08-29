@@ -49,28 +49,44 @@ export default async function ReadySlabsPage() {
     updated_at: string | null;
     source_block_id: string | null;
   };
+  const COLS =
+    "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id";
+
   async function fetchAllReadySlabs(): Promise<ReadySlabRow[]> {
     const PAGE = 1000;
     const MAX = 50000;
-    const out: ReadySlabRow[] = [];
-    for (let offset = 0; offset < MAX; offset += PAGE) {
-      const { data, error } = await admin
-        .from("slab_requirements")
-        .select(
-          "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, priority, created_at, updated_at, source_block_id",
-        )
-        .in("status", POST_CUT_STATUSES)
-        .order("updated_at", { ascending: false })
-        // Unique tiebreaker — `updated_at` is NOT unique, and a tie group
-        // straddling a page boundary silently drops/duplicates rows.
-        .order("id", { ascending: true })
-        .range(offset, offset + PAGE - 1);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
-      out.push(...(data as ReadySlabRow[]));
-      if (data.length < PAGE) break;
-    }
-    return out;
+
+    // Aug 2026 — this walked the pages one after another. At ~12,800
+    // post-cut slabs that is THIRTEEN sequential round-trips before the
+    // page can render anything, and it was the main reason Total Ready
+    // Sizes took so long to open. Ask for the count once, then fetch
+    // every page at the same time: 13 waits become 2.
+    const { count, error: countErr } = await admin
+      .from("slab_requirements")
+      .select("id", { count: "exact", head: true })
+      .in("status", POST_CUT_STATUSES);
+    if (countErr) throw new Error(countErr.message);
+
+    const total = Math.min(count ?? 0, MAX);
+    if (total === 0) return [];
+
+    const pages = Array.from({ length: Math.ceil(total / PAGE) }, (_, i) => i * PAGE);
+    const results = await Promise.all(
+      pages.map(async (offset) => {
+        const { data, error } = await admin
+          .from("slab_requirements")
+          .select(COLS)
+          .in("status", POST_CUT_STATUSES)
+          .order("updated_at", { ascending: false })
+          // Unique tiebreaker — `updated_at` is NOT unique, and a tie group
+          // straddling a page boundary silently drops/duplicates rows.
+          .order("id", { ascending: true })
+          .range(offset, offset + PAGE - 1);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as ReadySlabRow[];
+      }),
+    );
+    return results.flat();
   }
 
   const [data, { data: stoneTypeRows }] = await Promise.all([
