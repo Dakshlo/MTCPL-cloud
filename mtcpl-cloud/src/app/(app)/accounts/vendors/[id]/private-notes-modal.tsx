@@ -523,14 +523,21 @@ export function PrivateNotesModal({
   // Daksh (May 2026): on small laptop screens, scrolling inside the
   // open modal was moving the page behind it. Lock body overflow so
   // any vertical motion stays inside the modal's own scroll area.
+  //
+  // NOT when embedded (Aug 2026). There the panel is ordinary page
+  // content, not an overlay, and `mode` sits at "edit" the whole time
+  // you are on the Royalty-by-vendor page — so this locked the body and
+  // never let go, and the page could not be scrolled to the Clear-all
+  // row at the bottom. There is nothing behind an inline panel to keep
+  // still; the page IS the thing that should scroll.
   useEffect(() => {
-    if (mode === "closed") return;
+    if (embedded || mode === "closed") return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [mode]);
+  }, [mode, embedded]);
 
   // ── Tablet unlock SEQUENCE (Daksh). On the vendor profile: double-tap the
   // vendor NAME → 2 taps on the TDS value → 2 taps on the DOT → opens (then the
