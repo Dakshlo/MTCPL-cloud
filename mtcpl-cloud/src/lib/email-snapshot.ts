@@ -25,6 +25,13 @@ export type SnapshotItem = {
   from: string;
   subject: string;
   summary: string;
+  // Aug 2026 — the same three fields in Hindi, written in the same pass
+  // so the toggle is a field swap rather than a translation round-trip.
+  // Optional: snapshots generated before this render English, which is
+  // exactly what they showed anyway.
+  summaryHi?: string;
+  keyPointsHi?: string[];
+  actionHi?: string;
   // 2-4 crisp key points — the facts of the email as separate bullets
   // (amounts, dates, PO/invoice numbers, names). Optional so older stored
   // snapshots that predate this still render from `summary` alone.
@@ -133,6 +140,10 @@ const SUMMARY_SCHEMA = {
       type: "string",
       description: "A 1-2 sentence plain-language digest of what matters in this batch — the actual substance ('L&T needs a vehicle to Pindwara Mon; HDFC debited Rs 4.4L to Shree Marble.'), NOT just counts. The dashboard shows counts separately.",
     },
+    overviewHi: {
+      type: "string",
+      description: "The same digest in Hindi (Devanagari). Natural Hindi, not transliteration; keep names, companies and amounts exactly as written.",
+    },
     items: {
       type: "array",
       items: {
@@ -154,6 +165,19 @@ const SUMMARY_SCHEMA = {
             items: { type: "string" },
             description: "2-4 bullets, each ONE concrete fact: an amount, a date, a PO/invoice/e-way number, a name, a place. Specific, never vague. e.g. ['L&T (Ankur Jain) asking for a vehicle', 'Ahmedabad → Pindwara workshop', 'Virendra Sir, mob 9978442511', 'Monday 9 AM, Zone 6 mock-up inspection'].",
           },
+          summaryHi: {
+            type: "string",
+            description: "The `summary` line in Hindi (Devanagari). Same meaning, natural Hindi — not a word-for-word transliteration. Keep names, companies, amounts and numbers exactly as they appear.",
+          },
+          keyPointsHi: {
+            type: "array",
+            items: { type: "string" },
+            description: "The `keyPoints` bullets in Hindi (Devanagari), same order and same count. Keep names, companies, amounts, dates and reference numbers exactly as written in the original.",
+          },
+          actionHi: {
+            type: "string",
+            description: "The `action` line in Hindi (Devanagari), imperative. Empty string when `action` is empty.",
+          },
           action: {
             type: "string",
             description: "The SINGLE concrete thing the owner must do, imperative and specific. Empty string when nothing is required (FYI).",
@@ -163,12 +187,12 @@ const SUMMARY_SCHEMA = {
             description: "When it is due, if the email says so ('Mon 11 Aug, 9 AM'). Empty string if none stated.",
           },
         },
-        required: ["idx", "important", "category", "urgency", "summary", "keyPoints", "action", "deadline"],
+        required: ["idx", "important", "category", "urgency", "summary", "keyPoints", "action", "deadline", "summaryHi", "keyPointsHi", "actionHi"],
         additionalProperties: false,
       },
     },
   },
-  required: ["overview", "items"],
+  required: ["overview", "overviewHi", "items"],
   additionalProperties: false,
 } as const;
 
@@ -193,7 +217,19 @@ For every email return an item with the same idx and important true/false. For t
   • action — the SINGLE concrete thing the owner must do, as an imperative ("Arrange a vehicle Ahmedabad→Pindwara for Mon 9 AM"). Empty string if nothing is required.
   • deadline — when it is due if the email states one; empty string otherwise.
   • urgency — action_needed ONLY when he must actually do something (i.e. action is non-empty); otherwise fyi.
-And write the batch overview as a real 1-2 sentence digest of what matters across these emails — the substance, not a count.`;
+And write the batch overview as a real 1-2 sentence digest of what matters across these emails — the substance, not a count.
+
+HINDI (Aug 2026): the owner reads Hindi more comfortably than English, and the
+dashboard lets him switch. So ALSO fill summaryHi, keyPointsHi, actionHi and
+overviewHi with the same content in Hindi (Devanagari).
+  • Natural, spoken-business Hindi — the way you would say it to him, not a
+    word-for-word transliteration of the English.
+  • NEVER translate the specifics. Company and people's names, amounts, dates,
+    invoice / PO / e-way numbers, phone numbers and places stay exactly as
+    written ("HDFC", "L&T", "Rs 4,41,513", "9978442511", "Pindwara").
+  • keyPointsHi must have the SAME number of bullets, in the same order, as
+    keyPoints — the two lists are shown in place of each other.
+  • actionHi is an empty string whenever action is empty.`;
 
 // fromName = clean display name (what we show in bold); fromText keeps
 // the full "Name <addr>" for the AI's context. uid lets us re-open the
@@ -363,7 +399,7 @@ const SUMMARIZE_CONCURRENCY = 3;  // calls running at once
 
 /** Summarize ONE batch of emails — returns the important ones. JSON parse
  *  errors yield [] (skip the batch); API errors propagate to the caller. */
-async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<{ items: SnapshotItem[]; overview: string }> {
+async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<{ items: SnapshotItem[]; overview: string; overviewHi: string }> {
   const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
@@ -381,12 +417,14 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
       idx: number; important: boolean; category: string;
       urgency: "action_needed" | "fyi"; summary: string;
       keyPoints?: string[]; action?: string; deadline?: string;
+      summaryHi?: string; keyPointsHi?: string[]; actionHi?: string;
     }>;
+    overviewHi?: string;
   };
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { items: [], overview: "" };
+    return { items: [], overview: "", overviewHi: "" };
   }
   const items: SnapshotItem[] = [];
   for (const it of parsed.items ?? []) {
@@ -397,10 +435,20 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
       ? it.keyPoints.map((k) => String(k).trim()).filter(Boolean)
       : [];
     const action = (it.action ?? "").trim();
+    const keyPointsHi = Array.isArray(it.keyPointsHi)
+      ? it.keyPointsHi.map((k) => String(k).trim()).filter(Boolean)
+      : [];
+    const actionHi = (it.actionHi ?? "").trim();
     items.push({
       from: src.fromName,
       subject: src.subject,
       summary: it.summary,
+      summaryHi: (it.summaryHi ?? "").trim() || undefined,
+      // Only keep the Hindi bullets when they line up with the English
+      // ones — a mismatched count would swap a 4-point list for a
+      // 2-point one on toggle, silently losing facts.
+      keyPointsHi: keyPointsHi.length === keyPoints.length && keyPointsHi.length > 0 ? keyPointsHi : undefined,
+      actionHi: actionHi || undefined,
       keyPoints: keyPoints.length ? keyPoints : undefined,
       action: action || undefined,
       deadline: (it.deadline ?? "").trim() || undefined,
@@ -413,16 +461,16 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
       messageId: src.messageId,
     });
   }
-  return { items, overview: (parsed.overview ?? "").trim() };
+  return { items, overview: (parsed.overview ?? "").trim(), overviewHi: (parsed.overviewHi ?? "").trim() };
 }
 
 /** Ask Claude which emails matter + what they say. Processes emails in
  *  small batches with limited concurrency — a single huge call over a month
  *  of email is slow and can blow the function's time/token budget (the cause
  *  of the "Refresh failed" timeout). Batching keeps each call fast. */
-async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; items: SnapshotItem[] }> {
+async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; overviewHi: string; items: SnapshotItem[] }> {
   if (emails.length === 0) {
-    return { overview: "No new emails in this period.", items: [] };
+    return { overview: "No new emails in this period.", overviewHi: "इस अवधि में कोई नया ईमेल नहीं।", items: [] };
   }
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not set.");
@@ -435,6 +483,7 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
 
   const out: SnapshotItem[][] = new Array(batches.length).fill(null).map(() => []);
   const overviews: string[] = new Array(batches.length).fill("");
+  const overviewsHi: string[] = new Array(batches.length).fill("");
   let nextIdx = 0;
   let firstError: unknown = null;
   async function worker() {
@@ -444,6 +493,7 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
         const r = await summarizeBatch(anthropic, model, batches[i]);
         out[i] = r.items;
         overviews[i] = r.overview;
+        overviewsHi[i] = r.overviewHi;
       } catch (e) {
         if (!firstError) firstError = e;
       }
@@ -465,13 +515,17 @@ async function summarize(emails: FetchedEmail[]): Promise<{ overview: string; it
   // itself, so the overview text is free to be about content, not tallies.
   // Fall back to the old count sentence if the model returned nothing.
   const digest = overviews.map((o) => o.trim()).filter(Boolean).join(" ");
+  const digestHi = overviewsHi.map((o) => o.trim()).filter(Boolean).join(" ");
   const actionCount = items.filter((i) => i.urgency === "action_needed").length;
   const overview =
     items.length === 0
       ? `Scanned ${emails.length} email${emails.length === 1 ? "" : "s"} — nothing important.`
       : digest ||
         `${items.length} important${actionCount ? `, ${actionCount} need action` : ""} (of ${emails.length} scanned).`;
-  return { overview, items };
+  // Hindi digest falls back to the English one rather than to nothing —
+  // an empty panel would read as "no mail", which is worse than a line
+  // the reader has to work through.
+  return { overview, overviewHi: digestHi || overview, items };
 }
 
 /** Write a standalone diagnostic row (no fetch/summarize) so a problem
@@ -500,10 +554,11 @@ export async function runEmailSnapshot(
   const effectiveRange: SnapshotRange = trigger === "cron" ? "today" : normalizeRange(range);
   try {
     const emails = await fetchRecentEmails(effectiveRange);
-    const { overview, items } = await summarize(emails);
+    const { overview, overviewHi, items } = await summarize(emails);
     const { error } = await admin.from("email_snapshots").insert({
       items,
       overview,
+      overview_hi: overviewHi,
       scanned_count: emails.length,
       trigger,
       range: effectiveRange,

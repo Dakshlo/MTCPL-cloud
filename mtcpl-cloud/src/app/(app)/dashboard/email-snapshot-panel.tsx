@@ -11,11 +11,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { SnapshotItem } from "@/lib/email-snapshot";
 import { EmailPeek } from "./email-peek";
+import { setSnapshotLangAction, type SnapshotLang } from "./snapshot-lang-action";
 
 type Snap = {
   generatedAt: string;
   items: SnapshotItem[];
   overview: string | null;
+  overviewHi: string | null;
   scannedCount: number;
   range: string;
   error: string | null;
@@ -78,8 +80,27 @@ function fmtEmailDate(iso: string | undefined): string {
   }
 }
 
-export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; configured: boolean }) {
+export function EmailSnapshotPanel({
+  snap,
+  configured,
+  initialLang = "en",
+}: {
+  snap: Snap | null;
+  configured: boolean;
+  /** Mig 224 — the language this person last chose, from their profile. */
+  initialLang?: SnapshotLang;
+}) {
   const router = useRouter();
+  // Switch instantly, save in the background. Waiting on a round-trip to
+  // repaint a language toggle would feel broken; if the save fails the
+  // view is still right for this session and the next load falls back.
+  const [lang, setLang] = useState<SnapshotLang>(initialLang);
+  function chooseLang(next: SnapshotLang) {
+    if (next === lang) return;
+    setLang(next);
+    void setSnapshotLangAction(next);
+  }
+  const hi = lang === "hi";
   const [collapsed, setCollapsed] = useState(false);
   const [range, setRange] = useState<string>(snap?.range ?? "today");
   const [busy, setBusy] = useState(false);
@@ -275,9 +296,48 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                         </span>
                       )}
                       <span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>of {snap.scannedCount} scanned</span>
+
+                      {/* Mig 224 — English / Hindi. Sits with the counts
+                          rather than in the header so it is next to the
+                          text it changes. The choice saves to the profile,
+                          so it is still set tomorrow and on another
+                          machine. */}
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          display: "inline-flex",
+                          border: "1px solid var(--border)",
+                          borderRadius: 999,
+                          overflow: "hidden",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {([["en", "EN"], ["hi", "हिं"]] as const).map(([code, label]) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => chooseLang(code)}
+                            title={code === "hi" ? "हिंदी में पढ़ें" : "Read in English"}
+                            aria-pressed={lang === code}
+                            style={{
+                              padding: "3px 11px",
+                              fontSize: 11,
+                              fontWeight: 800,
+                              border: "none",
+                              cursor: "pointer",
+                              background: lang === code ? "var(--accent, #4f46e5)" : "transparent",
+                              color: lang === code ? "#fff" : "var(--muted)",
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </span>
                     </div>
-                    {snap.overview && (
-                      <p style={{ fontSize: 12.5, margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>{snap.overview}</p>
+                    {(hi ? snap.overviewHi || snap.overview : snap.overview) && (
+                      <p style={{ fontSize: 12.5, margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>
+                        {hi ? snap.overviewHi || snap.overview : snap.overview}
+                      </p>
                     )}
                   </div>
                 );
@@ -342,23 +402,28 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                         <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>{it.subject}</div>
                         {/* Headline line — kept short and quiet; the facts sit in
                             the key points below. */}
-                        {it.summary && (
-                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)" }}>{it.summary}</div>
+                        {/* Hindi when chosen and present; English otherwise.
+                            A snapshot written before mig 224 has no Hindi at
+                            all, and falling back beats an empty line. */}
+                        {(hi ? it.summaryHi || it.summary : it.summary) && (
+                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)" }}>
+                            {hi ? it.summaryHi || it.summary : it.summary}
+                          </div>
                         )}
 
                         {/* Key points — the substance, as separate facts. Falls
                             back to nothing when an older snapshot has none (its
                             summary already carried the detail). */}
-                        {it.keyPoints && it.keyPoints.length > 0 && (
+                        {(() => { const pts = hi ? it.keyPointsHi ?? it.keyPoints : it.keyPoints; return pts && pts.length > 0 && (
                           <ul style={{ margin: "3px 0 0", paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
-                            {it.keyPoints.map((k, ki) => (
+                            {pts.map((k, ki) => (
                               <li key={ki} style={{ fontSize: 12.5, lineHeight: 1.45, display: "flex", gap: 7 }}>
                                 <span style={{ color: action ? "#dc2626" : "var(--accent, #4f46e5)", fontWeight: 800, flexShrink: 0 }}>·</span>
                                 <span>{k}</span>
                               </li>
                             ))}
                           </ul>
-                        )}
+                        ); })()}
 
                         {/* The one thing to do, called out — with the deadline
                             beside it when the email gave one. */}
@@ -366,7 +431,7 @@ export function EmailSnapshotPanel({ snap, configured }: { snap: Snap | null; co
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 5, padding: "6px 10px", borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
                             <span style={{ fontSize: 11, fontWeight: 800, color: "#dc2626", flexShrink: 0, marginTop: 1 }}>DO</span>
                             <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.4 }}>
-                              {it.action}
+                              {hi ? it.actionHi || it.action : it.action}
                               {it.deadline && (
                                 <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: "#b91c1c", background: "rgba(220,38,38,0.14)", padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
                                   ⏱ {it.deadline}
