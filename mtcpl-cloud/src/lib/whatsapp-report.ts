@@ -1195,7 +1195,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const detailDocs = [...recChallans, ...recInvoices].slice(0, RECENT_CAP);
   const hasRecent = detailDocs.length > 0;
   const detailPages = Math.ceil(detailDocs.length / DOCS_PER_PAGE);
-  const PAGES = 4 + (hasRecent ? 1 + detailPages : 0);
+  const PAGES = 5 + (hasRecent ? 1 + detailPages : 0);
   const newPage = () => {
     const pg = pdf.addPage([W, H]);
     // Vertical slate gradient (banded — pdf-lib has no native gradients).
@@ -1216,8 +1216,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     return mk(pg);
   };
 
-  // ── Page 1 — headline metrics: month total, 24 h pill, vs-last-month,
-  //    month-end pace and a 10-day sparkline on every card ──
+  // ── Page 1 — the five headline metrics, two numbers each ──
   {
     const P = newPage();
     let y = header(P, H - 26, true);
@@ -1226,123 +1225,202 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     /* Aug 2026 — Daksh, relaying his dad: "too much on the card, it's
        confusing. Just show 2 numbers — that day on the left, month so
        far on the right." Then: "dad is more interested in CFT, not
-       blocks or slabs." Then: "in blocks added and cutting done show
-       2 cards on blocks added, one for marble and one for sandstone —
-       for marble tonnes, for sandstone CFT." Cutting he wants left as
-       one card: "both stone, no separate."
+       blocks or slabs." Then: "on blocks added, 2 cards — one for
+       marble and one for sandstone; for marble tonnes, for sandstone
+       CFT", and "both those cards should look like they're under a
+       single roof." Cutting he wants left as one: "both stone, no
+       separate."
 
-       So: five cards, each exactly two numbers. Marble BLOCKS are
-       stated in tonnes because that is how they are bought and those
-       blocks carry no dimensions at all; everything downstream is CFT,
-       cut marble included, which is why cutting adds up as one figure.
+       So: BLOCKS ADDED is one bordered card containing two stone rows,
+       and the three flow metrics below it are plain cards. The roof is
+       what says "these two are the same measurement, split by stone" —
+       without it they read as two unrelated metrics.
+
+       Marble BLOCKS are stated in tonnes because that is how they are
+       bought and those blocks carry no dimensions at all; everything
+       downstream is CFT, cut marble included, which is why cutting
+       adds up as one figure.
 
        Everything that used to crowd these cards (prev-day pill,
        sparkline, vs-last-month, pace projection) is gone. The 24 h
-       breakdown by stone is page 3, the trend charts page 4. */
+       breakdown by stone is page 4, the trend charts page 5. */
     const C_24H = ink;                          // today — near-black
     const C_MTD = COL.blue;                     // month so far — its own colour
     const moLabel = `${mo.monthName.toUpperCase()} SO FAR · ${mo.days} ${mo.days === 1 ? "DAY" : "DAYS"}`;
+    const midX = M + cw / 2;
 
+    /** One left/right number pair — the same shape inside the blocks roof
+     *  and on the standalone cards below it, so they read as one family. */
+    const pair = (
+      top: number, unit: string,
+      todayV: string, todaySub: string, monthV: string, monthSub: string,
+      num: number,
+    ) => {
+      const numY = top - (num + 8);   // rhythm scales with the figure size
+      const subY = numY - 20;
+      const uSz = Math.max(11, num * 0.36);
+      P.t("LAST 24 H", M + 18, top, 8.5, bold, muted);
+      P.t(todayV, M + 18, numY, num, bold, C_24H);
+      P.t(unit, M + 18 + bold.widthOfTextAtSize(todayV, num) + 7, numY, uSz, bold, C_24H);
+      P.t(todaySub, M + 18, subY, 9.5, bold, muted);
+
+      P.t(moLabel, midX + 16, top, 8.5, bold, C_MTD);
+      P.t(monthV, midX + 16, numY, num, bold, C_MTD);
+      P.t(unit, midX + 16 + bold.widthOfTextAtSize(monthV, num) + 7, numY, uSz, bold, C_MTD);
+      P.t(monthSub, midX + 16, subY, 9.5, bold, muted);
+    };
+
+    // ── BLOCKS ADDED — one roof, two stone rows ──
+    {
+      const rowH = 108, hh = 44 + rowH * 2 + 6;
+      P.glass(M, y, cw, hh, 13, COL.blue, WASH.blue);
+      P.t("BLOCKS ADDED", M + 18, y - 28, 13.5, bold, COL.blue);
+      P.r("MARBLE IN TONNES · SANDSTONE IN CFT", W - M - 14, y - 27, 8, bold, muted);
+
+      const stoneRow = (top: number, name: string, unit: string, t: string, tSub: string, m: string, mSub: string) => {
+        P.t(name, M + 18, top - 16, 11, bold, ink);
+        P.pg.drawLine({ start: { x: midX, y: top - 24 }, end: { x: midX, y: top - 100 }, thickness: 0.7, color: COL.blue, opacity: 0.3 });
+        pair(top - 36, unit, t, tSub, m, mSub, 32);
+      };
+      stoneRow(
+        y - 44, "MARBLE", "T",
+        fmt1(data.today.blocks.marble.tonnes), `${data.today.blocks.marble.count} blocks`,
+        fmt1(data.mtd.blocks.marble.tonnes), `${fmt0(data.mtd.blocks.marble.count)} blocks`,
+      );
+      // Hairline between the two rows — inside the same border, so they stay
+      // one card rather than becoming two.
+      P.pg.drawLine({ start: { x: M + 14, y: y - 44 - rowH }, end: { x: W - M - 14, y: y - 44 - rowH }, thickness: 0.6, color: COL.blue, opacity: 0.28 });
+      stoneRow(
+        y - 44 - rowH, "SANDSTONE", "CFT",
+        fmt0(data.today.blocks.sandstone.cft), `${data.today.blocks.sandstone.count} blocks`,
+        fmt0(data.mtd.blocks.sandstone.cft), `${fmt0(data.mtd.blocks.sandstone.count)} blocks`,
+      );
+      y -= hh + 13;
+    }
+
+    // ── the three flow metrics, one card each ──
     const cards: Array<{
-      c: ReturnType<typeof rgb>; wash: ReturnType<typeof rgb>; label: string; stone: string;
-      unit: string; today: string; todaySub: string; month: string; monthSub: string;
+      c: ReturnType<typeof rgb>; wash: ReturnType<typeof rgb>; label: string;
+      today: string; todaySub: string; month: string; monthSub: string;
     }> = [
       {
-        c: COL.blue, wash: WASH.blue, label: "BLOCKS ADDED", stone: "MARBLE", unit: "T",
-        today: fmt1(data.today.blocks.marble.tonnes), todaySub: `${data.today.blocks.marble.count} blocks`,
-        month: fmt1(data.mtd.blocks.marble.tonnes),   monthSub: `${fmt0(data.mtd.blocks.marble.count)} blocks`,
-      },
-      {
-        c: COL.blue, wash: WASH.blue, label: "BLOCKS ADDED", stone: "SANDSTONE", unit: "CFT",
-        today: fmt0(data.today.blocks.sandstone.cft), todaySub: `${data.today.blocks.sandstone.count} blocks`,
-        month: fmt0(data.mtd.blocks.sandstone.cft),   monthSub: `${fmt0(data.mtd.blocks.sandstone.count)} blocks`,
-      },
-      {
-        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE", stone: "", unit: "CFT",
+        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE",
         today: fmt0(data.today.cutting.cft), todaySub: `${data.today.cutting.slabs} slabs`,
         month: fmt0(data.mtd.cutting.cft),   monthSub: `${fmt0(data.mtd.cutting.slabs)} slabs`,
       },
       {
-        c: COL.amber, wash: WASH.amber, label: "CARVING DONE", stone: "", unit: "CFT",
+        c: COL.amber, wash: WASH.amber, label: "CARVING DONE",
         today: fmt0(data.today.carving.cft), todaySub: `${data.today.carving.slabs} slabs`,
         month: fmt0(data.mtd.carving.cft),   monthSub: `${fmt0(data.mtd.carving.slabs)} slabs`,
       },
       {
-        c: COL.green, wash: WASH.green, label: "DISPATCHED", stone: "", unit: "CFT",
+        c: COL.green, wash: WASH.green, label: "DISPATCHED",
         today: fmt0(data.today.dispatch.cft),
         todaySub: `${data.today.dispatch.slabs} slabs · ${data.today.dispatch.trucks} trucks`,
         month: fmt0(data.mtd.dispatch.cft),
         monthSub: `${fmt0(data.mtd.dispatch.slabs)} slabs · ${data.mtd.dispatch.trucks} trucks`,
       },
     ];
-
-    // Five cards on one phone page: 142 pt each clears the footer and
-    // leaves the numbers the biggest thing on the sheet.
-    const ch = 142, gap = 12;
-    const midX = M + cw / 2;
+    const ch = 152, gap = 13;
     for (const k of cards) {
       P.glass(M, y, cw, ch, 13, k.c, k.wash);
-      P.t(k.label, M + 18, y - 28, 13.5, bold, k.c);
-      if (k.stone) P.t(`· ${k.stone}`, M + 18 + bold.widthOfTextAtSize(k.label, 13.5) + 6, y - 28, 13.5, bold, muted);
-      P.pg.drawLine({ start: { x: midX, y: y - 42 }, end: { x: midX, y: y - ch + 14 }, thickness: 0.7, color: k.c, opacity: 0.3 });
-
-      const NUM = 32;
-      // LEFT — that day.
-      P.t("LAST 24 H", M + 18, y - 56, 9, bold, muted);
-      P.t(k.today, M + 18, y - 96, NUM, bold, C_24H);
-      P.t(k.unit, M + 18 + bold.widthOfTextAtSize(k.today, NUM) + 7, y - 96, 12, bold, C_24H);
-      P.t(k.todaySub, M + 18, y - 116, 9.5, bold, muted);
-
-      // RIGHT — the month so far, and exactly how many days that is.
-      P.t(moLabel, midX + 16, y - 56, 9, bold, C_MTD);
-      P.t(k.month, midX + 16, y - 96, NUM, bold, C_MTD);
-      P.t(k.unit, midX + 16 + bold.widthOfTextAtSize(k.month, NUM) + 7, y - 96, 12, bold, C_MTD);
-      P.t(k.monthSub, midX + 16, y - 116, 9.5, bold, muted);
-
+      P.t(k.label, M + 18, y - 30, 14, bold, k.c);
+      P.pg.drawLine({ start: { x: midX, y: y - 46 }, end: { x: midX, y: y - ch + 16 }, thickness: 0.7, color: k.c, opacity: 0.3 });
+      pair(y - 62, "CFT", k.today, k.todaySub, k.month, k.monthSub, 36);
       y -= ch + gap;
     }
 
     footer(P, 1, PAGES);
   }
 
-  // ── Page 2 — money: costing, billing, supplier payments ──
+  /* ── Page 2 — the plant: what cutting and carving cost, what stone is
+     left, and how much of a block survives it.
+     Stock and recovery sit here rather than beside the trend charts on
+     Daksh's instruction ("bring them up under cutter costing") — they
+     answer the same question the costing cards do: is the material side
+     of the business healthy. */
   {
     const P = newPage();
     let y = header(P, H - 26, false);
-    /* Aug 2026 — "in CNC costing, cutter costing make it minimal and bold,
-       only important numbers." Both cards used to carry the operational /
+    /* "In CNC costing, cutter costing make it minimal and bold, only
+       important numbers." Both cards used to carry the operational /
        depreciation split, machine counts and a per-SFT-and-per-CFT line.
        What the owner actually reads is the RATE and what it has cost so
        far, so that is all that is left; the rest lives on the costing
        pages in the app. */
+    const COST_H = 196, PLANT_GAP = 14;
     if (data.cnc) {
-      const c = data.cnc, hh = 118;
+      const c = data.cnc, hh = COST_H;
+      const rate = Number.isFinite(c.costPerCombined) ? inr2(c.costPerCombined) : "--";
       P.glass(M, y, cw, hh, 14, COL.indigo, WASH.indigo);
-      P.t("CNC COSTING", M + 18, y - 28, 13, bold, COL.indigo);
-      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
-      P.t(Number.isFinite(c.costPerCombined) ? inr2(c.costPerCombined) : "--", M + 18, y - 68, 32, bold, ink);
-      P.t("PER SFT+CFT", M + 20 + bold.widthOfTextAtSize(Number.isFinite(c.costPerCombined) ? inr2(c.costPerCombined) : "--", 32) + 8, y - 68, 10, bold, muted);
-      P.pg.drawLine({ start: { x: M + 18, y: y - 82 }, end: { x: W - M - 16, y: y - 82 }, thickness: 0.6, color: COL.indigo, opacity: 0.3 });
-      P.t("SPENT", M + 18, y - 96, 9, bold, muted);
-      P.t(inr(c.totalCost), M + 18, y - 110, 15, bold, ink);
-      P.r("CARVED", W - M - 16, y - 96, 9, bold, muted);
-      P.r(`${fmt0(c.sft + c.cft)} units · ${c.slabs} slabs`, W - M - 16, y - 110, 12, bold, ink);
-      y -= hh + 13;
+      P.t("CNC COSTING", M + 18, y - 32, 14.5, bold, COL.indigo);
+      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 31, 9, bold, muted);
+      P.t(rate, M + 18, y - 96, 44, bold, ink);
+      P.t("PER SFT+CFT", M + 20 + bold.widthOfTextAtSize(rate, 44) + 9, y - 96, 11, bold, muted);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 122 }, end: { x: W - M - 16, y: y - 122 }, thickness: 0.6, color: COL.indigo, opacity: 0.3 });
+      P.t("SPENT", M + 18, y - 144, 9.5, bold, muted);
+      P.t(inr(c.totalCost), M + 18, y - 170, 19, bold, ink);
+      P.r("CARVED", W - M - 16, y - 144, 9.5, bold, muted);
+      P.r(`${fmt0(c.sft + c.cft)} units · ${c.slabs} slabs`, W - M - 16, y - 170, 14, bold, ink);
+      y -= hh + PLANT_GAP;
     }
     if (data.cutter) {
-      const c = data.cutter, hh = 118;
+      const c = data.cutter, hh = COST_H;
+      const rate = Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--";
       P.glass(M, y, cw, hh, 14, COL.teal, WASH.teal);
-      P.t("CUTTER COSTING", M + 18, y - 28, 13, bold, COL.teal);
-      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
-      P.t(Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--", M + 18, y - 68, 32, bold, ink);
-      P.t("PER CFT", M + 20 + bold.widthOfTextAtSize(Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--", 32) + 8, y - 68, 10, bold, muted);
-      P.pg.drawLine({ start: { x: M + 18, y: y - 82 }, end: { x: W - M - 16, y: y - 82 }, thickness: 0.6, color: COL.teal, opacity: 0.3 });
-      P.t("SPENT", M + 18, y - 96, 9, bold, muted);
-      P.t(inr(c.totalCost), M + 18, y - 110, 15, bold, ink);
-      P.r("CUT", W - M - 16, y - 96, 9, bold, muted);
-      P.r(`${fmt0(c.cft)} CFT`, W - M - 16, y - 110, 12, bold, ink);
-      y -= hh + 13;
+      P.t("CUTTER COSTING", M + 18, y - 32, 14.5, bold, COL.teal);
+      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 31, 9, bold, muted);
+      P.t(rate, M + 18, y - 96, 44, bold, ink);
+      P.t("PER CFT", M + 20 + bold.widthOfTextAtSize(rate, 44) + 9, y - 96, 11, bold, muted);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 122 }, end: { x: W - M - 16, y: y - 122 }, thickness: 0.6, color: COL.teal, opacity: 0.3 });
+      P.t("SPENT", M + 18, y - 144, 9.5, bold, muted);
+      P.t(inr(c.totalCost), M + 18, y - 170, 19, bold, ink);
+      P.r("CUT", W - M - 16, y - 144, 9.5, bold, muted);
+      P.r(`${fmt0(c.cft)} CFT`, W - M - 16, y - 170, 14, bold, ink);
+      y -= hh + PLANT_GAP;
     }
+    const PLANT_H = 166;
+    if (data.stock) {
+      const s = data.stock, hh = PLANT_H;
+      P.glass(M, y, cw, hh, 14, COL.cyan, WASH.cyan);
+      P.t("RAW BLOCK STOCK", M + 18, y - 30, 14, bold, COL.cyan);
+      P.r("available + reserved", W - M - 16, y - 29, 8.5, bold, muted);
+      const colW = (cw - 34) / 2;
+      P.t("SANDSTONE", M + 18, y - 62, 9.5, bold, muted);
+      P.t(`${fmt0(s.sandstoneCft)} CFT`, M + 18, y - 106, 27, bold, ink);
+      P.t(`${s.sandstoneCount} blocks`, M + 18, y - 128, 9.5, bold, muted);
+      const mx = M + 18 + colW;
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 136 }, thickness: 0.6, color: COL.cyan, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 62, 9.5, bold, muted);
+      P.t(`${fmt1(s.marbleTonnes)} T`, mx, y - 106, 27, bold, ink);
+      P.t(`${s.marbleCount} blocks · ~${fmt0(s.marbleCft)} CFT`, mx, y - 128, 9.5, bold, muted);
+      y -= hh + PLANT_GAP;
+    }
+    // Block recovery split by stone category (matches the Block Journey
+    // page): sandstone as a yield %, marble as CFT per tonne.
+    if (data.recovery) {
+      const rec = data.recovery, rh = PLANT_H;
+      P.glass(M, y, cw, rh, 14, COL.gold, WASH.gold);
+      P.t("BLOCK RECOVERY", M + 18, y - 30, 14, bold, COL.gold);
+      P.r("lifetime, every cut block", W - M - 16, y - 29, 8.5, bold, muted);
+      const colW = (cw - 34) / 2;
+      P.t("SANDSTONE", M + 18, y - 62, 9.5, bold, muted);
+      P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 18, y - 106, 27, bold, ink);
+      P.t(`${fmt0(rec.sandstone.slabCft)} / ${fmt0(rec.sandstone.originalCft)} CFT`, M + 18, y - 128, 9.5, bold, muted);
+      const mx = M + 18 + colW;
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 136 }, thickness: 0.6, color: COL.gold, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 62, 9.5, bold, muted);
+      P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 106, 27, bold, ink);
+      P.t(`${fmt0(rec.marble.slabCft)} CFT from ${fmt1(rec.marble.tonnes)} T`, mx, y - 128, 9.5, bold, muted);
+      y -= rh + PLANT_GAP;
+    }
+    footer(P, 2, PAGES);
+  }
+
+  // ── Page 3 — money out: billing raised and suppliers paid ──
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
     {
       // Billing pulse — how much paper went out in the same 24 h window. The
       // full lists + itemised copies follow on the billing pages.
@@ -1361,10 +1439,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     }
     {
       // Show EVERY supplier paid in the window (Daksh: the old top-6 cap
-      // silently dropped vendors while the total stayed correct). Two columns
-      // fit ~40; only an extreme tail collapses into a "+N more" line so the
-      // page can never overflow. Capacity is computed from the space left
-      // under the cards above.
+      // silently dropped vendors while the total stayed correct). A typical
+      // day settles ~17 bills and the worst in four months was 52, so with
+      // its own page the two columns never actually truncate; only an
+      // extreme tail collapses into a "+N more" line.
       const all = data.payments.byVendor;
       const hasRows = all.length > 0;
       const lineH = 16, headH = 82, padBot = 14, footMargin = 46;
@@ -1407,10 +1485,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         }
       }
     }
-    footer(P, 2, PAGES);
+    footer(P, 3, PAGES);
   }
 
-  // ── Page 3 — last-24 h breakdowns (blocks / cutting / carving / dispatch) ──
+  // ── Page 4 — last-24 h breakdowns (blocks / cutting / carving / dispatch) ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
@@ -1437,55 +1515,18 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${fmt0(rw.cft)} CFT · ${rw.slabs}` })));
     section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${fmt0(rw.cft)} CFT · ${rw.slabs}` })));
     section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${fmt1(rw.cft)} CFT · ${rw.slabs}` })));
-    footer(P, 3, PAGES);
+    footer(P, 4, PAGES);
   }
 
-  /* ── Page 4 — stock, recovery and the 10-day trends ──
-     The LIVE PIPELINE card that used to open its own page is gone (Daksh:
-     "remove live pipeline") — it answered "where is everything right now",
-     which the app's own boards answer better and in real time. NOTE that
-     buildPipeline() and DailyReport.pipeline stay: the Cockpit dashboard
-     reads them (dashboard/cockpit.tsx). Only the PDF page is gone. Stock and
-     recovery moved onto the trends page rather than keeping a page of
-     their own: two cards on an otherwise empty sheet is what made the old
-     page 3 look broken. */
+  /* ── Page 5 — the 10-day trends.
+     The LIVE PIPELINE card that used to open a page of its own is gone
+     (Daksh: "remove live pipeline") — it answered "where is everything
+     right now", which the app's own boards answer better and in real
+     time. NOTE that buildPipeline() and DailyReport.pipeline stay: the
+     Cockpit dashboard reads them (dashboard/cockpit.tsx). */
   {
     const P = newPage();
     let y = header(P, H - 26, false);
-    if (data.stock) {
-      const s = data.stock, hh = 104;
-      P.glass(M, y, cw, hh, 14, COL.cyan, WASH.cyan);
-      P.t("RAW BLOCK STOCK", M + 16, y - 24, 12, bold, COL.cyan);
-      P.r("available + reserved", W - M - 14, y - 23, 8.5, bold, muted);
-      const colW = (cw - 30) / 2;
-      P.t("SANDSTONE", M + 16, y - 48, 9, bold, muted);
-      P.t(`${fmt0(s.sandstoneCft)} CFT`, M + 16, y - 74, 19, bold, ink);
-      P.t(`${s.sandstoneCount} blocks`, M + 16, y - 90, 9, bold, muted);
-      const mx = M + 16 + colW;
-      P.pg.drawLine({ start: { x: mx - 8, y: y - 40 }, end: { x: mx - 8, y: y - 94 }, thickness: 0.6, color: COL.cyan, opacity: 0.3 });
-      P.t("MARBLE", mx, y - 48, 9, bold, muted);
-      P.t(`${fmt1(s.marbleTonnes)} T`, mx, y - 74, 19, bold, ink);
-      P.t(`${s.marbleCount} blocks · ~${fmt0(s.marbleCft)} CFT`, mx, y - 90, 9, bold, muted);
-      y -= hh + 13;
-    }
-    // Block recovery split by stone category (matches the Block Journey
-    // page): sandstone as a yield %, marble as CFT per tonne.
-    if (data.recovery) {
-      const rec = data.recovery, rh = 104;
-      P.glass(M, y, cw, rh, 14, COL.gold, WASH.gold);
-      P.t("BLOCK RECOVERY", M + 16, y - 24, 12, bold, COL.gold);
-      P.r("lifetime, every cut block", W - M - 14, y - 23, 8.5, bold, muted);
-      const colW = (cw - 30) / 2;
-      P.t("SANDSTONE", M + 16, y - 48, 9, bold, muted);
-      P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 16, y - 74, 19, bold, ink);
-      P.t(`${fmt0(rec.sandstone.slabCft)} / ${fmt0(rec.sandstone.originalCft)} CFT`, M + 16, y - 90, 9, bold, muted);
-      const mx = M + 16 + colW;
-      P.pg.drawLine({ start: { x: mx - 8, y: y - 40 }, end: { x: mx - 8, y: y - 94 }, thickness: 0.6, color: COL.gold, opacity: 0.3 });
-      P.t("MARBLE", mx, y - 48, 9, bold, muted);
-      P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 74, 19, bold, ink);
-      P.t(`${fmt0(rec.marble.slabCft)} CFT from ${fmt1(rec.marble.tonnes)} T`, mx, y - 90, 9, bold, muted);
-      y -= rh + 15;
-    }
     P.t("10-DAY ACTIVITY TRENDS", M, y, 11, bold, ink); y -= 18;
     const tr = data.trend, n = tr.length;
     const drawMini = (title: string, color: ReturnType<typeof rgb>, key: "blocks" | "cutting" | "carving" | "dispatch") => {
@@ -1494,11 +1535,9 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       const total = vals.reduce((a, b) => a + b, 0);
       const avg = n > 0 ? total / n : 0;
       P.pg.drawCircle({ x: M + 4, y: y - 3, size: 3.4, color });
-      P.t(title, M + 13, y - 6, 11, bold, ink);
+      P.t(title, M + 13, y - 6, 11.5, bold, ink);
       P.r(`avg ${avg.toFixed(1)}/day · peak ${peak} · total ${total}`, W - M, y - 6, 8, bold, muted);
-      // Plot 100 → 74 pt tall: four charts plus the two cards above still
-      // clear the footer, and at phone size the shape reads the same.
-      const left = M + 26, rightX = W - M - 4, pT = y - 18, pB = pT - 74;
+      const left = M + 26, rightX = W - M - 4, pT = y - 20, pB = pT - 100;
       const niceMax = Math.max(5, Math.ceil(peak / 5) * 5);
       for (let g = 0; g <= 4; g++) {
         const yy = pB + ((pT - pB) * g) / 4;
@@ -1507,16 +1546,16 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       }
       const xAt = (i: number) => left + (n <= 1 ? 0 : ((rightX - left) * i) / (n - 1));
       const yAt = (v: number) => pB + (pT - pB) * Math.min(1, v / niceMax);
-      for (let i = 0; i < n; i++) P.ctr(tr[i].short, xAt(i), pB - 11, 7.5, font, muted);
+      for (let i = 0; i < n; i++) P.ctr(tr[i].short, xAt(i), pB - 12, 7.5, font, muted);
       for (let i = 0; i < n - 1; i++) P.pg.drawLine({ start: { x: xAt(i), y: yAt(vals[i]) }, end: { x: xAt(i + 1), y: yAt(vals[i + 1]) }, thickness: 2.2, color });
       for (let i = 0; i < n; i++) P.pg.drawCircle({ x: xAt(i), y: yAt(vals[i]), size: 2.4, color });
-      y = pB - 11 - 20;
+      y = pB - 12 - 22;
     };
     drawMini("Blocks added", COL.blue, "blocks");
     drawMini("Cutting done", COL.cyan, "cutting");
     drawMini("Carving done", COL.amber, "carving");
     drawMini("Dispatched", COL.green, "dispatch");
-    footer(P, 4, PAGES);
+    footer(P, 5, PAGES);
   }
 
   // ── Pages 6+ — last-24 h challans & invoices (summary + copies) ──
@@ -1556,7 +1595,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       listBlock("CHALLANS RAISED", COL.blue, recChallans);
       listBlock("INVOICES ISSUED", COL.green, recInvoices);
       P.t("Full itemised copies of each document on the following pages.", M, y, 8.5, font, muted);
-      footer(P, 5, PAGES);
+      footer(P, 6, PAGES);
     }
 
     // Detail pages — one itemised block per document (fixed slot).
@@ -1610,7 +1649,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
           P.t("Not priced yet - value will appear once this challan is priced.", M + 6, ty + 1, 8, font, muted);
         }
       });
-      footer(P, 6 + pageIdx, PAGES);
+      footer(P, 7 + pageIdx, PAGES);
     }
   }
 
