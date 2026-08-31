@@ -44,6 +44,7 @@ import { getReportRecipientNumbers } from "@/lib/wa-recipients";
 import { buildCncVariousCostReport, cncPeriodFromSearch } from "@/lib/cnc-various-cost-report";
 import { buildCutterCostReport, cutterPeriodFromSearch } from "@/lib/cutter-cost-report";
 import { isMarble, cftEquivFromTonnes, type StoneCategory } from "@/lib/stone-categories";
+import { isThinSlab, faceSftFromSlab } from "@/lib/dimensions";
 import { applyDiscount, computeGroupedGstTotals, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
@@ -207,7 +208,18 @@ type DayTotals = {
     sandstone: { count: number; cft: number };
   };
   cutting: { slabs: number; cft: number };
-  carving: { slabs: number; cft: number };
+  /* Aug 2026 — Daksh: "in carving done you're only showing CFT; show the
+     combined CFT + SFT." Carved output is measured in ONE unit per slab,
+     decided by real thickness: a slab 12 in or thinner is charged on its
+     face AREA (SFT), a thicker one on VOLUME (CFT). Adding the two gives
+     the "combined units" the CNC costing page already prices per unit, so
+     the two screens now report the same quantity.
+
+     Double-sided carving counts twice (mig 088) — two faces is two lots
+     of work. Both of those were missing here: every carved slab was being
+     counted as raw volume, once, so thin slabs read as a sliver of their
+     real output and double-sided work as half. */
+  carving: { slabs: number; cft: number; sft: number };
   dispatch: { slabs: number; cft: number; tonnes: number; trucks: number };
 };
 
@@ -253,7 +265,7 @@ export type DailyReport = {
   } | null;
   blocksByStone: Array<{ stone: string; count: number; cft: number; vendors: Array<{ vendor: string; count: number; cft: number }> }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
-  carvingByVendor: Array<{ vendor: string; slabs: number; cft: number }>;
+  carvingByVendor: Array<{ vendor: string; slabs: number; cft: number; sft: number }>;
   dispatchByTemple: Array<{ temple: string; slabs: number; cft: number; tonnes: number }>;
   payments: { total: number; byVendor: Array<{ vendor: string; amount: number }> };
   /** Supplier payments for the report month to date (total only). */
@@ -313,10 +325,29 @@ async function cftBySlab(admin: AdminClient, ids: string[]): Promise<Map<string,
   return out;
 }
 
+/** Raw dims per slab — carved output needs the thin/thick decision, which
+ *  cftBySlab's single number has already thrown away. */
+async function dimsBySlab(
+  admin: AdminClient,
+  ids: string[],
+): Promise<Map<string, { l: number; w: number; t: number }>> {
+  const out = new Map<string, { l: number; w: number; t: number }>();
+  for (const chunk of chunkIds(ids, 500)) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, length_ft, width_ft, thickness_ft")
+      .in("id", chunk);
+    for (const s of (data ?? []) as Array<{ id: string; length_ft: number; width_ft: number; thickness_ft: number }>) {
+      out.set(s.id, { l: Number(s.length_ft), w: Number(s.width_ft), t: Number(s.thickness_ft) });
+    }
+  }
+  return out;
+}
+
 const emptyTotals = (): DayTotals => ({
   blocks: { count: 0, cft: 0, marble: { count: 0, tonnes: 0 }, sandstone: { count: 0, cft: 0 } },
   cutting: { slabs: 0, cft: 0 },
-  carving: { slabs: 0, cft: 0 },
+  carving: { slabs: 0, cft: 0, sft: 0 },
   dispatch: { slabs: 0, cft: 0, tonnes: 0, trucks: 0 },
 });
 
@@ -447,26 +478,33 @@ async function aggregateDay(
 
   // 3. CARVING done in the window — carving_items approved, by vendor.
   {
-    const rows = await fetchAllPaged<{ slab_requirement_id: string | null; vendor_name: string | null }>((from, to) =>
+    const rows = await fetchAllPaged<{ slab_requirement_id: string | null; vendor_name: string | null; carving_sides: number | null }>((from, to) =>
       admin
         .from("carving_items")
-        .select("slab_requirement_id, vendor_name, review_approved_at")
+        .select("slab_requirement_id, vendor_name, carving_sides, review_approved_at")
         .not("review_approved_at", "is", null)
         .gte("review_approved_at", startUTC)
         .lt("review_approved_at", endUTC)
         .order("id", { ascending: true })
         .range(from, to),
     );
-    const dims = await cftBySlab(admin, rows.map((r) => r.slab_requirement_id).filter(Boolean) as string[]);
-    const byVendor = new Map<string, { slabs: number; cft: number }>();
+    const dims = await dimsBySlab(admin, rows.map((r) => r.slab_requirement_id).filter(Boolean) as string[]);
+    const byVendor = new Map<string, { slabs: number; cft: number; sft: number }>();
     for (const r of rows) {
-      const c = r.slab_requirement_id ? dims.get(r.slab_requirement_id) ?? 0 : 0;
-      totals.carving.slabs += 1; totals.carving.cft += c;
+      const d = r.slab_requirement_id ? dims.get(r.slab_requirement_id) : undefined;
+      // Same rule as the CNC costing report (cnc-various-cost-report.ts): one
+      // unit per slab by REAL thickness — never both, which would double-count
+      // — times the number of carved sides.
+      const sides = Number(r.carving_sides) === 2 ? 2 : 1;
+      const thin = d ? isThinSlab(d.l, d.w, d.t) : false;
+      const c = d && !thin ? cft(d.l, d.w, d.t) * sides : 0;
+      const s = d && thin ? faceSftFromSlab(d.l, d.w, d.t) * sides : 0;
+      totals.carving.slabs += 1; totals.carving.cft += c; totals.carving.sft += s;
       const k = r.vendor_name || "-";
-      const g = byVendor.get(k) ?? { slabs: 0, cft: 0 };
-      g.slabs += 1; g.cft += c; byVendor.set(k, g);
+      const g = byVendor.get(k) ?? { slabs: 0, cft: 0, sft: 0 };
+      g.slabs += 1; g.cft += c; g.sft += s; byVendor.set(k, g);
     }
-    if (detail) det.carvingByVendor = [...byVendor.entries()].map(([vendor, v]) => ({ vendor, ...v })).sort((a, b) => b.cft - a.cft);
+    if (detail) det.carvingByVendor = [...byVendor.entries()].map(([vendor, v]) => ({ vendor, ...v })).sort((a, b) => (b.cft + b.sft) - (a.cft + a.sft));
   }
 
   // 4. DISPATCH in the window — trucks sent; slabs + tonnes by temple.
@@ -1300,21 +1338,28 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
 
     // ── the three flow metrics, one card each ──
     const cards: Array<{
-      c: ReturnType<typeof rgb>; wash: ReturnType<typeof rgb>; label: string;
+      c: ReturnType<typeof rgb>; wash: ReturnType<typeof rgb>; label: string; unit: string;
       today: string; todaySub: string; month: string; monthSub: string;
     }> = [
       {
-        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE",
+        c: COL.cyan, wash: WASH.cyan, label: "CUTTING DONE", unit: "CFT",
         today: fmt0(data.today.cutting.cft), todaySub: `${data.today.cutting.slabs} slabs`,
         month: fmt0(data.mtd.cutting.cft),   monthSub: `${fmt0(data.mtd.cutting.slabs)} slabs`,
       },
       {
-        c: COL.amber, wash: WASH.amber, label: "CARVING DONE",
-        today: fmt0(data.today.carving.cft), todaySub: `${data.today.carving.slabs} slabs`,
-        month: fmt0(data.mtd.carving.cft),   monthSub: `${fmt0(data.mtd.carving.slabs)} slabs`,
+        /* Carved output is SFT for a thin slab and CFT for a thick one —
+           never both — so the honest headline is the two added together,
+           the same "combined units" the CNC costing card is priced per.
+           The split is spelled out underneath so it is never mistaken
+           for plain CFT. */
+        c: COL.amber, wash: WASH.amber, label: "CARVING DONE", unit: "CFT+SFT",
+        today: fmt0(data.today.carving.cft + data.today.carving.sft),
+        todaySub: `${fmt0(data.today.carving.cft)} CFT + ${fmt0(data.today.carving.sft)} SFT · ${data.today.carving.slabs} slabs`,
+        month: fmt0(data.mtd.carving.cft + data.mtd.carving.sft),
+        monthSub: `${fmt0(data.mtd.carving.cft)} CFT + ${fmt0(data.mtd.carving.sft)} SFT · ${fmt0(data.mtd.carving.slabs)} slabs`,
       },
       {
-        c: COL.green, wash: WASH.green, label: "DISPATCHED",
+        c: COL.green, wash: WASH.green, label: "DISPATCHED", unit: "CFT",
         today: fmt0(data.today.dispatch.cft),
         todaySub: `${data.today.dispatch.slabs} slabs · ${data.today.dispatch.trucks} trucks`,
         month: fmt0(data.mtd.dispatch.cft),
@@ -1326,7 +1371,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.glass(M, y, cw, ch, 13, k.c, k.wash);
       P.t(k.label, M + 18, y - 30, 14, bold, k.c);
       P.pg.drawLine({ start: { x: midX, y: y - 46 }, end: { x: midX, y: y - ch + 16 }, thickness: 0.7, color: k.c, opacity: 0.3 });
-      pair(y - 62, "CFT", k.today, k.todaySub, k.month, k.monthSub, 36);
+      pair(y - 62, k.unit, k.today, k.todaySub, k.month, k.monthSub, 36);
       y -= ch + gap;
     }
 
@@ -1513,7 +1558,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `    -  ${vd.vendor}`, v: `${fmt0(vd.cft)} CFT · ${vd.count}` })),
     ]));
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${fmt0(rw.cft)} CFT · ${rw.slabs}` })));
-    section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({ n: rw.vendor, v: `${fmt0(rw.cft)} CFT · ${rw.slabs}` })));
+    section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({
+      n: rw.vendor,
+      v: rw.sft >= 0.5 ? `${fmt0(rw.cft)} CFT + ${fmt0(rw.sft)} SFT · ${rw.slabs}` : `${fmt0(rw.cft)} CFT · ${rw.slabs}`,
+    })));
     section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${fmt1(rw.cft)} CFT · ${rw.slabs}` })));
     footer(P, 4, PAGES);
   }
