@@ -260,6 +260,27 @@ type Vendor = { id: string; name: string; vendor_type?: string };
 // carving=blue (felt cold). Now: idle=light-blue (waiting state),
 // carving=green (good, healthy progress), maintenance still red.
 // Inactive (offline) stays neutral grey.
+/* ── Long-running slabs (Daksh, Aug 2026) ──────────────────────────
+   Every running card is the same green whether the slab went on the
+   machine twenty minutes ago or nine days ago. Measured on the live
+   floor: of 84 slabs "running", 40 had been on a machine over 3 days
+   and 16 over a week. Some of those are genuinely long carves and
+   some were finished and never marked complete — and the screen
+   cannot tell you which, so nobody looks.
+
+   This is deliberately the SMALLEST possible signal: the elapsed
+   timer changes colour and picks up a word. No card moves, nothing
+   is hidden, no new row appears on the card. */
+const LONG_RUN_WARN_H = 72;   // 3 days
+const LONG_RUN_BAD_H = 168;   // 7 days
+
+function longRunTone(elapsedMin: number): { color: string; note: string } | null {
+  const h = elapsedMin / 60;
+  if (h >= LONG_RUN_BAD_H) return { color: "#b91c1c", note: "over a week" };
+  if (h >= LONG_RUN_WARN_H) return { color: "#b45309", note: "over 3 days" };
+  return null;
+}
+
 const STATUS_TINT: Record<
   string,
   {
@@ -689,6 +710,12 @@ export function VendorCockpitClient({
   }, []);
 
   // Modal state — only one open at a time.
+  /* Machine order (Daksh, Aug 2026). Default is UNCHANGED — by machine
+     number, the order the floor knows by heart. "Longest running" is a
+     deliberate second click for when someone is hunting for the slab
+     that has been sitting on a machine for a week. Not persisted: the
+     board should always open in the familiar order. */
+  const [machineOrder, setMachineOrder] = useState<"number" | "longest">("number");
   const [loadFor, setLoadFor] = useState<{ machine: CncMachineLive } | null>(null);
   const [completeFor, setCompleteFor] = useState<CncMachineLive | null>(null);
   const [maintenanceFor, setMaintenanceFor] = useState<CncMachineLive | null>(null);
@@ -1191,6 +1218,65 @@ export function VendorCockpitClient({
         const cncMachines = machines.filter((m) => m.machine_type !== "lathe");
         const latheMachines = machines.filter((m) => m.machine_type === "lathe");
 
+        /** Oldest load first. Machines with nothing on them sort last —
+         *  an idle machine has no age and should not head the list. */
+        const loadedAtMs = (m: CncMachineLive) => {
+          const t = m.current_jobs?.[0]?.loaded_at;
+          return t ? new Date(t).getTime() : Infinity;
+        };
+        const ordered = (list: typeof machines) =>
+          machineOrder === "longest"
+            ? [...list].sort((a, b) => loadedAtMs(a) - loadedAtMs(b))
+            : list;
+
+        // How many slabs have been on a machine past the two thresholds —
+        // shown on the header so the count is visible without hunting
+        // card by card.
+        let over3d = 0, over7d = 0;
+        for (const m of machines) {
+          for (const j of m.current_jobs ?? []) {
+            if (!j.loaded_at) continue;
+            const h = (now - new Date(j.loaded_at).getTime()) / 3_600_000;
+            if (h >= LONG_RUN_BAD_H) over7d += 1;
+            else if (h >= LONG_RUN_WARN_H) over3d += 1;
+          }
+        }
+        const orderToggle = (
+          <>
+            {(over3d > 0 || over7d > 0) && (
+              <span
+                style={{ fontSize: 11.5, fontWeight: 800, color: over7d > 0 ? "#b91c1c" : "#b45309", whiteSpace: "nowrap" }}
+                title="Slabs that have been on a machine a long time — a long carve, or one finished and never marked complete."
+              >
+                {over7d > 0 && `${over7d} over a week`}
+                {over7d > 0 && over3d > 0 && " · "}
+                {over3d > 0 && `${over3d} over 3 days`}
+              </span>
+            )}
+            <div style={{ display: "flex", border: "1.5px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+              {([["number", "By machine"], ["longest", "Longest running"]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setMachineOrder(key)}
+                  style={{
+                    padding: "5px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 800,
+                    border: "none",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    background: machineOrder === key ? "var(--gold-dark)" : "var(--bg)",
+                    color: machineOrder === key ? "#fff" : "var(--muted)",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </>
+        );
+
         const renderGrid = (list: typeof machines) => (
           <div
             style={{
@@ -1250,8 +1336,9 @@ export function VendorCockpitClient({
               <Section
                 title="CNC Machines"
                 subtitle={`${cncMachines.length} machine${cncMachines.length !== 1 ? "s" : ""}`}
+                right={orderToggle}
               >
-                {renderGrid(cncMachines)}
+                {renderGrid(ordered(cncMachines))}
               </Section>
             )}
             {latheMachines.length > 0 && (
@@ -1259,7 +1346,7 @@ export function VendorCockpitClient({
                 title="Lathe Machines"
                 subtitle={`${latheMachines.length} lathe${latheMachines.length !== 1 ? "s" : ""} · round work`}
               >
-                {renderGrid(latheMachines)}
+                {renderGrid(ordered(latheMachines))}
               </Section>
             )}
           </>
@@ -1832,6 +1919,7 @@ function Section({
   children,
   collapsible = false,
   defaultOpen = true,
+  right,
 }: {
   title: string;
   subtitle?: string;
@@ -1841,6 +1929,10 @@ function Section({
    *  up screen real estate by default. */
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /** Optional controls pinned to the RIGHT of the header line (the
+   *  machine-order toggle). Optional so every existing caller is
+   *  untouched. */
+  right?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = collapsible ? open : true;
@@ -1893,6 +1985,16 @@ function Section({
           <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
             {subtitle}
           </span>
+        )}
+        {right && (
+          <div
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}
+            // The header is click-to-collapse on collapsible sections;
+            // don't let a control inside it fold the section away.
+            onClick={(e) => e.stopPropagation()}
+          >
+            {right}
+          </div>
         )}
       </div>
       {isOpen && children}
@@ -4695,10 +4797,12 @@ function MachineCard({
   let remainingLabel: string | null = null;
   let remainingColor: string | null = null;
   let progressPct: number | null = null;
+  let longRun: { color: string; note: string } | null = null;
   if (machine.status === "carving" && job?.loaded_at) {
     const eta = job.vendor_estimated_minutes ?? job.estimated_minutes ?? null;
     const elapsedMin = (now - new Date(job.loaded_at).getTime()) / 60_000;
     runningForLabel = `running for ${fmtDuration(elapsedMin)}`;
+    longRun = longRunTone(elapsedMin);
     if (eta) {
       const remaining = eta - elapsedMin;
       progressPct = Math.max(0, Math.min(100, (elapsedMin / eta) * 100));
@@ -5109,8 +5213,19 @@ function MachineCard({
                       }}
                     >
                       {runningForLabel && (
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: longRun ? 800 : 700,
+                            // Amber past 3 days, red past a week. The only
+                            // thing that changes is this timer's colour —
+                            // the card itself stays exactly where it was.
+                            color: longRun ? longRun.color : "#15803d",
+                          }}
+                          title={longRun ? `On this machine ${longRun.note}. Either a long carve or a slab that was finished and never marked complete.` : undefined}
+                        >
                           ▶ {runningForLabel}
+                          {longRun && ` · ${longRun.note}`}
                         </span>
                       )}
                       {remainingLabel && (
