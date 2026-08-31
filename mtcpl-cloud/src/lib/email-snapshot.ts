@@ -153,7 +153,7 @@ const SUMMARY_SCHEMA = {
           important: { type: "boolean" },
           category: {
             type: "string",
-            enum: ["bank_payment", "government_gst", "client", "vendor", "legal", "other"],
+            enum: ["bank_payment", "government_gst", "client", "vendor", "internal", "legal", "other"],
           },
           urgency: { type: "string", enum: ["action_needed", "fyi"] },
           summary: {
@@ -202,6 +202,7 @@ KEEP (important=true) — only these kinds:
   • Bank / payment / finance: bank alerts, statements, UPI/NEFT/RTGS confirmations, anything debited/credited or due.
   • Government: GST, income-tax, e-way bill, any government/regulatory notice.
   • Client / project: clients, temples, or main contractors (e.g. L&T) writing about a project, drawing, approval, dispatch, or payment.
+  • Internal: MTCPL's own staff reporting something the owner should know (work sent out, a site problem, a figure he asked for). Category "internal", NOT "client".
   • Vendor / supplier: a vendor asking for something, sending an invoice/PO, or chasing payment.
   • Legal / insurance / compliance.
   • Anything with a real business amount, invoice/PO number, or a deadline that affects the company.
@@ -217,6 +218,23 @@ For every email return an item with the same idx and important true/false. For t
   • action — the SINGLE concrete thing the owner must do, as an imperative ("Arrange a vehicle Ahmedabad→Pindwara for Mon 9 AM"). Empty string if nothing is required.
   • deadline — when it is due if the email states one; empty string otherwise.
   • urgency — action_needed ONLY when he must actually do something (i.e. action is non-empty); otherwise fyi.
+
+WHO IS WRITING, AND WAS HE EVEN ASKED? (Aug 2026 — this was getting both wrong.)
+Each email carries "from", "to" and "cc". Read them before deciding category or urgency.
+  • MTCPL's OWN PEOPLE are not clients. Mail from "MTCPL Team", from the company's own
+    domain, or from a colleague (e.g. Parth Sompura) is "internal". Never "client" — a
+    client is someone OUTSIDE the company. Getting this wrong makes his own staff look
+    like customers.
+  • The owner is very often only in CC. His team copies him on what they send OUT to
+    clients so he stays informed. If his address is in "cc" and NOT in "to", the email
+    was not addressed to him: it is "fyi" with an EMPTY action, however much the body
+    sounds like a request. The request is aimed at the person on the "to" line, not him.
+    Say what was sent and by whom — "Parth Sompura sent three Jagti shop drawings to the
+    client" — and stop there. Do NOT turn it into "review these and reply to Parth".
+  • Only put a person's own colleague in the action line when that colleague genuinely
+    asked HIM for something and he is on the "to" line.
+  • action_needed therefore requires BOTH: something real to do, AND the email actually
+    being addressed to him.
 And write the batch overview as a real 1-2 sentence digest of what matters across these emails — the substance, not a count.
 
 HINDI (Aug 2026): the owner reads Hindi more comfortably than English, and the
@@ -234,7 +252,16 @@ overviewHi with the same content in Hindi (Devanagari).
 // fromName = clean display name (what we show in bold); fromText keeps
 // the full "Name <addr>" for the AI's context. uid lets us re-open the
 // full email later (read-only, on demand). messageId is the dedup key.
-type FetchedEmail = { uid: number; messageId: string; fromName: string; fromText: string; subject: string; date: string; body: string };
+type FetchedEmail = {
+  uid: number; messageId: string; fromName: string; fromText: string;
+  subject: string; date: string; body: string;
+  /* Aug 2026 — WITHOUT these the AI cannot tell an email written TO the
+     owner from one his own team sent to a client with him in CC. It was
+     reading the latter as "MTCPL Team ... ACTION NEEDED: review the
+     drawings and reply to Parth Sompura" — our own staff, filed as a
+     client, giving the owner orders. He is only on the copy line. */
+  to: string; cc: string;
+};
 
 /** Read recent inbox mail over read-only IMAP, within the given range. */
 async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> {
@@ -283,6 +310,12 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
             // Dedup key: the email's Message-ID (globally unique & stable);
             // fall back to sender+subject+date when a header is missing.
             const messageId = (parsed.messageId ?? "").trim() || `fallback:${fromName}|${subject}|${date}`;
+            // mailparser gives either one address object or an array.
+            const addrText = (v: unknown): string => {
+              if (!v) return "";
+              const list = Array.isArray(v) ? v : [v];
+              return list.map((a) => (a as { text?: string }).text ?? "").filter(Boolean).join(", ");
+            };
             out.push({
               uid: typeof msg.uid === "number" ? msg.uid : 0,
               messageId,
@@ -291,6 +324,8 @@ async function fetchRecentEmails(range: SnapshotRange): Promise<FetchedEmail[]> 
               subject,
               date,
               body,
+              to: addrText(parsed.to),
+              cc: addrText(parsed.cc),
             });
           } catch {
             // Unparseable message — skip it rather than failing the run.
@@ -394,13 +429,24 @@ export async function fetchAttachment(
   }
 }
 
+/** Names the mailbox being screened, so the model can actually apply the
+ *  to-vs-cc rule instead of guessing which address is the owner's. Silent
+ *  when GMAIL_USER is unset — the rest of the prompt still stands. */
+function ownerMailboxNote(): string {
+  const me = (process.env.GMAIL_USER ?? "").trim();
+  if (!me) return "";
+  const domain = me.includes("@") ? me.slice(me.indexOf("@") + 1) : "";
+  return `\n\nTHE MAILBOX YOU ARE READING is ${me} — that address is the OWNER.` +
+    (domain ? ` Anyone writing from @${domain} is MTCPL's own staff, i.e. internal, never a client.` : "");
+}
+
 const SUMMARIZE_BATCH = 15;       // emails per Claude call
 const SUMMARIZE_CONCURRENCY = 3;  // calls running at once
 
 /** Summarize ONE batch of emails — returns the important ones. JSON parse
  *  errors yield [] (skip the batch); API errors propagate to the caller. */
 async function summarizeBatch(anthropic: Anthropic, model: string, emails: FetchedEmail[]): Promise<{ items: SnapshotItem[]; overview: string; overviewHi: string }> {
-  const input = emails.map((e, idx) => ({ idx, from: e.fromText, subject: e.subject, date: e.date, body: e.body }));
+  const input = emails.map((e, idx) => ({ idx, from: e.fromText, to: e.to, cc: e.cc, subject: e.subject, date: e.date, body: e.body }));
   const response = await anthropic.messages.create({
     model,
     max_tokens: 4096,
@@ -408,7 +454,7 @@ async function summarizeBatch(anthropic: Anthropic, model: string, emails: Fetch
     // adaptive thinking added a lot of latency per batch (a big part of
     // why the run blew the 60s budget). Direct answers are plenty here.
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
-    messages: [{ role: "user", content: `${SUMMARY_PROMPT}\n\nEMAILS (JSON):\n${JSON.stringify(input)}` }],
+    messages: [{ role: "user", content: `${SUMMARY_PROMPT}${ownerMailboxNote()}\n\nEMAILS (JSON):\n${JSON.stringify(input)}` }],
   });
   const text = response.content.find((b) => b.type === "text")?.text ?? "";
   let parsed: {

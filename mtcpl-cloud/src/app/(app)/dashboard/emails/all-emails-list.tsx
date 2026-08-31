@@ -23,6 +23,8 @@ const CATEGORY_META: Record<string, { label: string; icon: string }> = {
   government_gst: { label: "Govt / GST", icon: "🏛️" },
   client: { label: "Client", icon: "🤝" },
   vendor: { label: "Vendor", icon: "📦" },
+  // Our own staff — a colleague copying the owner is not a customer.
+  internal: { label: "Our team", icon: "🏠" },
   legal: { label: "Legal", icon: "⚖️" },
   other: { label: "Other", icon: "✉️" },
 };
