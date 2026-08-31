@@ -25,7 +25,7 @@ import { buildDailyReportData, type DailyReport } from "@/lib/whatsapp-report";
 import type { Profile } from "@/lib/types";
 import { HeroArt, CockpitClock } from "./cockpit-bits";
 import { DashViewToggle } from "./view-toggle";
-import { TimeCheckCard } from "./time-check-card";
+
 
 /** Images that exist in public/daily/ — extend when Daksh drops files. */
 const DAILY_ART: string[] = [];
@@ -205,21 +205,14 @@ export async function CockpitDashboard({ profile }: { profile: Profile }) {
   const quickActions = [
     { icon: "📄", en: "Daily Report (PDF)", hi: "दैनिक रिपोर्ट", href: "/api/whatsapp-report/preview", ext: true },
     { icon: "📒", en: "Work Diary", hi: "काम का रजिस्टर", href: "/diary", ext: false },
-    { icon: "📊", en: "Temple P&L", hi: "मंदिर लाभ-हानि", href: "/reports/temple-pnl", ext: false },
-    { icon: "🧮", en: "Tender / Price Breakdown", hi: "टेंडर / रेट ब्रेकअप", href: "/reports/tender", ext: false },
     { icon: "🏭", en: "Production DPR", hi: "उत्पादन रिपोर्ट", href: "/reports/dpr", ext: false },
+    { icon: "🕐", en: "Server time check", hi: "सर्वर समय जाँच", href: "/time-check", ext: false },
   ];
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 16px 40px", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Toggle back to the untouched classic dashboard. */}
       <DashViewToggle current="cockpit" />
-
-      {/* Same server-vs-browser clock as the classic dashboard — the
-          whole Cockpit is developer-only, so no extra role check. It
-          lives on both views so it does not matter which one is open
-          when a date looks wrong. */}
-      <TimeCheckCard />
 
       {/* ── HERO — greeting left, daily photo right ── */}
       <div style={{ ...CARD, padding: 0, overflow: "hidden" }}>
