@@ -16,6 +16,7 @@ import { MarketNewsEntryCard } from "@/components/market-news-entry-card";
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { VariousCostingEntryCard } from "@/components/various-costing-entry-card";
 import { TemplePnlEntryCard } from "@/components/temple-pnl-entry-card";
+import { TimeCheckCard } from "./time-check-card";
 import { TenderEntryCard } from "@/components/tender-entry-card";
 import { canUseTender } from "@/app/(app)/reports/temple-pnl/tender-model";
 import {
@@ -240,6 +241,11 @@ export default async function DashboardPage() {
       {/* Dev-only switch to the new Cockpit view — everyone else never
           sees this and the classic dashboard stays exactly as-is. */}
       {profile.role === "developer" && <DashViewToggle current="classic" />}
+
+      {/* Server-vs-browser clock, developer only. Sits at the top so a
+          wrong date is the first thing seen, not something to go
+          hunting for. */}
+      {profile.role === "developer" && <TimeCheckCard />}
 
       {/* ── GREETING HEADER ── styled by .dash-hero (globals.css):
           same card, richer finish — layered gold glows, hairline ring,

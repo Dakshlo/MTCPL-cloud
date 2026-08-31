@@ -25,6 +25,7 @@ import { buildDailyReportData, type DailyReport } from "@/lib/whatsapp-report";
 import type { Profile } from "@/lib/types";
 import { HeroArt, CockpitClock } from "./cockpit-bits";
 import { DashViewToggle } from "./view-toggle";
+import { TimeCheckCard } from "./time-check-card";
 
 /** Images that exist in public/daily/ — extend when Daksh drops files. */
 const DAILY_ART: string[] = [];
@@ -213,6 +214,12 @@ export async function CockpitDashboard({ profile }: { profile: Profile }) {
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 16px 40px", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Toggle back to the untouched classic dashboard. */}
       <DashViewToggle current="cockpit" />
+
+      {/* Same server-vs-browser clock as the classic dashboard — the
+          whole Cockpit is developer-only, so no extra role check. It
+          lives on both views so it does not matter which one is open
+          when a date looks wrong. */}
+      <TimeCheckCard />
 
       {/* ── HERO — greeting left, daily photo right ── */}
       <div style={{ ...CARD, padding: 0, overflow: "hidden" }}>
