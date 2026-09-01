@@ -151,7 +151,9 @@ export default async function BillsListPage({
       .from("bills")
       .select(
         "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
-      );
+      )
+      // Mig 226 — archived bills are out of the accounts entirely.
+      .is("archived_at", null);
     if (restrictToOwn) q = q.eq("submitted_by", profile.id);
     if (statusFilter && ALL_STATUSES.includes(statusFilter)) q = q.eq("status", statusFilter);
     if (vendorFilter) q = q.eq("bill_vendor_id", vendorFilter);
@@ -188,7 +190,7 @@ export default async function BillsListPage({
   // describe the whole book, which is what makes them stable filter
   // targets, exactly as before.
   const countBills = async (status?: string) => {
-    let q = supabase.from("bills").select("id", { count: "exact", head: true });
+    let q = supabase.from("bills").select("id", { count: "exact", head: true }).is("archived_at", null);
     if (restrictToOwn) q = q.eq("submitted_by", profile.id);
     if (status) q = q.eq("status", status);
     const { count } = await q;

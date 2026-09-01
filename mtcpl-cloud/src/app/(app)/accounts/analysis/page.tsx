@@ -91,6 +91,9 @@ export default async function FinanceAnalysisPage() {
           "id, token, vendor_bill_no, bill_date, cost_head, status, amount_payable_to_vendor, amount_paid, amount_outstanding, held_amount, held_reason, bill_vendor_id",
         )
         .in("status", LEDGER_STATUSES)
+        // Mig 226 — LEDGER_STATUSES includes fully_paid, which is exactly
+        // what an archived bill is, so this one needs the filter.
+        .is("archived_at", null)
         .order("id")
         .range(from, to),
     ),

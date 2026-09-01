@@ -157,6 +157,9 @@ export async function lookupFinance(query: string): Promise<FinanceLookupResult>
         "bill_vendors(id, name)",
     )
     .ilike("token", `%${qUpper.replace(/[%_]/g, (m) => `\\${m}`)}%`)
+    // Mig 226 — archived bills are not findable; the developer reaches
+    // them through /accounts/archived-bills instead.
+    .is("archived_at", null)
     .order("bill_date", { ascending: false })
     .limit(5);
 
@@ -342,6 +345,8 @@ async function loadVendorResult(
       "token, vendor_bill_no, bill_date, status, amount_total, amount_paid, amount_outstanding, amount_tds, amount_tcs",
     )
     .eq("bill_vendor_id", vendorId)
+    // Mig 226 — and they leave the vendor's lifetime billed/paid figures.
+    .is("archived_at", null)
     .order("bill_date", { ascending: false });
   const all = bills ?? [];
 

@@ -600,6 +600,13 @@ export default async function AccountsHomePage({
             <Link href="/accounts/pay-today" style={BUTTON_STYLES.secondary}>
               💸 Pay Today
             </Link>
+            {/* Mig 226 — the way back for anything the owner archived.
+                Developer only; the page re-checks the role. */}
+            {profile.role === "developer" && (
+              <Link href="/accounts/archived-bills" style={BUTTON_STYLES.secondary}>
+                🗄 Archived bills
+              </Link>
+            )}
           </>
         }
       />

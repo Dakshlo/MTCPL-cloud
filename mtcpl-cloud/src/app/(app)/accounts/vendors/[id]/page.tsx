@@ -156,6 +156,9 @@ export default async function BillVendorDetailPage({
       "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, amount_outstanding, amount_tds, amount_tcs, amount_payable_to_vendor, status, held_amount, held_reason",
     )
     .eq("bill_vendor_id", id)
+    // Mig 226 — an archived bill leaves this vendor's list AND the
+    // totals computed from it (bill total, paid, net).
+    .is("archived_at", null)
     .order("bill_date", { ascending: false })
     .limit(200);
 

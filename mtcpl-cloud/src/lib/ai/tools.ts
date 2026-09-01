@@ -2586,7 +2586,9 @@ async function getFinanceSnapshot() {
     admin
       .from("bills")
       .select("amount_tds, amount_tcs, status")
-      .neq("status", "cancelled"),
+      .neq("status", "cancelled")
+      // Mig 226 — archived bills are out of the accounts.
+      .is("archived_at", null),
   ]);
 
   type DueRow = {
@@ -2952,6 +2954,8 @@ async function getVendorFinance(input: Record<string, unknown>) {
       "token, vendor_bill_no, bill_date, status, amount_total, amount_tds, amount_tcs, amount_paid, amount_outstanding",
     )
     .eq("bill_vendor_id", r.id)
+    // Mig 226 — archived bills leave the vendor's lifetime figures too.
+    .is("archived_at", null)
     .order("bill_date", { ascending: false });
   const allBills = bills ?? [];
 
@@ -3038,7 +3042,9 @@ async function listBillVendors(input: Record<string, unknown>) {
     const { data: agg } = await admin
       .from("bills")
       .select("bill_vendor_id, amount_outstanding, status")
-      .in("bill_vendor_id", ids);
+      .in("bill_vendor_id", ids)
+      // Mig 226 — archived bills are out of the accounts.
+      .is("archived_at", null);
     for (const r of agg ?? []) {
       const id = r.bill_vendor_id as string;
       const cur = billsByVendor.get(id) ?? { outstanding: 0, bills: 0 };

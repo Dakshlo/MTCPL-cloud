@@ -30,6 +30,7 @@ import { CancelBillButton } from "./cancel-bill-button";
 import { HoldBillForm } from "./hold-bill-form";
 import { ReleaseHoldButton } from "./release-hold-button";
 import { SettlementForm, ReverseSettlementButton } from "./settlement-form";
+import { ArchiveBillPanel, ArchivedBillBanner } from "./archive-bill";
 import { ApplyAdvanceButton } from "./apply-advance-button";
 import {
   ACCOUNTS_TOKENS,
@@ -60,7 +61,7 @@ export default async function BillDetailPage({
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, block_cft, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, held_amount, held_reason, held_at, held_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
+      "id, token, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, amount_gst, amount_cgst, amount_sgst, amount_igst, amount_tds, amount_tcs, amount_total, amount_payable_to_vendor, amount_paid, amount_outstanding, block_cft, status, rejection_note, partial_rejection_amount, partial_rejection_note, partial_rejection_at, partial_rejection_by, held_amount, held_reason, held_at, held_by, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, cancelled_by, cancelled_at, archived_at, archived_by, archive_reason, bill_vendor_id, bill_vendors(id, name, category, gstin, phone, email, address, bank_name, bank_account, ifsc, upi_id, tds_applicable, tcs_applicable)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -1913,6 +1914,47 @@ export default async function BillDetailPage({
           </div>
         </aside>
       </div>
+
+      {/* Mig 226 — archive lives at the very bottom, after everything
+          that says what the bill IS. It is the last thing on the page
+          for the same reason a delete key is not next to Enter. */}
+      {(() => {
+        const archivedAt = (bill as { archived_at?: string | null }).archived_at ?? null;
+        if (archivedAt) {
+          return (
+            <div style={{ marginTop: 16 }}>
+              <ArchivedBillBanner
+                billId={String(bill.id)}
+                archivedAt={archivedAt}
+                archivedBy={
+                  (() => {
+                    const by = (bill as { archived_by?: string | null }).archived_by ?? null;
+                    return by ? profilesMap[by] ?? null : null;
+                  })()
+                }
+                reason={(bill as { archive_reason?: string | null }).archive_reason ?? null}
+                canRestore={profile.role === "developer"}
+              />
+            </div>
+          );
+        }
+        // Eligibility mirrors the server action exactly. A bill holding
+        // money back is NOT finished, whatever its status says.
+        const eligible =
+          bill.status === "fully_paid" &&
+          Number(bill.amount_outstanding ?? 0) === 0 &&
+          Number(bill.held_amount ?? 0) === 0;
+        if (!eligible) return null;
+        return (
+          <div style={{ marginTop: 16 }}>
+            <ArchiveBillPanel
+              billId={String(bill.id)}
+              token={String(bill.token)}
+              canArchive={profile.role === "owner" || profile.role === "developer"}
+            />
+          </div>
+        );
+      })()}
     </section>
   );
 }
