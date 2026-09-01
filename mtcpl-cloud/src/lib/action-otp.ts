@@ -9,12 +9,22 @@
 // who has walked up to an unlocked screen.
 //
 // Deliberately NOT built on lib/short-otp.ts. That one is the login
-// path: it pairs an easy 4-digit code with the real six Supabase
-// issued, and its small keyspace was an informed trade for something
-// typed several times a day. Archiving happens rarely and destroys the
-// visibility of a paid bill, so it gets a full random six digits and no
-// shortcuts. Nothing here can mint a session — these codes are checked
-// against this table and nothing else.
+// path: it pairs an EASY-SHAPE 4-digit code (2299, 6699 — about 300
+// possibilities) with the real six Supabase issued. Nothing here can
+// mint a session; these codes are checked against this table and
+// nothing else.
+//
+// FOUR DIGITS, at Daksh's instruction (Sep 2026), and RANDOM — the full
+// 10,000, not the login's ~300 easy shapes. With the 3-attempt cap that
+// is a 3-in-10,000 chance of guessing a live code, about 1 in 3,300.
+// Worth writing down why that is a fair trade here, rather than leaving
+// it to look like an oversight: to reach this prompt at all you must
+// already hold an owner session, the code goes to the owner's own phone
+// and never to anything the page supplied, it dies after three wrong
+// tries or ten minutes, and the worst an attacker achieves is HIDING a
+// fully-paid bill — which the developer restores in one click, with the
+// payments and audit trail untouched throughout. A wrong outcome here
+// is cheap and completely reversible, so two more digits bought little.
 //
 // Shape:
 //   • the code is hashed (sha256) at rest; the plaintext exists only in
@@ -29,19 +39,18 @@
 import crypto from "node:crypto";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { sendOtpSms } from "@/lib/msg91";
+import { CODE_LENGTH } from "@/lib/otp-shape";
 
 const TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 3;
 
 const hash = (code: string) => crypto.createHash("sha256").update(code).digest("hex");
 
-/** Six random digits from a CSPRNG. Uniform over 000000–999999 —
- *  rejection-free because 10^6 divides evenly into the 2^32 draw only
- *  approximately, so we draw wider and take the remainder of a value
- *  far above the modulus, where the bias is below 1 in 4 billion. */
-function sixDigits(): string {
-  const n = crypto.randomInt(0, 1_000_000);
-  return String(n).padStart(6, "0");
+/** Four random digits from a CSPRNG — uniform over 0000–9999, and the
+ *  whole range, not the login's easy shapes. crypto.randomInt rejection-
+ *  samples internally, so there is no modulo bias. */
+function newCode(): string {
+  return String(crypto.randomInt(0, 10_000)).padStart(CODE_LENGTH, "0");
 }
 
 /** Mask a phone for display: "9799868196" → "•••••• 8196". */
@@ -77,7 +86,7 @@ export async function issueActionOtp(opts: {
     .eq("subject_id", subjectId)
     .is("consumed_at", null);
 
-  const code = sixDigits();
+  const code = newCode();
   const { error } = await admin.from("action_otps").insert({
     action,
     subject_id: subjectId,
@@ -111,7 +120,9 @@ export async function verifyActionOtp(opts: {
 }): Promise<VerifyResult> {
   const { action, subjectId } = opts;
   const typed = (opts.code || "").replace(/\D/g, "");
-  if (typed.length !== 6) return { ok: false, error: "Enter the 6-digit code." };
+  if (typed.length !== CODE_LENGTH) {
+    return { ok: false, error: `Enter the ${CODE_LENGTH}-digit code.` };
+  }
 
   const admin = createAdminSupabaseClient();
   const { data } = await admin

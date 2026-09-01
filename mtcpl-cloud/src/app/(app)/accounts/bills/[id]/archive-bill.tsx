@@ -9,7 +9,7 @@
  * CHECK constraint in the database.
  *
  * Two steps on purpose:
- *   1. "Archive this bill" → a 6-digit code is sent to the owner's own
+ *   1. "Archive this bill" → a 4-digit code is sent to the owner's own
  *      registered number.
  *   2. He types it here.
  *
@@ -25,6 +25,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { CODE_LENGTH } from "@/lib/otp-shape";
 import {
   requestBillArchiveOtpAction,
   archiveBillAction,
@@ -112,22 +113,22 @@ export function ArchiveBillPanel({
       {stage === "code" && (
         <>
           <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 4 }}>
-            6-digit code from your phone
+            {CODE_LENGTH}-digit code from your phone
           </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <input
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH))}
               inputMode="numeric"
               autoComplete="one-time-code"
-              placeholder="––––––"
-              style={{ width: 150, padding: "10px 12px", fontSize: 20, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
+              placeholder={"–".repeat(CODE_LENGTH)}
+              style={{ width: 122, padding: "10px 12px", fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
             />
             <button
               type="button"
               onClick={doArchive}
-              disabled={pending || code.length !== 6}
-              style={{ padding: "10px 16px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, border: "none", background: code.length === 6 ? "#b91c1c" : "var(--border)", color: "#fff", cursor: pending ? "wait" : "pointer" }}
+              disabled={pending || code.length !== CODE_LENGTH}
+              style={{ padding: "10px 16px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, border: "none", background: code.length === CODE_LENGTH ? "#b91c1c" : "var(--border)", color: "#fff", cursor: pending ? "wait" : "pointer" }}
             >
               {pending ? "Archiving…" : "Confirm archive"}
             </button>
