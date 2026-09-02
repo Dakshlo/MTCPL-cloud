@@ -162,6 +162,22 @@ export default async function BillVendorDetailPage({
     .order("bill_date", { ascending: false })
     .limit(200);
 
+  /* Mig 226 — how many of this vendor's bills are archived. Asked for
+     because the archive link lived only on the Accounts landing page,
+     which is not where the question occurs to you: you are looking at a
+     vendor and wondering what is missing from their history.
+     Developer-only, so for everyone else an archived bill stays gone —
+     the count is not even fetched. */
+  let archivedCount = 0;
+  if (profile.role === "developer") {
+    const { count } = await supabase
+      .from("bills")
+      .select("id", { count: "exact", head: true })
+      .eq("bill_vendor_id", id)
+      .not("archived_at", "is", null);
+    archivedCount = count ?? 0;
+  }
+
   // Mig 053 follow-on (Daksh): tiny "Net: ..." line above Bill
   // history that shows the royalty-points net balance. Visible
   // only to roles that can see the private vendor data modal
@@ -658,6 +674,15 @@ export default async function BillVendorDetailPage({
             <span style={{ fontSize: 12, color: "var(--muted)" }}>
               {billsCount} bill{billsCount === 1 ? "" : "s"}
             </span>
+            {archivedCount > 0 && (
+              <Link
+                href={`/accounts/archived-bills?vendor=${id}`}
+                style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, textDecoration: "none", color: "#b45309", background: "rgba(180,83,9,0.10)", border: "1px solid rgba(180,83,9,0.35)", borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap" }}
+                title="Bills the owner has archived. Hidden from this list and these totals — click to see them or bring one back."
+              >
+                🗄 {archivedCount} archived
+              </Link>
+            )}
           </div>
           {bills.length === 0 ? (
             <EmptyState

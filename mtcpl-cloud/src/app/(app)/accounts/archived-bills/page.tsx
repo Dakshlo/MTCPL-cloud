@@ -41,19 +41,31 @@ type Row = {
   bill_vendors: { name: string } | { name: string }[] | null;
 };
 
-export default async function ArchivedBillsPage() {
+export default async function ArchivedBillsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ vendor?: string }>;
+}) {
   const { profile } = await requireAuth();
   if (profile.role !== "developer") redirect("/accounts");
 
+  // ?vendor=<id> — arriving from the "N archived" chip on a vendor
+  // profile, so the page opens on the vendor you were already looking at
+  // instead of the whole pile.
+  const vendorFilter = (await searchParams)?.vendor ?? null;
+
   const admin = createAdminSupabaseClient();
   const [{ data }, profilesMap] = await Promise.all([
-    admin
-      .from("bills")
-      .select(
-        "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, archived_at, archived_by, archive_reason, bill_vendor_id, bill_vendors(name)",
-      )
-      .not("archived_at", "is", null)
-      .order("archived_at", { ascending: false }),
+    (() => {
+      let q = admin
+        .from("bills")
+        .select(
+          "id, token, vendor_bill_no, bill_date, description, amount_total, amount_paid, archived_at, archived_by, archive_reason, bill_vendor_id, bill_vendors(name)",
+        )
+        .not("archived_at", "is", null);
+      if (vendorFilter) q = q.eq("bill_vendor_id", vendorFilter);
+      return q.order("archived_at", { ascending: false });
+    })(),
     getProfilesMap(),
   ]);
 
@@ -80,6 +92,14 @@ export default async function ArchivedBillsPage() {
             Developer
           </div>
           <h1 style={{ margin: "2px 0 0" }}>🗄 Archived bills</h1>
+          {vendorFilter && rows.length > 0 && (
+            <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginTop: 4 }}>
+              Showing one vendor ·{" "}
+              <Link href="/accounts/archived-bills" style={{ fontWeight: 800 }}>
+                show every vendor →
+              </Link>
+            </div>
+          )}
         </div>
         <Link
           href="/accounts"
@@ -101,7 +121,14 @@ export default async function ArchivedBillsPage() {
       {rows.length === 0 ? (
         <section className="page-card">
           <div className="muted" style={{ fontSize: 13, textAlign: "center", padding: "40px 20px" }}>
-            Nothing has been archived yet.
+            {vendorFilter ? (
+              <>
+                Nothing archived for this vendor.{" "}
+                <Link href="/accounts/archived-bills">Show every vendor →</Link>
+              </>
+            ) : (
+              "Nothing has been archived yet."
+            )}
           </div>
         </section>
       ) : (
