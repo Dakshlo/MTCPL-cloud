@@ -8,10 +8,10 @@
  * still owes money. The server re-checks all of that, and so does a
  * CHECK constraint in the database.
  *
- * Two steps on purpose:
- *   1. "Archive this bill" → a 4-digit code is sent to the owner's own
- *      registered number.
- *   2. He types it here.
+ * Closed by default — a single quiet button. Pressing it opens the
+ * panel, which sends a short code to the owner's own registered number;
+ * typing that code archives the bill. There is no reason field: he
+ * asked for it gone, and the audit row already records who and when.
  *
  * He asked for a code rather than another stack of confirm dialogs, and
  * he was right: a second "are you sure?" is muscle memory within a
@@ -42,14 +42,20 @@ export function ArchiveBillPanel({
   canArchive: boolean;
 }) {
   const router = useRouter();
-  const [stage, setStage] = useState<"idle" | "code">("idle");
+  /* Closed by default (Daksh, Sep 2026): "don't show the archive form
+     always, give a button — when pressed it shows the form." Right
+     call. A destructive form sitting open at the foot of every settled
+     bill is something you eventually stop reading, and the one time it
+     matters you have already clicked. Closed → confirm → code. */
+  const [stage, setStage] = useState<"closed" | "confirm" | "code">("closed");
   const [code, setCode] = useState("");
-  const [reason, setReason] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   if (!canArchive) return null;
+
+  const reset = () => { setStage("closed"); setCode(""); setErr(null); setMsg(null); };
 
   const sendCode = () =>
     start(async () => {
@@ -63,13 +69,29 @@ export function ArchiveBillPanel({
   const doArchive = () =>
     start(async () => {
       setErr(null); setMsg(null);
-      const r = await archiveBillAction(billId, code, reason);
+      const r = await archiveBillAction(billId, code);
       if (!r.ok) { setErr(r.error); return; }
-      // Straight to the vendor list — the bill's own page would now be
+      // Straight to the bill list — the bill's own page would now be
       // showing an archived banner, which reads like a failure.
       router.push("/accounts/bills?toast=" + encodeURIComponent(r.message));
       router.refresh();
     });
+
+  // Closed: one quiet button, nothing else. Deliberately not red — this
+  // opens a panel, it does not archive anything.
+  if (stage === "closed") {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => setStage("confirm")}
+          style={{ padding: "9px 15px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
+        >
+          🗄 Archive this bill
+        </button>
+      </div>
+    );
+  }
 
   return (
     <section className="page-card" style={{ borderColor: "rgba(220,38,38,0.35)" }}>
@@ -78,6 +100,14 @@ export function ArchiveBillPanel({
         <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted)", border: "1px solid var(--border)", borderRadius: 999, padding: "2px 8px" }}>
           owner only
         </span>
+        <button
+          type="button"
+          onClick={reset}
+          disabled={pending}
+          style={{ marginLeft: "auto", padding: "5px 11px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+        >
+          Close
+        </button>
       </div>
       <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.65, marginTop: 8, marginBottom: 12 }}>
         {token} is fully settled. Archiving takes it out of the bill list, out of{" "}
@@ -86,28 +116,15 @@ export function ArchiveBillPanel({
         stay exactly as they are, and the developer can bring the bill back at any time.
       </p>
 
-      {stage === "idle" && (
-        <>
-          <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--muted)", marginBottom: 4 }}>
-            Reason (optional)
-          </label>
-          <input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. old bill, fully settled"
-            style={{ width: "100%", maxWidth: 420, padding: "9px 11px", fontSize: 13, border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)", marginBottom: 12 }}
-          />
-          <div>
-            <button
-              type="button"
-              onClick={sendCode}
-              disabled={pending}
-              style={{ padding: "10px 16px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, border: "none", background: "#b91c1c", color: "#fff", cursor: pending ? "wait" : "pointer" }}
-            >
-              {pending ? "Sending code…" : "Archive this bill →"}
-            </button>
-          </div>
-        </>
+      {stage === "confirm" && (
+        <button
+          type="button"
+          onClick={sendCode}
+          disabled={pending}
+          style={{ padding: "10px 16px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, border: "none", background: "#b91c1c", color: "#fff", cursor: pending ? "wait" : "pointer" }}
+        >
+          {pending ? "Sending code…" : `Send me the code →`}
+        </button>
       )}
 
       {stage === "code" && (
@@ -121,8 +138,9 @@ export function ArchiveBillPanel({
               onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH))}
               inputMode="numeric"
               autoComplete="one-time-code"
+              autoFocus
               placeholder={"–".repeat(CODE_LENGTH)}
-              style={{ width: 122, padding: "10px 12px", fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
+              style={{ width: 104, padding: "10px 12px", fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
             />
             <button
               type="button"
@@ -131,14 +149,6 @@ export function ArchiveBillPanel({
               style={{ padding: "10px 16px", fontSize: 13.5, fontWeight: 800, borderRadius: 10, border: "none", background: code.length === CODE_LENGTH ? "#b91c1c" : "var(--border)", color: "#fff", cursor: pending ? "wait" : "pointer" }}
             >
               {pending ? "Archiving…" : "Confirm archive"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setStage("idle"); setCode(""); setErr(null); setMsg(null); }}
-              disabled={pending}
-              style={{ padding: "10px 14px", fontSize: 12.5, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
-            >
-              Cancel
             </button>
           </div>
         </>

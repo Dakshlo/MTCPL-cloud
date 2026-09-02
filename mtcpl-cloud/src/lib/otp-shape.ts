@@ -7,4 +7,4 @@
  * input. Importing the server module into the client bundle to reach
  * one constant would drag node:crypto in with it and fail the build.
  */
-export const CODE_LENGTH = 4;
+export const CODE_LENGTH = 3;

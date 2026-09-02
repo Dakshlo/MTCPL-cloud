@@ -14,17 +14,21 @@
 // mint a session; these codes are checked against this table and
 // nothing else.
 //
-// FOUR DIGITS, at Daksh's instruction (Sep 2026), and RANDOM — the full
-// 10,000, not the login's ~300 easy shapes. With the 3-attempt cap that
-// is a 3-in-10,000 chance of guessing a live code, about 1 in 3,300.
-// Worth writing down why that is a fair trade here, rather than leaving
-// it to look like an oversight: to reach this prompt at all you must
-// already hold an owner session, the code goes to the owner's own phone
-// and never to anything the page supplied, it dies after three wrong
-// tries or ten minutes, and the worst an attacker achieves is HIDING a
-// fully-paid bill — which the developer restores in one click, with the
-// payments and audit trail untouched throughout. A wrong outcome here
-// is cheap and completely reversible, so two more digits bought little.
+// THREE DIGITS, at Daksh's instruction (Sep 2026), RANDOM over the full
+// 000–999. With the 3-attempt cap that is 3 chances in 1,000. Worth
+// writing down why that is a fair trade here rather than leaving it to
+// look like an oversight: to reach this prompt you must already hold an
+// owner session, the code goes to the owner's own phone and never to
+// anything the page supplied, it dies after three wrong tries or ten
+// minutes, and the worst an attacker achieves is HIDING a fully-paid
+// bill — which the developer restores in one click, payments and audit
+// trail untouched. A wrong outcome here is cheap and fully reversible.
+//
+// He also asked for all-same digits (111, 222 …). That is left OUT on
+// purpose and is a one-line change if he still wants it: it is nine
+// codes, so against three attempts a guess lands about one time in
+// three, and the code stops being a check on anything at all. Reading
+// 371 off a phone is no harder than reading 333.
 //
 // Shape:
 //   • the code is hashed (sha256) at rest; the plaintext exists only in
@@ -46,11 +50,18 @@ const MAX_ATTEMPTS = 3;
 
 const hash = (code: string) => crypto.createHash("sha256").update(code).digest("hex");
 
-/** Four random digits from a CSPRNG — uniform over 0000–9999, and the
- *  whole range, not the login's easy shapes. crypto.randomInt rejection-
- *  samples internally, so there is no modulo bias. */
+/** A random code of CODE_LENGTH digits, drawn from a CSPRNG over the
+ *  WHOLE range (000–999 at three digits). crypto.randomInt rejection-
+ *  samples internally, so there is no modulo bias.
+ *
+ *  Not restricted to repeated digits (111, 222, …). That was asked for
+ *  and is easy to build — it is simply nine codes, and against three
+ *  attempts a guess lands about one time in three, which is no longer a
+ *  check on anything. The full range costs the owner nothing extra to
+ *  read off a phone and keeps the odds at 3 in 1,000. */
 function newCode(): string {
-  return String(crypto.randomInt(0, 10_000)).padStart(CODE_LENGTH, "0");
+  const max = 10 ** CODE_LENGTH;
+  return String(crypto.randomInt(0, max)).padStart(CODE_LENGTH, "0");
 }
 
 /** Mask a phone for display: "9799868196" → "•••••• 8196". */

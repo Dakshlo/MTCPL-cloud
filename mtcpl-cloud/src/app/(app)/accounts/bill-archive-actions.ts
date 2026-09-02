@@ -21,7 +21,7 @@
  *      held back — checked here AND by a CHECK constraint in the
  *      database, so a bug in this file still cannot archive a bill that
  *      owes money
- *   3. a 6-digit code sent to the owner's own phone. Not a second
+ *   3. a short code sent to the owner's own phone. Not a second
  *      confirm dialog: those become muscle memory in a week.
  *
  * Restore is developer-only, has no expiry, and is a single UPDATE back
@@ -117,7 +117,6 @@ export async function requestBillArchiveOtpAction(billId: string): Promise<Archi
 export async function archiveBillAction(
   billId: string,
   code: string,
-  reason: string,
 ): Promise<ArchiveStepResult> {
   const { profile } = await requireAuth(["owner", "developer"]);
   const gate = await loadArchivable(billId);
@@ -141,7 +140,11 @@ export async function archiveBillAction(
     .update({
       archived_at: new Date().toISOString(),
       archived_by: profile.id,
-      archive_reason: reason.trim() || null,
+      // No reason field any more (Daksh: "remove reason form"). The
+      // column stays — the audit row below already records who and
+      // when, and the archived-bills page renders a reason if an older
+      // row carries one.
+      archive_reason: null,
     } as never)
     .eq("id", billId)
     .is("archived_at", null)
@@ -153,7 +156,6 @@ export async function archiveBillAction(
     bill_id: billId,
     vendor_id: gate.bill.bill_vendor_id,
     amount_total: gate.bill.amount_total,
-    reason: reason.trim() || null,
   });
 
   revalidatePath("/accounts");
