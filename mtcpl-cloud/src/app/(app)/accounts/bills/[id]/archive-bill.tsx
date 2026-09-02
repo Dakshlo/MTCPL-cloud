@@ -71,9 +71,15 @@ export function ArchiveBillPanel({
       setErr(null); setMsg(null);
       const r = await archiveBillAction(billId, code);
       if (!r.ok) { setErr(r.error); return; }
-      // Straight to the bill list — the bill's own page would now be
-      // showing an archived banner, which reads like a failure.
-      router.push("/accounts/bills?toast=" + encodeURIComponent(r.message));
+      /* Back to the VENDOR's account (Daksh, Sep 2026), not the bill
+         list: that is the page whose numbers just changed, so the bill
+         missing from the list and the lower totals are the proof it
+         worked. Staying on the bill would have shown an archived
+         banner, which reads like a failure.
+
+         No ?toast= — neither page renders one, so it was a query param
+         nothing read. */
+      router.push(r.vendorId ? `/accounts/vendors/${r.vendorId}` : "/accounts/bills");
       router.refresh();
     });
 

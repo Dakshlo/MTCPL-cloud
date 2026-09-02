@@ -77,7 +77,13 @@ async function loadArchivable(billId: string): Promise<
   return { ok: true, bill };
 }
 
-export type ArchiveStepResult = { ok: true; message: string } | { ok: false; error: string };
+export type ArchiveStepResult =
+  /** vendorId is returned on a successful archive so the panel can send
+   *  the owner back to that vendor's account — where the bill has just
+   *  left the list and the totals have dropped, which is the proof the
+   *  thing worked. */
+  | { ok: true; message: string; vendorId?: string }
+  | { ok: false; error: string };
 
 /** Step 1 — owner asks to archive; a code goes to his own phone. */
 export async function requestBillArchiveOtpAction(billId: string): Promise<ArchiveStepResult> {
@@ -163,7 +169,11 @@ export async function archiveBillAction(
   revalidatePath(`/accounts/bills/${billId}`);
   revalidatePath(`/accounts/vendors/${gate.bill.bill_vendor_id}`);
   revalidatePath("/accounts/vendors");
-  return { ok: true, message: `Bill ${gate.bill.token} archived.` };
+  return {
+    ok: true,
+    message: `Bill ${gate.bill.token} archived.`,
+    vendorId: gate.bill.bill_vendor_id,
+  };
 }
 
 /** Developer-only restore. No window, no expiry — an archived bill can
