@@ -14,21 +14,29 @@
 // mint a session; these codes are checked against this table and
 // nothing else.
 //
-// THREE DIGITS, at Daksh's instruction (Sep 2026), RANDOM over the full
-// 000–999. With the 3-attempt cap that is 3 chances in 1,000. Worth
-// writing down why that is a fair trade here rather than leaving it to
-// look like an oversight: to reach this prompt you must already hold an
-// owner session, the code goes to the owner's own phone and never to
-// anything the page supplied, it dies after three wrong tries or ten
-// minutes, and the worst an attacker achieves is HIDING a fully-paid
-// bill — which the developer restores in one click, payments and audit
-// trail untouched. A wrong outcome here is cheap and fully reversible.
+// TWO DIGITS, at Daksh's instruction (Sep 2026), random over 00–99.
+// He was shown the arithmetic and chose this; it is his call and it is
+// a defensible one, but the number belongs in the file rather than in a
+// chat message: 100 codes against a 3-attempt cap is 3 chances in 100,
+// roughly 1 in 33. He had asked for all-same digits (111, 222 …) which
+// would have been NINE codes — about 1 in 3 — and dropped that idea
+// once the odds were on the table.
 //
-// He also asked for all-same digits (111, 222 …). That is left OUT on
-// purpose and is a one-line change if he still wants it: it is nine
-// codes, so against three attempts a guess lands about one time in
-// three, and the code stops being a check on anything at all. Reading
-// 371 off a phone is no harder than reading 333.
+// What makes 1-in-33 acceptable for THIS action specifically:
+//   • you must already hold an owner session to reach the prompt
+//   • the code goes to the owner's own registered phone, never to
+//     anything the page supplied
+//   • it dies after three wrong tries or ten minutes
+//   • grinding is LOUD: every fresh code is another SMS to the owner's
+//     phone, so a serious attempt buries him in texts
+//   • and the worst outcome is a fully-paid bill being HIDDEN, which
+//     the developer restores in one click with the payments and audit
+//     trail untouched throughout
+//
+// None of that would be true of a code that moved money or minted a
+// session, and this file must not be reused for one without revisiting
+// the length. LOGIN IS UNAFFECTED — signing in still uses the 4-digit
+// easy-shape code in lib/short-otp.ts.
 //
 // Shape:
 //   • the code is hashed (sha256) at rest; the plaintext exists only in
@@ -50,15 +58,10 @@ const MAX_ATTEMPTS = 3;
 
 const hash = (code: string) => crypto.createHash("sha256").update(code).digest("hex");
 
-/** A random code of CODE_LENGTH digits, drawn from a CSPRNG over the
- *  WHOLE range (000–999 at three digits). crypto.randomInt rejection-
- *  samples internally, so there is no modulo bias.
- *
- *  Not restricted to repeated digits (111, 222, …). That was asked for
- *  and is easy to build — it is simply nine codes, and against three
- *  attempts a guess lands about one time in three, which is no longer a
- *  check on anything. The full range costs the owner nothing extra to
- *  read off a phone and keeps the odds at 3 in 1,000. */
+/** A random code of CODE_LENGTH digits from a CSPRNG, over the WHOLE
+ *  range (00–99 at two digits) — never a restricted set like repeated
+ *  digits, which would cut 100 codes down to nine. crypto.randomInt
+ *  rejection-samples internally, so there is no modulo bias. */
 function newCode(): string {
   const max = 10 ** CODE_LENGTH;
   return String(crypto.randomInt(0, max)).padStart(CODE_LENGTH, "0");

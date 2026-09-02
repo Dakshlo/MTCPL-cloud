@@ -140,7 +140,7 @@ export function ArchiveBillPanel({
               autoComplete="one-time-code"
               autoFocus
               placeholder={"–".repeat(CODE_LENGTH)}
-              style={{ width: 104, padding: "10px 12px", fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
+              style={{ width: 88, padding: "10px 12px", fontSize: 22, fontWeight: 800, letterSpacing: "0.2em", textAlign: "center", fontFamily: "ui-monospace, monospace", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--bg)", color: "var(--text)" }}
             />
             <button
               type="button"
