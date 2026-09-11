@@ -263,7 +263,14 @@ export type DailyReport = {
     storageCut: number;      // cut_done + parked (main storage, cut kind)
     storageReady: number;    // completed + parked (main storage, ready kind)
   } | null;
-  blocksByStone: Array<{ stone: string; count: number; cft: number; vendors: Array<{ vendor: string; count: number; cft: number }> }>;
+  /* marble + tonnes (Sep 2026): a marble block is weighed, not measured
+     — its dimensions are NULL — so its cft is always 0. The detail page
+     printed "0 CFT" for every marble row, which read as "nothing came
+     in". It now prints the tonnes instead, per stone and per vendor. */
+  blocksByStone: Array<{
+    stone: string; marble: boolean; count: number; cft: number; tonnes: number;
+    vendors: Array<{ vendor: string; count: number; cft: number; tonnes: number }>;
+  }>;
   cuttingByStone: Array<{ stone: string; slabs: number; cft: number }>;
   carvingByVendor: Array<{ vendor: string; slabs: number; cft: number; sft: number }>;
   dispatchByTemple: Array<{ temple: string; slabs: number; cft: number; tonnes: number }>;
@@ -381,7 +388,8 @@ async function aggregateDay(
         .order("id", { ascending: true })
         .range(from, to),
     );
-    const byStone = new Map<string, { count: number; cft: number; vendors: Map<string, { count: number; cft: number }> }>();
+    type Agg = { count: number; cft: number; tonnes: number };
+    const byStone = new Map<string, Agg & { marble: boolean; vendors: Map<string, Agg> }>();
     for (const b of data) {
       const c = cft(Number(b.length_ft), Number(b.width_ft), Number(b.height_ft));
       totals.blocks.count += 1; totals.blocks.cft += c;
@@ -395,14 +403,29 @@ async function aggregateDay(
         totals.blocks.sandstone.cft += c;
       }
       const k = stoneLabel(b.stone);
-      const g = byStone.get(k) ?? { count: 0, cft: 0, vendors: new Map<string, { count: number; cft: number }>() };
-      g.count += 1; g.cft += c;
+      const t = Number(b.tonnes) || 0;
+      const g = byStone.get(k) ?? {
+        count: 0, cft: 0, tonnes: 0,
+        marble: isMarble(b.stone, categoryMap),
+        vendors: new Map<string, Agg>(),
+      };
+      g.count += 1; g.cft += c; g.tonnes += t;
       const vn = (b.vendor_name ?? "").trim() || "—";
-      const vg = g.vendors.get(vn) ?? { count: 0, cft: 0 };
-      vg.count += 1; vg.cft += c; g.vendors.set(vn, vg);
+      const vg = g.vendors.get(vn) ?? { count: 0, cft: 0, tonnes: 0 };
+      vg.count += 1; vg.cft += c; vg.tonnes += t; g.vendors.set(vn, vg);
       byStone.set(k, g);
     }
-    if (detail) det.blocksByStone = [...byStone.entries()].map(([stone, v]) => ({ stone, count: v.count, cft: v.cft, vendors: [...v.vendors.entries()].map(([vendor, vv]) => ({ vendor, ...vv })).sort((a, b) => b.cft - a.cft) })).sort((a, b) => b.cft - a.cft);
+    // Sort by the measure that actually means something for that stone,
+    // so a big marble day is not buried under a small sandstone one.
+    const weight = (v: { cft: number; tonnes: number }, marble: boolean) => (marble ? v.tonnes * 8 : v.cft);
+    if (detail) det.blocksByStone = [...byStone.entries()]
+      .map(([stone, v]) => ({
+        stone, marble: v.marble, count: v.count, cft: v.cft, tonnes: v.tonnes,
+        vendors: [...v.vendors.entries()]
+          .map(([vendor, vv]) => ({ vendor, ...vv }))
+          .sort((a, b) => weight(b, v.marble) - weight(a, v.marble)),
+      }))
+      .sort((a, b) => weight(b, b.marble) - weight(a, a.marble));
   }
 
   // 2. CUTTING done in the window — blocks that became 'done'; their cut slabs by stone.
@@ -1393,52 +1416,133 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
        What the owner actually reads is the RATE and what it has cost so
        far, so that is all that is left; the rest lives on the costing
        pages in the app. */
-    const COST_H = 196, PLANT_GAP = 14;
+    /* Five cards on one page since Sep 2026 — the flow card joined
+       between cutter costing and stock — so every card was re-sized to
+       fit rather than one being pushed off. 140+140+168+128+128 plus
+       gaps is 759 pt of the 778 available. */
+    const COST_H = 140, FLOW_H = 168, PLANT_H = 128, PLANT_GAP = 11;
     if (data.cnc) {
       const c = data.cnc, hh = COST_H;
       const rate = Number.isFinite(c.costPerCombined) ? inr2(c.costPerCombined) : "--";
       P.glass(M, y, cw, hh, 14, COL.indigo, WASH.indigo);
-      P.t("CNC COSTING", M + 18, y - 32, 14.5, bold, COL.indigo);
-      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 31, 9, bold, muted);
-      P.t(rate, M + 18, y - 96, 44, bold, ink);
-      P.t("PER SFT+CFT", M + 20 + bold.widthOfTextAtSize(rate, 44) + 9, y - 96, 11, bold, muted);
-      P.pg.drawLine({ start: { x: M + 18, y: y - 122 }, end: { x: W - M - 16, y: y - 122 }, thickness: 0.6, color: COL.indigo, opacity: 0.3 });
-      P.t("SPENT", M + 18, y - 144, 9.5, bold, muted);
-      P.t(inr(c.totalCost), M + 18, y - 170, 19, bold, ink);
-      P.r("CARVED", W - M - 16, y - 144, 9.5, bold, muted);
-      P.r(`${fmt0(c.sft + c.cft)} units · ${c.slabs} slabs`, W - M - 16, y - 170, 14, bold, ink);
+      P.t("CNC COSTING", M + 18, y - 28, 14, bold, COL.indigo);
+      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
+      P.t(rate, M + 18, y - 74, 36, bold, ink);
+      P.t("PER SFT+CFT", M + 20 + bold.widthOfTextAtSize(rate, 36) + 9, y - 74, 10.5, bold, muted);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 90 }, end: { x: W - M - 16, y: y - 90 }, thickness: 0.6, color: COL.indigo, opacity: 0.3 });
+      P.t("SPENT", M + 18, y - 106, 9, bold, muted);
+      P.t(inr(c.totalCost), M + 18, y - 125, 17, bold, ink);
+      P.r("CARVED", W - M - 16, y - 106, 9, bold, muted);
+      P.r(`${fmt0(c.sft + c.cft)} units · ${c.slabs} slabs`, W - M - 16, y - 125, 13, bold, ink);
       y -= hh + PLANT_GAP;
     }
     if (data.cutter) {
       const c = data.cutter, hh = COST_H;
       const rate = Number.isFinite(c.costPerCft) ? inr2(c.costPerCft) : "--";
       P.glass(M, y, cw, hh, 14, COL.teal, WASH.teal);
-      P.t("CUTTER COSTING", M + 18, y - 32, 14.5, bold, COL.teal);
-      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 31, 9, bold, muted);
-      P.t(rate, M + 18, y - 96, 44, bold, ink);
-      P.t("PER CFT", M + 20 + bold.widthOfTextAtSize(rate, 44) + 9, y - 96, 11, bold, muted);
-      P.pg.drawLine({ start: { x: M + 18, y: y - 122 }, end: { x: W - M - 16, y: y - 122 }, thickness: 0.6, color: COL.teal, opacity: 0.3 });
-      P.t("SPENT", M + 18, y - 144, 9.5, bold, muted);
-      P.t(inr(c.totalCost), M + 18, y - 170, 19, bold, ink);
-      P.r("CUT", W - M - 16, y - 144, 9.5, bold, muted);
-      P.r(`${fmt0(c.cft)} CFT`, W - M - 16, y - 170, 14, bold, ink);
+      P.t("CUTTER COSTING", M + 18, y - 28, 14, bold, COL.teal);
+      P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
+      P.t(rate, M + 18, y - 74, 36, bold, ink);
+      P.t("PER CFT", M + 20 + bold.widthOfTextAtSize(rate, 36) + 9, y - 74, 10.5, bold, muted);
+      P.pg.drawLine({ start: { x: M + 18, y: y - 90 }, end: { x: W - M - 16, y: y - 90 }, thickness: 0.6, color: COL.teal, opacity: 0.3 });
+      P.t("SPENT", M + 18, y - 106, 9, bold, muted);
+      P.t(inr(c.totalCost), M + 18, y - 125, 17, bold, ink);
+      P.r("CUT", W - M - 16, y - 106, 9, bold, muted);
+      P.r(`${fmt0(c.cft)} CFT`, W - M - 16, y - 125, 13, bold, ink);
       y -= hh + PLANT_GAP;
     }
-    const PLANT_H = 166;
+
+    /* ── BLOCKS IN → SLABS OUT (Daksh, Sep 2026) ──────────────────────
+       "Average of how much block is coming in and how much is leaving
+       as slabs — a line with blocks on the left, slabs on the right,
+       and a ratio of it."
+
+       Daily averages over the month so far, so a single heavy truck day
+       does not swing it. The two stones are bought in different units
+       (marble by the tonne, sandstone by the CFT), so they are shown
+       separately on the left exactly as page 1 does; the RATIO needs one
+       unit, so marble is converted at the company's own 8 CFT per tonne
+       — the same conversion the raw-stock card already prints.
+
+       What the ratio is NOT: a recovery figure. A cut block leaves both
+       slabs and remnants, and today's cutting is not of today's blocks.
+       It answers a flow question — is stone arriving faster than it
+       leaves as slabs (stock building) or slower (stock drawing down) —
+       and it is labelled that way so nobody reads it as yield.       */
+    {
+      const hh = FLOW_H;
+      const days = Math.max(1, data.month.days);
+      const sandIn = data.mtd.blocks.sandstone.cft / days;
+      const marbleInT = data.mtd.blocks.marble.tonnes / days;
+      const inCft = sandIn + marbleInT * 8;
+      const outCft = data.mtd.cutting.cft / days;
+      const outSlabs = data.mtd.cutting.slabs / days;
+      const ratio = inCft > 0 ? Math.round((outCft / inCft) * 100) : null;
+
+      P.glass(M, y, cw, hh, 14, COL.amber, WASH.amber);
+      P.t("BLOCKS IN  vs  SLABS OUT", M + 18, y - 26, 13, bold, COL.amber);
+      P.r(`${mo2(data.month.monthName)} SO FAR · ${data.month.days} DAYS · PER DAY`, W - M - 16, y - 25, 8.5, bold, muted);
+
+      const colW = cw / 3;
+      const leftCx = M + colW / 2;
+      const rightCx = M + colW * 2.5;
+      const midCx = M + cw / 2;
+
+      // Stone drawn as simple isometric solids: three faces, three tones
+      // of the same sandstone colour, so it reads as a lit block at a
+      // glance and prints cleanly without any embedded image.
+      const faces = {
+        top: rgb(0.93, 0.84, 0.75),
+        left: rgb(0.80, 0.66, 0.55),
+        right: rgb(0.68, 0.53, 0.43),
+      };
+      const iso = (x: number, yTop: number, w: number, d: number, t: number) => {
+        // Top rhombus, then the two visible sides hanging from it.
+        P.pg.drawSvgPath(`M ${w / 2} 0 L ${w} ${d / 2} L ${w / 2} ${d} L 0 ${d / 2} Z`, { x, y: yTop, color: faces.top });
+        P.pg.drawSvgPath(`M 0 ${d / 2} L ${w / 2} ${d} L ${w / 2} ${d + t} L 0 ${d / 2 + t} Z`, { x, y: yTop, color: faces.left });
+        P.pg.drawSvgPath(`M ${w / 2} ${d} L ${w} ${d / 2} L ${w} ${d / 2 + t} L ${w / 2} ${d + t} Z`, { x, y: yTop, color: faces.right });
+      };
+      // A block is tall; a slab is the same footprint, cut thin.
+      iso(leftCx - 28, y - 38, 56, 28, 32);
+      iso(rightCx - 32, y - 52, 64, 30, 7);
+      iso(rightCx - 32, y - 44, 64, 30, 7);
+
+      // Left — what arrived.
+      P.ctr(`${fmt0(sandIn)} CFT`, leftCx, y - 118, 16, bold, ink);
+      P.ctr("sandstone", leftCx, y - 131, 8.5, bold, muted);
+      P.ctr(marbleInT >= 0.05 ? `+ ${fmt1(marbleInT)} T marble` : "no marble", leftCx, y - 147, 9, bold, marbleInT >= 0.05 ? ink : muted);
+
+      // Right — what left as slabs.
+      P.ctr(`${fmt0(outCft)} CFT`, rightCx, y - 118, 16, bold, ink);
+      P.ctr(`${fmt0(outSlabs)} slabs`, rightCx, y - 131, 8.5, bold, muted);
+      P.ctr("cut from blocks", rightCx, y - 147, 9, bold, muted);
+
+      // Middle — the arrow and the ratio.
+      const ax0 = M + colW + 8, ax1 = M + colW * 2 - 8, ay = y - 70;
+      P.pg.drawLine({ start: { x: ax0, y: ay }, end: { x: ax1 - 6, y: ay }, thickness: 2, color: COL.amber });
+      P.pg.drawSvgPath(`M 0 0 L 9 5 L 0 10 Z`, { x: ax1 - 8, y: ay + 5, color: COL.amber });
+      P.ctr(ratio == null ? "—" : `100 : ${ratio}`, midCx, y - 104, 22, bold, ink);
+      P.ctr(ratio == null ? "no stone came in" : `every 100 CFT in,`, midCx, y - 120, 8.5, bold, muted);
+      if (ratio != null) P.ctr(`${ratio} CFT out as slabs`, midCx, y - 132, 8.5, bold, muted);
+      P.ctr("marble at 8 CFT per tonne", midCx, y - 150, 7.5, font, muted);
+
+      y -= hh + PLANT_GAP;
+    }
+
     if (data.stock) {
       const s = data.stock, hh = PLANT_H;
       P.glass(M, y, cw, hh, 14, COL.cyan, WASH.cyan);
-      P.t("RAW BLOCK STOCK", M + 18, y - 30, 14, bold, COL.cyan);
-      P.r("available + reserved", W - M - 16, y - 29, 8.5, bold, muted);
+      P.t("RAW BLOCK STOCK", M + 18, y - 26, 13, bold, COL.cyan);
+      P.r("available + reserved", W - M - 16, y - 25, 8.5, bold, muted);
       const colW = (cw - 34) / 2;
-      P.t("SANDSTONE", M + 18, y - 62, 9.5, bold, muted);
-      P.t(`${fmt0(s.sandstoneCft)} CFT`, M + 18, y - 106, 27, bold, ink);
-      P.t(`${s.sandstoneCount} blocks`, M + 18, y - 128, 9.5, bold, muted);
+      P.t("SANDSTONE", M + 18, y - 50, 9, bold, muted);
+      P.t(`${fmt0(s.sandstoneCft)} CFT`, M + 18, y - 82, 23, bold, ink);
+      P.t(`${s.sandstoneCount} blocks`, M + 18, y - 100, 9, bold, muted);
       const mx = M + 18 + colW;
-      P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 136 }, thickness: 0.6, color: COL.cyan, opacity: 0.3 });
-      P.t("MARBLE", mx, y - 62, 9.5, bold, muted);
-      P.t(`${fmt1(s.marbleTonnes)} T`, mx, y - 106, 27, bold, ink);
-      P.t(`${s.marbleCount} blocks · ~${fmt0(s.marbleCft)} CFT`, mx, y - 128, 9.5, bold, muted);
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 42 }, end: { x: mx - 8, y: y - 108 }, thickness: 0.6, color: COL.cyan, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 50, 9, bold, muted);
+      P.t(`${fmt1(s.marbleTonnes)} T`, mx, y - 82, 23, bold, ink);
+      P.t(`${s.marbleCount} blocks · ~${fmt0(s.marbleCft)} CFT`, mx, y - 100, 9, bold, muted);
       y -= hh + PLANT_GAP;
     }
     // Block recovery split by stone category (matches the Block Journey
@@ -1446,17 +1550,17 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     if (data.recovery) {
       const rec = data.recovery, rh = PLANT_H;
       P.glass(M, y, cw, rh, 14, COL.gold, WASH.gold);
-      P.t("BLOCK RECOVERY", M + 18, y - 30, 14, bold, COL.gold);
-      P.r("lifetime, every cut block", W - M - 16, y - 29, 8.5, bold, muted);
+      P.t("BLOCK RECOVERY", M + 18, y - 26, 13, bold, COL.gold);
+      P.r("lifetime, every cut block", W - M - 16, y - 25, 8.5, bold, muted);
       const colW = (cw - 34) / 2;
-      P.t("SANDSTONE", M + 18, y - 62, 9.5, bold, muted);
-      P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 18, y - 106, 27, bold, ink);
-      P.t(`${fmt0(rec.sandstone.slabCft)} / ${fmt0(rec.sandstone.originalCft)} CFT`, M + 18, y - 128, 9.5, bold, muted);
+      P.t("SANDSTONE", M + 18, y - 50, 9, bold, muted);
+      P.t(`${rec.sandstone.recoveredPct.toFixed(1)}%`, M + 18, y - 82, 23, bold, ink);
+      P.t(`${fmt0(rec.sandstone.slabCft)} / ${fmt0(rec.sandstone.originalCft)} CFT`, M + 18, y - 100, 9, bold, muted);
       const mx = M + 18 + colW;
-      P.pg.drawLine({ start: { x: mx - 8, y: y - 50 }, end: { x: mx - 8, y: y - 136 }, thickness: 0.6, color: COL.gold, opacity: 0.3 });
-      P.t("MARBLE", mx, y - 62, 9.5, bold, muted);
-      P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 106, 27, bold, ink);
-      P.t(`${fmt0(rec.marble.slabCft)} CFT from ${fmt1(rec.marble.tonnes)} T`, mx, y - 128, 9.5, bold, muted);
+      P.pg.drawLine({ start: { x: mx - 8, y: y - 42 }, end: { x: mx - 8, y: y - 108 }, thickness: 0.6, color: COL.gold, opacity: 0.3 });
+      P.t("MARBLE", mx, y - 50, 9, bold, muted);
+      P.t(`${rec.marble.cftPerTonne.toFixed(1)} CFT/T`, mx, y - 82, 23, bold, ink);
+      P.t(`${fmt0(rec.marble.slabCft)} CFT from ${fmt1(rec.marble.tonnes)} T`, mx, y - 100, 9, bold, muted);
       y -= rh + PLANT_GAP;
     }
     footer(P, 2, PAGES);
@@ -1553,9 +1657,11 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       }
       y -= 12;
     };
+    // Marble in tonnes, sandstone in CFT — the same rule as page 1.
+    const qty = (m: boolean, cftV: number, tV: number) => (m ? `${fmt1(tV)} T` : `${fmt0(cftV)} CFT`);
     section("BLOCKS ADDED BY STONE", COL.blue, data.blocksByStone.flatMap((rw) => [
-      { n: rw.stone, v: `${fmt0(rw.cft)} CFT · ${rw.count}` },
-      ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `    -  ${vd.vendor}`, v: `${fmt0(vd.cft)} CFT · ${vd.count}` })),
+      { n: rw.stone, v: `${qty(rw.marble, rw.cft, rw.tonnes)} · ${rw.count}` },
+      ...rw.vendors.filter((vd) => vd.vendor !== "—").map((vd) => ({ n: `    -  ${vd.vendor}`, v: `${qty(rw.marble, vd.cft, vd.tonnes)} · ${vd.count}` })),
     ]));
     section("CUTTING BY STONE", COL.cyan, data.cuttingByStone.map((rw) => ({ n: rw.stone, v: `${fmt0(rw.cft)} CFT · ${rw.slabs}` })));
     section("CARVING BY VENDOR", COL.amber, data.carvingByVendor.map((rw) => ({
