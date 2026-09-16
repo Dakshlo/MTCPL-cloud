@@ -513,30 +513,89 @@ function groupByTemple(jobs: CarvingJobLite[]): Array<[string, CarvingJobLite[]]
   return [...groups.entries()];
 }
 
-function TempleGroupHeader({ temple, count }: { temple: string; count: number }) {
+/** Temple divider inside the Pending-stock / Ready-to-load peeks.
+ *
+ *  Daksh Sep 2026 — "it's hard to see the temple in between". It was a
+ *  small line of text with a hairline under it, sitting in the same
+ *  8px gap rhythm as the slab cards, so at a glance it read as just
+ *  another row. With 39 slabs in the list you scrolled straight past
+ *  the boundary and lost track of whose temple you were looking at.
+ *
+ *  Three changes, in order of how much they help:
+ *    1. STICKY. The band pins to the top of the peek while its own
+ *       group scrolls past, so the temple name is on screen the whole
+ *       time you are looking at its slabs. It releases when the next
+ *       temple pushes it off. This is the real fix for a long list.
+ *    2. Solid dark band (the sidebar tone) with a gold rule. A filled
+ *       shape cannot be mistaken for a card; the cards are white.
+ *    3. Bigger air above each group than between the cards inside it,
+ *       so the eye reads the list as blocks rather than one run.
+ *
+ *  Deliberately ONE colour for every temple rather than a per-temple
+ *  palette: the cards already carry coloured left rails for batches
+ *  (batchTint), and a second colour system on top would fight it. */
+function TempleGroupHeader({
+  temple,
+  count,
+  first,
+}: {
+  temple: string;
+  count: number;
+  first?: boolean;
+}) {
   return (
     <div
       style={{
+        position: "sticky",
+        // Sticky measures `top` from the scroll container's PADDING box,
+        // and the peek's scroller has 14px of top padding — so top:0
+        // pins the band 14px down and the previous temple's last card
+        // shows through the gap above it. -14 cancels that padding so
+        // the band pins flush to the top of the scroll area and covers
+        // what passes behind it. Keep in step with CenterPeekModal's
+        // scroller padding.
+        top: -14,
+        zIndex: 2,
+        // Extra air above each group — but not the first, which sits
+        // right under the modal's own header.
+        marginTop: first ? 0 : 10,
         display: "flex",
-        alignItems: "baseline",
-        gap: 8,
-        marginTop: 6,
-        paddingBottom: 3,
-        borderBottom: "1px solid var(--border)",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        borderRadius: 8,
+        background: "var(--sidebar-bg)",
+        borderLeft: "4px solid var(--gold)",
+        boxShadow: "0 2px 8px rgba(45,36,16,0.22)",
       }}
     >
+      <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1 }}>🏛</span>
       <span
         style={{
-          fontSize: 11.5,
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12,
           fontWeight: 800,
-          letterSpacing: "0.02em",
-          color: "var(--text)",
+          letterSpacing: "0.06em",
+          lineHeight: 1.3,
+          color: "#fff",
           textTransform: "uppercase",
         }}
       >
-        🏛 {temple}
+        {temple}
       </span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 11,
+          fontWeight: 800,
+          padding: "3px 9px",
+          borderRadius: 999,
+          background: "var(--gold)",
+          color: "#2D2410",
+          fontFamily: "ui-monospace, monospace",
+        }}
+      >
         {count} slab{count === 1 ? "" : "s"}
       </span>
     </div>
@@ -1455,9 +1514,9 @@ export function VendorCockpitClient({
               <Empty text="No slabs awaiting transfer to your shade." />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {groupByTemple(pendingStock).map(([temple, jobs]) => (
+                {groupByTemple(pendingStock).map(([temple, jobs], gi) => (
                   <div key={temple} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <TempleGroupHeader temple={temple} count={jobs.length} />
+                    <TempleGroupHeader temple={temple} count={jobs.length} first={gi === 0} />
                     {jobs.map((job) => (
                       <PendingStockRow key={job.id} job={job} />
                     ))}
@@ -1476,9 +1535,9 @@ export function VendorCockpitClient({
               />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {groupByTemple(readyToLoad).map(([temple, jobs]) => (
+                {groupByTemple(readyToLoad).map(([temple, jobs], gi) => (
                   <div key={temple} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <TempleGroupHeader temple={temple} count={jobs.length} />
+                    <TempleGroupHeader temple={temple} count={jobs.length} first={gi === 0} />
                     {jobs.map((job) => (
                       <QueueRow
                         key={job.id}
