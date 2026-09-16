@@ -352,6 +352,8 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
   }
 
   // Reshape rows for the client component.
+  const vendorIsCnc =
+    (vendor as { vendor_type?: string } | null)?.vendor_type === "CNC";
   const queue: CarvingJobLite[] = [];
   // Map machine_id → ALL active jobs on it. Used to be a single
   // entry per machine (only the last one in iteration order), which
@@ -472,6 +474,21 @@ export default async function VendorPortalPage({ searchParams }: { searchParams:
       const arr = activeByMachine.get(row.cnc_machine_id) ?? [];
       arr.push(job);
       activeByMachine.set(row.cnc_machine_id, arr);
+    } else if (vendorIsCnc) {
+      // Nothing used to catch this and the slab simply vanished off
+      // the cockpit: status='carving_in_progress' at a CNC vendor but
+      // on no machine and not completed. Three slabs sat in that hole
+      // from May to Sep 2026 (AGROHA-0002-12, ROHTAK-0106-29/-30) —
+      // the pre-mig-080 soft reject cleared completed_at and pushed
+      // them back to in-progress expecting the vendor to reload, but
+      // the unload had already cleared cnc_machine_id, so they were in
+      // no bucket at all. Nobody could see them to reload them.
+      //
+      // Put them where a human can act: the ready-to-load queue, which
+      // is exactly what that old reject flow intended. An Outsource
+      // vendor is NOT included — machine-less in-progress is the
+      // correct shape there (the piece is out at their shed).
+      queue.push(job);
     }
   }
   // Sort held: most-recently-held first so a quick flip-and-reload

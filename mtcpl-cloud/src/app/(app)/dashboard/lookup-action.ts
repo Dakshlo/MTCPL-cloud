@@ -97,6 +97,14 @@ export type SlabResult = {
     review_approved_at: string | null;
     approved_by_name: string | null;
     machine_code: string | null;
+    /** The machine the slab is on RIGHT NOW — strictly cnc_machine_id,
+     *  never the completed_on_* fallback. machine_code above answers
+     *  "which CNC did the work"; the two are only the same while the
+     *  slab is still loaded. Sep 2026: a slab whose row was left
+     *  machine-less was being reported as standing on the machine that
+     *  carved it months ago, and the floor went looking at an empty
+     *  machine. Nothing may claim "on machine X" off this being null. */
+    on_machine_code: string | null;
   } | null;
   dispatch: {
     challan_number: number | null;
@@ -592,21 +600,28 @@ async function loadSlabContext(
       approvedByName =
         (who as { full_name?: string } | null)?.full_name ?? null;
     }
-    // Prefer completed_on_cnc_machine_id (the machine that carved it,
-    // set at unload + kept through approval). Fall back to
-    // cnc_machine_id for a still-loaded slab or any row the unload
-    // path didn't stamp.
+    // Two different questions, two different columns:
+    //   machineId    — "which CNC did the work". completed_on_* is set
+    //                  at unload and kept for ever; fall back to the
+    //                  live column for a slab still under the tool.
+    //   onMachineId  — "where is it standing right now". ONLY the live
+    //                  column. If it is null the slab is not on any
+    //                  machine, whatever else the row says.
     const machineId = c.completed_on_cnc_machine_id ?? c.cnc_machine_id;
-    let machineCode: string | null = null;
-    if (machineId) {
-      const { data: mac } = await admin
+    const onMachineId = c.cnc_machine_id;
+    const wanted = [...new Set([machineId, onMachineId].filter(Boolean))] as string[];
+    const codeById = new Map<string, string>();
+    if (wanted.length > 0) {
+      const { data: macs } = await admin
         .from("cnc_machines")
-        .select("machine_code")
-        .eq("id", machineId)
-        .maybeSingle();
-      machineCode =
-        (mac as { machine_code?: string } | null)?.machine_code ?? null;
+        .select("id, machine_code")
+        .in("id", wanted);
+      for (const m of (macs ?? []) as Array<{ id: string; machine_code: string }>) {
+        codeById.set(m.id, m.machine_code);
+      }
     }
+    const machineCode = machineId ? codeById.get(machineId) ?? null : null;
+    const onMachineCode = onMachineId ? codeById.get(onMachineId) ?? null : null;
     carving = {
       vendor_name: c.vendor_name,
       vendor_type: c.vendor_type,
@@ -618,6 +633,7 @@ async function loadSlabContext(
       review_approved_at: c.review_approved_at,
       approved_by_name: approvedByName,
       machine_code: machineCode,
+      on_machine_code: onMachineCode,
     };
   }
 
@@ -676,11 +692,28 @@ async function loadSlabContext(
     currentLocation = `Carving done — awaiting approval at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
   } else if (carving?.status === "carving_in_progress") {
     // Name the machine right in the headline — "which CNC?" was the next
-    // question every time (Daksh). Falls back to the old wording when the
-    // row has no machine resolved.
-    currentLocation = carving.machine_code
-      ? `On CNC ${machineNoLabel(carving.machine_code)} at ${carving.vendor_name}`
-      : `On a CNC at ${carving.vendor_name}`;
+    // question every time (Daksh).
+    //
+    // It must be the LIVE machine and nothing else. Until Sep 2026 this
+    // read completed_on_cnc_machine_id when the live column was empty,
+    // so AGROHA-0002-12 — unloaded from CNC 32 in May and then rejected
+    // under the old soft-reject, which put it back to in-progress with
+    // no machine — was still being reported as "On CNC No. 32 at MOHIT".
+    // The floor walked to machine 32 and found it empty.
+    if (carving.on_machine_code) {
+      currentLocation = `On CNC ${machineNoLabel(carving.on_machine_code)} at ${carving.vendor_name}`;
+    } else if (carving.vendor_type === "Outsource") {
+      // Outsource jobwork has no machine by design — "in progress" here
+      // means the piece is sitting at the carver's own shed.
+      currentLocation = `Out for carving at ${carving.vendor_name}`;
+    } else if (carving.machine_code) {
+      // In progress at a CNC vendor but on no machine. Say what is
+      // actually known instead of inventing a location: it came off
+      // that machine and nobody has put it anywhere since.
+      currentLocation = `⚠️ Not on any machine — last carved on CNC ${machineNoLabel(carving.machine_code)} at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
+    } else {
+      currentLocation = `⚠️ At ${carving.vendor_name}, not on any machine`;
+    }
   } else if (carving?.status === "completed") {
     currentLocation = `Carving completed at ${carving.vendor_name}${carving.location ? ` · ${carving.location}` : ""}`;
   } else if (carving?.status === "carving_assigned") {

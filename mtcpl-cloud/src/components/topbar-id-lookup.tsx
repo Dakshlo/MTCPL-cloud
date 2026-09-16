@@ -1594,10 +1594,15 @@ function SlabResultPanel({ result }: { result: Extract<LookupResult, { kind: "sl
                 carved it, when it was completed/approved, and by whom. */}
             {/* A bare machine code ("10") reads as a quantity — machineNoLabel
                 turns it into "No. 10". Key follows the tense: still loaded =
-                "On machine", otherwise "Carved on". */}
+                "On machine", otherwise "Carved on".
+                The tense comes from on_machine_code (the live column), not
+                from the status. A rejected slab keeps status
+                'carving_in_progress' long after it left the machine, and
+                labelling that "On machine" is what sent the floor to an
+                empty CNC 32 in Sep 2026. */}
             {result.carving.machine_code && (
               <Field
-                k={result.carving.status === "carving_in_progress" ? "On machine" : "Carved on"}
+                k={result.carving.on_machine_code ? "On machine" : "Carved on"}
                 v={machineNoLabel(result.carving.machine_code)}
                 mono
               />
