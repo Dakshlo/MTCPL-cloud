@@ -3409,6 +3409,28 @@ function JobsByTemple({
                           j.cnc_machine_id ?? j.completed_on_cnc_machine_id ?? null;
                         const code = mid ? machineCodeById[mid] ?? null : null;
                         if (!code) return null;
+                        // Sep 2026 — an Active card with no live machine is
+                        // not on a bed, whatever the fallback code says.
+                        // AGROHA-0002-12 sat here reading "🏭 32" for 111
+                        // days while machine 32 stood empty. Say "off
+                        // machine" so the pill can't be read as a place to
+                        // walk to. Review/Done cards are unaffected: they
+                        // have completed_at, and there the code honestly
+                        // means "this is the CNC that carved it".
+                        const offMachine =
+                          !j.cnc_machine_id &&
+                          !j.completed_at &&
+                          j.status === "carving_in_progress";
+                        if (offMachine) {
+                          return (
+                            <span
+                              title={`Came off machine ${code} — not on any machine now`}
+                              style={{ color: "#b45309", fontWeight: 700 }}
+                            >
+                              ⚠ off {code}
+                            </span>
+                          );
+                        }
                         return <span title="Carving machine">🏭 {code}</span>;
                       })()}
                     </div>
