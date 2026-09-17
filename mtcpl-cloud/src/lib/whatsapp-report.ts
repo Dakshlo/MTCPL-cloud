@@ -207,7 +207,16 @@ type DayTotals = {
     marble: { count: number; tonnes: number };
     sandstone: { count: number; cft: number };
   };
-  cutting: { slabs: number; cft: number };
+  /* Cut output is CFT for both stones — a cut marble slab has real
+     dimensions even though the block it came from was only ever weighed.
+     The per-stone split (Daksh, Sep 2026) is what lets the blocks-in vs
+     slabs-out card report each stone against its own intake instead of
+     folding marble tonnes into sandstone CFT at a nominal rate. */
+  cutting: {
+    slabs: number; cft: number;
+    marble: { slabs: number; cft: number };
+    sandstone: { slabs: number; cft: number };
+  };
   /* Aug 2026 — Daksh: "in carving done you're only showing CFT; show the
      combined CFT + SFT." Carved output is measured in ONE unit per slab,
      decided by real thickness: a slab 12 in or thinner is charged on its
@@ -353,7 +362,7 @@ async function dimsBySlab(
 
 const emptyTotals = (): DayTotals => ({
   blocks: { count: 0, cft: 0, marble: { count: 0, tonnes: 0 }, sandstone: { count: 0, cft: 0 } },
-  cutting: { slabs: 0, cft: 0 },
+  cutting: { slabs: 0, cft: 0, marble: { slabs: 0, cft: 0 }, sandstone: { slabs: 0, cft: 0 } },
   carving: { slabs: 0, cft: 0, sft: 0 },
   dispatch: { slabs: 0, cft: 0, tonnes: 0, trucks: 0 },
 });
@@ -491,6 +500,11 @@ async function aggregateDay(
       for (const s of slabs) {
         const c = cft(Number(s.length_ft), Number(s.width_ft), Number(s.thickness_ft));
         totals.cutting.slabs += 1; totals.cutting.cft += c;
+        // Split by stone category. Keyed off the SLAB's own stone, which
+        // is copied from its source block at cut time, so it agrees with
+        // how the block was counted on the way in.
+        const side = isMarble(s.stone, categoryMap) ? totals.cutting.marble : totals.cutting.sandstone;
+        side.slabs += 1; side.cft += c;
         const k = stoneLabel(s.stone);
         const g = byStone.get(k) ?? { slabs: 0, cft: 0 };
         g.slabs += 1; g.cft += c; byStone.set(k, g);
@@ -1418,9 +1432,16 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
        pages in the app. */
     /* Five cards on one page since Sep 2026 — the flow card joined
        between cutter costing and stock — so every card was re-sized to
-       fit rather than one being pushed off. 140+140+168+128+128 plus
-       gaps is 759 pt of the 778 available. */
-    const COST_H = 140, FLOW_H = 168, PLANT_H = 128, PLANT_GAP = 11;
+       fit rather than one being pushed off.
+
+       Sep 17: the flow card gained a second stone row, so it needed
+       another 32 pt. 19 pt were already spare; the other 20 came off
+       the two plant cards, whose last text line sits at -100 and so had
+       28 pt of dead space below it — at 118 they still clear it by 18.
+       140+140+200+118+118 plus five 11 pt gaps is 771 of the 778
+       available. Anything added here has to find its 11 pt+ the same
+       way, or the last card drops off the page silently. */
+    const COST_H = 140, FLOW_H = 200, PLANT_H = 118, PLANT_GAP = 11;
     if (data.cnc) {
       const c = data.cnc, hh = COST_H;
       const rate = Number.isFinite(c.costPerCombined) ? inr2(c.costPerCombined) : "--";
@@ -1452,32 +1473,42 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       y -= hh + PLANT_GAP;
     }
 
-    /* ── BLOCKS IN → SLABS OUT (Daksh, Sep 2026) ──────────────────────
+    /* ── BLOCKS IN vs SLABS OUT (Daksh, Sep 2026) ─────────────────────
        "Average of how much block is coming in and how much is leaving
        as slabs — a line with blocks on the left, slabs on the right,
-       and a ratio of it."
+       and a ratio of it." Then (Sep 17): "it includes both sandstone
+       and marble, make 2 separate for both."
+
+       One roof, two stone rows — the same shape BLOCKS ADDED uses on
+       page 1, because these are the same measurement split by stone
+       rather than two unrelated metrics.
+
+       Splitting it removed a fudge. The two stones are bought in
+       different units (marble by the tonne, sandstone by the CFT), so
+       the combined card had to convert marble at the company's nominal
+       8 CFT per tonne just to reach a single ratio, and carried a
+       footnote saying so. Each stone now answers in its own unit:
+       sandstone CFT-in vs CFT-out as 100 : N, marble as CFT of slab per
+       TONNE of block — the same unit the BLOCK RECOVERY card already
+       prints for marble. No conversion, no footnote.
 
        Daily averages over the month so far, so a single heavy truck day
-       does not swing it. The two stones are bought in different units
-       (marble by the tonne, sandstone by the CFT), so they are shown
-       separately on the left exactly as page 1 does; the RATIO needs one
-       unit, so marble is converted at the company's own 8 CFT per tonne
-       — the same conversion the raw-stock card already prints.
+       does not swing it.
 
-       What the ratio is NOT: a recovery figure. A cut block leaves both
+       What these are NOT: recovery figures. A cut block leaves both
        slabs and remnants, and today's cutting is not of today's blocks.
-       It answers a flow question — is stone arriving faster than it
-       leaves as slabs (stock building) or slower (stock drawing down) —
-       and it is labelled that way so nobody reads it as yield.       */
+       They answer a flow question — is stone arriving faster than it
+       leaves as slabs (stock building) or slower (drawing down) — and
+       they are labelled that way so nobody reads them as yield.      */
     {
       const hh = FLOW_H;
       const days = Math.max(1, data.month.days);
       const sandIn = data.mtd.blocks.sandstone.cft / days;
-      const marbleInT = data.mtd.blocks.marble.tonnes / days;
-      const inCft = sandIn + marbleInT * 8;
-      const outCft = data.mtd.cutting.cft / days;
-      const outSlabs = data.mtd.cutting.slabs / days;
-      const ratio = inCft > 0 ? Math.round((outCft / inCft) * 100) : null;
+      const sandOut = data.mtd.cutting.sandstone.cft / days;
+      const sandOutSlabs = data.mtd.cutting.sandstone.slabs / days;
+      const marbleIn = data.mtd.blocks.marble.tonnes / days;
+      const marbleOut = data.mtd.cutting.marble.cft / days;
+      const marbleOutSlabs = data.mtd.cutting.marble.slabs / days;
 
       P.glass(M, y, cw, hh, 14, COL.amber, WASH.amber);
       P.t("BLOCKS IN  vs  SLABS OUT", M + 18, y - 26, 13, bold, COL.amber);
@@ -1502,29 +1533,65 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         P.pg.drawSvgPath(`M 0 ${d / 2} L ${w / 2} ${d} L ${w / 2} ${d + t} L 0 ${d / 2 + t} Z`, { x, y: yTop, color: faces.left });
         P.pg.drawSvgPath(`M ${w / 2} ${d} L ${w} ${d / 2} L ${w} ${d / 2 + t} L ${w / 2} ${d + t} Z`, { x, y: yTop, color: faces.right });
       };
-      // A block is tall; a slab is the same footprint, cut thin.
-      iso(leftCx - 28, y - 38, 56, 28, 32);
-      iso(rightCx - 32, y - 52, 64, 30, 7);
-      iso(rightCx - 32, y - 44, 64, 30, 7);
 
-      // Left — what arrived.
-      P.ctr(`${fmt0(sandIn)} CFT`, leftCx, y - 118, 16, bold, ink);
-      P.ctr("sandstone", leftCx, y - 131, 8.5, bold, muted);
-      P.ctr(marbleInT >= 0.05 ? `+ ${fmt1(marbleInT)} T marble` : "no marble", leftCx, y - 147, 9, bold, marbleInT >= 0.05 ? ink : muted);
+      /** One stone's row: block on the left, slabs on the right, the
+       *  ratio between them in the middle. `ratio` / `ratioSub` are
+       *  passed in because the two stones answer in different units.
+       *
+       *  Rows are 82 pt. The art hangs from -20 and is sized so its
+       *  lowest face lands by -50; all three figures share a -63
+       *  baseline and all three captions -74, which is what keeps the
+       *  columns reading as one line across. drawSvgPath draws DOWNWARD
+       *  from its y, so an iso's real extent is yTop-(d+t) — grow the
+       *  art and it walks straight into the numbers. */
+      const flowRow = (
+        top: number, name: string,
+        inV: string, inSub: string,
+        ratio: string | null, ratioSub: string,
+        outV: string, outSub: string,
+      ) => {
+        P.t(name, M + 18, top - 14, 10.5, bold, ink);
+        // A block is tall; a slab is the same footprint, cut thin, and
+        // there are two of them — one block makes many slabs.
+        iso(leftCx - 16, top - 20, 32, 15, 15);
+        iso(rightCx - 19, top - 28, 38, 16, 4);
+        iso(rightCx - 19, top - 22, 38, 16, 4);
 
-      // Right — what left as slabs.
-      P.ctr(`${fmt0(outCft)} CFT`, rightCx, y - 118, 16, bold, ink);
-      P.ctr(`${fmt0(outSlabs)} slabs`, rightCx, y - 131, 8.5, bold, muted);
-      P.ctr("cut from blocks", rightCx, y - 147, 9, bold, muted);
+        P.ctr(inV, leftCx, top - 63, 15, bold, ink);
+        P.ctr(inSub, leftCx, top - 74, 8, bold, muted);
 
-      // Middle — the arrow and the ratio.
-      const ax0 = M + colW + 8, ax1 = M + colW * 2 - 8, ay = y - 70;
-      P.pg.drawLine({ start: { x: ax0, y: ay }, end: { x: ax1 - 6, y: ay }, thickness: 2, color: COL.amber });
-      P.pg.drawSvgPath(`M 0 0 L 9 5 L 0 10 Z`, { x: ax1 - 8, y: ay + 5, color: COL.amber });
-      P.ctr(ratio == null ? "—" : `100 : ${ratio}`, midCx, y - 104, 22, bold, ink);
-      P.ctr(ratio == null ? "no stone came in" : `every 100 CFT in,`, midCx, y - 120, 8.5, bold, muted);
-      if (ratio != null) P.ctr(`${ratio} CFT out as slabs`, midCx, y - 132, 8.5, bold, muted);
-      P.ctr("marble at 8 CFT per tonne", midCx, y - 150, 7.5, font, muted);
+        P.ctr(outV, rightCx, top - 63, 15, bold, ink);
+        P.ctr(outSub, rightCx, top - 74, 8, bold, muted);
+
+        const ax0 = M + colW + 10, ax1 = M + colW * 2 - 10, ay = top - 32;
+        P.pg.drawLine({ start: { x: ax0, y: ay }, end: { x: ax1 - 6, y: ay }, thickness: 1.8, color: COL.amber });
+        P.pg.drawSvgPath(`M 0 0 L 8 4.5 L 0 9 Z`, { x: ax1 - 8, y: ay + 4.5, color: COL.amber });
+        P.ctr(ratio ?? "—", midCx, top - 63, 18, bold, ink);
+        P.ctr(ratio == null ? "no stone came in" : ratioSub, midCx, top - 74, 8, bold, muted);
+      };
+
+      // SANDSTONE — CFT in, CFT out, so the ratio is a plain 100 : N.
+      const sandRatio = sandIn > 0 ? Math.round((sandOut / sandIn) * 100) : null;
+      flowRow(
+        y - 36, "SANDSTONE",
+        `${fmt0(sandIn)} CFT`, "blocks in",
+        sandRatio == null ? null : `100 : ${sandRatio}`, "CFT in : CFT out",
+        `${fmt0(sandOut)} CFT`, `${fmt0(sandOutSlabs)} slabs out`,
+      );
+
+      // Hairline between the rows — inside the same border, so the two
+      // stay one card rather than becoming two.
+      P.pg.drawLine({ start: { x: M + 14, y: y - 118 }, end: { x: W - M - 14, y: y - 118 }, thickness: 0.6, color: COL.amber, opacity: 0.28 });
+
+      // MARBLE — tonnes in, CFT out. Stated as CFT per tonne, which is
+      // the unit the team already reads marble in on BLOCK RECOVERY.
+      const marbleRate = marbleIn > 0 ? marbleOut / marbleIn : null;
+      flowRow(
+        y - 118, "MARBLE",
+        `${fmt1(marbleIn)} T`, "blocks in",
+        marbleRate == null ? null : `${marbleRate.toFixed(1)} CFT/T`, "slab CFT per tonne in",
+        `${fmt0(marbleOut)} CFT`, `${fmt0(marbleOutSlabs)} slabs out`,
+      );
 
       y -= hh + PLANT_GAP;
     }
