@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import type { FloorProduction } from "@/lib/floor-production-data";
+import { ProductionTvSlide, VendorsTvSlide } from "./production-slide";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -193,13 +196,44 @@ function isProgPending(m: FloorMachine): boolean {
 
 // ── Main client component ─────────────────────────────────────────
 
+/** A TV slide is either one operator's machine board (possibly one of
+ *  several pages for a big fleet) or one of the two month-number
+ *  screens. The union keeps the rotation, the progress dots and the
+ *  fit-to-screen measurement working off a single list. */
+type TvSlide =
+  | { kind: "vendor"; vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }
+  | { kind: "production"; production: FloorProduction }
+  | { kind: "vendors"; production: FloorProduction };
+
+/** Stable per-slide key for TvFit's re-measure. */
+function tvFitDep(s: TvSlide, total: number): string {
+  return s.kind === "vendor"
+    ? `v:${s.vendor.id}:${s.page}:${s.machines.length}:${total}`
+    : `${s.kind}:${s.production.today}:${total}`;
+}
+
+/** Label for the dot tooltip + the dot's React key. */
+function slideKey(s: TvSlide, i: number): string {
+  return s.kind === "vendor" ? `${s.vendor.id}:${s.page}` : `${s.kind}:${i}`;
+}
+function slideTitle(s: TvSlide): string {
+  if (s.kind === "production") return "Carved this month";
+  if (s.kind === "vendors") return "Vendor scoreboard";
+  return s.pageCount > 1 ? `${s.vendor.name} (${s.page + 1}/${s.pageCount})` : s.vendor.name;
+}
+
 export function FloorViewClient({
   vendors,
+  production,
   initialMode,
   initialRotateSec,
   initialVendorId,
 }: {
   vendors: FloorVendor[];
+  /** Month numbers for the two scoreboard slides. null when they could
+   *  not be built — the wall then rotates operators only rather than
+   *  showing an empty chart. */
+  production: FloorProduction | null;
   initialMode: "grid" | "tv";
   initialRotateSec: number;
   initialVendorId: string | null;
@@ -247,22 +281,47 @@ export function FloorViewClient({
     return () => clearInterval(t);
   }, [router]);
 
-  // Paginate each vendor's machines into pages of up to 10 (5 per row). Vendors
-  // with ≤10 (e.g. Vivek) stay one page; bigger ones (Mohit, 18) split, and the
-  // rotation steps through (vendor, page) slides. Machines are flattened in type
-  // order so a vendor's pages are stable across refreshes.
+  // Paginate each vendor's machines. Vendors with a small fleet (Vivek,
+  // 7) stay one page; bigger ones split and the rotation steps through
+  // (vendor, page) slides. Machines are flattened in type order so a
+  // vendor's pages are stable across refreshes.
+  //
+  // Daksh Sep 2026 — "Mohit has 21 machines so his view is on 3 pages,
+  // 2 with 10 and one with only 1, that looks odd." It did: a fixed
+  // slice of 10 leaves the remainder stranded on a page of its own, and
+  // one tile stretched across a TV looks broken.
+  //
+  // The fix is to SPREAD the machines evenly over however many pages
+  // they need, instead of filling each page to 10 and orphaning the
+  // rest. Mohit's 21 go 7 + 7 + 7; 18 go 9 + 9 rather than 10 + 8.
+  //
+  // He asked to merge the stray one into the other two. Tried it —
+  // 11 + 10 — and it is the wrong trade: 11 tiles is either three rows
+  // (so TvFit, which scales to fit the HEIGHT, shrinks the whole board
+  // and leaves the sides empty) or six across (so the slab codes wrap
+  // mid-word). Even pages keep every tile at the size the floor
+  // actually reads from, and the odd-looking page is gone either way.
   const slides = useMemo(() => {
-    const PAGE_SIZE = 10;
-    const out: Array<{ vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }> = [];
+    const TARGET = 10;
+    const out: TvSlide[] = [];
     for (const v of vendors) {
       const flat = groupMachinesByType(v.machines).flatMap((g) => g.machines);
-      const pageCount = Math.max(1, Math.ceil(flat.length / PAGE_SIZE));
+      const pageCount = Math.max(1, Math.ceil(flat.length / TARGET));
+      const per = Math.ceil(flat.length / pageCount);
       for (let p = 0; p < pageCount; p++) {
-        out.push({ vendor: v, machines: flat.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE), page: p, pageCount });
+        out.push({ kind: "vendor", vendor: v, machines: flat.slice(p * per, (p + 1) * per), page: p, pageCount });
       }
     }
+    // The two number slides land at the END of the loop, so the wall
+    // shows every operator's live board first and then answers "how is
+    // the month going" before starting over. Omitted entirely when the
+    // data couldn't be built, rather than rotating onto a blank screen.
+    if (production) {
+      out.push({ kind: "production", production });
+      out.push({ kind: "vendors", production });
+    }
     return out;
-  }, [vendors]);
+  }, [vendors, production]);
 
   // TV auto-rotate. Pauses if the user clicks ⏸.
   useEffect(() => {
@@ -308,7 +367,6 @@ export function FloorViewClient({
   // gradient was washing out from a distance).
   if (mode === "tv") {
     const s = slides[slides.length ? tvIndex % slides.length : 0];
-    const v = s.vendor;
     const isDark = tvTheme === "dark";
     // NOTE: previously onMouseEnter paused the rotation. For a
     // kiosk display the cursor is always somewhere on screen, so
@@ -384,9 +442,17 @@ export function FloorViewClient({
           setTvTheme={setTvTheme}
         />
 
-        {/* Scale the whole operator board to fit the screen — no scroll. */}
-        <TvFit dep={`${v.id}:${s.page}:${s.machines.length}:${slides.length}`}>
-          <VendorTvSlide vendor={v} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
+        {/* Scale the whole board to fit the screen — no scroll. The dep
+            key is what tells TvFit to re-measure, so it has to change on
+            every slide, number slides included. */}
+        <TvFit dep={tvFitDep(s, slides.length)}>
+          {s.kind === "vendor" ? (
+            <VendorTvSlide vendor={s.vendor} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
+          ) : s.kind === "production" ? (
+            <ProductionTvSlide data={s.production} dark={isDark} />
+          ) : (
+            <VendorsTvSlide data={s.production} dark={isDark} />
+          )}
         </TvFit>
       </div>
     );
@@ -491,7 +557,7 @@ function TvHeader({
   setPaused: (b: boolean) => void;
   tvIndex: number;
   setTvIndex: (n: number) => void;
-  slides: Array<{ vendor: FloorVendor; page: number; pageCount: number }>;
+  slides: TvSlide[];
   fleetTotals: FloorVendor["totals"];
   tvTheme: "light" | "dark";
   setTvTheme: (t: "light" | "dark") => void;
@@ -587,20 +653,22 @@ function TvHeader({
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {slides.map((s, i) => (
             <button
-              key={`${s.vendor.id}:${s.page}`}
+              key={slideKey(s, i)}
               type="button"
               onClick={() => setTvIndex(i)}
               style={{
-                width: 10,
+                // The two number slides get a squarer dot so the dot row
+                // also reads as "operators, then the month numbers".
+                width: s.kind === "vendor" ? 10 : 14,
                 height: 10,
-                borderRadius: "50%",
+                borderRadius: s.kind === "vendor" ? "50%" : 3,
                 border: "none",
                 cursor: "pointer",
                 background: i === tvIndex ? "#b87333" : dotInactive,
                 transition: "background 0.2s",
                 padding: 0,
               }}
-              title={s.pageCount > 1 ? `${s.vendor.name} (${s.page + 1}/${s.pageCount})` : s.vendor.name}
+              title={slideTitle(s)}
             />
           ))}
         </div>
