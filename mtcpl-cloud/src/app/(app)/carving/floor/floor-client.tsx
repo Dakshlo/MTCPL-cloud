@@ -449,7 +449,13 @@ export function FloorViewClient({
           {s.kind === "vendor" ? (
             <VendorTvSlide vendor={s.vendor} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
           ) : s.kind === "production" ? (
-            <ProductionTvSlide data={s.production} dark={isDark} />
+            // Keyed on the slide index so the chart REMOUNTS every time
+            // the wall comes round to it. Without the key, React reuses
+            // the element whenever the previous slide was the same
+            // component (clicking this dot twice, or a two-slide
+            // rotation), the SVG animations never restart, and the
+            // draw-in Daksh asked for only ever plays on first load.
+            <ProductionTvSlide key={`prod-${tvIndex}`} data={s.production} dark={isDark} />
           ) : (
             <VendorsTvSlide data={s.production} dark={isDark} />
           )}

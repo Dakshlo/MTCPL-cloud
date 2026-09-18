@@ -25,6 +25,14 @@ import type { FloorProduction, FloorVendorNumbers, ProductionPoint } from "@/lib
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 
+/** How long the line takes to draw itself in on arrival. Comfortably
+ *  inside the shortest sensible rotation so the slide is never still
+ *  drawing when it is swapped out. */
+const DRAW_MS = 1500;
+/** Height of one repeat of the travelling highlight, in viewBox units.
+ *  One band per ~2.6s cycle. */
+const SWEEP_BAND = 130;
+
 /* Palette. Last month is a calm grey-brown so it reads as history;
    this month is green when ahead of that line and amber when behind,
    which is the whole message of the slide.
@@ -157,6 +165,23 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           flexDirection: "column",
         }}
       >
+        <style>{`
+          @keyframes mtcpl-head-in {
+            from { opacity: 0; transform: scale(0.7); }
+            to   { opacity: 1; transform: scale(1); }
+          }
+          .mtcpl-head {
+            opacity: 0;
+            transform-box: fill-box;
+            transform-origin: center;
+            animation: mtcpl-head-in 420ms cubic-bezier(0.22, 1, 0.36, 1) ${DRAW_MS - 120}ms forwards;
+          }
+          /* A wall TV never asks for this, but a laptop opening the same
+             URL might: skip straight to the finished chart. */
+          @media (prefers-reduced-motion: reduce) {
+            .mtcpl-head { opacity: 1; animation: none; }
+          }
+        `}</style>
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", flex: 1, minHeight: 0 }}>
           <defs>
             {/* A vertical ramp in user space: dark at the baseline,
@@ -180,6 +205,66 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
               <stop offset="0%" stopColor={ramp.mid} stopOpacity={dark ? 0.34 : 0.26} />
               <stop offset="100%" stopColor={ramp.mid} stopOpacity={0} />
             </linearGradient>
+
+            {/* THE LIVE SWEEP. A band of light that runs up the line for
+                ever, the way a loading bar does. It is a second gradient
+                painted over the static ramp rather than a replacement
+                for it, so the line keeps its dark-at-the-bottom shape
+                and the sweep only adds the movement.
+
+                spreadMethod="repeat" tiles the band up the whole line,
+                and translating by exactly one band height per cycle
+                makes the loop seamless — the tile that leaves the top is
+                the tile arriving at the bottom, so there is no jump at
+                the wrap. Purely decorative: it carries no data, which is
+                why it is soft-edged and translucent rather than a hard
+                stripe someone might try to read a value off. */}
+            <linearGradient
+              id="mtcpl-line-sweep"
+              gradientUnits="userSpaceOnUse"
+              spreadMethod="repeat"
+              x1={0}
+              y1={baseY}
+              x2={0}
+              y2={baseY - SWEEP_BAND}
+            >
+              <stop offset="0%" stopColor={ramp.high} stopOpacity={0} />
+              <stop offset="45%" stopColor={ramp.high} stopOpacity={dark ? 0.85 : 0.6} />
+              <stop offset="90%" stopColor={ramp.high} stopOpacity={0} />
+              <animateTransform
+                attributeName="gradientTransform"
+                type="translate"
+                values={`0 0; 0 ${-SWEEP_BAND}`}
+                dur="2.6s"
+                repeatCount="indefinite"
+              />
+            </linearGradient>
+
+            {/* THE DRAW-IN. A rectangle that widens from nothing to the
+                full chart, clipping the wash and both strokes of this
+                month, so the line appears to be drawn day by day as the
+                slide arrives. `fill="freeze"` holds it open afterwards.
+                The slide is re-keyed on every rotation step (see
+                floor-client), so this replays each time the wall comes
+                back round to it rather than only on first load. */}
+            <clipPath id="mtcpl-wipe">
+              <rect x={0} y={0} width={0} height={H}>
+                <animate
+                  attributeName="width"
+                  values={`0; ${W}`}
+                  keyTimes="0; 1"
+                  calcMode="spline"
+                  // Gentle ease-out, not a snap. 0.25 0.9 0.3 1 was
+                  // tried first and measured at ~90% width within
+                  // 200ms of starting — the eye reads that as the chart
+                  // appearing, not drawing. This spends real time in the
+                  // middle so the month visibly plays out.
+                  keySplines="0.4 0 0.25 1"
+                  dur={`${DRAW_MS}ms`}
+                  fill="freeze"
+                />
+              </rect>
+            </clipPath>
           </defs>
 
           {ticks.map((v, i) => (
@@ -226,33 +311,48 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
             {data.prevMonthLabel.split(" ")[0]}
           </text>
 
-          {/* This month: the wash, then the ramped stroke over it. */}
-          <path d={thisArea} fill="url(#mtcpl-area-ramp)" stroke="none" />
-          <path
-            d={thisPath}
-            fill="none"
-            stroke="url(#mtcpl-line-ramp)"
-            strokeWidth={4.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+          {/* This month: the wash, the ramped stroke, then the sweep
+              riding on top — all three revealed by the same wipe. */}
+          <g clipPath="url(#mtcpl-wipe)">
+            <path d={thisArea} fill="url(#mtcpl-area-ramp)" stroke="none" />
+            <path
+              d={thisPath}
+              fill="none"
+              stroke="url(#mtcpl-line-ramp)"
+              strokeWidth={4.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d={thisPath}
+              fill="none"
+              stroke="url(#mtcpl-line-sweep)"
+              strokeWidth={4.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
           {last && (
             <>
               {/* A ring rather than a blob, and the figure sits ABOVE the
                   head of the line so it can never collide with last
-                  month's dashes running underneath it. */}
-              <circle cx={xOf(last.day)} cy={yOf(last.cum)} r={9} fill={C.panelSolid} stroke={ramp.high} strokeWidth={3} />
-              <text
-                x={xOf(last.day)}
-                y={yOf(last.cum) - 20}
-                textAnchor="middle"
-                fontSize={21}
-                fontWeight={700}
-                fill={ramp.mid}
-                letterSpacing="-0.3"
-              >
-                {fmt0(last.cum)}
-              </text>
+                  month's dashes running underneath it. Held back until
+                  the line has finished drawing, so it lands on the head
+                  instead of hanging in mid-air waiting for it. */}
+              <g className="mtcpl-head">
+                <circle cx={xOf(last.day)} cy={yOf(last.cum)} r={9} fill={C.panelSolid} stroke={ramp.high} strokeWidth={3} />
+                <text
+                  x={xOf(last.day)}
+                  y={yOf(last.cum) - 20}
+                  textAnchor="middle"
+                  fontSize={21}
+                  fontWeight={700}
+                  fill={ramp.mid}
+                  letterSpacing="-0.3"
+                >
+                  {fmt0(last.cum)}
+                </text>
+              </g>
             </>
           )}
         </svg>
