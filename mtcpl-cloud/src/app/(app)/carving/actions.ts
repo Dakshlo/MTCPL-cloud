@@ -4667,7 +4667,7 @@ export async function getDispatchStationsAction(): Promise<
   | { ok: false }
 > {
   try {
-    await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+    await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
     const admin = createAdminSupabaseClient();
     const { data } = await admin
       .from("dispatch_stations")
@@ -4685,7 +4685,7 @@ export async function getDispatchStationsAction(): Promise<
 }
 
 export async function approveCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes") || null;
@@ -4942,7 +4942,7 @@ export async function approveCarvingJobAction(formData: FormData) {
 // leaves the approval queue into the vendor-wise "Still Pending Work"
 // tab. The vendor reworks; backToApprovalAction returns it for approval.
 export async function stillPendingWorkAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const note = txt(formData, "notes") || null;
@@ -5005,7 +5005,7 @@ export async function stillPendingWorkAction(formData: FormData) {
 // Clears the pending-work flag → the slab returns to Carving Done
 // Approval so it can be approved after the vendor's rework. (Mig 097)
 export async function backToApprovalAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   if (!jobId) redirect("/carving?toast=Missing+job+id");
@@ -5021,7 +5021,7 @@ export async function backToApprovalAction(formData: FormData) {
 }
 
 export async function markReadyToDispatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -5076,7 +5076,7 @@ export async function markReadyToDispatchAction(formData: FormData) {
 }
 
 export async function updateCarvingLocationAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const location = txt(formData, "location");
@@ -5113,7 +5113,7 @@ export async function updateCarvingLocationAction(formData: FormData) {
 // on review_reworked_at + review_decision so old-style soft rejects
 // don't accidentally show up here.
 export async function reworkCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes").trim();
@@ -5212,7 +5212,7 @@ export async function reworkCarvingJobAction(formData: FormData) {
 // shape in a future migration we can add a back-compat fallback,
 // but for now Daksh's spec is "image is mandatory" and we honor it.
 export async function rejectCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const notes = txt(formData, "notes").trim();
@@ -5301,7 +5301,7 @@ export async function rejectCarvingJobAction(formData: FormData) {
 // detail page. See migration 014 for the schema change.
 
 export async function cancelCarvingJobAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
 
@@ -6192,7 +6192,7 @@ export async function unclaimDispatchBatchAction(formData: FormData) {
 // actually needs a lathe. Only allowed while the job is still in
 // the queue or actively carving.
 export async function updateRequiresMachineTypeAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -6262,7 +6262,7 @@ export async function updateRequiresMachineTypeAction(formData: FormData) {
 // before/at approval (and even shortly after) fixes the CNC costing.
 // Staff-only — NOT the vendor role; the vendor cockpit has no control.
 export async function updateCarvingSidesAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -6334,7 +6334,7 @@ export async function transferCarvingJobAction(formData: FormData) {
   // the /carving/[id] detail page. (Daksh flagged the bug: clicking
   // Transfer from the detail page redirected him to /slabs because
   // his role wasn't in the list.)
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "vendor"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head", "vendor"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -6496,7 +6496,7 @@ export async function transferCarvingJobAction(formData: FormData) {
 // Approve / Reject reuse the existing CNC-side actions.
 
 export async function markCarvingStartedManuallyAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -6551,7 +6551,7 @@ export async function markCarvingStartedManuallyAction(formData: FormData) {
 }
 
 export async function markCarvingCompleteManuallyAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const carvingItemId = txt(formData, "carving_item_id");
@@ -6626,7 +6626,7 @@ export async function markCarvingCompleteManuallyAction(formData: FormData) {
 // just looped. Office roles only. Skips any row that isn't a still-in-
 // progress Outsource job (CNC + cutting untouched).
 export async function receiveOutsourceCarvingBatchAction(formData: FormData) {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const redirectTo = txt(formData, "redirect_to") || "/carving?tab=active&mode=outsource";
@@ -7637,7 +7637,7 @@ export type JobEvent = {
 };
 
 export async function getJobEvents(jobId: string): Promise<JobEvent[]> {
-  await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const { data: events } = await admin
@@ -7870,7 +7870,7 @@ const OWNER_REVIEW_KINDS = new Set(["no_slab_code", "other"]);
 export async function involveOwnerAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string } | void> {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
   const jobId = txt(formData, "job_id");
   const stay = txt(formData, "stay") === "1";
@@ -8073,7 +8073,7 @@ export async function bringBackStorageSlabsAction(
 export async function directDispatchSlabsAction(
   formData: FormData,
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
-  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager"]);
+  const { profile } = await requireAuth(["developer", "owner", "carving_head", "senior_incharge", "tender_manager", "team_head"]);
   const admin = createAdminSupabaseClient();
 
   const slabIds = JSON.parse(String(formData.get("slab_ids") || "[]")) as string[];

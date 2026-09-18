@@ -831,14 +831,13 @@ export default async function CarvingDashboardPage({
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ margin: 0, fontSize: 22 }}>Carving Jobs</h1>
-            <span className="role-pill" style={{ background: "var(--gold)", color: "#fff", fontWeight: 700, fontSize: 10 }}>
-              DEV-ONLY
-            </span>
-          </div>
+          {/* The DEV-ONLY pill and the "Phase 2 module" line are gone
+              (Daksh, Sep 2026): this page has been the floor's daily
+              carving screen for months, and every role that reaches it
+              was being told it is a developer preview. */}
+          <h1 style={{ margin: 0, fontSize: 22 }}>Carving Jobs</h1>
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-            Phase 2 module · assign cut slabs to carving vendors, track progress, approve and dispatch
+            Assign cut slabs to carving vendors, track progress, approve and dispatch
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1112,7 +1111,7 @@ export default async function CarvingDashboardPage({
           templeFilter={templeFilter}
           stoneTypes={stoneTypes ?? []}
           // Mig 132 — who can long-press a slab to request a cancel.
-          canRequestCancel={["developer", "owner", "carving_head", "senior_incharge"].includes(profile.role)}
+          canRequestCancel={["developer", "owner", "carving_head", "senior_incharge", "team_head"].includes(profile.role)}
           // Mig 125 follow-on — who can park selected slabs to storage.
           canManageStorage={canManageStorage}
         />

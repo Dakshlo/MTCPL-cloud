@@ -162,6 +162,14 @@ export function canSeeAwaitingReview(
   // Daksh (June 2026) — Tender Manager can do Carving Done Approval
   // (approve / rework / reject), same as senior_incharge.
   if (profile.role === "tender_manager") return true;
+  // Daksh (Sep 2026) — Paresh Kumar signs carving off on the floor, so
+  // team_head joins the sign-off tier: the Carving Done Approval tab
+  // plus every action on it (approve / rework / reject / still-pending /
+  // send back / ready-to-dispatch / location / involve owner / cancel).
+  // Note this does NOT include the Outsource and Direct Dispatch lanes —
+  // those are gated separately by canUseOutsource on /carving, so a
+  // team_head still sees the CNC queue only.
+  if (profile.role === "team_head") return true;
   return false;
 }
 
