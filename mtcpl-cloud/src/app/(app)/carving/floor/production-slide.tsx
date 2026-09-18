@@ -27,17 +27,34 @@ const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 
 /* Palette. Last month is a calm grey-brown so it reads as history;
    this month is green when ahead of that line and amber when behind,
-   which is the whole message of the slide. */
+   which is the whole message of the slide.
+
+   The two *Ramp triples drive the line's vertical gradient: low at the
+   chart floor, high at its ceiling. Kept as three stops rather than two
+   so the mid-tone — the colour the legend and the headline figures use
+   — actually appears on the line instead of only at its ends. */
 function palette(dark: boolean) {
   return {
     ink: dark ? "#fff" : "#1a1a1a",
-    muted: dark ? "rgba(255,255,255,0.55)" : "#8a7a55",
-    grid: dark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.10)",
-    prev: dark ? "#a8a29e" : "#78716c",
+    muted: dark ? "rgba(255,255,255,0.52)" : "#8a7a55",
+    axis: dark ? "rgba(255,255,255,0.45)" : "#a2957a",
+    rule: dark ? "rgba(255,255,255,0.10)" : "#e7e1d6",
+    grid: dark ? "rgba(255,255,255,0.08)" : "rgba(45,36,16,0.07)",
+    prev: dark ? "#a8a29e" : "#9a8f7d",
     ahead: dark ? "#4ade80" : "#15803d",
     behind: dark ? "#fbbf24" : "#b45309",
-    panel: dark ? "rgba(255,255,255,0.05)" : "#fff",
-    panelBorder: dark ? "rgba(255,255,255,0.14)" : "#e4ddd2",
+    aheadRamp: dark
+      ? { low: "#166534", mid: "#22c55e", high: "#86efac" }
+      : { low: "#14532d", mid: "#15803d", high: "#4ade80" },
+    behindRamp: dark
+      ? { low: "#7c2d12", mid: "#d97706", high: "#fcd34d" }
+      : { low: "#7c2d12", mid: "#b45309", high: "#f59e0b" },
+    panel: dark ? "rgba(255,255,255,0.04)" : "#fff",
+    /* Opaque twin of `panel` — an SVG marker cannot punch through a
+       translucent fill, so the ring around the line's head needs a
+       solid colour to sit on. */
+    panelSolid: dark ? "#141210" : "#fff",
+    panelBorder: dark ? "rgba(255,255,255,0.11)" : "#e7e1d6",
   };
 }
 
@@ -51,11 +68,20 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
   const C = palette(dark);
   const t = data.totals;
   const ahead = t.vsLastPct == null ? true : t.vsLastPct >= 0;
-  const nowColor = ahead ? C.ahead : C.behind;
+  const ramp = ahead ? C.aheadRamp : C.behindRamp;
+  const nowColor = ramp.mid;
 
-  // Chart geometry. viewBox units, scaled by the parent to fill the wall.
-  const W = 1000, H = 380;
-  const padL = 96, padR = 130, padT = 24, padB = 46;
+  /* Chart geometry.
+     preserveAspectRatio is "meet", NOT "none". With "none" the viewBox
+     stretched to the panel's width and every stroke and axis number
+     came out horizontally squashed — that distortion was most of why
+     the slide looked crude. The viewBox aspect below is matched to the
+     panel it sits in — measured 2.53:1 on a 1920x1080 wall — so "meet"
+     letterboxes by only a few pixels on the screen this actually runs
+     on. Change the header or tile heights above and this wants
+     re-measuring, or the chart starts floating in its panel. */
+  const W = 1000, H = 395;
+  const padL = 92, padR = 118, padT = 26, padB = 48;
   const maxDay = Math.max(data.daysInMonth, data.daysInPrevMonth);
   const peak = Math.max(
     1,
@@ -64,28 +90,36 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
   );
   const xOf = (d: number) => padL + ((d - 1) / Math.max(1, maxDay - 1)) * (W - padL - padR);
   const yOf = (v: number) => H - padB - (v / peak) * (H - padT - padB);
+  const baseY = H - padB;
 
   const prevPath = linePath(data.prevMonth, xOf, yOf);
   const thisPath = linePath(data.thisMonth, xOf, yOf);
+  // Same line closed down to the baseline — the soft wash under it is
+  // what stops a bare stroke reading as a toy.
+  const thisArea = thisPath
+    ? `${thisPath} L ${xOf(data.thisMonth[data.thisMonth.length - 1].day).toFixed(1)} ${baseY} L ${xOf(1).toFixed(1)} ${baseY} Z`
+    : "";
   const last = data.thisMonth.length ? data.thisMonth[data.thisMonth.length - 1] : null;
-
-  // Four horizontal guides — enough to judge a level, few enough not to
-  // clutter a screen nobody can zoom into.
+  // Top of the running line — the ramp's bright end. Cumulative, so the
+  // last point is always the highest.
+  const headY = last ? yOf(last.cum) : padT;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * peak);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18, height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap", flex: "0 0 auto" }}>
-        <span style={{ fontSize: 48, fontWeight: 800, letterSpacing: "-0.6px", color: C.ink }}>
-          CARVED THIS MONTH
-        </span>
-        <span style={{ fontSize: 20, color: C.muted, fontWeight: 600 }}>
-          {data.monthLabel} · day {data.today} of {data.daysInMonth} · approved work
-        </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%" }}>
+      <div style={{ flex: "0 0 auto" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 42, fontWeight: 700, letterSpacing: "-0.8px", color: C.ink }}>
+            Carved this month
+          </span>
+          <span style={{ fontSize: 18, color: C.muted, fontWeight: 500, letterSpacing: "0.01em" }}>
+            {data.monthLabel} · day {data.today} of {data.daysInMonth} · approved work
+          </span>
+        </div>
+        <div style={{ height: 1, background: C.rule, marginTop: 12 }} />
       </div>
 
-      {/* Headline row — the four numbers the floor actually argues about. */}
-      <div style={{ display: "flex", gap: 14, flex: "0 0 auto" }}>
+      <div style={{ display: "flex", gap: 12, flex: "0 0 auto" }}>
         <NumTile label={`${data.monthLabel} so far`} value={fmt0(t.thisMonth)} unit="CFT" fg={nowColor} dark={dark} big />
         <NumTile
           label={`${data.prevMonthLabel} by day ${data.today}`}
@@ -105,7 +139,7 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           label={`On pace for · ${data.prevMonthLabel.split(" ")[0]} finished ${fmt0(t.prevMonthFull)}`}
           value={fmt0(t.projected)}
           unit="CFT"
-          fg={C.muted}
+          fg={C.ink}
           dark={dark}
         />
       </div>
@@ -115,18 +149,51 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           flex: 1,
           minHeight: 0,
           background: C.panel,
-          border: `2px solid ${C.panelBorder}`,
-          borderRadius: 16,
-          padding: "14px 18px 6px",
+          border: `1px solid ${C.panelBorder}`,
+          borderRadius: 14,
+          boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
+          padding: "10px 14px 4px",
           display: "flex",
           flexDirection: "column",
         }}
       >
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", flex: 1, minHeight: 0 }}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", flex: 1, minHeight: 0 }}>
+          <defs>
+            {/* A vertical ramp in user space: dark at the baseline,
+                bright at the head of the line. Because it is anchored to
+                fixed Y coordinates rather than to the path, the colour
+                at a given height is the same wherever the line happens
+                to be — it does not chase the wiggle. That is the
+                "constant" part.
+
+                It spans the LINE's own height, not the chart's. Anchored
+                to the chart the bright stop sat at a level the line
+                never reaches (it is at 4,992 of a 8,312 scale), so two
+                thirds of the ramp was wasted above it and the stroke
+                read as flat dark green. */}
+            <linearGradient id="mtcpl-line-ramp" gradientUnits="userSpaceOnUse" x1={0} y1={baseY} x2={0} y2={headY}>
+              <stop offset="0%" stopColor={ramp.low} />
+              <stop offset="55%" stopColor={ramp.mid} />
+              <stop offset="100%" stopColor={ramp.high} />
+            </linearGradient>
+            <linearGradient id="mtcpl-area-ramp" gradientUnits="userSpaceOnUse" x1={0} y1={headY} x2={0} y2={baseY}>
+              <stop offset="0%" stopColor={ramp.mid} stopOpacity={dark ? 0.34 : 0.26} />
+              <stop offset="100%" stopColor={ramp.mid} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+
           {ticks.map((v, i) => (
             <g key={i}>
-              <line x1={padL} y1={yOf(v)} x2={W - padR} y2={yOf(v)} stroke={C.grid} strokeWidth={1} />
-              <text x={padL - 12} y={yOf(v) + 6} textAnchor="end" fontSize={17} fontWeight={700} fill={C.muted}>
+              <line
+                x1={padL}
+                y1={yOf(v)}
+                x2={W - padR}
+                y2={yOf(v)}
+                stroke={C.grid}
+                strokeWidth={1}
+                shapeRendering="crispEdges"
+              />
+              <text x={padL - 14} y={yOf(v) + 5} textAnchor="end" fontSize={15} fontWeight={500} fill={C.axis}>
                 {fmt0(v)}
               </text>
             </g>
@@ -138,47 +205,58 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           {Array.from({ length: maxDay }, (_, i) => i + 1)
             .filter((d) => d === 1 || d % 5 === 0 || (d === maxDay && maxDay % 5 > 1))
             .map((d) => (
-              <text key={d} x={xOf(d)} y={H - padB + 26} textAnchor="middle" fontSize={17} fontWeight={700} fill={C.muted}>
+              <text key={d} x={xOf(d)} y={H - padB + 25} textAnchor="middle" fontSize={15} fontWeight={500} fill={C.axis}>
                 {d}
               </text>
             ))}
 
-          {/* Last month — dashed, calm, the line to beat. */}
-          <path d={prevPath} fill="none" stroke={C.prev} strokeWidth={4} strokeDasharray="10 8" strokeLinecap="round" />
+          {/* Today's mark, kept faint — it locates the comparison, it is
+              not one of the two things being compared. */}
+          <line x1={xOf(data.today)} y1={padT} x2={xOf(data.today)} y2={baseY} stroke={C.axis} strokeWidth={1} strokeDasharray="2 7" opacity={0.45} />
+
+          {/* Last month: thin, dashed, receding. */}
+          <path d={prevPath} fill="none" stroke={C.prev} strokeWidth={2.5} strokeDasharray="9 7" strokeLinecap="round" opacity={0.85} />
           <text
-            x={W - padR + 10}
-            y={yOf(data.prevMonth.length ? data.prevMonth[data.prevMonth.length - 1].cum : 0) + 6}
-            fontSize={18}
-            fontWeight={800}
+            x={W - padR + 12}
+            y={yOf(data.prevMonth.length ? data.prevMonth[data.prevMonth.length - 1].cum : 0) + 5}
+            fontSize={16}
+            fontWeight={600}
             fill={C.prev}
           >
             {data.prevMonthLabel.split(" ")[0]}
           </text>
 
-          {/* Today's vertical marker — where the two months are compared. */}
-          <line
-            x1={xOf(data.today)}
-            y1={padT}
-            x2={xOf(data.today)}
-            y2={H - padB}
-            stroke={nowColor}
-            strokeWidth={2}
-            strokeDasharray="4 6"
-            opacity={0.5}
+          {/* This month: the wash, then the ramped stroke over it. */}
+          <path d={thisArea} fill="url(#mtcpl-area-ramp)" stroke="none" />
+          <path
+            d={thisPath}
+            fill="none"
+            stroke="url(#mtcpl-line-ramp)"
+            strokeWidth={4.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
-
-          {/* This month — solid, thick, coloured by whether it is winning. */}
-          <path d={thisPath} fill="none" stroke={nowColor} strokeWidth={7} strokeLinecap="round" strokeLinejoin="round" />
           {last && (
             <>
-              <circle cx={xOf(last.day)} cy={yOf(last.cum)} r={10} fill={nowColor} />
-              <text x={xOf(last.day) + 18} y={yOf(last.cum) + 7} fontSize={22} fontWeight={800} fill={nowColor}>
+              {/* A ring rather than a blob, and the figure sits ABOVE the
+                  head of the line so it can never collide with last
+                  month's dashes running underneath it. */}
+              <circle cx={xOf(last.day)} cy={yOf(last.cum)} r={9} fill={C.panelSolid} stroke={ramp.high} strokeWidth={3} />
+              <text
+                x={xOf(last.day)}
+                y={yOf(last.cum) - 20}
+                textAnchor="middle"
+                fontSize={21}
+                fontWeight={700}
+                fill={ramp.mid}
+                letterSpacing="-0.3"
+              >
                 {fmt0(last.cum)}
               </text>
             </>
           )}
         </svg>
-        <div style={{ display: "flex", gap: 26, justifyContent: "center", paddingBottom: 8, flex: "0 0 auto" }}>
+        <div style={{ display: "flex", gap: 24, justifyContent: "center", paddingBottom: 6, flex: "0 0 auto" }}>
           <Legend color={nowColor} label={`${data.monthLabel} (running)`} dark={dark} />
           <Legend color={C.prev} label={`${data.prevMonthLabel} (finished)`} dashed dark={dark} />
         </div>
@@ -292,19 +370,31 @@ function NumTile({
       style={{
         flex: 1,
         background: C.panel,
-        border: `2px solid ${C.panelBorder}`,
-        borderRadius: 14,
-        padding: "12px 18px",
+        border: `1px solid ${C.panelBorder}`,
+        borderRadius: 12,
+        boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
+        padding: "11px 16px 13px",
       }}
     >
-      <div style={{ fontSize: 18, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+      {/* Small, widely tracked caption over a large figure — the label
+          should be found when looked for, not compete with the number. */}
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.muted, letterSpacing: "0.09em", textTransform: "uppercase" }}>
         {label}
       </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-        <span style={{ fontSize: big ? 62 : 46, fontWeight: 900, color: fg, fontFamily: "ui-monospace, monospace", lineHeight: 1.05 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginTop: 6 }}>
+        <span
+          style={{
+            fontSize: big ? 56 : 42,
+            fontWeight: 700,
+            color: fg,
+            fontFamily: "ui-monospace, monospace",
+            lineHeight: 1,
+            letterSpacing: "-1px",
+          }}
+        >
           {value}
         </span>
-        {unit && <span style={{ fontSize: 22, fontWeight: 800, color: C.muted }}>{unit}</span>}
+        {unit && <span style={{ fontSize: 18, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>{unit}</span>}
       </div>
     </div>
   );
@@ -313,12 +403,12 @@ function NumTile({
 function Legend({ color, label, dashed = false, dark }: { color: string; label: string; dashed?: boolean; dark: boolean }) {
   const C = palette(dark);
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 19, fontWeight: 700, color: C.muted }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 16, fontWeight: 600, color: C.muted, letterSpacing: "0.02em" }}>
       <span
         style={{
-          width: 44,
+          width: 34,
           height: 0,
-          borderTop: `${dashed ? 4 : 6}px ${dashed ? "dashed" : "solid"} ${color}`,
+          borderTop: `${dashed ? 2 : 3}px ${dashed ? "dashed" : "solid"} ${color}`,
           display: "inline-block",
         }}
       />
