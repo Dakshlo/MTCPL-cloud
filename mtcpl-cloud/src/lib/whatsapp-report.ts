@@ -1450,6 +1450,18 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
       P.t(rate, M + 18, y - 74, 36, bold, ink);
       P.t("PER SFT+CFT", M + 20 + bold.widthOfTextAtSize(rate, 36) + 9, y - 74, 10.5, bold, muted);
+      /* Daily average (Daksh, Sep 2026) — the same pair the CNC costing
+         page shows. It sits in the dead space to the RIGHT of the rate
+         rather than on a row of its own: page 2 runs at 771 pt of the
+         778 available, so a new row would have pushed the last card off
+         the page silently. The rate plus its label never reaches half
+         the card's width, so there is nothing to collide with. */
+      {
+        const dd = Math.max(1, c.days);
+        P.r("DAILY AVERAGE", W - M - 16, y - 50, 8.5, bold, muted);
+        P.r(`${fmt0((c.sft + c.cft) / dd)} units/day`, W - M - 16, y - 68, 15, bold, ink);
+        P.r(`${inr(c.totalCost / dd)}/day`, W - M - 16, y - 84, 11.5, bold, muted);
+      }
       P.pg.drawLine({ start: { x: M + 18, y: y - 90 }, end: { x: W - M - 16, y: y - 90 }, thickness: 0.6, color: COL.indigo, opacity: 0.3 });
       P.t("SPENT", M + 18, y - 106, 9, bold, muted);
       P.t(inr(c.totalCost), M + 18, y - 125, 17, bold, ink);
@@ -1465,6 +1477,14 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       P.r(`${mo2(c.label)} · ${c.days} of ${c.monthLen} days`, W - M - 16, y - 27, 9, bold, muted);
       P.t(rate, M + 18, y - 74, 36, bold, ink);
       P.t("PER CFT", M + 20 + bold.widthOfTextAtSize(rate, 36) + 9, y - 74, 10.5, bold, muted);
+      // Same daily-average block as the CNC card above; cutting output
+      // is volume only, so it reads in CFT rather than combined units.
+      {
+        const dd = Math.max(1, c.days);
+        P.r("DAILY AVERAGE", W - M - 16, y - 50, 8.5, bold, muted);
+        P.r(`${fmt0(c.cft / dd)} CFT/day`, W - M - 16, y - 68, 15, bold, ink);
+        P.r(`${inr(c.totalCost / dd)}/day`, W - M - 16, y - 84, 11.5, bold, muted);
+      }
       P.pg.drawLine({ start: { x: M + 18, y: y - 90 }, end: { x: W - M - 16, y: y - 90 }, thickness: 0.6, color: COL.teal, opacity: 0.3 });
       P.t("SPENT", M + 18, y - 106, 9, bold, muted);
       P.t(inr(c.totalCost), M + 18, y - 125, 17, bold, ink);
