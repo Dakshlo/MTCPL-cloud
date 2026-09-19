@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FloorProduction } from "@/lib/floor-production-data";
-import { ProductionTvSlide, VendorsTvSlide } from "./production-slide";
+import { ProductionTvSlide } from "./production-slide";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -202,8 +202,7 @@ function isProgPending(m: FloorMachine): boolean {
  *  fit-to-screen measurement working off a single list. */
 type TvSlide =
   | { kind: "vendor"; vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }
-  | { kind: "production"; production: FloorProduction }
-  | { kind: "vendors"; production: FloorProduction };
+  | { kind: "production"; production: FloorProduction };
 
 /** Stable per-slide key for TvFit's re-measure. */
 function tvFitDep(s: TvSlide, total: number): string {
@@ -218,7 +217,6 @@ function slideKey(s: TvSlide, i: number): string {
 }
 function slideTitle(s: TvSlide): string {
   if (s.kind === "production") return "Carved this month";
-  if (s.kind === "vendors") return "Vendor scoreboard";
   return s.pageCount > 1 ? `${s.vendor.name} (${s.page + 1}/${s.pageCount})` : s.vendor.name;
 }
 
@@ -312,14 +310,16 @@ export function FloorViewClient({
         out.push({ kind: "vendor", vendor: v, machines: flat.slice(p * per, (p + 1) * per), page: p, pageCount });
       }
     }
-    // The two number slides land at the END of the loop, so the wall
-    // shows every operator's live board first and then answers "how is
-    // the month going" before starting over. Omitted entirely when the
-    // data couldn't be built, rather than rotating onto a blank screen.
-    if (production) {
-      out.push({ kind: "production", production });
-      out.push({ kind: "vendors", production });
-    }
+    // The number slide lands at the END of the loop, so the wall shows
+    // every operator's live board first and then answers "how is the
+    // month going" before starting over. Omitted entirely when the data
+    // couldn't be built, rather than rotating onto a blank screen.
+    //
+    // There was a Vendor Scoreboard here too. Daksh dropped it after a
+    // week on the wall — "keep carving this month, that one's good" —
+    // so the per-vendor comparison is gone rather than left rotating
+    // past people who had stopped looking at it.
+    if (production) out.push({ kind: "production", production });
     return out;
   }, [vendors, production]);
 
@@ -448,7 +448,7 @@ export function FloorViewClient({
         <TvFit dep={tvFitDep(s, slides.length)}>
           {s.kind === "vendor" ? (
             <VendorTvSlide vendor={s.vendor} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
-          ) : s.kind === "production" ? (
+          ) : (
             // Keyed on the slide index so the chart REMOUNTS every time
             // the wall comes round to it. Without the key, React reuses
             // the element whenever the previous slide was the same
@@ -456,8 +456,6 @@ export function FloorViewClient({
             // rotation), the SVG animations never restart, and the
             // draw-in Daksh asked for only ever plays on first load.
             <ProductionTvSlide key={`prod-${tvIndex}`} data={s.production} dark={isDark} />
-          ) : (
-            <VendorsTvSlide data={s.production} dark={isDark} />
           )}
         </TvFit>
       </div>

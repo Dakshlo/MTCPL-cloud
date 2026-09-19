@@ -1,27 +1,28 @@
 "use client";
 
 /**
- * The two number slides on the carving wall (Daksh, Sep 2026).
+ * The number slide on the carving wall (Daksh, Sep 2026).
  *
- *   ProductionTvSlide — this month's carved output climbing toward last
- *     month's finished curve. Two lines on one chart, cumulative by day
- *     of month, so "ahead or behind" is read off which line is higher
- *     at today's mark rather than by comparing two months of different
- *     lengths.
+ * This month's carved output climbing toward last month's finished
+ * curve. Two lines on one chart, cumulative by day of month, so "ahead
+ * or behind" is read off which line is higher at today's mark rather
+ * than by comparing two months of different lengths.
  *
- *   VendorsTvSlide — all CNC vendors on one page: what each has carved
- *     this month against their own same-day figure last month, with a
- *     bar so the split of the month's work is obvious at a glance.
+ * A Vendor Scoreboard slide lived here too — per-vendor bars against
+ * each vendor's own same-day figure last month. Daksh dropped it after
+ * a week on the wall: "keep carving this month, that one's good."
+ * Deleted rather than left unrendered, along with the per-vendor
+ * aggregation in floor-production-data that fed it.
  *
- * Both are drawn as inline SVG with no chart library: the wall runs an
- * always-on browser and every kilobyte of JS is a kilobyte that can
- * fail to load at 6 am with nobody there to reload it.
+ * Drawn as inline SVG with no chart library: the wall runs an always-on
+ * browser and every kilobyte of JS is a kilobyte that can fail to load
+ * at 6 am with nobody there to reload it.
  *
  * Sized for a TV seen from across a workshop — the smallest type here
- * is 18px before TvFit scales the slide up to fill the screen.
+ * is 14px before TvFit scales the slide up to fill the screen.
  */
 
-import type { FloorProduction, FloorVendorNumbers, ProductionPoint } from "@/lib/floor-production-data";
+import type { FloorProduction, ProductionPoint } from "@/lib/floor-production-data";
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 
@@ -360,100 +361,6 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           <Legend color={nowColor} label={`${data.monthLabel} (running)`} dark={dark} />
           <Legend color={C.prev} label={`${data.prevMonthLabel} (finished)`} dashed dark={dark} />
         </div>
-      </div>
-    </div>
-  );
-}
-
-export function VendorsTvSlide({ data, dark }: { data: FloorProduction; dark: boolean }) {
-  const C = palette(dark);
-  // Bars are scaled against the busiest vendor so the split of the
-  // month's work is obvious even when the totals are small.
-  const peak = Math.max(1, ...data.vendors.map((v) => Math.max(v.thisMonth, v.lastMonthToDate)));
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18, height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap", flex: "0 0 auto" }}>
-        <span style={{ fontSize: 48, fontWeight: 800, letterSpacing: "-0.6px", color: C.ink }}>
-          VENDOR SCOREBOARD
-        </span>
-        <span style={{ fontSize: 20, color: C.muted, fontWeight: 600 }}>
-          {data.monthLabel} to day {data.today} · vs the same days of {data.prevMonthLabel}
-        </span>
-      </div>
-
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 14 }}>
-        {data.vendors.map((v) => (
-          <VendorRow key={v.vendorId} v={v} peak={peak} C={C} dark={dark} />
-        ))}
-        {data.vendors.length === 0 && (
-          <div style={{ color: C.muted, fontSize: 24, fontWeight: 700 }}>No active CNC vendors.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function VendorRow({
-  v, peak, C, dark,
-}: {
-  v: FloorVendorNumbers;
-  peak: number;
-  C: ReturnType<typeof palette>;
-  dark: boolean;
-}) {
-  const pct = v.lastMonthToDate > 0 ? ((v.thisMonth - v.lastMonthToDate) / v.lastMonthToDate) * 100 : null;
-  const ahead = pct == null ? true : pct >= 0;
-  const fg = ahead ? C.ahead : C.behind;
-  const w = (x: number) => `${Math.max(0, Math.min(100, (x / peak) * 100))}%`;
-
-  return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        background: C.panel,
-        border: `2px solid ${C.panelBorder}`,
-        borderRadius: 16,
-        padding: "14px 20px",
-        display: "flex",
-        alignItems: "center",
-        gap: 24,
-      }}
-    >
-      <div style={{ width: 260, flex: "0 0 auto" }}>
-        <div style={{ fontSize: 40, fontWeight: 800, color: C.ink, letterSpacing: "-0.4px" }}>{v.name}</div>
-        <div style={{ fontSize: 19, color: C.muted, fontWeight: 600 }}>
-          {v.machines} CNC · {v.carving} running · {v.idle} free
-        </div>
-      </div>
-
-      {/* Two stacked bars: this month solid over last month's ghost, so
-          the comparison is a length not a subtraction. */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, height: 30, background: dark ? "rgba(255,255,255,0.07)" : "#f2efe8", borderRadius: 6, overflow: "hidden" }}>
-            <div style={{ width: w(v.thisMonth), height: "100%", background: fg, borderRadius: 6 }} />
-          </div>
-          <div style={{ width: 190, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 30, fontWeight: 800, color: fg }}>
-            {fmt0(v.thisMonth)} <span style={{ fontSize: 18 }}>CFT</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, height: 16, background: dark ? "rgba(255,255,255,0.05)" : "#f7f5f0", borderRadius: 5, overflow: "hidden" }}>
-            <div style={{ width: w(v.lastMonthToDate), height: "100%", background: C.prev, opacity: 0.55, borderRadius: 5 }} />
-          </div>
-          <div style={{ width: 190, textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 20, fontWeight: 700, color: C.muted }}>
-            {fmt0(v.lastMonthToDate)} last
-          </div>
-        </div>
-      </div>
-
-      <div style={{ width: 150, flex: "0 0 auto", textAlign: "right" }}>
-        <div style={{ fontSize: 38, fontWeight: 900, color: fg, fontFamily: "ui-monospace, monospace", lineHeight: 1.1 }}>
-          {pct == null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%`}
-        </div>
-        <div style={{ fontSize: 17, color: C.muted, fontWeight: 700 }}>{v.slabs} slabs</div>
       </div>
     </div>
   );
