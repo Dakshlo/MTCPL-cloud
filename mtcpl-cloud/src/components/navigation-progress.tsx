@@ -45,9 +45,23 @@ export function NavigationProgress() {
       // flagged the cursor change felt late.
       if (showTimer) clearTimeout(showTimer);
       showTimer = setTimeout(() => setActive(true), 60);
-      // Safety net: never leave the indicator hung past 12s.
+      // Safety net so a server action that never changes route can't
+      // leave the bar spinning for ever.
+      //
+      // This was 12s, and 12s was the whole "Dispatch doesn't open"
+      // complaint (Daksh, Sep 2026). Dispatch ships ~1.2 MB and takes
+      // longer than that on a plant tablet, so the bar and the wait
+      // cursor switched themselves off while the navigation was still
+      // in flight — the screen went back to looking completely idle on
+      // the OLD page. "It loads and nothing happens." Every other page
+      // finished inside 12s, which is why only this one looked broken.
+      //
+      // 90s is past any real navigation but still bounded. The proper
+      // answer is the loading.tsx below it, which paints a skeleton the
+      // instant you click; this timer is now only the backstop it was
+      // always meant to be.
       if (safetyTimer) clearTimeout(safetyTimer);
-      safetyTimer = setTimeout(stop, 12_000);
+      safetyTimer = setTimeout(stop, 90_000);
     }
 
     function stop() {

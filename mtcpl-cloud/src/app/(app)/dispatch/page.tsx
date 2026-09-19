@@ -208,11 +208,19 @@ export default async function DispatchPage({
   // Pull dims for all slabs that appear in any dispatch (open or closed)
   // so we can render CFT totals.
   const dispatchedSlabsMap = new Map<string, { l: number; w: number; t: number }>();
-  if (dispatchedSlabIds.size > 0) {
-    const { data: dispatchedSlabs } = await admin
+  // Chunked, like the provisional lookup further down. This was ONE
+  // .in() over every slab ever dispatched — 3,986 ids and growing by a
+  // truckload a day, which PostgREST takes as a ~52 KB query STRING.
+  // It survives today; it is one busy month from being rejected
+  // outright for an over-long URL, and the failure would be silent:
+  // supabase-js returns the error in `error`, this code only destructures
+  // `data`, so every CFT total on the page would quietly read 0.
+  for (const idChunk of chunkIds([...dispatchedSlabIds])) {
+    const { data: dispatchedSlabs, error } = await admin
       .from("slab_requirements")
       .select("id, length_ft, width_ft, thickness_ft")
-      .in("id", [...dispatchedSlabIds]);
+      .in("id", idChunk);
+    if (error) console.error("[dispatch] slab dims lookup failed", error);
     for (const s of dispatchedSlabs ?? []) {
       dispatchedSlabsMap.set(s.id, {
         l: Number(s.length_ft),
