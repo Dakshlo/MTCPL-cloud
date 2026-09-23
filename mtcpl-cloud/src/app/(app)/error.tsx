@@ -56,20 +56,56 @@ export default function AppErrorBoundary({
           lineHeight: 1.6,
         }}
       >
-        The error is logged. The rest of the app — sidebar, other departments
-        and other pages in this one — is still working. You can try this
-        page again, or jump somewhere else.
+        The rest of the app — sidebar, other departments and other pages in
+        this one — is still working. Try this page again, or jump somewhere
+        else.
       </p>
-      {error.digest && (
-        <p
+      {/* Sep 2026 — this used to say "The error is logged." It was not
+          true: Sentry is wired into the codebase but was never given a
+          DSN, so nothing was recorded anywhere, and a floor complaint of
+          "an error shows up sometimes" could not be traced to a single
+          real error. Until error reporting is switched on (see
+          docs/SENTRY_SETUP.md), the reference below is the ONLY handle on
+          what went wrong — Next.js hides the message from the browser in
+          production and gives out just this digest, which matches a full
+          stack trace in the Vercel runtime log. So ask for it plainly
+          instead of implying someone is already looking. */}
+      {error.digest ? (
+        <div
           style={{
-            margin: "12px 0 0",
-            fontSize: 11,
-            fontFamily: "ui-monospace, monospace",
-            color: "var(--muted)",
+            margin: "16px 0 0",
+            padding: "12px 14px",
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            textAlign: "left",
           }}
         >
-          Error reference: <strong>{error.digest}</strong>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+            📷 Please screenshot this and send it to the office
+          </div>
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 15,
+              fontFamily: "ui-monospace, monospace",
+              fontWeight: 700,
+              color: "var(--text)",
+              wordBreak: "break-all",
+            }}
+          >
+            {error.digest}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, color: "var(--muted)" }}>
+            {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+            {" · "}
+            {typeof window !== "undefined" ? window.location.pathname : ""}
+          </div>
+        </div>
+      ) : (
+        <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--muted)" }}>
+          No error reference was produced — please note what you were doing
+          and tell the office.
         </p>
       )}
       <div style={{ marginTop: 20, display: "flex", gap: 10, flexWrap: "wrap" }}>
