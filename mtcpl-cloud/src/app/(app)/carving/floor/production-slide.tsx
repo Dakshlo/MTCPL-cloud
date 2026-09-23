@@ -22,9 +22,10 @@
  * is 14px before TvFit scales the slide up to fill the screen.
  */
 
-import type { FloorProduction, ProductionPoint } from "@/lib/floor-production-data";
+import type { FloorProduction, FloorStock, MonthSeries, ProductionPoint, StockStone } from "@/lib/floor-production-data";
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
+const fmt1 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** How long the line takes to draw itself in on arrival. Comfortably
  *  inside the shortest sensible rotation so the slide is never still
@@ -64,6 +65,11 @@ function palette(dark: boolean) {
        solid colour to sit on. */
     panelSolid: dark ? "#141210" : "#fff",
     panelBorder: dark ? "rgba(255,255,255,0.11)" : "#e7e1d6",
+    /* Stock slide. Sandstone takes the warm stone tone the app already
+       uses for it; marble a cool one, so the two columns are told apart
+       at a glance from across the floor. */
+    sand: dark ? "#d8a75b" : "#b45309",
+    marble: dark ? "#67c9e8" : "#0369a1",
   };
 }
 
@@ -73,9 +79,22 @@ function linePath(pts: ProductionPoint[], xOf: (d: number) => number, yOf: (v: n
   return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${xOf(p.day).toFixed(1)} ${yOf(p.cum).toFixed(1)}`).join(" ");
 }
 
-export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark: boolean }) {
+/** One month-vs-last-month chart. Carving and cutting both render
+ *  through this — Daksh asked for cutting as "the same graph thing", and
+ *  two copies of a chart is two places for the comparison to drift. */
+export function ProductionTvSlide({
+  data, series, title, subtitle, dark,
+}: {
+  data: FloorProduction;
+  series: MonthSeries;
+  title: string;
+  /** What the metric counts. Carving signs work off; cutting turns
+   *  blocks into slabs. Saying "approved work" on both was wrong. */
+  subtitle: string;
+  dark: boolean;
+}) {
   const C = palette(dark);
-  const t = data.totals;
+  const t = series.totals;
   const ahead = t.vsLastPct == null ? true : t.vsLastPct >= 0;
   const ramp = ahead ? C.aheadRamp : C.behindRamp;
   const nowColor = ramp.mid;
@@ -95,20 +114,20 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
   const peak = Math.max(
     1,
     t.prevMonthFull,
-    data.thisMonth.length ? data.thisMonth[data.thisMonth.length - 1].cum : 0,
+    series.thisMonth.length ? series.thisMonth[series.thisMonth.length - 1].cum : 0,
   );
   const xOf = (d: number) => padL + ((d - 1) / Math.max(1, maxDay - 1)) * (W - padL - padR);
   const yOf = (v: number) => H - padB - (v / peak) * (H - padT - padB);
   const baseY = H - padB;
 
-  const prevPath = linePath(data.prevMonth, xOf, yOf);
-  const thisPath = linePath(data.thisMonth, xOf, yOf);
+  const prevPath = linePath(series.prevMonth, xOf, yOf);
+  const thisPath = linePath(series.thisMonth, xOf, yOf);
   // Same line closed down to the baseline — the soft wash under it is
   // what stops a bare stroke reading as a toy.
   const thisArea = thisPath
-    ? `${thisPath} L ${xOf(data.thisMonth[data.thisMonth.length - 1].day).toFixed(1)} ${baseY} L ${xOf(1).toFixed(1)} ${baseY} Z`
+    ? `${thisPath} L ${xOf(series.thisMonth[series.thisMonth.length - 1].day).toFixed(1)} ${baseY} L ${xOf(1).toFixed(1)} ${baseY} Z`
     : "";
-  const last = data.thisMonth.length ? data.thisMonth[data.thisMonth.length - 1] : null;
+  const last = series.thisMonth.length ? series.thisMonth[series.thisMonth.length - 1] : null;
   // Top of the running line — the ramp's bright end. Cumulative, so the
   // last point is always the highest.
   const headY = last ? yOf(last.cum) : padT;
@@ -119,10 +138,10 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
       <div style={{ flex: "0 0 auto" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 42, fontWeight: 700, letterSpacing: "-0.8px", color: C.ink }}>
-            Carved this month
+            {title}
           </span>
           <span style={{ fontSize: 18, color: C.muted, fontWeight: 500, letterSpacing: "0.01em" }}>
-            {data.monthLabel} · day {data.today} of {data.daysInMonth} · approved work
+            {data.monthLabel} · day {data.today} of {data.daysInMonth} · {subtitle}
           </span>
         </div>
         <div style={{ height: 1, background: C.rule, marginTop: 12 }} />
@@ -304,7 +323,7 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
           <path d={prevPath} fill="none" stroke={C.prev} strokeWidth={2.5} strokeDasharray="9 7" strokeLinecap="round" opacity={0.85} />
           <text
             x={W - padR + 12}
-            y={yOf(data.prevMonth.length ? data.prevMonth[data.prevMonth.length - 1].cum : 0) + 5}
+            y={yOf(series.prevMonth.length ? series.prevMonth[series.prevMonth.length - 1].cum : 0) + 5}
             fontSize={16}
             fontWeight={600}
             fill={C.prev}
@@ -364,6 +383,216 @@ export function ProductionTvSlide({ data, dark }: { data: FloorProduction; dark:
       </div>
     </div>
   );
+}
+
+/** Raw block stock, split the way the yard is actually counted:
+ *  sandstone measured in CFT, marble weighed in tonnes, each broken
+ *  down by the individual stone underneath. Plus what was bought this
+ *  month, so the standing pile is read against its top-up rather than
+ *  in isolation.
+ *
+ *  The two categories deliberately do NOT share a number. Adding a
+ *  tonne of marble to a cubic foot of sandstone is the fudge the daily
+ *  report had to make and then footnote; here there is room to just
+ *  show both properly. The "~ CFT" under marble is the company's own
+ *  8 CFT/tonne and is marked with a tilde because it is a conversion,
+ *  not a measurement. */
+export function StockTvSlide({ data, dark }: { data: FloorProduction; dark: boolean }) {
+  const C = palette(dark);
+  const st = data.stock;
+  if (!st) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+        <span style={{ fontSize: 30, fontWeight: 700, color: C.muted }}>Stock unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%" }}>
+      <div style={{ flex: "0 0 auto" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 42, fontWeight: 700, letterSpacing: "-0.8px", color: C.ink }}>
+            Block stock
+          </span>
+          <span style={{ fontSize: 18, color: C.muted, fontWeight: 500 }}>
+            uncut blocks in the yard · {fmt0(st.sandstone.blocks + st.marble.blocks)} blocks
+          </span>
+        </div>
+        <div style={{ height: 1, background: C.rule, marginTop: 12 }} />
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 14 }}>
+        <StockColumn
+          title="SANDSTONE"
+          headline={fmt0(st.sandstone.cft)}
+          unit="CFT"
+          sub={`${fmt0(st.sandstone.blocks)} blocks`}
+          accent={C.sand}
+          rows={st.sandstone.byStone}
+          valueOf={(g) => `${fmt0(g.cft)} CFT`}
+          shareOf={(g) => (st.sandstone.cft > 0 ? g.cft / st.sandstone.cft : 0)}
+          bought={
+            st.purchased.sandstone.blocks > 0
+              ? `+ ${fmt0(st.purchased.sandstone.cft)} CFT · ${st.purchased.sandstone.blocks} blocks`
+              : "nothing bought yet"
+          }
+          boughtLabel={`BOUGHT IN ${data.monthLabel.split(" ")[0].toUpperCase()}`}
+          dark={dark}
+        />
+        <StockColumn
+          title="MARBLE"
+          headline={fmt1(st.marble.tonnes)}
+          unit="T"
+          sub={`${fmt0(st.marble.blocks)} blocks · ~${fmt0(st.marble.cftEquiv)} CFT`}
+          accent={C.marble}
+          rows={st.marble.byStone}
+          valueOf={(g) => `${fmt1(g.tonnes)} T`}
+          shareOf={(g) => (st.marble.tonnes > 0 ? g.tonnes / st.marble.tonnes : 0)}
+          bought={
+            st.purchased.marble.blocks > 0
+              ? `+ ${fmt1(st.purchased.marble.tonnes)} T · ${st.purchased.marble.blocks} blocks`
+              : "nothing bought yet"
+          }
+          boughtLabel={`BOUGHT IN ${data.monthLabel.split(" ")[0].toUpperCase()}`}
+          dark={dark}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StockColumn({
+  title, headline, unit, sub, accent, rows, valueOf, shareOf, bought, boughtLabel, dark,
+}: {
+  title: string;
+  headline: string;
+  unit: string;
+  sub: string;
+  accent: string;
+  rows: StockStone[];
+  valueOf: (g: StockStone) => string;
+  shareOf: (g: StockStone) => number;
+  bought: string;
+  boughtLabel: string;
+  dark: boolean;
+}) {
+  const C = palette(dark);
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        background: C.panel,
+        border: `1px solid ${C.panelBorder}`,
+        borderRadius: 14,
+        boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
+        padding: "16px 20px 14px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        // A coloured edge rather than a coloured panel: the stone names
+        // below need to stay the loudest thing in the column.
+        borderLeft: `5px solid ${accent}`,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.muted, letterSpacing: "0.12em" }}>{title}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span
+          style={{
+            fontSize: 58,
+            fontWeight: 700,
+            color: C.ink,
+            fontFamily: "ui-monospace, monospace",
+            lineHeight: 1,
+            letterSpacing: "-1.5px",
+          }}
+        >
+          {headline}
+        </span>
+        <span style={{ fontSize: 22, fontWeight: 600, color: C.muted }}>{unit}</span>
+      </div>
+      <div style={{ fontSize: 17, color: C.muted, fontWeight: 600, marginTop: -4 }}>{sub}</div>
+
+      <div style={{ height: 1, background: C.rule }} />
+
+      {/* Per-stone rows. The bar is each stone's share of its OWN
+          category, so the split reads without needing the numbers. */}
+      {/* Spread down the panel, not stacked at the top. There are only a
+          handful of stones in stock, so top-aligning left a dead half-
+          panel; centring fixed that but then a 2-stone column and a
+          3-stone one sat at different heights and read as a mistake.
+          Even distribution fills both and looks deliberate either way. */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: 14 }}>
+        {rows.map((g) => (
+          <div key={g.stone} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+              <span style={{ fontSize: 22, fontWeight: 700, color: C.ink, letterSpacing: "-0.2px" }}>
+                {prettyStone(g.stone)}
+              </span>
+              <span
+                style={{
+                  fontSize: 21,
+                  fontWeight: 700,
+                  color: C.ink,
+                  fontFamily: "ui-monospace, monospace",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {valueOf(g)}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  flex: 1,
+                  height: 10,
+                  borderRadius: 5,
+                  background: dark ? "rgba(255,255,255,0.07)" : "#f2efe8",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(1, Math.min(100, shareOf(g) * 100))}%`,
+                    height: "100%",
+                    background: accent,
+                    borderRadius: 5,
+                  }}
+                />
+              </div>
+              <span style={{ fontSize: 15, color: C.muted, fontWeight: 600, whiteSpace: "nowrap", width: 78, textAlign: "right" }}>
+                {g.blocks} blocks
+              </span>
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <span style={{ fontSize: 19, color: C.muted, fontWeight: 600 }}>No blocks in stock.</span>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: C.rule }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.muted, letterSpacing: "0.09em" }}>{boughtLabel}</span>
+        <span style={{ fontSize: 20, fontWeight: 700, color: accent, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>
+          {bought}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** "PinkStone" → "PINK STONE", "Rajnagarmarble" → "RAJNAGAR MARBLE".
+ *  Stone names are entered inconsistently — some camelCase, some run
+ *  together in lower case — and in caps they become one long word. The
+ *  second rule only splits a trailing "marble"/"stone", which is the
+ *  shape every one of them actually has. */
+function prettyStone(s: string): string {
+  return s
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([a-z])(marble|stone)$/i, "$1 $2")
+    .toUpperCase();
 }
 
 function NumTile({

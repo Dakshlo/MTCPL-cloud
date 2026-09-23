@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FloorProduction } from "@/lib/floor-production-data";
-import { ProductionTvSlide } from "./production-slide";
+import { ProductionTvSlide, StockTvSlide } from "./production-slide";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -202,7 +202,9 @@ function isProgPending(m: FloorMachine): boolean {
  *  fit-to-screen measurement working off a single list. */
 type TvSlide =
   | { kind: "vendor"; vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }
-  | { kind: "production"; production: FloorProduction };
+  | { kind: "carving"; production: FloorProduction }
+  | { kind: "cutting"; production: FloorProduction }
+  | { kind: "stock"; production: FloorProduction };
 
 /** Stable per-slide key for TvFit's re-measure. */
 function tvFitDep(s: TvSlide, total: number): string {
@@ -211,12 +213,17 @@ function tvFitDep(s: TvSlide, total: number): string {
     : `${s.kind}:${s.production.today}:${total}`;
 }
 
+/** The number slides, in rotation order. */
+const NUMBER_SLIDES = ["carving", "cutting", "stock"] as const;
+
 /** Label for the dot tooltip + the dot's React key. */
 function slideKey(s: TvSlide, i: number): string {
   return s.kind === "vendor" ? `${s.vendor.id}:${s.page}` : `${s.kind}:${i}`;
 }
 function slideTitle(s: TvSlide): string {
-  if (s.kind === "production") return "Carved this month";
+  if (s.kind === "carving") return "Carved this month";
+  if (s.kind === "cutting") return "Cut this month";
+  if (s.kind === "stock") return "Block stock";
   return s.pageCount > 1 ? `${s.vendor.name} (${s.page + 1}/${s.pageCount})` : s.vendor.name;
 }
 
@@ -310,16 +317,17 @@ export function FloorViewClient({
         out.push({ kind: "vendor", vendor: v, machines: flat.slice(p * per, (p + 1) * per), page: p, pageCount });
       }
     }
-    // The number slide lands at the END of the loop, so the wall shows
+    // The number slides land at the END of the loop, so the wall shows
     // every operator's live board first and then answers "how is the
     // month going" before starting over. Omitted entirely when the data
     // couldn't be built, rather than rotating onto a blank screen.
     //
-    // There was a Vendor Scoreboard here too. Daksh dropped it after a
-    // week on the wall — "keep carving this month, that one's good" —
-    // so the per-vendor comparison is gone rather than left rotating
-    // past people who had stopped looking at it.
-    if (production) out.push({ kind: "production", production });
+    // Carved, then cut, then what is left in the yard — output first,
+    // then the input behind it. A Vendor Scoreboard sat here too until
+    // Daksh dropped it after a week on the wall.
+    if (production) {
+      for (const kind of NUMBER_SLIDES) out.push({ kind, production });
+    }
     return out;
   }, [vendors, production]);
 
@@ -448,14 +456,23 @@ export function FloorViewClient({
         <TvFit dep={tvFitDep(s, slides.length)}>
           {s.kind === "vendor" ? (
             <VendorTvSlide vendor={s.vendor} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
+          ) : s.kind === "stock" ? (
+            <StockTvSlide data={s.production} dark={isDark} />
           ) : (
             // Keyed on the slide index so the chart REMOUNTS every time
             // the wall comes round to it. Without the key, React reuses
             // the element whenever the previous slide was the same
-            // component (clicking this dot twice, or a two-slide
-            // rotation), the SVG animations never restart, and the
-            // draw-in Daksh asked for only ever plays on first load.
-            <ProductionTvSlide key={`prod-${tvIndex}`} data={s.production} dark={isDark} />
+            // component — and carving and cutting ARE the same component,
+            // back to back, so without this the second one would inherit
+            // the first's finished animation and never draw itself in.
+            <ProductionTvSlide
+              key={`chart-${tvIndex}`}
+              data={s.production}
+              series={s.kind === "cutting" ? s.production.cutting : s.production.carving}
+              title={s.kind === "cutting" ? "Cut this month" : "Carved this month"}
+              subtitle={s.kind === "cutting" ? "blocks cut into slabs" : "approved work"}
+              dark={isDark}
+            />
           )}
         </TvFit>
       </div>
