@@ -78,9 +78,21 @@ export type StockStone = {
   tonnes: number;
 };
 
+/** One day's buying, for the running list along the bottom of the
+ *  stock slide. Daksh: "there show month date when added." */
+export type StockPurchase = {
+  /** "22 September" — day and full month, as the wall says it. */
+  dayLabel: string;
+  /** Sort key, YYYY-MM-DD in IST. */
+  day: string;
+  blocks: number;
+  cft: number;
+  tonnes: number;
+};
+
 export type FloorStock = {
-  sandstone: { blocks: number; cft: number; byStone: StockStone[] };
-  marble: { blocks: number; tonnes: number; cftEquiv: number; byStone: StockStone[] };
+  sandstone: { blocks: number; cft: number; byStone: StockStone[]; purchases: StockPurchase[] };
+  marble: { blocks: number; tonnes: number; cftEquiv: number; byStone: StockStone[]; purchases: StockPurchase[] };
   /** Bought THIS month — the top-up against the standing stock above. */
   purchased: {
     sandstone: { blocks: number; cft: number };
@@ -116,7 +128,13 @@ function istMidnightUTC(y: number, m: number, d: number): string {
   return new Date(Date.UTC(y, m - 1, d) - IST_OFFSET_MS).toISOString();
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/* Full names, not "Sep" (Daksh). These read at wall distance and there
+   is room for them; the chart's own end-of-line label takes the first
+   word, so it becomes "August" rather than "Aug". */
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 export async function buildFloorProductionData(): Promise<FloorProduction> {
   const admin = createAdminSupabaseClient();
@@ -369,7 +387,7 @@ export async function buildFloorProductionData(): Promise<FloorProduction> {
     // ADDED card uses.
     const bought = await fetchAllPaged<{
       stone: string | null; length_ft: number | string; width_ft: number | string;
-      height_ft: number | string; tonnes: number | null;
+      height_ft: number | string; tonnes: number | null; created_at: string;
     }>((from, to) =>
       admin
         .from("blocks")
@@ -380,16 +398,46 @@ export async function buildFloorProductionData(): Promise<FloorProduction> {
         .range(from, to),
     );
     let pSandBlocks = 0, pSandCft = 0, pMarbleBlocks = 0, pMarbleT = 0;
+    // Also grouped by the DAY it was added, for the running list along
+    // the bottom of the slide. Keyed on the IST calendar day so a truck
+    // booked at 1 am reads as that morning's, not the night before's.
+    const sandDays = new Map<string, StockPurchase>();
+    const marbleDays = new Map<string, StockPurchase>();
+    const dayRow = (map: Map<string, StockPurchase>, iso: string): StockPurchase => {
+      const p = istParts(iso);
+      const key = `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
+      const row = map.get(key) ?? {
+        day: key,
+        dayLabel: `${p.d} ${MONTHS[p.m - 1]}`,
+        blocks: 0,
+        cft: 0,
+        tonnes: 0,
+      };
+      map.set(key, row);
+      return row;
+    };
     for (const b of bought) {
       if (isMarble(b.stone, categoryMap)) {
         pMarbleBlocks += 1;
-        pMarbleT += Number(b.tonnes) || 0;
+        const t = Number(b.tonnes) || 0;
+        pMarbleT += t;
+        const row = dayRow(marbleDays, b.created_at);
+        row.blocks += 1;
+        row.tonnes += t;
       } else {
         pSandBlocks += 1;
-        pSandCft +=
+        const c =
           ((Number(b.length_ft) || 0) * (Number(b.width_ft) || 0) * (Number(b.height_ft) || 0)) / 1728;
+        pSandCft += c;
+        const row = dayRow(sandDays, b.created_at);
+        row.blocks += 1;
+        row.cft += c;
       }
     }
+    // Newest first — the wall should open on what arrived today.
+    const byNewest = (a: StockPurchase, b: StockPurchase) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0);
+    const sandPurchases = [...sandDays.values()].sort(byNewest);
+    const marblePurchases = [...marbleDays.values()].sort(byNewest);
 
     const marbleTonnes = marbleStones.reduce((s2, g) => s2 + g.tonnes, 0);
     stock = {
@@ -397,6 +445,7 @@ export async function buildFloorProductionData(): Promise<FloorProduction> {
         blocks: sandStones.reduce((s2, g) => s2 + g.blocks, 0),
         cft: sandStones.reduce((s2, g) => s2 + g.cft, 0),
         byStone: sandStones,
+        purchases: sandPurchases,
       },
       marble: {
         blocks: marbleStones.reduce((s2, g) => s2 + g.blocks, 0),
@@ -406,6 +455,7 @@ export async function buildFloorProductionData(): Promise<FloorProduction> {
         // a conversion, not a measurement.
         cftEquiv: cftEquivFromTonnes(marbleTonnes),
         byStone: marbleStones,
+        purchases: marblePurchases,
       },
       purchased: {
         sandstone: { blocks: pSandBlocks, cft: pSandCft },

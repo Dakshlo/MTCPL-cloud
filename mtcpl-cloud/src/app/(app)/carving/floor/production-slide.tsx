@@ -22,7 +22,7 @@
  * is 14px before TvFit scales the slide up to fill the screen.
  */
 
-import type { FloorProduction, FloorStock, MonthSeries, ProductionPoint, StockStone } from "@/lib/floor-production-data";
+import type { FloorProduction, MonthSeries, ProductionPoint, StockPurchase, StockStone } from "@/lib/floor-production-data";
 
 const fmt0 = (n: number) => Math.round(n).toLocaleString("en-IN");
 const fmt1 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -34,6 +34,11 @@ const DRAW_MS = 1500;
 /** Height of one repeat of the travelling highlight, in viewBox units.
  *  One band per ~2.6s cycle. */
 const SWEEP_BAND = 130;
+/** Buying-list rows that fit the stock column before it has to scroll
+ *  itself. A guess, not a measurement — the panel height depends on the
+ *  wall — but erring low only means a short list creeps gently rather
+ *  than a long one hiding half its days. */
+const VISIBLE_PURCHASES = 5;
 
 /* Palette. Last month is a calm grey-brown so it reads as history;
    this month is green when ahead of that line and amber when behind,
@@ -422,6 +427,16 @@ export function StockTvSlide({ data, dark }: { data: FloorProduction; dark: bool
         <div style={{ height: 1, background: C.rule, marginTop: 12 }} />
       </div>
 
+      <style>{`
+        /* Exactly half the doubled list, so the wrap is invisible. */
+        @keyframes mtcpl-stock-scroll {
+          from { transform: translateY(0); }
+          to   { transform: translateY(-50%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [style*="mtcpl-stock-scroll"] { animation: none !important; }
+        }
+      `}</style>
       <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 14 }}>
         <StockColumn
           title="SANDSTONE"
@@ -432,12 +447,9 @@ export function StockTvSlide({ data, dark }: { data: FloorProduction; dark: bool
           rows={st.sandstone.byStone}
           valueOf={(g) => `${fmt0(g.cft)} CFT`}
           shareOf={(g) => (st.sandstone.cft > 0 ? g.cft / st.sandstone.cft : 0)}
-          bought={
-            st.purchased.sandstone.blocks > 0
-              ? `+ ${fmt0(st.purchased.sandstone.cft)} CFT · ${st.purchased.sandstone.blocks} blocks`
-              : "nothing bought yet"
-          }
-          boughtLabel={`BOUGHT IN ${data.monthLabel.split(" ")[0].toUpperCase()}`}
+          purchases={st.sandstone.purchases}
+          purchaseTotal={`+ ${fmt0(st.purchased.sandstone.cft)} CFT · ${st.purchased.sandstone.blocks} blocks`}
+          purchaseValueOf={(p) => `${fmt0(p.cft)} CFT`}
           dark={dark}
         />
         <StockColumn
@@ -449,12 +461,9 @@ export function StockTvSlide({ data, dark }: { data: FloorProduction; dark: bool
           rows={st.marble.byStone}
           valueOf={(g) => `${fmt1(g.tonnes)} T`}
           shareOf={(g) => (st.marble.tonnes > 0 ? g.tonnes / st.marble.tonnes : 0)}
-          bought={
-            st.purchased.marble.blocks > 0
-              ? `+ ${fmt1(st.purchased.marble.tonnes)} T · ${st.purchased.marble.blocks} blocks`
-              : "nothing bought yet"
-          }
-          boughtLabel={`BOUGHT IN ${data.monthLabel.split(" ")[0].toUpperCase()}`}
+          purchases={st.marble.purchases}
+          purchaseTotal={`+ ${fmt1(st.purchased.marble.tonnes)} T · ${st.purchased.marble.blocks} blocks`}
+          purchaseValueOf={(p) => `${fmt1(p.tonnes)} T`}
           dark={dark}
         />
       </div>
@@ -463,7 +472,7 @@ export function StockTvSlide({ data, dark }: { data: FloorProduction; dark: bool
 }
 
 function StockColumn({
-  title, headline, unit, sub, accent, rows, valueOf, shareOf, bought, boughtLabel, dark,
+  title, headline, unit, sub, accent, rows, valueOf, shareOf, purchases, purchaseTotal, purchaseValueOf, dark,
 }: {
   title: string;
   headline: string;
@@ -473,16 +482,34 @@ function StockColumn({
   rows: StockStone[];
   valueOf: (g: StockStone) => string;
   shareOf: (g: StockStone) => number;
-  bought: string;
-  boughtLabel: string;
+  purchases: StockPurchase[];
+  purchaseTotal: string;
+  purchaseValueOf: (p: StockPurchase) => string;
   dark: boolean;
 }) {
   const C = palette(dark);
+  /* The buying list is one row per day and September already has 14 of
+     them, far more than fit. Rather than truncate it — the wall has
+     nobody to click "show more" — the list scrolls itself.
+
+     It is rendered TWICE and translated by exactly half its height, so
+     the copy leaving the top is the copy arriving at the bottom and the
+     loop has no seam. Below the threshold it just sits still: a list of
+     three quietly creeping upward would look broken, not alive. */
+  const scrolls = purchases.length > VISIBLE_PURCHASES;
+  const scrollSecs = Math.max(12, purchases.length * 1.8);
+
   return (
     <div
       style={{
         flex: 1,
         minWidth: 0,
+        // minHeight:0 is load-bearing. Without it a flex child cannot
+        // shrink below its content, so the scrolling buying list pushed
+        // the column taller than its row and the rows spilled out past
+        // the rounded corner. overflow:hidden is the belt to that brace.
+        minHeight: 0,
+        overflow: "hidden",
         background: C.panel,
         border: `1px solid ${C.panelBorder}`,
         borderRadius: 14,
@@ -496,8 +523,11 @@ function StockColumn({
         borderLeft: `5px solid ${accent}`,
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.muted, letterSpacing: "0.12em" }}>{title}</div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: C.muted, letterSpacing: "0.12em" }}>{title}</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: C.muted }}>{sub}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: -4 }}>
         <span
           style={{
             fontSize: 58,
@@ -512,18 +542,12 @@ function StockColumn({
         </span>
         <span style={{ fontSize: 22, fontWeight: 600, color: C.muted }}>{unit}</span>
       </div>
-      <div style={{ fontSize: 17, color: C.muted, fontWeight: 600, marginTop: -4 }}>{sub}</div>
 
       <div style={{ height: 1, background: C.rule }} />
 
       {/* Per-stone rows. The bar is each stone's share of its OWN
           category, so the split reads without needing the numbers. */}
-      {/* Spread down the panel, not stacked at the top. There are only a
-          handful of stones in stock, so top-aligning left a dead half-
-          panel; centring fixed that but then a 2-stone column and a
-          3-stone one sat at different heights and read as a mistake.
-          Even distribution fills both and looks deliberate either way. */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: 14 }}>
+      <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 13 }}>
         {rows.map((g) => (
           <div key={g.stone} style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
@@ -572,12 +596,86 @@ function StockColumn({
         )}
       </div>
 
-      <div style={{ height: 1, background: C.rule }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: C.muted, letterSpacing: "0.09em" }}>{boughtLabel}</span>
-        <span style={{ fontSize: 20, fontWeight: 700, color: accent, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>
-          {bought}
+      <div style={{ height: 1, background: C.rule, marginTop: 2 }} />
+
+      {/* Bought this month, day by day. */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flex: "0 0 auto" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.muted, letterSpacing: "0.09em" }}>
+          BOUGHT THIS MONTH
         </span>
+        <span style={{ fontSize: 20, fontWeight: 700, color: accent, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>
+          {purchaseTotal}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
+        {purchases.length === 0 ? (
+          <span style={{ fontSize: 18, color: C.muted, fontWeight: 600 }}>Nothing bought yet.</span>
+        ) : (
+          <div
+            style={
+              scrolls
+                ? { animation: `mtcpl-stock-scroll ${scrollSecs}s linear infinite` }
+                : undefined
+            }
+          >
+            {(scrolls ? [...purchases, ...purchases] : purchases).map((pch, idx) => (
+              <div
+                key={`${pch.day}-${idx}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 10,
+                  padding: "6px 0",
+                  borderTop: idx === 0 ? "none" : `1px solid ${C.rule}`,
+                }}
+              >
+                <span style={{ fontSize: 18, fontWeight: 600, color: C.ink, whiteSpace: "nowrap" }}>
+                  {pch.dayLabel}
+                </span>
+                <span style={{ fontSize: 16, color: C.muted, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {pch.blocks} block{pch.blocks === 1 ? "" : "s"}
+                </span>
+                <span
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: accent,
+                    fontFamily: "ui-monospace, monospace",
+                    whiteSpace: "nowrap",
+                    minWidth: 96,
+                    textAlign: "right",
+                  }}
+                >
+                  {purchaseValueOf(pch)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Fades at both edges so a row enters and leaves through
+            light instead of being sliced by a hard line. */}
+        {scrolls && (
+          <>
+            <div
+              aria-hidden
+              style={{
+                position: "absolute", left: 0, right: 0, top: 0, height: 26,
+                background: `linear-gradient(to top, transparent, ${C.panelSolid})`,
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              aria-hidden
+              style={{
+                position: "absolute", left: 0, right: 0, bottom: 0, height: 30,
+                background: `linear-gradient(to bottom, transparent, ${C.panelSolid})`,
+                pointerEvents: "none",
+              }}
+            />
+          </>
+        )}
       </div>
     </div>
   );
