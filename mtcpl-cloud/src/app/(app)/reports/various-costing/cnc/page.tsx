@@ -9,7 +9,8 @@
  *   • An Output tile showing total CFT and SFT carved.
  *   • A Total Cost tile (operational only — depreciation lives on
  *     the full Excel report linked from the footer).
- *   • On Monthly: a Daily Average tile (mirrors Cutter Monthly).
+ *   • A Daily Average tile on Weekly / Monthly / Yearly (mirrors
+ *     the Cutter page; Daily has no average to take).
  *   • A per-vendor breakdown table — this is the "vendor wise
  *     costing" Daksh's dad explicitly asked for.
  *   • The aggregate operational-expense breakdown by category.
@@ -32,6 +33,7 @@ import {
   cncPeriodFromSearch,
   type CncPeriodKind,
 } from "@/lib/cnc-various-cost-report";
+import { daysElapsedInWindow, isClippedYear, COSTING_DATA_START } from "@/lib/costing-window";
 import { OutputPeekCard } from "./output-peek-card";
 import { CostTrend } from "../_ui/cost-trend";
 import { KpiTile, DualKpiTile, Panel, TabBar, TabLink, PickerLabel, pickerRow, pickerInput, pickerBtn, th, td, VcStyles } from "../_ui/kit";
@@ -100,30 +102,16 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
   const curMonth = today.getMonth() + 1;
   const years = [curYear - 1, curYear, curYear + 1];
 
-  // Daily average — Monthly view only. Same logic as Cutter page.
+  // Daily average — on every view long enough for an average to mean
+  // something. Daksh, Sep 2026: "and in yearly, daily average like
+  // monthly and weekly." A single day has no average to take, so Daily
+  // is left out; the rest divide by the days that have ACTUALLY
+  // happened, which for the current year means from 1 June (see
+  // lib/costing-window).
   const dailyAvg = (() => {
-    if (view !== "monthly") return null;
-    const periodYear = Number(period.startDate.slice(0, 4));
-    const periodMonth = Number(period.startDate.slice(5, 7));
-    const istParts = (() => {
-      const t = Date.now() + 5.5 * 60 * 60 * 1000;
-      const d = new Date(t);
-      return {
-        year: d.getUTCFullYear(),
-        month: d.getUTCMonth() + 1,
-        day: d.getUTCDate(),
-      };
-    })();
-    let daysElapsed: number;
-    if (periodYear > istParts.year || (periodYear === istParts.year && periodMonth > istParts.month)) {
-      return null;
-    }
-    if (periodYear === istParts.year && periodMonth === istParts.month) {
-      daysElapsed = istParts.day;
-    } else {
-      daysElapsed = new Date(periodYear, periodMonth, 0).getDate();
-    }
-    if (daysElapsed <= 0) return null;
+    if (view === "daily") return null;
+    const daysElapsed = daysElapsedInWindow(period.startDate, period.endDate);
+    if (!daysElapsed) return null;
     return {
       daysElapsed,
       cftPerDay: report.totalCft / daysElapsed,
@@ -292,6 +280,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           </form>
         )}
         {view === "yearly" && (
+          <>
           <form method="get" action="/reports/various-costing/cnc" style={pickerRow()}>
             <input type="hidden" name="view" value="yearly" />
             <PickerLabel>Year</PickerLabel>
@@ -300,6 +289,19 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
             </select>
             <button type="submit" style={pickerBtn()}>Show</button>
           </form>
+          {/* A short year is stated, never quietly served. */}
+          {isClippedYear(Number(period.startDate.slice(0, 4))) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
+              ⓘ {Number(period.startDate.slice(0, 4))} is counted from{" "}
+              <strong style={{ color: "var(--text)" }}>
+                {Number(COSTING_DATA_START.slice(8, 10))} {MONTH_NAMES[Number(COSTING_DATA_START.slice(5, 7)) - 1]}
+              </strong>
+              . The software only came into full use then, so the earlier months are
+              left out instead of being averaged in against output nobody was
+              entering yet. Later years run January to December as normal.
+            </div>
+          )}
+          </>
         )}
       </div>
 

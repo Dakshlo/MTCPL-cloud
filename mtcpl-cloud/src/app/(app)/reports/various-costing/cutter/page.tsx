@@ -20,6 +20,7 @@ import {
   type CutterPeriodKind,
 } from "@/lib/cutter-cost-report";
 import { CftPeekTile } from "./cft-peek-tile";
+import { daysElapsedInWindow, isClippedYear, COSTING_DATA_START } from "@/lib/costing-window";
 import { CostTrend } from "../_ui/cost-trend";
 import { KpiTile, DualKpiTile, Panel, Row, TabBar, TabLink, PickerLabel, pickerRow, pickerInput, pickerBtn, th, td, VcStyles } from "../_ui/kit";
 
@@ -85,39 +86,20 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
   const curMonth = today.getMonth() + 1;
   const years = [curYear - 1, curYear, curYear + 1];
 
-  // Daksh May 2026 — Monthly view gets a Daily Average tile. Tells
-  // the operator their daily rhythm: "we cut X CFT/day this month
-  // and that costs ₹Y/day". For the CURRENT month we use today's
-  // day-of-month (e.g. 25 if today is May 25 — gives the average
-  // "of the 25 days so far"); for past months we use the full
-  // length of the month; future months get a "—" since nothing has
-  // happened yet. Wrapped in an IIFE so we only compute when
-  // Monthly is the active view.
+  // Daksh May 2026 — the daily rhythm: "we cut X CFT/day and that
+  // costs ₹Y/day". Sep 2026 he asked for it on Yearly too ("daily
+  // average like monthly and weekly"), so it now runs on every view
+  // except Daily, where a one-day average is just the day itself.
+  //
+  // It always divides by the days that have actually happened: a month
+  // in progress divides by today's date, a finished month by its full
+  // length, and the current year by the days since 1 June (see
+  // lib/costing-window — 2026 does not start in January). A window
+  // that has not begun gets no tile at all rather than a fake average.
   const dailyAvg = (() => {
-    if (view !== "monthly") return null;
-    const periodYear = Number(period.startDate.slice(0, 4));
-    const periodMonth = Number(period.startDate.slice(5, 7));
-    const istParts = (() => {
-      const t = Date.now() + 5.5 * 60 * 60 * 1000;
-      const d = new Date(t);
-      return {
-        year: d.getUTCFullYear(),
-        month: d.getUTCMonth() + 1,
-        day: d.getUTCDate(),
-      };
-    })();
-    let daysElapsed: number;
-    if (periodYear > istParts.year || (periodYear === istParts.year && periodMonth > istParts.month)) {
-      // Future month — no time has elapsed yet, return null.
-      return null;
-    }
-    if (periodYear === istParts.year && periodMonth === istParts.month) {
-      daysElapsed = istParts.day;
-    } else {
-      // Past month — use the full month length.
-      daysElapsed = new Date(periodYear, periodMonth, 0).getDate();
-    }
-    if (daysElapsed <= 0) return null;
+    if (view === "daily") return null;
+    const daysElapsed = daysElapsedInWindow(period.startDate, period.endDate);
+    if (!daysElapsed) return null;
     return {
       daysElapsed,
       cftPerDay: report.totalCft / daysElapsed,
@@ -286,6 +268,7 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
           </form>
         )}
         {view === "yearly" && (
+          <>
           <form method="get" action="/reports/various-costing/cutter" style={pickerRow()}>
             <input type="hidden" name="view" value="yearly" />
             <PickerLabel>Year</PickerLabel>
@@ -294,6 +277,19 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
             </select>
             <button type="submit" style={pickerBtn()}>Show</button>
           </form>
+          {/* A short year is stated, never quietly served. */}
+          {isClippedYear(Number(period.startDate.slice(0, 4))) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
+              ⓘ {Number(period.startDate.slice(0, 4))} is counted from{" "}
+              <strong style={{ color: "var(--text)" }}>
+                {Number(COSTING_DATA_START.slice(8, 10))} {MONTH_NAMES[Number(COSTING_DATA_START.slice(5, 7)) - 1]}
+              </strong>
+              . The software only came into full use then, so the earlier months are
+              left out instead of being averaged in against output nobody was
+              entering yet. Later years run January to December as normal.
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -330,11 +326,11 @@ export default async function CutterCostReportPage({ searchParams }: { searchPar
           hint={`Op ${fmtINR(report.operationalForPeriod)} + Dep ${fmtINR(report.depreciationForPeriod)}`}
           tone="warning"
         />
-        {/* Daksh May 2026 — Monthly-only Daily Average tile. Two
-            equally-prominent stacked values: CFT/day + ₹/day. Subtitle
-            is "N days" so the user knows whether they're averaging
-            over the elapsed days (current month) or the full month
-            (past month). */}
+        {/* Daily Average — two equally-prominent stacked values:
+            CFT/day + ₹/day. The subtitle is "N days" so the user can
+            see what the average was taken over: the days elapsed so
+            far in a period still running, or the whole span of a
+            finished one. */}
         {dailyAvg && (
           <DualKpiTile
             label="Daily Average"
