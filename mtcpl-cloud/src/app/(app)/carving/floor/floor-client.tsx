@@ -332,7 +332,7 @@ export function FloorViewClient({
     // reduce below still attributes a mixed machine to its first job
     // rather than counting it twice and inventing a CNC.
     {
-      const byTemple = new Map<string, { machines: number; slabs: number; codes: string[] }>();
+      const byTemple = new Map<string, { machines: number; slabs: number; cft: number; codes: string[] }>();
       let idle = 0, maintenance = 0, total = 0;
       for (const v of vendors) {
         for (const m of v.machines) {
@@ -343,9 +343,15 @@ export function FloorViewClient({
             continue;
           }
           const temple = m.current_jobs[0]?.slab?.temple?.trim() || "—";
-          const g = byTemple.get(temple) ?? { machines: 0, slabs: 0, codes: [] };
+          const g = byTemple.get(temple) ?? { machines: 0, slabs: 0, cft: 0, codes: [] };
           g.machines += 1;
           g.slabs += m.current_jobs.length;
+          // Raw volume on the bed — same l x w x t the machine tile
+          // prints per slab, so the two screens agree.
+          for (const j of m.current_jobs) {
+            const sl = j.slab;
+            if (sl) g.cft += (sl.length_in * sl.width_in * sl.thickness_in) / 1728;
+          }
           g.codes.push(m.machine_code);
           byTemple.set(temple, g);
         }

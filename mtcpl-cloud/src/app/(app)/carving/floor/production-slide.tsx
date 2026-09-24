@@ -392,6 +392,11 @@ export type TempleLoad = {
   temple: string;
   machines: number;
   slabs: number;
+  /** Raw volume of the slabs currently under the tool — "how much CFT
+   *  will be prepared" (Daksh). Plain l x w x t, the same figure the
+   *  machine tiles print per slab, NOT the SFT/CFT carving-output rule:
+   *  this is stone on the bed, not work signed off. */
+  cft: number;
   /** Machine codes carrying it, in board order. */
   codes: string[];
 };
@@ -436,23 +441,49 @@ function donutSlice(cx: number, cy: number, rOuter: number, rInner: number, from
   ].join(" ");
 }
 
-/** Which temple is holding the floor — a donut of the whole fleet split
- *  by temple, and beside it the same thing as a ranked list naming the
- *  actual machines.
+/** Wrap a temple name into at most two lines that fit a callout column.
+ *  SVG text does not wrap, and these names run to 33 characters
+ *  ("SHRI BABA MASTNATH ROHTAK HARYANA"), so the packing is done here. */
+function wrapName(name: string, perLine = 20, maxLines = 2): string[] {
+  const words = name.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length <= perLine || !cur) {
+      cur = next;
+    } else {
+      lines.push(cur);
+      cur = w;
+      if (lines.length === maxLines) break;
+    }
+  }
+  if (lines.length < maxLines && cur) lines.push(cur);
+  if (lines.length === maxLines) {
+    // Anything that did not fit is signalled rather than silently lost.
+    const used = lines.join(" ").length;
+    if (used < name.length) lines[maxLines - 1] = `${lines[maxLines - 1]}…`;
+  }
+  return lines;
+}
+
+/** Which temple is holding the floor — one pie of the whole fleet, each
+ *  slice labelled out on a leader line with its machine count and share.
  *
  *  Daksh, for his dad: "a page where he can get a glimpse of what temple
- *  work is going on what machine — a pie of total machines and each
- *  temple's share, and under it maybe another way to represent."
+ *  work is going on what machine." First build put a donut beside a
+ *  ranked list; he cut the split — "use pie only, show arrow from pie
+ *  segment wise, show that 20 is CNC and percent also, bigger font."
  *
- *  Two readings of one fact, because they answer different questions. The
- *  donut answers "who is taking the floor" in a glance from across the
- *  room. The list answers "which machines exactly", which a pie cannot
- *  say however long you look at it. Side by side rather than stacked:
- *  the wall is 16:9, and stacking them would shrink both.
+ *  So the pie is the whole slide and the numbers live on the slices.
+ *  What went with the list is the machine NUMBERS — there is no room for
+ *  twenty of them on a callout, and they were the detail rather than the
+ *  glimpse. The per-vendor boards two slides earlier carry them.
  *
- *  Idle and under-maintenance machines are slices too, in grey and red,
- *  so the ring is the WHOLE fleet and the shares are honest. A donut of
- *  only the running ones would read as 100% utilised. */
+ *  Free and under-maintenance machines are slices too, in grey and red,
+ *  so the ring is the WHOLE fleet and the percentages are honest. A pie
+ *  of only the running ones would read as 100% utilised, which is the
+ *  one thing a glance must not get wrong. */
 export function TempleFloorSlide({
   loads, idle, maintenance, total, dark,
 }: {
@@ -467,18 +498,102 @@ export function TempleFloorSlide({
   const colourFor = (i: number) => colours[i] ?? (dark ? "#9ca3af" : "#6b7280");
 
   const running = loads.reduce((s2, l) => s2 + l.machines, 0);
-  const segments = [
-    ...loads.map((l, i) => ({ label: l.temple, value: l.machines, colour: colourFor(i) })),
-    ...(idle > 0 ? [{ label: "Free", value: idle, colour: dark ? "#6b7280" : "#b8ad99" }] : []),
-    ...(maintenance > 0 ? [{ label: "Maintenance", value: maintenance, colour: dark ? "#f87171" : "#dc2626" }] : []),
+
+  /* Only the biggest few temples get their own callout. One dominant
+     slice — Rohtak at 44% — spans the whole right half of the ring, so
+     EVERY other label lands on the left; at the font size Daksh asked
+     for, eight of them need about 600 units of a 470-unit panel and
+     they collided and clipped off the edge. The tail is collapsed into
+     one slice instead. It is still on the ring, still counted in the
+     percentages, just not given a line of its own — which is the right
+     trade for a glimpse, where three separate 2% labels say less than
+     one honest "3 more temples". */
+  const NAMED = 3;
+  const big = loads.slice(0, NAMED);
+  const tail = loads.slice(NAMED);
+  const tailMachines = tail.reduce((s2, l) => s2 + l.machines, 0);
+  const tailCft = tail.reduce((s2, l) => s2 + l.cft, 0);
+  const tailSlabs = tail.reduce((s2, l) => s2 + l.slabs, 0);
+
+  const segments: Array<{ label: string; value: number; colour: string; sub: string | null }> = [
+    ...big.map((l, i) => ({
+      label: l.temple,
+      value: l.machines,
+      colour: colourFor(i),
+      sub: `${fmt0(l.cft)} CFT · ${l.slabs} slab${l.slabs === 1 ? "" : "s"}`,
+    })),
+    ...(tailMachines > 0
+      ? [{
+          label: `${tail.length} more temple${tail.length === 1 ? "" : "s"}`,
+          value: tailMachines,
+          colour: colourFor(NAMED),
+          sub: `${fmt0(tailCft)} CFT · ${tailSlabs} slab${tailSlabs === 1 ? "" : "s"}`,
+        }]
+      : []),
+    ...(idle > 0 ? [{ label: "Free", value: idle, colour: dark ? "#6b7280" : "#b8ad99", sub: null }] : []),
+    ...(maintenance > 0 ? [{ label: "In maintenance", value: maintenance, colour: dark ? "#f87171" : "#dc2626", sub: null }] : []),
   ];
   const denom = Math.max(1, segments.reduce((s2, g) => s2 + g.value, 0));
 
-  const SZ = 340, R = 150, RI = 92;
-  let angle = -Math.PI / 2; // start at 12 o'clock
+  /* Geometry. The viewBox aspect is matched to the panel on a 1920x1080
+     wall so "meet" letterboxes by almost nothing; change the header
+     above and this wants re-measuring. */
+  const W = 1000, H = 470;
+  const cx = W / 2, cy = H / 2 + 6;
+  const R = 150, RI = 88;
+  const ELBOW = R + 30;        // where the leader turns horizontal
+  const LX = cx - 208, RX = cx + 208; // label columns
+
+  // Lay the callouts out, then push apart any that would overlap. The
+  // slices are sorted biggest-first, so without this the small ones at
+  // the end of the ring stack on top of each other.
+  type Callout = {
+    label: string; value: number; colour: string; pct: number; sub: string | null;
+    side: -1 | 1; y: number; ax: number; ay: number;
+  };
+  const callouts: Callout[] = [];
+  {
+    let a = -Math.PI / 2;
+    for (const g of segments) {
+      const span = (g.value / denom) * Math.PI * 2;
+      const mid = a + span / 2;
+      a += span;
+      const side: -1 | 1 = Math.cos(mid) < 0 ? -1 : 1;
+      callouts.push({
+        label: g.label,
+        value: g.value,
+        colour: g.colour,
+        sub: g.sub,
+        pct: (g.value / denom) * 100,
+        side,
+        y: cy + Math.sin(mid) * ELBOW,
+        ax: cx + Math.cos(mid) * (R + 4),
+        ay: cy + Math.sin(mid) * (R + 4),
+      });
+    }
+    /* Two passes, and both are needed. Pushing down alone piles the
+       last label off the bottom; shifting the whole column back up
+       alone drives the first one off the top. So: settle downward from
+       a clamped top, then settle upward from a clamped bottom. */
+    const GAP = 104, TOP = 58, BOT = H - 58;
+    for (const side of [-1, 1] as const) {
+      const col = callouts.filter((c) => c.side === side).sort((x, z) => x.y - z.y);
+      if (col.length === 0) continue;
+      col[0].y = Math.max(TOP, col[0].y);
+      for (let k = 1; k < col.length; k++) {
+        col[k].y = Math.max(col[k].y, col[k - 1].y + GAP);
+      }
+      col[col.length - 1].y = Math.min(BOT, col[col.length - 1].y);
+      for (let k = col.length - 2; k >= 0; k--) {
+        col[k].y = Math.min(col[k].y, col[k + 1].y - GAP);
+      }
+    }
+  }
+
+  let angle = -Math.PI / 2;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, height: "100%" }}>
       <div style={{ flex: "0 0 auto" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 42, fontWeight: 700, letterSpacing: "-0.8px", color: C.ink }}>
@@ -491,128 +606,99 @@ export function TempleFloorSlide({
         <div style={{ height: 1, background: C.rule, marginTop: 12 }} />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 18 }}>
-        {/* The donut. */}
-        <div
-          style={{
-            flex: "0 0 38%",
-            minWidth: 0,
-            background: C.panel,
-            border: `1px solid ${C.panelBorder}`,
-            borderRadius: 14,
-            boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 12,
-          }}
-        >
-          <svg viewBox={`0 0 ${SZ} ${SZ}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%" }}>
-            {segments.map((g, i) => {
-              const from = angle;
-              const to = angle + (g.value / denom) * Math.PI * 2;
-              angle = to;
-              return (
-                <path
-                  key={`${g.label}-${i}`}
-                  d={donutSlice(SZ / 2, SZ / 2, R, RI, from, to)}
-                  fill={g.colour}
-                  stroke={C.panelSolid}
-                  strokeWidth={2.5}
-                />
-              );
-            })}
-            <text
-              x={SZ / 2}
-              y={SZ / 2 - 6}
-              textAnchor="middle"
-              fontSize={54}
-              fontWeight={700}
-              fill={C.ink}
-              fontFamily="ui-monospace, monospace"
-            >
-              {total}
-            </text>
-            <text x={SZ / 2} y={SZ / 2 + 26} textAnchor="middle" fontSize={19} fontWeight={600} fill={C.muted}>
-              CNCs
-            </text>
-          </svg>
-        </div>
-
-        {/* The same thing as a list — with the machine numbers, which is
-            the part the pie cannot tell you. */}
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            minHeight: 0,
-            overflow: "hidden",
-            background: C.panel,
-            border: `1px solid ${C.panelBorder}`,
-            borderRadius: 14,
-            boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
-            padding: "14px 18px",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "space-evenly",
-            gap: 8,
-          }}
-        >
-          {loads.map((l, i) => (
-            <div key={l.temple} style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-              <span
-                style={{
-                  width: 14, height: 14, borderRadius: 4, background: colourFor(i), flexShrink: 0,
-                }}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          background: C.panel,
+          border: `1px solid ${C.panelBorder}`,
+          borderRadius: 14,
+          boxShadow: dark ? "none" : "0 1px 3px rgba(45,36,16,0.05)",
+          padding: 10,
+          display: "flex",
+        }}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%" }}>
+          {segments.map((g, i) => {
+            const from = angle;
+            const to = angle + (g.value / denom) * Math.PI * 2;
+            angle = to;
+            return (
+              <path
+                key={`${g.label}-${i}`}
+                d={donutSlice(cx, cy, R, RI, from, to)}
+                fill={g.colour}
+                stroke={C.panelSolid}
+                strokeWidth={2.5}
               />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
-                  <span
-                    style={{
-                      fontSize: 23, fontWeight: 700, color: C.ink, letterSpacing: "-0.2px",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}
+            );
+          })}
+
+          <text x={cx} y={cy - 4} textAnchor="middle" fontSize={62} fontWeight={700} fill={C.ink} fontFamily="ui-monospace, monospace">
+            {total}
+          </text>
+          <text x={cx} y={cy + 28} textAnchor="middle" fontSize={20} fontWeight={600} fill={C.muted}>
+            CNCs
+          </text>
+
+          {callouts.map((c, i) => {
+            const endX = c.side < 0 ? LX : RX;
+            const elbowX = cx + c.side * ELBOW;
+            const lines = wrapName(c.label, 20, 2);
+            // Name block sits above the figure, so the figure lands on
+            // the leader line wherever the name runs to one line or two.
+            const nameTop = c.y - 14 - (lines.length - 1) * 26;
+            return (
+              <g key={`${c.label}-${i}`}>
+                <polyline
+                  points={`${c.ax.toFixed(1)},${c.ay.toFixed(1)} ${elbowX.toFixed(1)},${c.y.toFixed(1)} ${endX},${c.y.toFixed(1)}`}
+                  fill="none"
+                  stroke={c.colour}
+                  strokeWidth={2.5}
+                  strokeLinejoin="round"
+                />
+                <circle cx={c.ax} cy={c.ay} r={5} fill={c.colour} />
+                {lines.map((ln, li) => (
+                  <text
+                    key={li}
+                    x={endX + c.side * 12}
+                    y={nameTop + li * 26}
+                    textAnchor={c.side < 0 ? "end" : "start"}
+                    fontSize={23}
+                    fontWeight={700}
+                    fill={C.ink}
                   >
-                    {l.temple}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 22, fontWeight: 700, color: colourFor(i),
-                      fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap",
-                    }}
-                  >
-                    {l.machines} CNC · {l.slabs} slab{l.slabs === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 16, color: C.muted, fontWeight: 600, fontFamily: "ui-monospace, monospace",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2,
-                  }}
+                    {ln}
+                  </text>
+                ))}
+                <text
+                  x={endX + c.side * 12}
+                  y={c.y + 16}
+                  textAnchor={c.side < 0 ? "end" : "start"}
+                  fontSize={28}
+                  fontWeight={800}
+                  fill={c.colour}
+                  fontFamily="ui-monospace, monospace"
                 >
-                  {l.codes.join("  ")}
-                </div>
-              </div>
-            </div>
-          ))}
-          {(idle > 0 || maintenance > 0) && (
-            <div style={{ display: "flex", gap: 18, alignItems: "center", paddingTop: 6, borderTop: `1px solid ${C.rule}` }}>
-              {idle > 0 && (
-                <span style={{ fontSize: 19, fontWeight: 700, color: C.muted }}>
-                  {idle} free
-                </span>
-              )}
-              {maintenance > 0 && (
-                <span style={{ fontSize: 19, fontWeight: 700, color: dark ? "#f87171" : "#dc2626" }}>
-                  {maintenance} in maintenance
-                </span>
-              )}
-            </div>
-          )}
-          {loads.length === 0 && (
-            <span style={{ fontSize: 22, color: C.muted, fontWeight: 600 }}>No machine is carving right now.</span>
-          )}
-        </div>
+                  {c.value} CNC · {Math.round(c.pct)}%
+                </text>
+                {c.sub && (
+                  <text
+                    x={endX + c.side * 12}
+                    y={c.y + 40}
+                    textAnchor={c.side < 0 ? "end" : "start"}
+                    fontSize={20}
+                    fontWeight={600}
+                    fill={C.muted}
+                    fontFamily="ui-monospace, monospace"
+                  >
+                    {c.sub}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
       </div>
     </div>
   );
