@@ -288,6 +288,34 @@ export function FloorViewClient({
     return () => clearInterval(t);
   }, [router]);
 
+  // The floor error boundary counts consecutive failures so it can stop
+  // reload-looping on a fault that will not clear. Reaching here means
+  // the wall rendered, so the run is over — without this reset, four
+  // unrelated blips across a week would eventually disable the recovery.
+  useEffect(() => {
+    try { window.sessionStorage.removeItem("mtcpl-floor-reloads"); } catch { /* private mode */ }
+  }, []);
+
+  /* Kiosk hygiene. Daksh: "when the TV stays on for like 2-3 hours the
+   * error occurs." By then this page has done ~160 soft refreshes on a
+   * tab that has never once been reloaded, holding a realtime socket and
+   * an auth session the whole time. Whatever it is that eventually gives
+   * out — a lapsed token, a dropped socket, a browser that has simply had
+   * enough — a tab that starts fresh every two hours never gets there.
+   *
+   * This is prevention, not a diagnosis: the floor error boundary now
+   * reports what actually failed, so the real cause is still findable.
+   * Prevention first because the wall has nobody standing at it.
+   *
+   * Skipped while paused — a pause means somebody is deliberately reading
+   * a slide, and having the wall reload under them is exactly the rudeness
+   * this is meant to prevent. */
+  useEffect(() => {
+    if (mode !== "tv" || paused) return;
+    const t = setTimeout(() => window.location.reload(), 2 * 60 * 60 * 1000);
+    return () => clearTimeout(t);
+  }, [mode, paused]);
+
   // Paginate each vendor's machines. Vendors with a small fleet (Vivek,
   // 7) stay one page; bigger ones split and the rotation steps through
   // (vendor, page) slides. Machines are flattened in type order so a
