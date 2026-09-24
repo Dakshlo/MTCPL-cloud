@@ -376,14 +376,30 @@ export function FloorViewClient({
     return out;
   }, [vendors, production]);
 
+  /* How long the slide currently on screen gets.
+   *
+   * Daksh: "increase the last 4 pages, from Which temple is on the floor
+   * to Block stock, by 10 seconds." They earn it — an operator board is
+   * read at a glance, whereas the pie and the three month charts each
+   * carry numbers somebody actually stops to take in, and the charts
+   * spend the first 1.5s drawing themselves.
+   *
+   * The rotation used to be a setInterval on one fixed period, which
+   * cannot give different slides different lengths. It is a timeout
+   * re-armed per slide now, so tvIndex has to be in the dependencies —
+   * without it the timer would be set once and never re-armed. */
+  const NUMBER_SLIDE_BONUS_SEC = 10;
+  const currentKind = slides.length ? slides[tvIndex % slides.length].kind : "vendor";
+  const slideSec = currentKind === "vendor" ? rotateSec : rotateSec + NUMBER_SLIDE_BONUS_SEC;
+
   // TV auto-rotate. Pauses if the user clicks ⏸.
   useEffect(() => {
     if (mode !== "tv" || paused || slides.length <= 1) return;
-    const t = setInterval(() => {
+    const t = setTimeout(() => {
       setTvIndex((i) => (i + 1) % slides.length);
-    }, rotateSec * 1000);
-    return () => clearInterval(t);
-  }, [mode, paused, rotateSec, slides.length]);
+    }, slideSec * 1000);
+    return () => clearTimeout(t);
+  }, [mode, paused, slideSec, slides.length, tvIndex]);
 
   // Aggregate fleet totals across all vendors — shown in the grid
   // header and on each TV slide for quick context.
@@ -474,7 +490,7 @@ export function FloorViewClient({
                 height: "100%",
                 width: "100%",
                 background: isDark ? "#fbbf24" : "#b45309",
-                animation: `mtcpl-tv-deplete ${rotateSec}s linear forwards`,
+                animation: `mtcpl-tv-deplete ${slideSec}s linear forwards`,
                 animationPlayState: paused ? "paused" : "running",
               }}
             />
