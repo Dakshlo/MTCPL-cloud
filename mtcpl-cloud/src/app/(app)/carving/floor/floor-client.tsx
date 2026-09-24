@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FloorProduction } from "@/lib/floor-production-data";
-import { ProductionTvSlide, StockTvSlide } from "./production-slide";
+import { ProductionTvSlide, StockTvSlide, TempleFloorSlide, type TempleLoad } from "./production-slide";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -202,15 +202,16 @@ function isProgPending(m: FloorMachine): boolean {
  *  fit-to-screen measurement working off a single list. */
 type TvSlide =
   | { kind: "vendor"; vendor: FloorVendor; machines: FloorMachine[]; page: number; pageCount: number }
+  | { kind: "temples"; loads: TempleLoad[]; idle: number; maintenance: number; total: number }
   | { kind: "carving"; production: FloorProduction }
   | { kind: "cutting"; production: FloorProduction }
   | { kind: "stock"; production: FloorProduction };
 
 /** Stable per-slide key for TvFit's re-measure. */
 function tvFitDep(s: TvSlide, total: number): string {
-  return s.kind === "vendor"
-    ? `v:${s.vendor.id}:${s.page}:${s.machines.length}:${total}`
-    : `${s.kind}:${s.production.today}:${total}`;
+  if (s.kind === "vendor") return `v:${s.vendor.id}:${s.page}:${s.machines.length}:${total}`;
+  if (s.kind === "temples") return `temples:${s.loads.length}:${s.total}:${total}`;
+  return `${s.kind}:${s.production.today}:${total}`;
 }
 
 /** The number slides, in rotation order. */
@@ -221,6 +222,7 @@ function slideKey(s: TvSlide, i: number): string {
   return s.kind === "vendor" ? `${s.vendor.id}:${s.page}` : `${s.kind}:${i}`;
 }
 function slideTitle(s: TvSlide): string {
+  if (s.kind === "temples") return "Which temple is on the floor";
   if (s.kind === "carving") return "Carved this month";
   if (s.kind === "cutting") return "Cut this month";
   if (s.kind === "stock") return "Block stock";
@@ -317,6 +319,43 @@ export function FloorViewClient({
         out.push({ kind: "vendor", vendor: v, machines: flat.slice(p * per, (p + 1) * per), page: p, pageCount });
       }
     }
+    // Straight after the operator boards: the same machines read by
+    // TEMPLE instead of by vendor. Daksh's dad wants the glimpse of
+    // whose work is holding the floor, which the per-vendor boards
+    // cannot show — they are organised by who owns the machine, not by
+    // what is on it. Computed from the boards above, so it costs no
+    // extra query.
+    //
+    // A machine is counted once, under the temple of the slab it is
+    // carving. Checked against production: no machine is running two
+    // temples at once — a 2-head pair is always one temple — but the
+    // reduce below still attributes a mixed machine to its first job
+    // rather than counting it twice and inventing a CNC.
+    {
+      const byTemple = new Map<string, { machines: number; slabs: number; codes: string[] }>();
+      let idle = 0, maintenance = 0, total = 0;
+      for (const v of vendors) {
+        for (const m of v.machines) {
+          total += 1;
+          if (m.status === "maintenance") { maintenance += 1; continue; }
+          if (m.status !== "carving" || m.current_jobs.length === 0) {
+            if (m.status !== "inactive") idle += 1;
+            continue;
+          }
+          const temple = m.current_jobs[0]?.slab?.temple?.trim() || "—";
+          const g = byTemple.get(temple) ?? { machines: 0, slabs: 0, codes: [] };
+          g.machines += 1;
+          g.slabs += m.current_jobs.length;
+          g.codes.push(m.machine_code);
+          byTemple.set(temple, g);
+        }
+      }
+      const loads: TempleLoad[] = [...byTemple.entries()]
+        .map(([temple, g]) => ({ temple, ...g }))
+        .sort((a, b) => b.machines - a.machines || b.slabs - a.slabs);
+      if (total > 0) out.push({ kind: "temples", loads, idle, maintenance, total });
+    }
+
     // The number slides land at the END of the loop, so the wall shows
     // every operator's live board first and then answers "how is the
     // month going" before starting over. Omitted entirely when the data
@@ -456,6 +495,8 @@ export function FloorViewClient({
         <TvFit dep={tvFitDep(s, slides.length)}>
           {s.kind === "vendor" ? (
             <VendorTvSlide vendor={s.vendor} machines={s.machines} page={s.page} pageCount={s.pageCount} now={now} dark={isDark} />
+          ) : s.kind === "temples" ? (
+            <TempleFloorSlide loads={s.loads} idle={s.idle} maintenance={s.maintenance} total={s.total} dark={isDark} />
           ) : s.kind === "stock" ? (
             <StockTvSlide data={s.production} dark={isDark} />
           ) : (
