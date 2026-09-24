@@ -20,6 +20,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { PeekIframe } from "@/components/peek-iframe";
+import { CncAuditPanel } from "./cnc-audit-panel";
 import { EmailSnapshotCard } from "./email-snapshot-card";
 import { RoyaltySecretDot } from "./royalty-secret-dot";
 import { LiveClock } from "./live-clock";
@@ -319,10 +320,22 @@ export function DashboardV2({
               modalTitle="Block Report"
               triggerContent={<ReportRowBody icon="📊" title="Block Report" accent="#818cf8" accentLight="#4f46e5" />}
             />
-            <PeekIframe
-              url="/embed/slabs/ready"
-              modalTitle="Ready Sizes Report"
-              triggerContent={<ReportRowBody icon="📋" title="Ready Sizes Report" accent="#fbbf24" accentLight="#b45309" />}
+            {/* Ready Sizes Report was here; Daksh swapped it for the CNC
+                Audit (see the classic dashboard for the why). Kept on
+                both dashboards so the Cockpit toggle does not change
+                which tools an owner has. */}
+            <CncAuditPanel
+              triggerStyle={{
+                width: "100%",
+                textAlign: "left",
+                cursor: "pointer",
+                background: "var(--dv2-tile-bg, transparent)",
+                border: "1px solid var(--dv2-tile-border, rgba(255,255,255,0.10))",
+                borderLeft: "3px solid #b45309",
+                borderRadius: 4,
+                padding: "13px 14px",
+                color: "inherit",
+              }}
             />
 
             {/* Urgent push — full page entry. */}

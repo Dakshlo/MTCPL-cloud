@@ -24,6 +24,7 @@ import {
 import { DprEntryCard } from "@/components/dpr-entry-card";
 import { CncLogbookEntryCard } from "@/components/cnc-logbook-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
+import { CncAuditPanel } from "./cnc-audit-panel";
 
 /**
  * IST midnight today / start / end — used to scope Screen Time pings.
@@ -370,14 +371,16 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
+        {/* Ready Sizes Report lived here until Sep 2026. Daksh replaced
+            it with the CNC Audit: the ready-sizes list is reachable from
+            the sidebar anyway, whereas nothing in the app previously let
+            the office check the software against the floor. */}
         <div style={{ flex: "1 1 220px", display: "flex" }}>
-          <PeekIframe
-            url="/embed/slabs/ready"
-            triggerIcon="📋"
-            triggerLabel="Ready Sizes Report"
-            modalTitle="Ready Sizes Report"
+          <CncAuditPanel
             triggerStyle={{
               flex: 1,
+              textAlign: "left",
+              cursor: "pointer",
               padding: "18px 22px 18px 26px",
               background:
                 "linear-gradient(135deg, #ffffff 0%, #fff7ec 100%)",
