@@ -48,6 +48,8 @@ import { isThinSlab, faceSftFromSlab } from "@/lib/dimensions";
 import { applyDiscount, computeGroupedGstTotals, type GstMode } from "@/lib/challan-pricing";
 import { challanCode, invoiceCodeFromDoc } from "@/lib/doc-code";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
+import { buildFloorViewData } from "@/lib/floor-view-data";
+import { templeLoadFromVendors, type FloorTempleLoad } from "@/lib/floor-temple-load";
 import {
   buildLineages,
   aggregateLineages,
@@ -261,6 +263,11 @@ export type DailyReport = {
     sandstone: { recoveredPct: number; originalCft: number; slabCft: number; lineages: number };
     marble: { cftPerTonne: number; tonnes: number; slabCft: number; lineages: number };
   } | null;
+  /** The CNC floor RIGHT NOW, read by temple instead of by vendor: out of
+   *  every machine, how many are carving whose temple. Same aggregation the
+   *  carving wall's temple slide runs on. null if it couldn't be computed —
+   *  the floor is a nice-to-have, it never blocks the report. */
+  floor: FloorTempleLoad | null;
   /** Live pipeline snapshot — where material stands RIGHT NOW (counts, not
    *  window-bound). null if it couldn't be computed. */
   pipeline: {
@@ -1073,6 +1080,16 @@ export async function buildDailyReportData(): Promise<DailyReport> {
   const recovery = await buildRecoveryByCategory(admin, categoryMap);
   const pipeline = await buildPipeline(admin);
 
+  // The CNC floor by temple. Reuses the wall's own snapshot builder so the
+  // report, the wall and the CNC audit sheet all describe one floor.
+  // Wrapped: a floor hiccup must never cost us the whole daily report.
+  let floor: FloorTempleLoad | null = null;
+  try {
+    floor = templeLoadFromVendors(await buildFloorViewData());
+  } catch {
+    floor = null;
+  }
+
   // Report-month CNC costing — same prorated-to-elapsed-days engine as the
   // /reports/various-costing/cnc page (it self-clamps current months to
   // "today"; a past report month yields its complete final figures).
@@ -1149,6 +1166,7 @@ export async function buildDailyReportData(): Promise<DailyReport> {
     stock,
     recovery,
     pipeline,
+    floor,
     blocksByStone: today.det.blocksByStone,
     cuttingByStone: today.det.cuttingByStone,
     carvingByVendor: today.det.carvingByVendor,
@@ -1270,7 +1288,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
   const detailDocs = [...recChallans, ...recInvoices].slice(0, RECENT_CAP);
   const hasRecent = detailDocs.length > 0;
   const detailPages = Math.ceil(detailDocs.length / DOCS_PER_PAGE);
-  const PAGES = 5 + (hasRecent ? 1 + detailPages : 0);
+  const PAGES = 6 + (hasRecent ? 1 + detailPages : 0);
   const newPage = () => {
     const pg = pdf.addPage([W, H]);
     // Vertical slate gradient (banded — pdf-lib has no native gradients).
@@ -1653,7 +1671,110 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     footer(P, 2, PAGES);
   }
 
-  // ── Page 3 — money out: billing raised and suppliers paid ──
+  /* ── Page 3 — the CNC floor read by TEMPLE, not by vendor.
+
+     Daksh, Sep 2026: "add that info also — on what machine what temple is
+     going on. Like out of total machine how much in what temple."
+
+     The per-vendor boards on the wall answer "whose machines are busy";
+     this answers "whose WORK is holding the floor", which is the question
+     an owner actually asks. The percentage is deliberately of the TOTAL
+     machine count, not of the running ones — that is what he asked for,
+     and it means the bars plus the free/maintenance tiles add up to the
+     whole plant instead of to a subset.
+
+     Same aggregation as the wall's temple slide (lib/floor-temple-load), so
+     the two can never disagree. It is a RIGHT-NOW snapshot, not a 24 h
+     window — the title says so, because everything else on this report is
+     a window and a reader will assume this one is too. */
+  {
+    const P = newPage();
+    let y = header(P, H - 26, false);
+    P.t("CNC FLOOR · RIGHT NOW", M, y, 11, bold, ink);
+    P.r("at the moment this report was made", W - M, y, 8, font, muted);
+    y -= 16;
+
+    const fl = data.floor;
+    if (!fl || fl.total === 0) {
+      P.t("Floor snapshot unavailable.", M, y - 6, 10, font, muted);
+    } else {
+      // Strip: the whole plant in four numbers, so the temple bars below
+      // have something to be a share OF.
+      const tiles: Array<{ k: string; v: number; c: ReturnType<typeof rgb>; w: ReturnType<typeof rgb> }> = [
+        { k: "MACHINES", v: fl.total, c: COL.indigo, w: WASH.indigo },
+        { k: "CARVING", v: fl.running, c: COL.green, w: WASH.green },
+        { k: "FREE", v: fl.idle, c: COL.blue, w: WASH.blue },
+        { k: "MAINT.", v: fl.maintenance, c: COL.amber, w: WASH.amber },
+      ];
+      const gap = 7, tw = (cw - gap * 3) / 4, th = 50;
+      tiles.forEach((tl, i) => {
+        const x = M + i * (tw + gap);
+        P.glass(x, y, tw, th, 8, tl.c, tl.w);
+        P.ctr(tl.k, x + tw / 2 + 2, y - 15, 7, bold, tl.c);
+        P.ctr(String(tl.v), x + tw / 2 + 2, y - 38, 19, bold, ink);
+      });
+      y -= th + 16;
+
+      if (fl.loads.length === 0) {
+        P.t("No machine is carving right now.", M, y - 6, 10, font, muted);
+      } else {
+        P.t("WHICH TEMPLE IS ON WHICH MACHINE", M, y, 9, bold, brown);
+        y -= 6;
+        P.pg.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: brown });
+        y -= 14;
+
+        const ring = [COL.green, COL.blue, COL.amber, COL.indigo, COL.teal, COL.cyan, COL.gold];
+        const wring = [WASH.green, WASH.blue, WASH.amber, WASH.indigo, WASH.teal, WASH.cyan, WASH.gold];
+        const CAP = 8;
+        const shown = fl.loads.slice(0, CAP);
+        const RH = 62;
+
+        // Clip to a MEASURED width, not a character count: temple names run
+        // from "PALI GATE" to "SHRI BABA MASTNATH ROHTAK HARYANA" and a fixed
+        // slice fits one while overflowing the other into the CNC count.
+        const fit = (raw: string, f: typeof font, size: number, maxW: number) => {
+          let tx = winSafe(asc(raw));
+          if (f.widthOfTextAtSize(tx, size) <= maxW) return tx;
+          while (tx.length > 1 && f.widthOfTextAtSize(`${tx}...`, size) > maxW) tx = tx.slice(0, -1);
+          return `${tx.trimEnd()}...`;
+        };
+
+        shown.forEach((L, i) => {
+          const c = ring[i % ring.length], wsh = wring[i % wring.length];
+          P.glass(M, y, cw, RH, 8, c, wsh);
+          const pct = fl.total > 0 ? (L.machines / fl.total) * 100 : 0;
+
+          P.t(fit(L.temple, bold, 11.5, cw - 112), M + 12, y - 19, 11.5, bold, ink);
+          P.r(`${L.machines} CNC`, W - M - 12, y - 20, 15, bold, c);
+
+          P.t(fit(`CNC ${L.codes.join(", ")}`, font, 8, cw - 132), M + 12, y - 33, 8, font, muted);
+          P.r(`${L.slabs} slab${L.slabs === 1 ? "" : "s"} · ${fmt0(L.cft)} CFT`, W - M - 12, y - 34, 8.5, bold, muted);
+
+          // Share of the WHOLE plant, drawn as a bar so three temples read
+          // at a glance without anybody doing the division.
+          const bx = M + 12, bw = cw - 24 - 38, by = y - 51;
+          P.pg.drawRectangle({ x: bx, y: by, width: bw, height: 7, color: white });
+          P.pg.drawRectangle({ x: bx, y: by, width: Math.max(1.5, (bw * pct) / 100), height: 7, color: c });
+          P.r(`${fmt0(pct)}%`, W - M - 12, by, 8.5, bold, c);
+          y -= RH + 8;
+        });
+
+        if (fl.loads.length > CAP) {
+          const rest = fl.loads.slice(CAP);
+          const m = rest.reduce((a, b) => a + b.machines, 0);
+          P.t(`+ ${rest.length} more temples · ${m} CNC`, M + 2, y - 6, 9, font, muted);
+          y -= 18;
+        }
+        P.t(
+          `Percent is of all ${fl.total} machines. CFT is the stone on the bed right now, not work signed off.`,
+          M, y - 6, 7.5, font, muted,
+        );
+      }
+    }
+    footer(P, 3, PAGES);
+  }
+
+  // ── Page 4 — money out: billing raised and suppliers paid ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
@@ -1721,10 +1842,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
         }
       }
     }
-    footer(P, 3, PAGES);
+    footer(P, 4, PAGES);
   }
 
-  // ── Page 4 — last-24 h breakdowns (blocks / cutting / carving / dispatch) ──
+  // ── Page 5 — last-24 h breakdowns (blocks / cutting / carving / dispatch) ──
   {
     const P = newPage();
     let y = header(P, H - 26, false);
@@ -1756,10 +1877,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       v: rw.sft >= 0.5 ? `${fmt0(rw.cft)} CFT + ${fmt0(rw.sft)} SFT · ${rw.slabs}` : `${fmt0(rw.cft)} CFT · ${rw.slabs}`,
     })));
     section("DISPATCH BY TEMPLE", COL.green, data.dispatchByTemple.map((rw) => ({ n: rw.temple, v: `${fmt1(rw.cft)} CFT · ${rw.slabs}` })));
-    footer(P, 4, PAGES);
+    footer(P, 5, PAGES);
   }
 
-  /* ── Page 5 — the 10-day trends.
+  /* ── Page 6 — the 10-day trends.
      The LIVE PIPELINE card that used to open a page of its own is gone
      (Daksh: "remove live pipeline") — it answered "where is everything
      right now", which the app's own boards answer better and in real
@@ -1796,10 +1917,10 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
     drawMini("Cutting done", COL.cyan, "cutting");
     drawMini("Carving done", COL.amber, "carving");
     drawMini("Dispatched", COL.green, "dispatch");
-    footer(P, 5, PAGES);
+    footer(P, 6, PAGES);
   }
 
-  // ── Pages 6+ — last-24 h challans & invoices (summary + copies) ──
+  // ── Pages 7+ — last-24 h challans & invoices (summary + copies) ──
   if (hasRecent) {
     const money = (d: RecentDoc) => (d.priced ? inr(d.total) : "not priced");
     const qline = (d: { cft: number; sft: number; nos: number }) =>
@@ -1836,7 +1957,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
       listBlock("CHALLANS RAISED", COL.blue, recChallans);
       listBlock("INVOICES ISSUED", COL.green, recInvoices);
       P.t("Full itemised copies of each document on the following pages.", M, y, 8.5, font, muted);
-      footer(P, 6, PAGES);
+      footer(P, 7, PAGES);
     }
 
     // Detail pages — one itemised block per document (fixed slot).
@@ -1890,7 +2011,7 @@ export async function buildDailyReportPdf(data: DailyReport): Promise<Uint8Array
           P.t("Not priced yet - value will appear once this challan is priced.", M + 6, ty + 1, 8, font, muted);
         }
       });
-      footer(P, 7 + pageIdx, PAGES);
+      footer(P, 8 + pageIdx, PAGES);
     }
   }
 
@@ -1947,7 +2068,18 @@ async function sendTemplate(to: string[], pdfUrl: string, dateLabel: string): Pr
 }
 
 /** Full pipeline: aggregate → PDF → upload → send. Returns a summary. */
-export async function sendDailyWhatsAppReport(): Promise<{
+/**
+ * Build the report and send it on WhatsApp.
+ *
+ * `only` sends to exactly those numbers instead of the configured
+ * recipient list — Daksh, Sep 2026: "send me WhatsApp report only my
+ * number." Pressing the normal Send test button puts a PDF on every
+ * owner's phone, which is not what you want when you are checking a
+ * change. The caller is responsible for where those numbers came from;
+ * the route above only ever passes the signed-in user's OWN phone, so
+ * this cannot be pointed at a stranger.
+ */
+export async function sendDailyWhatsAppReport(only?: string[]): Promise<{
   ok: true; label: string; recipients: string[]; pdfUrl: string;
   totals: { blocks: number; cuttingSlabs: number; carvingSlabs: number; dispatchSlabs: number; paymentsToday: number };
 }> {
@@ -1963,7 +2095,11 @@ export async function sendDailyWhatsAppReport(): Promise<{
   if (upErr) throw new Error(`Report PDF upload failed: ${upErr.message}`);
   const pdfUrl = admin.storage.from("whatsapp_reports").getPublicUrl(path2).data.publicUrl;
 
-  const to = await recipients();
+  const picked = (only ?? []).map((d) => d.replace(/\D/g, "")).filter(Boolean);
+  const to = picked.length > 0
+    ? [...new Set(picked.map((d) => (d.length === 10 ? `91${d}` : d)))]
+    : await recipients();
+  if (to.length === 0) throw new Error("No recipient number to send to.");
   await sendTemplate(to, pdfUrl, data.label);
 
   return {

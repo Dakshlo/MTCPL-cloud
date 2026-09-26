@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import type { FloorProduction } from "@/lib/floor-production-data";
 import { ProductionTvSlide, StockTvSlide, TempleFloorSlide, type TempleLoad } from "./production-slide";
+import { templeLoadFromVendors } from "@/lib/floor-temple-load";
 import { batchTint } from "@/lib/batch-colours";
 
 // Light / dark theme variable packs for the TV overlay. The wall display
@@ -353,40 +354,11 @@ export function FloorViewClient({
     // cannot show — they are organised by who owns the machine, not by
     // what is on it. Computed from the boards above, so it costs no
     // extra query.
-    //
-    // A machine is counted once, under the temple of the slab it is
-    // carving. Checked against production: no machine is running two
-    // temples at once — a 2-head pair is always one temple — but the
-    // reduce below still attributes a mixed machine to its first job
-    // rather than counting it twice and inventing a CNC.
     {
-      const byTemple = new Map<string, { machines: number; slabs: number; cft: number; codes: string[] }>();
-      let idle = 0, maintenance = 0, total = 0;
-      for (const v of vendors) {
-        for (const m of v.machines) {
-          total += 1;
-          if (m.status === "maintenance") { maintenance += 1; continue; }
-          if (m.status !== "carving" || m.current_jobs.length === 0) {
-            if (m.status !== "inactive") idle += 1;
-            continue;
-          }
-          const temple = m.current_jobs[0]?.slab?.temple?.trim() || "—";
-          const g = byTemple.get(temple) ?? { machines: 0, slabs: 0, cft: 0, codes: [] };
-          g.machines += 1;
-          g.slabs += m.current_jobs.length;
-          // Raw volume on the bed — same l x w x t the machine tile
-          // prints per slab, so the two screens agree.
-          for (const j of m.current_jobs) {
-            const sl = j.slab;
-            if (sl) g.cft += (sl.length_in * sl.width_in * sl.thickness_in) / 1728;
-          }
-          g.codes.push(m.machine_code);
-          byTemple.set(temple, g);
-        }
-      }
-      const loads: TempleLoad[] = [...byTemple.entries()]
-        .map(([temple, g]) => ({ temple, ...g }))
-        .sort((a, b) => b.machines - a.machines || b.slabs - a.slabs);
+      // The arithmetic (one machine, one temple) lives in
+      // lib/floor-temple-load, shared with the daily WhatsApp report so
+      // the wall and the PDF can never quote a different floor.
+      const { loads, idle, maintenance, total } = templeLoadFromVendors(vendors);
       if (total > 0) out.push({ kind: "temples", loads, idle, maintenance, total });
     }
 

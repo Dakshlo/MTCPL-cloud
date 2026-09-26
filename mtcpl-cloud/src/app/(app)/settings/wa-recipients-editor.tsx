@@ -19,13 +19,24 @@ export function WaRecipientsEditor({ initial }: { initial: string[] }) {
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [sendErr, setSendErr] = useState<string | null>(null);
 
-  async function sendTest() {
+  /** self=true sends to the signed-in user's own mobile only. Checking a
+   *  change should not put a PDF on every owner's phone (Daksh, Sep 2026:
+   *  "send me WhatsApp report only my number"). The number itself is read
+   *  from the profile server-side; the browser only sends the flag. */
+  async function sendTest(self = false) {
     if (sendBusy) return;
-    if (numbers.length === 0) { setSendErr("Add at least one recipient first."); return; }
-    if (!window.confirm(`Send the daily work-report PDF to ${numbers.length} number${numbers.length === 1 ? "" : "s"} now?`)) return;
+    if (!self && numbers.length === 0) { setSendErr("Add at least one recipient first."); return; }
+    const who = self
+      ? "your own number"
+      : `${numbers.length} number${numbers.length === 1 ? "" : "s"}`;
+    if (!window.confirm(`Send the daily work-report PDF to ${who} now?`)) return;
     setSendBusy(true); setSendMsg(null); setSendErr(null);
     try {
-      const res = await fetch("/api/whatsapp-report/run", { method: "POST" });
+      const res = await fetch("/api/whatsapp-report/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ self }),
+      });
       const j = await res.json();
       if (!res.ok || !j.ok) { setSendErr(j.error || `HTTP ${res.status}`); return; }
       const t = j.totals ?? {};
@@ -113,13 +124,16 @@ export function WaRecipientsEditor({ initial }: { initial: string[] }) {
       {/* Preview / send-test — moved here from the Dashboard. */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 2, display: "flex", flexDirection: "column", gap: 10 }}>
         <p className="muted" style={{ fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-          The report auto-sends every evening at <strong>6 PM</strong>. Preview the PDF with today&apos;s data (nothing is sent), or send a test now to the numbers above.
+          The report auto-sends every evening at <strong>6 PM</strong>. Preview the PDF with today&apos;s data (nothing is sent), send a copy to your own number only, or send a test to every number above.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <a href="/api/whatsapp-report/preview" target="_blank" rel="noopener noreferrer" style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "var(--gold-dark)", background: "var(--surface)", border: "1px solid var(--gold-dark)", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap", textDecoration: "none" }}>
             👁 Preview PDF
           </a>
-          <button type="button" onClick={sendTest} disabled={sendBusy} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: sendBusy ? "var(--border)" : "#16A34A", border: "none", borderRadius: 8, cursor: sendBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+          <button type="button" onClick={() => sendTest(true)} disabled={sendBusy} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: sendBusy ? "var(--border)" : "#2563EB", border: "none", borderRadius: 8, cursor: sendBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+            {sendBusy ? "Sending…" : "📲 Send only to me"}
+          </button>
+          <button type="button" onClick={() => sendTest(false)} disabled={sendBusy} style={{ padding: "9px 16px", fontSize: 13, fontWeight: 800, color: "#fff", background: sendBusy ? "var(--border)" : "#16A34A", border: "none", borderRadius: 8, cursor: sendBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}>
             {sendBusy ? "Sending…" : "Send test now"}
           </button>
         </div>
