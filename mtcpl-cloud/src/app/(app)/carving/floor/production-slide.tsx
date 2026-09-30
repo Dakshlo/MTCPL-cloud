@@ -109,7 +109,15 @@ export function ProductionTvSlide({
      on. Change the header or tile heights above and this wants
      re-measuring, or the chart starts floating in its panel. */
   const W = 1000, H = 395;
-  const padL = 92, padR = 118, padT = 26, padB = 48;
+  /* padT carries the head figure, not just breathing room. The line is
+     CUMULATIVE, so its last point is always its highest — and whenever this
+     month is ahead of last month (the good case, and the common one) that
+     point IS the peak, which lands exactly on the top gridline. The figure
+     is drawn 20px above the head, so at padT = 26 it was being painted at
+     y = 6 with a 21px face: most of the glyphs sat above the viewBox and the
+     wall showed a number with its top sliced off. 54 leaves the whole figure
+     inside the frame with room to spare. */
+  const padL = 92, padR = 118, padT = 54, padB = 48;
   const maxDay = Math.max(data.daysInMonth, data.daysInPrevMonth);
   const peak = Math.max(
     1,
@@ -363,7 +371,10 @@ export function ProductionTvSlide({
                 <circle cx={xOf(last.day)} cy={yOf(last.cum)} r={9} fill={C.panelSolid} stroke={ramp.high} strokeWidth={3} />
                 <text
                   x={xOf(last.day)}
-                  y={yOf(last.cum) - 20}
+                  /* Never above the frame, whatever the geometry becomes
+                     later: 21px text needs ~16px of cap height above its
+                     baseline. */
+                  y={Math.max(20, yOf(last.cum) - 20)}
                   textAnchor="middle"
                   fontSize={21}
                   fontWeight={700}
