@@ -116,6 +116,28 @@ const SERIES_CSS = `
 export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
   const [g, setG] = useState<Granularity>("daily");
   const [mode, setMode] = useState<Mode>("output");
+
+  /* Cost has no Daily view (Daksh, Sep 2026: "remove the cost graph for
+     daily, only keep weekly and monthly").
+  
+     There is no per-day expense entry anywhere in the system: a month's
+     expenses and depreciation are booked once and spread evenly across its
+     days. So on a daily cost chart both money lines are dead flat by
+     construction — they are the same number sixteen times, and the only
+     thing moving is the ₹/unit line. Worse, a flat line invites the reader
+     to believe spending really was identical every day. Weekly is the
+     shortest window the underlying data can actually vary over. */
+  const GRANS: Record<Mode, Granularity[]> = {
+    output: ["daily", "weekly", "monthly"],
+    cost: ["weekly", "monthly"],
+  };
+  function pickMode(next: Mode) {
+    setMode(next);
+    // Coming from Output/Daily there is no daily cost series to show, so
+    // land on the nearest window that means something instead of an
+    // empty card.
+    if (!GRANS[next].includes(g)) setG(GRANS[next][0]);
+  }
   const [cache, setCache] = useState<Partial<Record<Granularity, TrendPoint[]>>>({});
   const outUnit = plant === "cnc" ? "units (SFT+CFT)" : "CFT";
   const rateUnit = plant === "cnc" ? "₹/unit" : "₹/CFT";
@@ -233,11 +255,11 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <div style={{ display: "inline-flex", gap: 3, padding: 4, borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
-            <button type="button" onClick={() => setMode("output")} style={seg(mode === "output")}>Output</button>
-            <button type="button" onClick={() => setMode("cost")} style={seg(mode === "cost")}>Cost</button>
+            <button type="button" onClick={() => pickMode("output")} style={seg(mode === "output")}>Output</button>
+            <button type="button" onClick={() => pickMode("cost")} style={seg(mode === "cost")}>Cost</button>
           </div>
           <div style={{ display: "inline-flex", gap: 3, padding: 4, borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
-            {(Object.keys(G_META) as Granularity[]).map((k) => (
+            {GRANS[mode].map((k) => (
               <button key={k} type="button" onClick={() => setG(k)} style={seg(g === k)}>{G_META[k].label}</button>
             ))}
           </div>
