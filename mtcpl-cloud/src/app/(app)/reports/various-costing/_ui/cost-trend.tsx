@@ -168,7 +168,12 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
 
   const outVals = points.map((p) => (Number.isFinite(p.out) ? p.out : 0));
   const costVals = points.map((p) => (Number.isFinite(p.cost) ? p.cost : 0));
-  const leftMax = mode === "output" ? Math.max(...outVals, 0) : Math.max(...costVals, 0);
+  // With the two cost series drawn side by side rather than stacked, the axis
+  // only has to reach the taller of them — stacking needed room for the sum,
+  // which squashed both lines into the bottom half.
+  const leftMax = mode === "output"
+    ? Math.max(...outVals, 0)
+    : Math.max(0, ...points.map((p) => Math.max(p.operational || 0, p.depreciation || 0)));
   const ticks = niceTicks(leftMax || 1);
   const yTop = ticks[ticks.length - 1] || 1;
   const yAt = (v: number) => MT + IH - (IH * v) / yTop;
@@ -181,7 +186,6 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
 
   const xAt = (i: number) => ML + (n <= 1 ? IW / 2 : (IW * i) / (n - 1));
   const band = n > 1 ? IW / (n - 1) : IW;
-  const barW = Math.max(6, Math.min(34, band * 0.56));
 
   // Area + line path for the output view. Zeros are plotted, so the line is
   // continuous; the final (running) window is split off to be dashed.
@@ -224,7 +228,7 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 1 }}>
             {mode === "output"
               ? `${G_META[g].caption} · ${plant === "cnc" ? "SFT + CFT" : "CFT"}, counted at approval`
-              : `${G_META[g].caption} · expenses + depreciation, with ${rateUnit} over the top`}
+              : `${G_META[g].caption} · expenses vs depreciation, with ${rateUnit} over the top`}
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -284,12 +288,12 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", margin: "8px 0 2px", fontSize: 12 }}>
               <span style={{ fontWeight: 800, color: "var(--text)" }}>Total {inrFull(totalCost)}</span>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--muted)" }}>
-                <i style={{ width: 11, height: 11, borderRadius: 3, background: C_EXP, display: "inline-block" }} />
+                <i style={{ width: 16, height: 3, borderRadius: 2, background: C_EXP, display: "inline-block" }} />
                 Expenses <strong style={{ color: "var(--text)" }}>{inrFull(totalOp)}</strong>
                 <span style={{ opacity: 0.75 }}>({fmt0(totalCost > 0 ? (totalOp / totalCost) * 100 : 0)}%)</span>
               </span>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--muted)" }}>
-                <i style={{ width: 11, height: 11, borderRadius: 3, background: C_DEP, display: "inline-block" }} />
+                <i style={{ width: 16, height: 3, borderRadius: 2, background: C_DEP, display: "inline-block" }} />
                 Depreciation <strong style={{ color: "var(--text)" }}>{inrFull(totalDep)}</strong>
                 <span style={{ opacity: 0.75 }}>({fmt0(totalCost > 0 ? (totalDep / totalCost) * 100 : 0)}%)</span>
               </span>
@@ -349,25 +353,30 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
                   </>
                 ) : (
                   <>
-                    {/* Stacked bars: expenses on the floor, depreciation on
-                        top, so the stack height IS the window's total cost. */}
-                    {points.map((p, i) => {
-                      const x = xAt(i) - barW / 2;
-                      const op = Math.max(0, p.operational || 0);
-                      const dep = Math.max(0, p.depreciation || 0);
-                      const yOp = yAt(op), hOp = MT + IH - yOp;
-                      const yDep = yAt(op + dep), hDep = yOp - yDep;
-                      const dim = hover != null && hover.i !== i ? 0.42 : 1;
-                      const partial = i === partialIdx;
+                    {/* Daksh, Sep 2026: "don't show this cost graph this way,
+                        instead show 2 lines — cost of depreciation and
+                        expenses." Two plain lines on the money axis; the
+                        stack is gone, so the two are compared against each
+                        other rather than read as one pile. Same dashed-tail
+                        convention as the output chart for the window that is
+                        still running. */}
+                    {([
+                      { get: (p: TrendPoint) => p.operational || 0, color: C_EXP, key: "exp" },
+                      { get: (p: TrendPoint) => p.depreciation || 0, color: C_DEP, key: "dep" },
+                    ] as const).map(({ get, color, key }) => {
+                      const pts = points.map((p, i) => `${xAt(i).toFixed(1)},${yAt(Math.max(0, get(p))).toFixed(1)}`);
+                      const solid = pts.slice(0, Math.max(2, n - 1)).join(" ");
+                      const tail = n >= 2 ? pts.slice(n - 2).join(" ") : "";
                       return (
-                        <g key={i} opacity={dim}>
-                          {hOp > 0.4 && <rect x={x} y={yOp} width={barW} height={hOp} fill={C_EXP} rx={1.5} />}
-                          {hDep > 0.4 && <rect x={x} y={yDep} width={barW} height={hDep} fill={C_DEP} rx={1.5} />}
-                          {/* The running window is hatched at the top edge so
-                              nobody reads a part-month as a cheap month. */}
-                          {partial && (op + dep) > 0 && (
-                            <rect x={x} y={yDep} width={barW} height={Math.min(4, Math.max(2, hDep))} fill="var(--surface)" opacity={0.55} />
-                          )}
+                        <g key={key}>
+                          {solid && <polyline points={solid} fill="none" stroke={color} strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" />}
+                          {tail && <polyline points={tail} fill="none" stroke={color} strokeWidth={2.4} strokeDasharray="6 5" strokeLinecap="round" opacity={0.85} />}
+                          {points.map((p, i) => (
+                            <circle key={i} cx={xAt(i)} cy={yAt(Math.max(0, get(p)))}
+                              r={hover?.i === i ? 5.5 : i === partialIdx ? 4 : 3}
+                              fill={i === partialIdx ? "var(--surface)" : color}
+                              stroke={color} strokeWidth={2} pointerEvents="none" />
+                          ))}
                         </g>
                       );
                     })}
@@ -452,10 +461,10 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
                       <>
                         <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "ui-monospace, monospace" }}>{inrFull(p.cost)}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "3px 8px", alignItems: "center", fontSize: 11, marginTop: 6 }}>
-                          <i style={{ width: 9, height: 9, borderRadius: 2, background: C_EXP }} />
+                          <i style={{ width: 13, height: 3, borderRadius: 2, background: C_EXP }} />
                           <span style={{ color: "rgba(255,255,255,0.8)" }}>Expenses</span>
                           <strong style={{ fontFamily: "ui-monospace, monospace" }}>{inrFull(p.operational)}</strong>
-                          <i style={{ width: 9, height: 9, borderRadius: 2, background: C_DEP }} />
+                          <i style={{ width: 13, height: 3, borderRadius: 2, background: C_DEP }} />
                           <span style={{ color: "rgba(255,255,255,0.8)" }}>Depreciation</span>
                           <strong style={{ fontFamily: "ui-monospace, monospace" }}>{inrFull(p.depreciation)}</strong>
                         </div>
@@ -485,7 +494,7 @@ export function CostTrend({ plant }: { plant: "cnc" | "cutter" }) {
             {mode === "output" ? (
               <>Each point = that {G_META[g].unitWord}&apos;s own carved output, counted at approval. A {G_META[g].unitWord} with nothing approved sits on zero.</>
             ) : (
-              <>Bars = that {G_META[g].unitWord}&apos;s own cost, expenses below and depreciation above; the two together are the total. The teal line is {rateUnit} on the right axis, and it breaks where nothing was carved.</>
+              <>Two lines on the money axis: what was SPENT and what was WRITTEN OFF in that {G_META[g].unitWord}; add them for the total. The teal line is {rateUnit} on the right axis, and it breaks where nothing was carved.</>
             )}
             {" "}The last {G_META[g].unitWord} is still running (dashed / lighter top). Hover anywhere on a column for the full breakdown.
           </div>
