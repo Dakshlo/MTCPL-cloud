@@ -16,6 +16,11 @@
  * CNC out = SFT + CFT (combined carved output). Cutter out = CFT.
  * value (cost/unit) is still returned for reference; no output → value: null.
  *
+ * Sep 2026 — each point also carries its COST SPLIT (operational vs
+ * depreciation, plus the operational categories), so the same card can flip
+ * to a cost view without a second round trip or a second engine run. Daksh:
+ * "in cost show graph of cost split e.g. expenses, depreciation."
+ *
  * Points are built with parallel engine calls (≤16) — heavier than a plain
  * query but guarantees the numbers can never drift from the page.
  */
@@ -104,10 +109,31 @@ export type TrendPoint = {
   /** Cost per unit (CNC: combined SFT+CFT, cutter: per CFT). null = no output. */
   value: number | null;
   cost: number;
+  /** Operational expenses for the window (prorated for sub-monthly). */
+  operational: number;
+  /** Depreciation for the window (WDV, prorated). operational + depreciation
+   *  === cost, which is what lets the cost view stack them. */
+  depreciation: number;
+  /** Operational split by category, already labelled for display. Zero-value
+   *  categories are dropped — a legend of empty rows helps nobody. */
+  cats: Array<{ key: string; label: string; amount: number }>;
   out: number;
   slabs: number;
   days: number;
 };
+
+/** Machine-readable category keys → what the office calls them. The two
+ *  plants have different expense schemas, hence one map per plant. */
+const CAT_LABEL: Record<string, string> = {
+  tools: "Tools", electricity: "Electricity", labor: "Labour", office: "Office",
+  maintenance: "Maintenance", other: "Other",
+  manpower: "Manpower", repair_maintenance: "Repair & maintenance",
+};
+const shapeCats = (rows: Array<{ category: string; amount: number }>) =>
+  rows
+    .filter((r) => r.amount > 0)
+    .map((r) => ({ key: r.category, label: CAT_LABEL[r.category] ?? r.category, amount: r.amount }))
+    .sort((a, b) => b.amount - a.amount);
 
 export async function GET(req: NextRequest) {
   const { profile } = await requireAuth();
@@ -127,7 +153,15 @@ export async function GET(req: NextRequest) {
           const period: CncReportPeriod = { kind: g === "weekly" ? "weekly" : "monthly", startDate: w.startDate, endDate: w.endDate, label: w.label };
           const r = await buildCncVariousCostReport(period);
           const out = r.totalSft + r.totalCft;
-          return { label: w.label, sub: w.sub, startDate: w.startDate, endDate: w.endDate, value: out > 0 ? r.totalCostForPeriod / out : null, cost: r.totalCostForPeriod, out, slabs: r.slabsCount, days: r.daysInWindow };
+          return {
+            label: w.label, sub: w.sub, startDate: w.startDate, endDate: w.endDate,
+            value: out > 0 ? r.totalCostForPeriod / out : null,
+            cost: r.totalCostForPeriod,
+            operational: r.operationalForPeriod,
+            depreciation: r.depreciationForPeriod,
+            cats: shapeCats(r.expenseBreakdown),
+            out, slabs: r.slabsCount, days: r.daysInWindow,
+          };
         }
         const period: CutterReportPeriod = { kind: g === "weekly" ? "weekly" : "monthly", startDate: w.startDate, endDate: w.endDate, label: w.label };
         const r = await buildCutterCostReport(period);
@@ -137,7 +171,15 @@ export async function GET(req: NextRequest) {
         const todayK = keyOf(Date.UTC(new Date(Date.now() + IST_MS).getUTCFullYear(), new Date(Date.now() + IST_MS).getUTCMonth(), new Date(Date.now() + IST_MS).getUTCDate()));
         const endK = w.endDate > todayK && w.startDate <= todayK ? todayK : w.endDate;
         const days = Math.max(1, Math.round((Date.parse(`${endK}T00:00:00Z`) - Date.parse(`${w.startDate}T00:00:00Z`)) / dayMs) + 1);
-        return { label: w.label, sub: w.sub, startDate: w.startDate, endDate: w.endDate, value: val, cost: r.totalCost, out: r.totalCft, slabs: r.slabsCount, days };
+        return {
+          label: w.label, sub: w.sub, startDate: w.startDate, endDate: w.endDate,
+          value: val,
+          cost: r.totalCost,
+          operational: r.operationalForPeriod,
+          depreciation: r.depreciationForPeriod,
+          cats: shapeCats(r.expenseBreakdown),
+          out: r.totalCft, slabs: r.slabsCount, days,
+        };
       }),
     );
     return NextResponse.json(
