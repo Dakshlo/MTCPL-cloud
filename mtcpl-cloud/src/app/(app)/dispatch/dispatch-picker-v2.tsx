@@ -32,7 +32,7 @@ import { useRouter } from "next/navigation";
 import { createDispatchAction, parkDispatchSlabsAction, fetchTempleStorageSlabsAction } from "./actions";
 import { FormPendingOverlay } from "@/components/form-pending-overlay";
 import { timeAgoLabel } from "./time-ago";
-import type { ReadySlab, SiteInfo, TempleGroup } from "./dispatch-client";
+import type { ReadySlab, SiteInfo, TempleCardData, TempleGroup } from "./dispatch-client";
 
 /* ── shared bits ─────────────────────────────────────────────────────── */
 
@@ -131,29 +131,27 @@ function Timer({ since, reworked }: { since: string | null; reworked: boolean })
  * to read past (Daksh).
  */
 export function TempleCardV2({
-  group, matched, draft, onOpen,
+  card, draft, loading, onOpen,
 }: {
-  group: TempleGroup;
-  /** The slabs currently matching the board's search (may be a subset). */
-  matched: ReadySlab[];
+  /* Counts, not slabs. The board no longer holds every ready slab — it
+     holds a summary per temple and fetches the rows when one is opened
+     (Oct 2026, to stop the page shipping 1.3 MB before it can paint). */
+  card: TempleCardData;
   /** Slabs already ticked for this temple in an earlier, unfinished visit. */
   draft: number;
+  /** This card's slabs are being fetched right now. */
+  loading?: boolean;
   onOpen: () => void;
 }) {
-  const totalCft = matched.reduce((sum, s) => sum + s.cft, 0);
-  const urgent = matched.filter((s) => s.priority).length;
-  const hasMarble = matched.some((s) => s.isMarble);
-  const blocked = matched.filter((s) => s.cancelPending).length;
+  const { temple, slabs: count, cft: totalCft, urgent, hasMarble, blocked } = card;
 
   // Top three components by count — "what is actually sitting here".
-  const top = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of matched) {
-      const k = (s.label || s.component_element || s.component_section || "—").trim().toUpperCase();
-      m.set(k, (m.get(k) ?? 0) + 1);
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-  }, [matched]);
+  const top = useMemo(
+    () => (Object.entries(card.components) as Array<[string, number]>)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3),
+    [card.components],
+  );
 
   return (
     <div
@@ -167,7 +165,7 @@ export function TempleCardV2({
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-        <span style={{ fontSize: 15.5, fontWeight: 800, lineHeight: 1.25, minWidth: 0, flex: 1 }}>🏛 {group.temple}</span>
+        <span style={{ fontSize: 15.5, fontWeight: 800, lineHeight: 1.25, minWidth: 0, flex: 1 }}>🏛 {temple}</span>
         {urgent > 0 && (
           <span title={`${urgent} urgent`} style={{ fontSize: 10.5, fontWeight: 900, color: "#fff", background: "#dc2626", borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>
             ⚡ {urgent}
@@ -177,8 +175,8 @@ export function TempleCardV2({
 
       {/* The two numbers that decide whether a truck is worth calling. */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1 }}>{matched.length}</span>
-        <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>slab{matched.length === 1 ? "" : "s"}</span>
+        <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1 }}>{count}</span>
+        <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>slab{count === 1 ? "" : "s"}</span>
         <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "ui-monospace, monospace", marginLeft: "auto" }}>{totalCft.toFixed(2)}</span>
         <span className="muted" style={{ fontSize: 11, fontWeight: 700 }}>CFT</span>
       </div>
@@ -216,12 +214,15 @@ export function TempleCardV2({
       <button
         type="button"
         onClick={onOpen}
+        disabled={loading}
         style={{
-          marginTop: "auto", background: "var(--gold-dark)", color: "#fff", border: "none",
-          borderRadius: 11, padding: "12px 16px", fontSize: 14.5, fontWeight: 800, cursor: "pointer", width: "100%",
+          marginTop: "auto", background: loading ? "var(--border)" : "var(--gold-dark)",
+          color: loading ? "var(--muted)" : "#fff", border: "none",
+          borderRadius: 11, padding: "12px 16px", fontSize: 14.5, fontWeight: 800,
+          cursor: loading ? "wait" : "pointer", width: "100%",
         }}
       >
-        🚚 Dispatch
+        {loading ? "Opening…" : "🚚 Dispatch"}
       </button>
     </div>
   );

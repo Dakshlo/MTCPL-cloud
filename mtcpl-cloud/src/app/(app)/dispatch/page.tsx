@@ -18,6 +18,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import { getSlabTransferStages } from "@/lib/slab-transfer-stages";
 import {
   DispatchClient,
+  type ReadyGroupSummary,
   type ReadySlab,
   type ProvisionalRow,
   type InvoiceInProcessRow,
@@ -391,7 +392,50 @@ export default async function DispatchPage({
     };
   }
 
-  const readySlabs: ReadySlab[] = readyRows.map(shapeReadySlab);
+  /* ── Why the board gets SUMMARIES and not 2,053 slabs ───────────
+     Daksh, Oct 2026: "earlier we talked about we need to set a limit to
+     load — that page takes time to open, maybe because it needs to load
+     so many slabs."
+
+     He is right about the cause. Every ready slab was being shaped and
+     serialised into the HTML: measured at 1.3 MB for ~2,000 slabs, which
+     a plant tablet on yard wifi has to download, parse and hold in
+     memory before the first card appears.
+
+     But the board does not SHOW slabs. Look at a card: a temple name, a
+     slab count, a CFT total, the three commonest components, an urgent
+     badge. All of that is arithmetic over the slabs, not the slabs
+     themselves. The individual rows are needed only when somebody opens
+     a temple to pick — one temple at a time — and that is now fetched on
+     demand from /api/dispatch/ready.
+
+     Summaries are keyed by (station, temple) because a temple's slabs can
+     sit at different stations and the board filters by station before it
+     groups. Component counts are kept whole rather than pre-trimmed to a
+     top three, so the client can still merge stations correctly under
+     "All dispatch". That is a few dozen small rows instead of thousands
+     of fat ones. */
+  const summaryByKey = new Map<string, ReadyGroupSummary>();
+  for (const row of readyRows) {
+    const slab = shapeReadySlab(row);
+    const key = `${slab.station}\u0000${slab.temple}`;
+    let g = summaryByKey.get(key);
+    if (!g) {
+      g = {
+        temple: slab.temple, station: slab.station ?? "main",
+        slabs: 0, cft: 0, urgent: 0, blocked: 0, hasMarble: false, components: {},
+      };
+      summaryByKey.set(key, g);
+    }
+    g.slabs += 1;
+    g.cft += slab.cft;
+    if (slab.priority) g.urgent += 1;
+    if (slab.cancelPending) g.blocked += 1;
+    if (slab.isMarble) g.hasMarble = true;
+    const comp = (slab.label || slab.component_element || slab.component_section || "\u2014").trim().toUpperCase();
+    g.components[comp] = (g.components[comp] ?? 0) + 1;
+  }
+  const readySummaries: ReadyGroupSummary[] = [...summaryByKey.values()];
 
   const provisional: ProvisionalRow[] = provisionalRows.map((d) => {
     const { count, cft } = cftForDispatch(d.id);
@@ -625,7 +669,7 @@ export default async function DispatchPage({
 
   return (
     <DispatchClient
-      readySlabs={readySlabs}
+      readySummaries={readySummaries}
       vendorSheds={vendorSheds}
       siteInfoByTemple={siteInfoByTemple}
       handlingMan={handlingMan}

@@ -124,6 +124,40 @@ function durationBetween(fromIso: string, toIso: string): string {
   return `${days} d ${hrs % 24} h`;
 }
 
+/**
+ * What the Make Dispatch board needs to draw one temple card, without
+ * the slabs themselves (mig-less change, Oct 2026).
+ *
+ * Keyed by (station, temple): a temple's slabs can sit at more than one
+ * station, and the board filters by station before it groups. Component
+ * counts are kept WHOLE rather than pre-trimmed to a top three, so that
+ * merging two stations under "All dispatch" still produces the right
+ * top three instead of a top three of top threes.
+ */
+/** One temple card on the board, after merging whatever stations are in
+ *  view. Same numbers a TempleGroup used to derive from its slabs. */
+export type TempleCardData = {
+  key: string;
+  temple: string;
+  slabs: number;
+  cft: number;
+  urgent: number;
+  blocked: number;
+  hasMarble: boolean;
+  components: Record<string, number>;
+};
+
+export type ReadyGroupSummary = {
+  temple: string;
+  station: string;
+  slabs: number;
+  cft: number;
+  urgent: number;
+  blocked: number;
+  hasMarble: boolean;
+  components: Record<string, number>;
+};
+
 export type ReadySlab = {
   id: string;
   label: string | null;
@@ -286,7 +320,7 @@ function slabMatches(s: ReadySlab, query: string): boolean {
 // ─── main client ─────────────────────────────────────────────────────────
 
 export function DispatchClient({
-  readySlabs,
+  readySummaries,
   vendorSheds,
   siteInfoByTemple,
   handlingMan,
@@ -306,7 +340,7 @@ export function DispatchClient({
   toast,
   error,
 }: {
-  readySlabs: ReadySlab[];
+  readySummaries: ReadyGroupSummary[];
   /** Mig 160 — vendor sheds (CNC) for the Make Dispatch station selector. */
   vendorSheds: { id: string; name: string }[];
   /** Mig 130 — temple name → site info, shown on the dispatch form. */
@@ -365,7 +399,7 @@ export function DispatchClient({
   }
 
   const counts = {
-    ready: readySlabs.length,
+    ready: readySummaries.reduce((n, g) => n + g.slabs, 0),
     provisional: provisional.length,
     invoice_in_process: invoiceInProcess.length, // Mig 167
     out_for_delivery: outForDelivery.length,
@@ -478,10 +512,10 @@ export function DispatchClient({
       </div>
 
       {tab === "ready" && (
-        <ReadyTab slabs={readySlabs} vendorSheds={vendorSheds} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} />
+        <ReadyTab summaries={readySummaries} vendorSheds={vendorSheds} siteInfoByTemple={siteInfoByTemple} handlingMan={handlingMan} carvingDispatchTransfer={carvingDispatchTransfer} />
       )}
       {tab === "provisional" && (
-        <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} readySlabs={readySlabs} truckHistory={truckHistory} canApprove={canApprove} />
+        <ProvisionalTab rows={provisional} slabsByDispatch={provisionalSlabsByDispatch} truckHistory={truckHistory} canApprove={canApprove} />
       )}
       {/* Mig 167 — Invoice in process (read-only for everyone). */}
       {tab === "invoice_in_process" && <InvoiceInProcessTab rows={invoiceInProcess} />}
@@ -503,9 +537,11 @@ export function DispatchClient({
 export type TempleGroup = { key: string; temple: string; hasMarble: boolean; slabs: ReadySlab[] };
 
 function ReadyTab({
-  slabs, vendorSheds, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
+  summaries, vendorSheds, siteInfoByTemple, handlingMan, carvingDispatchTransfer,
 }: {
-  slabs: ReadySlab[];
+  /** Counts and totals per (station, temple). The slabs themselves are
+   *  fetched one temple at a time — see loadGroup below. */
+  summaries: ReadyGroupSummary[];
   vendorSheds: { id: string; name: string }[];
   siteInfoByTemple: Record<string, SiteInfo>;
   handlingMan: { name?: string; phone?: string } | null;
@@ -544,37 +580,107 @@ function ReadyTab({
 
   const stationCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const s of slabs) { const k = s.station ?? "main"; m.set(k, (m.get(k) ?? 0) + 1); }
+    for (const g of summaries) m.set(g.station, (m.get(g.station) ?? 0) + g.slabs);
     return m;
-  }, [slabs]);
-  const stationSlabs = useMemo(
-    () => (showAll ? slabs : slabs.filter((s) => (s.station ?? "main") === stationFilter)),
-    [slabs, showAll, stationFilter],
-  );
+  }, [summaries]);
 
-  const groups: TempleGroup[] = useMemo(() => {
-    const map = new Map<string, TempleGroup>();
-    for (const s of stationSlabs) {
-      // Daksh June 2026 — ONE entry per temple (was split sandstone vs
-      // marble, which forced two separate dispatches for the same temple).
-      // A temple now lists ALL its ready slabs together so a single
-      // dispatch can mix stones; each slab keeps its own MARBLE badge.
-      const key = s.temple;
-      if (!map.has(key)) map.set(key, { key, temple: s.temple, hasMarble: false, slabs: [] });
-      const g = map.get(key)!;
-      g.slabs.push(s);
-      if (s.isMarble) g.hasMarble = true;
+  /** One card per temple for the station in view. Merging two stations
+   *  under "All dispatch" adds the component maps rather than picking a
+   *  winner, so the top three stays honest. */
+  const cards: TempleCardData[] = useMemo(() => {
+    const map = new Map<string, TempleCardData>();
+    for (const g of summaries) {
+      if (!showAll && g.station !== stationFilter) continue;
+      let c = map.get(g.temple);
+      if (!c) {
+        c = { key: g.temple, temple: g.temple, slabs: 0, cft: 0, urgent: 0, blocked: 0, hasMarble: false, components: {} };
+        map.set(g.temple, c);
+      }
+      c.slabs += g.slabs;
+      c.cft += g.cft;
+      c.urgent += g.urgent;
+      c.blocked += g.blocked;
+      c.hasMarble = c.hasMarble || g.hasMarble;
+      for (const [k, n] of Object.entries(g.components)) c.components[k] = (c.components[k] ?? 0) + n;
     }
     return [...map.values()].sort((a, b) => a.temple.localeCompare(b.temple));
-  }, [stationSlabs]);
+  }, [summaries, showAll, stationFilter]);
 
+  const totalSlabs = useMemo(() => cards.reduce((n, c) => n + c.slabs, 0), [cards]);
+
+  /* ── Search now asks the server ─────────────────────────────
+     It used to filter an array of every ready slab that the page had
+     already shipped. The page no longer ships them, so the search goes
+     to /api/dispatch/ready?q=… instead — debounced, because a round
+     trip per keystroke would be worse than the problem it solves. */
   const q = query.trim();
-  const visibleGroups = useMemo(() => {
-    if (!q) return groups.map((g) => ({ ...g, matched: g.slabs }));
-    return groups
-      .map((g) => ({ ...g, matched: g.slabs.filter((s) => slabMatches(s, q)) }))
-      .filter((g) => g.matched.length > 0);
-  }, [groups, q]);
+  const [found, setFound] = useState<ReadySlab[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [capped, setCapped] = useState(false);
+  useEffect(() => {
+    if (q.length < 2) { setFound(null); setSearching(false); return; }
+    let dead = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      fetch(`/api/dispatch/ready?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((j: { ok: boolean; slabs?: ReadySlab[]; capped?: boolean }) => {
+          if (dead) return;
+          setFound(j.ok ? (j.slabs ?? []) : []);
+          setCapped(!!j.capped);
+        })
+        .catch(() => { if (!dead) setFound([]); })
+        .finally(() => { if (!dead) setSearching(false); });
+    }, 300);
+    return () => { dead = true; clearTimeout(t); setSearching(false); };
+  }, [q]);
+
+  /** Search results, grouped the way the cards are. */
+  const searchCards: Array<TempleCardData & { matched: ReadySlab[] }> = useMemo(() => {
+    if (!found) return [];
+    const map = new Map<string, TempleCardData & { matched: ReadySlab[] }>();
+    for (const s of found) {
+      if (!showAll && (s.station ?? "main") !== stationFilter) continue;
+      let c = map.get(s.temple);
+      if (!c) {
+        c = { key: s.temple, temple: s.temple, slabs: 0, cft: 0, urgent: 0, blocked: 0, hasMarble: false, components: {}, matched: [] };
+        map.set(s.temple, c);
+      }
+      c.matched.push(s);
+      c.slabs += 1;
+      c.cft += s.cft;
+      if (s.priority) c.urgent += 1;
+      if (s.cancelPending) c.blocked += 1;
+      if (s.isMarble) c.hasMarble = true;
+      const k = (s.label || s.component_element || s.component_section || "\u2014").trim().toUpperCase();
+      c.components[k] = (c.components[k] ?? 0) + 1;
+    }
+    return [...map.values()].sort((a, b) => a.temple.localeCompare(b.temple));
+  }, [found, showAll, stationFilter]);
+
+  const shown = q.length >= 2 ? searchCards : cards;
+
+  /* ── Opening a temple fetches just that temple ────────────── */
+  const [loadingTemple, setLoadingTemple] = useState<string | null>(null);
+  async function openTemple(card: TempleCardData) {
+    // A search already has the rows in hand; no need to ask again.
+    const fromSearch = (card as { matched?: ReadySlab[] }).matched;
+    if (fromSearch && fromSearch.length) {
+      setPeekGroup({ key: card.key, temple: card.temple, hasMarble: card.hasMarble, slabs: fromSearch });
+      return;
+    }
+    setLoadingTemple(card.temple);
+    try {
+      const url = `/api/dispatch/ready?temple=${encodeURIComponent(card.temple)}&station=${showAll ? "all" : encodeURIComponent(stationFilter)}`;
+      const j = (await (await fetch(url)).json()) as { ok: boolean; slabs?: ReadySlab[] };
+      const list = j.ok ? (j.slabs ?? []) : [];
+      setPeekGroup({ key: card.key, temple: card.temple, hasMarble: card.hasMarble, slabs: list });
+    } catch {
+      setPeekGroup({ key: card.key, temple: card.temple, hasMarble: card.hasMarble, slabs: [] });
+    } finally {
+      setLoadingTemple(null);
+    }
+  }
 
   function toggleOpen(key: string) {
     setOpen((prev) => {
@@ -585,7 +691,7 @@ function ReadyTab({
     });
   }
 
-  if (slabs.length === 0) {
+  if (summaries.length === 0) {
     return (
       <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 14, fontSize: 15 }}>
         🎉 Nothing to dispatch right now. When carving jobs are approved, their slabs will queue up here.
@@ -645,27 +751,31 @@ function ReadyTab({
           )}
         </div>
         <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
-          {q
-            ? `${visibleGroups.reduce((n, g) => n + g.matched.length, 0)} match${visibleGroups.reduce((n, g) => n + g.matched.length, 0) === 1 ? "" : "es"}`
-            : `${slabs.length} slabs · ${groups.length} group${groups.length === 1 ? "" : "s"}`}
+          {q.length >= 2
+            ? searching
+              ? "searching…"
+              : `${shown.reduce((n, g) => n + g.slabs, 0)} match${shown.reduce((n, g) => n + g.slabs, 0) === 1 ? "" : "es"}${capped ? " (first 400)" : ""}`
+            : `${totalSlabs} slabs · ${shown.length} group${shown.length === 1 ? "" : "s"}`}
         </span>
       </div>
 
-      {visibleGroups.length === 0 ? (
+      {shown.length === 0 ? (
         <div className="muted" style={{ padding: "30px 16px", textAlign: "center", fontSize: 14, background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 12 }}>
-          {q ? `No slab matches “${q}”.` : stationSlabs.length === 0 ? "No slabs at this station yet." : "Nothing to show."}
+          {q.length >= 2
+            ? (searching ? "Searching…" : `No slab matches “${q}”.`)
+            : "No slabs at this station yet."}
         </div>
       ) : (
         // Temples as compact cards (4–5/row, Daksh June 2026). No inline slab
         // expansion — tap Dispatch to open the full-screen picker.
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(262px, 1fr))", gap: 12 }}>
-          {visibleGroups.map((g) => (
+          {shown.map((g) => (
             <TempleCardV2
               key={g.key}
-              group={g}
-              matched={g.matched}
+              card={g}
               draft={drafts[g.temple] ?? 0}
-              onOpen={() => setPeekGroup(g)}
+              loading={loadingTemple === g.temple}
+              onOpen={() => void openTemple(g)}
             />
           ))}
         </div>
@@ -688,13 +798,11 @@ function ReadyTab({
 function ProvisionalTab({
   rows,
   slabsByDispatch,
-  readySlabs,
   truckHistory,
   canApprove,
 }: {
   rows: ProvisionalRow[];
   slabsByDispatch: Record<string, ReadySlab[]>;
-  readySlabs: ReadySlab[];
   truckHistory: TruckTrip[];
   canApprove: boolean;
 }) {
