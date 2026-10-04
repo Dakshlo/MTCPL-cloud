@@ -19,9 +19,36 @@
 //   • Clicks on internal <a href="..."> links (Next.js navigation).
 //   • Form submissions.
 //
-// Resets when usePathname() changes (= navigation has completed) or
-// after a 12s safety timeout in case a server action drags + nothing
-// changes routes.
+// ── When it STOPS, and why that was wrong ────────────────────────
+//
+// It clears when usePathname()/useSearchParams() change — i.e. a real
+// navigation finished — or on a safety timeout.
+//
+// That is fine for a link. It is WRONG for a server action, which is
+// most of what this app does: an action re-renders the page in place
+// and changes neither the path nor the query, so there is no signal
+// here at all and the bar ran until the timeout. Dispatch made it
+// obvious — Daksh, Oct 2026: "the page opens but the top loading bar
+// still doesn't get off, and that spinning arrow doesn't stop until
+// very long… meanwhile it works, we are still able to go for any new
+// request."
+//
+// That last clause is the whole diagnosis: the app was never busy. The
+// indicator was lying, and it was lying for 90 SECONDS because the
+// safety timeout had been widened from 12s to 90s to stop the bar
+// vanishing mid-navigation on the slow Dispatch page. That fixed one
+// complaint by making this one six times worse.
+//
+// Three things now end it, so the timeout is a backstop again:
+//
+//   1. A real navigation (path/query change) — as before.
+//   2. The user touching the page again. A screen that accepts a click
+//      is not blocked, so the bar has no business still being up. This
+//      is the signal that matches what Daksh actually observed.
+//   3. A timeout sized to the KIND of work: a navigation may legitimately
+//      take a while on a plant tablet, a server action that re-renders
+//      in place should not. A form submit no longer inherits the long
+//      navigation budget.
 //
 // Designed to be near-zero cost on idle pages: just two listeners
 // and a re-render only when the active state toggles.
@@ -29,6 +56,16 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+
+/** A navigation may genuinely take a while on a plant tablet over yard
+ *  wifi, so it keeps a long backstop. */
+const NAV_BUDGET_MS = 30_000;
+/** A server action re-renders in place; if it has not finished in this
+ *  long, the bar is almost certainly stuck rather than busy. */
+const ACTION_BUDGET_MS = 6_000;
+/** Grace before the user's own interaction is allowed to clear the bar,
+ *  so the click that raised it cannot immediately cancel it. */
+const RELEASE_AFTER_MS = 900;
 
 export function NavigationProgress() {
   const pathname = usePathname();
@@ -38,30 +75,23 @@ export function NavigationProgress() {
   useEffect(() => {
     let showTimer: ReturnType<typeof setTimeout> | null = null;
     let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+    /** When the current indicator went up — used so the "user touched
+     *  the page" release cannot kill the bar on the same click that
+     *  raised it. */
+    let shownAt = 0;
 
-    function startSoon() {
+    function startSoon(budgetMs: number) {
       // Tiny delay so navigations that finish in < 60ms never
       // flicker the bar. Cut from 100ms → 60ms after Daksh
       // flagged the cursor change felt late.
       if (showTimer) clearTimeout(showTimer);
+      shownAt = Date.now();
       showTimer = setTimeout(() => setActive(true), 60);
-      // Safety net so a server action that never changes route can't
-      // leave the bar spinning for ever.
-      //
-      // This was 12s, and 12s was the whole "Dispatch doesn't open"
-      // complaint (Daksh, Sep 2026). Dispatch ships ~1.2 MB and takes
-      // longer than that on a plant tablet, so the bar and the wait
-      // cursor switched themselves off while the navigation was still
-      // in flight — the screen went back to looking completely idle on
-      // the OLD page. "It loads and nothing happens." Every other page
-      // finished inside 12s, which is why only this one looked broken.
-      //
-      // 90s is past any real navigation but still bounded. The proper
-      // answer is the loading.tsx below it, which paints a skeleton the
-      // instant you click; this timer is now only the backstop it was
-      // always meant to be.
+      // Backstop only. The real stops are a route change and the
+      // user's next interaction (see below); this just guarantees the
+      // bar cannot outlive the work by more than its own budget.
       if (safetyTimer) clearTimeout(safetyTimer);
-      safetyTimer = setTimeout(stop, 90_000);
+      safetyTimer = setTimeout(stop, budgetMs);
     }
 
     function stop() {
@@ -111,7 +141,7 @@ export function NavigationProgress() {
       } catch {
         return;
       }
-      startSoon();
+      startSoon(NAV_BUDGET_MS);
     }
 
     function onSubmit(e: SubmitEvent) {
@@ -119,14 +149,31 @@ export function NavigationProgress() {
       // GSTIN lookup form should be silent).
       const form = e.target as HTMLFormElement | null;
       if (form?.dataset.noProgress === "1") return;
-      startSoon();
+      // A server action re-renders in place and gives us no completion
+      // signal, so it gets a short budget. The button that was pressed
+      // shows its own "Saving…" state for anything longer — a global
+      // bar adds nothing there except doubt.
+      startSoon(ACTION_BUDGET_MS);
+    }
+
+    /** The page accepting input means the page is not blocked. Ignore
+     *  the click that STARTED this (hence the grace window), and the
+     *  modifier-less re-click a link gets while it is still resolving. */
+    function onInteract() {
+      if (Date.now() - shownAt > RELEASE_AFTER_MS) stop();
     }
 
     document.addEventListener("click", onClick, true);
     document.addEventListener("submit", onSubmit, true);
+    // Bubble phase, AFTER onClick's capture pass, so a link click still
+    // raises the bar before this can consider releasing it.
+    document.addEventListener("pointerdown", onInteract);
+    document.addEventListener("keydown", onInteract);
     return () => {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("submit", onSubmit, true);
+      document.removeEventListener("pointerdown", onInteract);
+      document.removeEventListener("keydown", onInteract);
       stop();
     };
   }, []);
