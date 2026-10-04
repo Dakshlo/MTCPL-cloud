@@ -2824,6 +2824,23 @@ body.vendor-cockpit-fullscreen .page-card {
  * that asks the user to rotate. The @media query auto-dismisses
  * the overlay the moment they rotate — no JS needed. */
 .rotate-prompt { display: none; }
+
+/* Mig 227 — a page may opt OUT of the rotate prompt by rendering
+ * `.allow-portrait` anywhere inside it.
+ *
+ * The CNC tool crib is the first: it is used standing at a machine with
+ * one hand on the phone, and demanding that the phone be turned sideways
+ * before a man can write down that he took a drill bit is the difference
+ * between a register people use and one they go back to paper for. The
+ * crib is built portrait-first, so the prompt is not protecting anything
+ * there.
+ *
+ * Deliberately opt-IN per page: every other screen in the app was laid
+ * out for landscape and still gets the prompt. */
+@media (orientation: portrait) and (max-width: 900px) {
+  body:has(.allow-portrait) .rotate-prompt { display: none !important; }
+}
+
 @media (orientation: portrait) and (max-width: 900px) {
   .rotate-prompt {
     display: flex;

@@ -666,6 +666,20 @@ export const navEntries: NavEntry[] = [
     roles: ["crosscheck", "owner", "developer"],
     department: "inventory",
   },
+  {
+    // Mig 227 — the CNC vendors' tool register. Sits in INVENTORY
+    // because it is stock, but it shares nothing with Scaffolding:
+    // separate tables, separate pages, separate permissions.
+    //
+    // DEVELOPER ONLY for now (Daksh, Oct 2026: "once done we will make
+    // it for all users which are relevant"). Widening this row and
+    // lib/cnc-tool-permissions.ts together is the whole of that change.
+    href: "/tools",
+    label: "CNC Tools",
+    icon: "🧰",
+    roles: ["developer"],
+    department: "inventory",
+  },
 ];
 
 /** Flatten the registry to the pages a given role+department may open.

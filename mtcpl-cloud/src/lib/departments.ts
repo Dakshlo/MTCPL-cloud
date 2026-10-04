@@ -116,7 +116,10 @@ export const DEPARTMENTS: ReadonlyArray<{
 ] as const;
 
 const FINANCE_PREFIXES = ["/accounts"] as const;
-const INVENTORY_PREFIXES = ["/inventory"] as const;
+// Mig 227 — /tools (the CNC tool crib) is stock, so it belongs to the
+// Inventory department for highlighting even though it shares no code
+// with the scaffolding module.
+const INVENTORY_PREFIXES = ["/inventory", "/tools"] as const;
 const INVOICING_PREFIXES = ["/invoicing"] as const;
 const REGISTER_PREFIXES = ["/activity-register"] as const;
 const MAINTENANCE_PREFIXES = ["/maintenance"] as const;
