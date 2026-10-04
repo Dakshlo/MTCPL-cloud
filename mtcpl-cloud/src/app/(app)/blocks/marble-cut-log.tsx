@@ -21,6 +21,8 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import { fetchMarbleCutLogAction } from "./marble-cut-log-action";
+
 type CutSlab = {
   id: string;
   label: string | null;
@@ -76,10 +78,8 @@ function cft(l: number | null, w: number | null, h: number | null): number {
 }
 
 export function MarbleCutLog({
-  entries,
   undoAction,
 }: {
-  entries: MarbleCutBlock[];
   /**
    * Optional server action to undo a marble block cut. When provided,
    * each block row in the modal gets an "Undo cut" button that flips
@@ -89,6 +89,25 @@ export function MarbleCutLog({
   undoAction?: (blockId: string) => Promise<UndoResult>;
 }) {
   const [open, setOpen] = useState(false);
+  /* The log is HISTORY behind a closed modal — 640 blocks and 4,238
+     slabs. It used to ride along in the page's HTML on every /blocks
+     render, which was most of that page's 2 MB, for something most
+     people never open. It now loads the first time somebody opens it
+     and is kept for the rest of the visit. */
+  const [entries, setEntries] = useState<MarbleCutBlock[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || entries !== null) return;
+    let dead = false;
+    void fetchMarbleCutLogAction().then((r) => {
+      if (dead) return;
+      if (r.ok) setEntries(r.entries as MarbleCutBlock[]);
+      else { setEntries([]); setLoadErr(r.error); }
+    });
+    return () => { dead = true; };
+  }, [open, entries]);
+  const loading = open && entries === null;
+  const rows = entries ?? [];
   const [stoneFilter, setStoneFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
@@ -144,13 +163,13 @@ export function MarbleCutLog({
   // Distinct stone names in the dataset for the filter dropdown.
   const stoneOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const e of entries) if (e.stone) set.add(e.stone);
+    for (const e of rows) if (e.stone) set.add(e.stone);
     return [...set].sort();
-  }, [entries]);
+  }, [rows]);
 
   // Apply filters.
   const filtered = useMemo(() => {
-    return entries.filter((e) => {
+    return rows.filter((e) => {
       if (stoneFilter !== "all" && e.stone !== stoneFilter) return false;
       if (dateFrom && (!e.cut_at || dateKey(e.cut_at) < dateFrom)) return false;
       if (dateTo && (!e.cut_at || dateKey(e.cut_at) > dateTo)) return false;
@@ -226,7 +245,9 @@ export function MarbleCutLog({
             🪨 Marble Cutting Log
           </p>
           <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
-            {entries.length} marble block{entries.length === 1 ? "" : "s"} cut · what came out, day-by-day · Yellow / White filter
+            {entries === null
+              ? "what came out of every marble block, day-by-day"
+              : `${entries.length} marble block${entries.length === 1 ? "" : "s"} cut · what came out, day-by-day · Yellow / White filter`}
           </p>
         </div>
         <span
@@ -402,7 +423,15 @@ export function MarbleCutLog({
 
             {/* Scrollable body */}
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px 16px" }}>
-              {filtered.length === 0 ? (
+              {loading ? (
+                <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+                  Loading the cutting log…
+                </div>
+              ) : loadErr ? (
+                <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--danger)", fontSize: 13, fontWeight: 700 }}>
+                  ⚠ {loadErr}
+                </div>
+              ) : filtered.length === 0 ? (
                 <div
                   style={{
                     padding: "48px 16px",

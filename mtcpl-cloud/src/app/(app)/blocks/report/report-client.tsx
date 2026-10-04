@@ -82,6 +82,49 @@ function calcCft(l: number, w: number, h: number) {
 
 /** CFT for any block — real CFT for sandstone, tonnes→CFT-equiv for
  *  marble. Lets sorting, totals, and Excel export treat both uniformly. */
+/** Indian digit grouping, fixed decimals. "33,257.49" beats "33257.49"
+ *  at arm's length, which is the whole point of the summary band. */
+function fmtNum(n: number, dp: number): string {
+  if (!Number.isFinite(n)) return "\u2014";
+  return n.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+
+/** One figure in the summary band: a small label, a big number, its
+ *  unit beside it. */
+function SummaryCell({
+  label, value, sub, marble,
+}: { label: string; value: string; sub: string; marble?: boolean }) {
+  return (
+    <div
+      style={{
+        padding: "9px 16px", minWidth: 0, flex: "1 1 auto",
+        borderLeft: "1px solid var(--border-light)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase",
+          color: "var(--muted)", whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 1 }}>
+        <span
+          style={{
+            fontSize: 21, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.15,
+            fontVariantNumeric: "tabular-nums",
+            color: marble ? "#b45309" : "var(--text)",
+          }}
+        >
+          {value}
+        </span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)", whiteSpace: "nowrap" }}>{sub}</span>
+      </div>
+    </div>
+  );
+}
+
 function blockCft(b: Block, isMarble: boolean): number {
   if (isMarble) {
     const t = Number(b.tonnes);
@@ -175,6 +218,35 @@ export function ReportClient({
     for (const b of baseRows) if (matchesCategory(b)) c[b.status] = (c[b.status] ?? 0) + 1;
     return c;
   }, [baseRows, categoryFilter]);
+
+  /* Volume per status, on exactly the same rows the counts above use.
+     Daksh, Oct 2026: "in the KPI card of 665 available also show CFT or
+     tonnes relevant in there, so it is easy to see."
+     A count on its own does not tell a yard anything — 665 blocks could
+     be a mountain or a corner. Marble is weighed and sandstone is
+     measured, so each card carries whichever is real for the stone it
+     holds, and both when the view mixes them. */
+  const statusTotals = useMemo(() => {
+    const t: Record<string, { cft: number; tonnes: number; marble: number }> = {
+      available: { cft: 0, tonnes: 0, marble: 0 },
+      reserved: { cft: 0, tonnes: 0, marble: 0 },
+      consumed: { cft: 0, tonnes: 0, marble: 0 },
+      discarded: { cft: 0, tonnes: 0, marble: 0 },
+    };
+    for (const b of baseRows) {
+      if (!matchesCategory(b)) continue;
+      const bucket = t[b.status];
+      if (!bucket) continue;
+      const isMarble = stoneCategoryMap[b.stone] === "marble";
+      bucket.cft += blockCft(b, isMarble);
+      if (isMarble) {
+        bucket.marble += 1;
+        if (b.tonnes != null) bucket.tonnes += Number(b.tonnes);
+      }
+    }
+    return t;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseRows, categoryFilter, stoneCategoryMap]);
 
   // Count per category, honouring the current status choice — the Fresh vs
   // Restocked split of whatever statuses are selected.
@@ -447,8 +519,22 @@ export function ReportClient({
                     {label}
                   </span>
                 </div>
+                {/* How much stone that number is. Marble in tonnes,
+                    sandstone in CFT, both when the view holds both. */}
+                {(() => {
+                  const tot = statusTotals[s];
+                  if (!tot || (tot.cft <= 0 && tot.tonnes <= 0)) return null;
+                  const sandstone = (statusCounts[s] ?? 0) - tot.marble;
+                  return (
+                    <div style={{ fontSize: 12, fontWeight: 800, color: on ? accent : "var(--text)", marginTop: 5, fontVariantNumeric: "tabular-nums" }}>
+                      {sandstone > 0 && <>{fmtNum(tot.cft, 0)} CFT</>}
+                      {sandstone > 0 && tot.tonnes > 0 && <span style={{ color: "var(--muted)", fontWeight: 600 }}> · </span>}
+                      {tot.tonnes > 0 && <>{fmtNum(tot.tonnes, 1)} T</>}
+                    </div>
+                  );
+                })()}
                 {s === "available" && categoryFilter === "all" && (
-                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
                     Fresh {statusCounts.available - restockedAvailableNow} · ↻ Restocked {restockedAvailableNow}
                   </div>
                 )}
@@ -660,16 +746,33 @@ export function ReportClient({
 
       {/* ── Summary + Export ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
-        <p className="muted" style={{ fontSize: 13 }}>
-          Showing <strong style={{ color: "var(--text)" }}>{filtered.length}</strong> of {blocks.length} blocks ·{" "}
-          Total volume <strong style={{ color: "var(--text)" }}>{totalCft.toFixed(2)} CFT</strong>
+        {/* Daksh, Oct 2026: "make this line more easy to read, or you can
+            say prominent, as dad looks there."
+
+            It was 13px grey body text in a row of controls — the one
+            sentence that answers "how much have I got in front of me"
+            looked like a caption. Now it is a band: the numbers large
+            and in ink, their labels small above them, so it reads from
+            arm's length across a desk. Marble's tonnes only appear when
+            marble is actually in the filtered view. */}
+        <div
+          style={{
+            display: "flex", alignItems: "stretch", gap: 0, flexWrap: "wrap",
+            border: "1px solid var(--border)", borderLeft: "4px solid var(--gold)",
+            borderRadius: 12, background: "var(--surface)", overflow: "hidden",
+            flex: "1 1 340px", minWidth: 0,
+          }}
+        >
+          <SummaryCell
+            label="Showing"
+            value={fmtNum(filtered.length, 0)}
+            sub={`of ${fmtNum(blocks.length, 0)} blocks`}
+          />
+          <SummaryCell label="Total volume" value={fmtNum(totalCft, 2)} sub="CFT" />
           {totals.marbleCount > 0 && (
-            <>
-              {" · "}
-              Total tonnes <strong style={{ color: "var(--text)" }}>{totals.tonnes.toFixed(3)} T</strong>
-            </>
+            <SummaryCell label="Total tonnes" value={fmtNum(totals.tonnes, 3)} sub="T" marble />
           )}
-        </p>
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* Yard preview (Daksh, Aug 2026): a cinema view of the
               CURRENT filter — MTCPL and RIICO as separate areas, each

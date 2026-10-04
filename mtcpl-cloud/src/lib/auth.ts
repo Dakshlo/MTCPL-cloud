@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -156,7 +157,30 @@ const DEV_MOCK_PROFILE: Profile = {
   theme_preference: null,
 };
 
-export async function getAuthContext() {
+/**
+ * Who is asking, and what may they do.
+ *
+ * MEMOISED PER REQUEST. React's cache() keeps one result for the whole
+ * render of one request; a second call in the same render gets the
+ * first answer instead of asking again.
+ *
+ * It was not memoised, and that was the single biggest tax on every
+ * page in the app. requireAuth() is called from the layout, the page,
+ * and most of the helpers underneath them — 264 files reference it —
+ * so a render asked the same question about twenty times. Each ask was
+ * a round trip to Supabase Auth, which runs FIVE queries of its own
+ * (users, sessions, identities, mfa_factors, mfa_amr_claims), plus a
+ * profiles select. Measured on /blocks, 1 Oct 2026: 20 auth round
+ * trips = 100 auth queries + 20 profile selects, out of ~325 queries
+ * for the page. Roughly a third of the work was asking who you are,
+ * over and over, within one render.
+ *
+ * Scope is exactly right for this: one request, one answer. A server
+ * action is its own request and re-checks; a later navigation
+ * re-checks; nothing is cached ACROSS users or requests, so a role
+ * change still takes effect on the next request as before.
+ */
+export const getAuthContext = cache(async function getAuthContext() {
   if (process.env.NODE_ENV === "development" && process.env.DEV_BYPASS_AUTH === "1") {
     return { user: { id: "dev-user-id", email: "dev@local" } as any, profile: DEV_MOCK_PROFILE };
   }
@@ -245,7 +269,7 @@ export async function getAuthContext() {
         } as Profile)
       : null
   };
-}
+});
 
 export async function requireAuth(roles?: AppRole[]): Promise<{ user: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["user"]>; profile: NonNullable<Awaited<ReturnType<typeof getAuthContext>>["profile"]> }> {
   const ctx = await getAuthContext();

@@ -249,55 +249,6 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
     return out;
   }
 
-  type CutSlabRow = {
-    id: string;
-    label: string | null;
-    temple: string;
-    stone: string | null;
-    length_ft: number;
-    width_ft: number;
-    thickness_ft: number;
-    status: string;
-    source_block_id: string | null;
-  };
-  async function fetchSlabsForBlocks(blockIds: string[]): Promise<CutSlabRow[]> {
-    if (blockIds.length === 0) return [];
-    const CHUNK = 500; // safe size for the .in() URL list
-    const PAGE = 1000; // PostgREST default row cap per request
-    const out: CutSlabRow[] = [];
-    // Chunk block-id list to keep .in() query strings safe.
-    // No status filter: we want to surface every slab linked to a
-    // cut block — including ones still in 'planned' / 'open' if the
-    // operator generated them but hasn't moved them along yet.
-    // The component already shows status per slab.
-    //
-    // Daksh May 2026 round 2 — the per-chunk query needs its OWN
-    // pagination via .range(). Without it, PostgREST silently caps
-    // each request at 1000 rows. Once cumulative slab count crosses
-    // that, blocks at the tail of the chunk lost slabs randomly
-    // (e.g. MT-B-380 showed "1 cut" in the Marble Cutting Log even
-    // though six slabs existed; Total Ready Sizes + the labels page
-    // both read slab_requirements with their own pagination and
-    // showed all six). Order by id so the pagination is deterministic
-    // and pages don't shuffle rows across requests.
-    for (let i = 0; i < blockIds.length; i += CHUNK) {
-      const chunk = blockIds.slice(i, i + CHUNK);
-      for (let offset = 0; offset < 100_000; offset += PAGE) {
-        const { data, error: pageErr } = await admin
-          .from("slab_requirements")
-          .select("id, label, temple, stone, length_ft, width_ft, thickness_ft, status, source_block_id")
-          .in("source_block_id", chunk)
-          .order("id")
-          .range(offset, offset + PAGE - 1);
-        if (pageErr) throw new Error(pageErr.message);
-        if (!data || data.length === 0) break;
-        out.push(...(data as CutSlabRow[]));
-        if (data.length < PAGE) break;
-      }
-    }
-    return out;
-  }
-
   // Build the inclusive cut-block universe.
   const consumedBlocks = await fetchConsumedBlocks();
   const linkedBlockIds = await fetchAllSourceBlockIds();
@@ -306,14 +257,12 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   const extraBlocks = await fetchBlocksByIds(missingIds);
   const allConsumed: ConsumedRow[] = [...consumedBlocks, ...extraBlocks];
 
-  const consumedSlabs = await fetchSlabsForBlocks(allConsumed.map((b) => b.id));
-  const slabsByBlock = new Map<string, CutSlabRow[]>();
-  for (const s of consumedSlabs) {
-    if (!s.source_block_id) continue;
-    const arr = slabsByBlock.get(s.source_block_id) ?? [];
-    arr.push(s);
-    slabsByBlock.set(s.source_block_id, arr);
-  }
+  /* The Marble Cutting Log used to be built here — every consumed
+     marble block with every slab under it, 640 and 4,238 of them — and
+     shipped in the HTML on every render. It is history behind a modal
+     that starts CLOSED, so it now loads itself when somebody opens it
+     (marble-cut-log-action.ts). That removed the heaviest query on this
+     page and most of its payload. */
 
   // Mig 076 — senior_incharge has full block edit + manual-cut
   // access, mirrors team_head (this was Rajesh's pre-promotion role
@@ -352,31 +301,6 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
   // Build the marble-cut log feed — one entry per consumed marble
   // block with its cut slabs and cutter info. Client-side filterable
   // by date / stone (yellow vs white) inside the modal.
-  const marbleCutLog = allConsumed
-    .filter((b) => categoryOf(b.stone) === "marble")
-    .map((b) => ({
-      id: b.id,
-      stone: b.stone ?? "Unknown",
-      yard: b.yard,
-      length_ft: b.length_ft,
-      width_ft: b.width_ft,
-      height_ft: b.height_ft,
-      tonnes: b.tonnes != null ? Number(b.tonnes) : null,
-      truck_no: b.truck_no,
-      vendor_name: b.vendor_name,
-      cut_at: b.updated_at,
-      cut_by_name: b.updated_by ? profilesMap[b.updated_by] ?? null : null,
-      slabs: (slabsByBlock.get(b.id) ?? []).map((s) => ({
-        id: s.id,
-        label: s.label,
-        temple: s.temple,
-        length_ft: Number(s.length_ft),
-        width_ft: Number(s.width_ft),
-        thickness_ft: Number(s.thickness_ft),
-        status: s.status,
-      })),
-    }));
-
   const blockList = activeCat === "marble" ? marbleBlocks : sandstoneBlocks;
   const totalBlocks = blockList.length;
 
@@ -619,7 +543,7 @@ export default async function BlocksPage({ searchParams }: { searchParams: Searc
 
           {/* Marble Cutting Log — third card, marble tab only. */}
           {canViewReport && activeCat === "marble" && (
-            <MarbleCutLog entries={marbleCutLog} undoAction={undoMarbleCutAction} />
+            <MarbleCutLog undoAction={undoMarbleCutAction} />
           )}
         </div>
       )}
