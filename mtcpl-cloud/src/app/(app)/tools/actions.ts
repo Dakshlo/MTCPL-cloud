@@ -1,9 +1,14 @@
 "use server";
 
 // ──────────────────────────────────────────────────────────────────
-// Migration 227 — CNC tool crib server actions
+// Migrations 227 + 228 — CNC tool store server actions
 // ──────────────────────────────────────────────────────────────────
 // Every write to cnc_tools / cnc_tool_movements goes through here.
+//
+// ONE STORE. A tool belongs to the plant, not to a vendor, and every
+// CNC vendor draws from the same shelf. `vendor_id` on a movement says
+// WHO IT WAS FOR — required on issue/return, NULL on receive/scrap/
+// adjust, and the database enforces that shape (mig 228).
 // RLS on those tables is read-only for `authenticated`, so the admin
 // client below is the only way in and these gates are the real door.
 //
@@ -27,7 +32,11 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import { canManageCncToolCrib, canUseCncTools } from "@/lib/cnc-tool-permissions";
+import {
+  canManageCncToolStore,
+  canUseCncTools,
+  takingVendorFor,
+} from "@/lib/cnc-tool-permissions";
 import {
   UNDO_WINDOW_MS,
   levelOf,
@@ -62,16 +71,14 @@ function refresh() {
  */
 export async function createToolAction(fd: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
-  if (!canManageCncToolCrib(profile)) return { ok: false, error: "Not allowed." };
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
 
-  const vendorId = txt(fd, "vendor_id");
   const name = txt(fd, "name");
   const spec = txt(fd, "spec") || null;
   const unit = txt(fd, "unit") || "pcs";
   const lowRaw = txt(fd, "low_stock_qty");
   const opening = num(fd, "opening_qty");
 
-  if (!vendorId) return { ok: false, error: "Pick a crib first." };
   if (!name) return { ok: false, error: "Give the tool a name." };
   if (name.length > 80) return { ok: false, error: "That name is too long." };
 
@@ -87,7 +94,6 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
   const { data: created, error } = await admin
     .from("cnc_tools")
     .insert({
-      vendor_id: vendorId,
       name,
       spec,
       unit,
@@ -98,12 +104,10 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
     .select("id, name")
     .maybeSingle();
 
-  // 23505 = the per-crib unique index. Worth naming the real cause: the
-  // same tool existing in ANOTHER crib is fine, so "already exists" on
-  // its own would read as a bug to someone who can see it isn't there.
+  // 23505 = the one-name-per-store unique index.
   if (error) {
     if (error.code === "23505") {
-      return { ok: false, error: `"${name}" is already in this crib.` };
+      return { ok: false, error: `"${name}" is already in the store.` };
     }
     return { ok: false, error: error.message };
   }
@@ -114,7 +118,7 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
   // of nowhere above an empty register.
   if (Number.isFinite(opening) && opening > 0) {
     const { error: mErr } = await admin.from("cnc_tool_movements").insert({
-      vendor_id: vendorId,
+      vendor_id: null, // stock arriving on the shelf belongs to the store
       tool_id: created.id,
       kind: "receive",
       delta: opening,
@@ -129,7 +133,6 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
   }
 
   await logAudit(profile.id, "cnc_tool_created", "cnc_tool", created.id, {
-    vendor_id: vendorId,
     name,
     spec,
     opening_qty: Number.isFinite(opening) && opening > 0 ? opening : 0,
@@ -144,7 +147,7 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
 
 export async function updateToolAction(fd: FormData): Promise<ActionResult> {
   const { profile } = await requireAuth();
-  if (!canManageCncToolCrib(profile)) return { ok: false, error: "Not allowed." };
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
 
   const toolId = txt(fd, "tool_id");
   if (!toolId) return { ok: false, error: "Missing tool." };
@@ -174,7 +177,7 @@ export async function updateToolAction(fd: FormData): Promise<ActionResult> {
   const admin = createAdminSupabaseClient();
   const { error } = await admin.from("cnc_tools").update(patch).eq("id", toolId);
   if (error) {
-    if (error.code === "23505") return { ok: false, error: "Another tool in this crib already has that name." };
+    if (error.code === "23505") return { ok: false, error: "Another tool in the store already has that name." };
     return { ok: false, error: error.message };
   }
 
@@ -198,7 +201,7 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   const { profile } = await requireAuth();
   if (!canUseCncTools(profile)) return { ok: false, error: "Not allowed." };
 
-  const vendorId = txt(fd, "vendor_id");
+  const requestedVendor = txt(fd, "vendor_id") || null;
   const toolId = txt(fd, "tool_id");
   const kind = txt(fd, "kind") as ToolMovementKind;
   const takenBy = txt(fd, "taken_by");
@@ -208,7 +211,7 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   // own direction instead of a signed quantity.
   const down = txt(fd, "direction") === "down";
 
-  if (!vendorId || !toolId) return { ok: false, error: "Missing tool." };
+  if (!toolId) return { ok: false, error: "Missing tool." };
   if (!["receive", "issue", "return", "scrap", "adjust"].includes(kind)) {
     return { ok: false, error: "Unknown movement." };
   }
@@ -216,11 +219,21 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
 
   // scrap and adjust are the two that can hide a loss, so they stay
   // behind the manage gate even though taking and returning are open.
-  if ((kind === "scrap" || kind === "adjust") && !canManageCncToolCrib(profile)) {
+  if ((kind === "scrap" || kind === "adjust") && !canManageCncToolStore(profile)) {
     return { ok: false, error: "Only a manager can scrap or fix the count." };
   }
   if (kind === "issue" && !takenBy) {
     return { ok: false, error: "Write who is taking it — that is the whole point of the register." };
+  }
+
+  // A take leaves the store FOR somebody, so it must name a vendor; the
+  // store's own lines (stock in, scrap, count fix) must not pretend to.
+  // Mig 228's CHECK enforces the same shape, so a tampered form cannot
+  // slip past this.
+  const needsVendor = kind === "issue" || kind === "return";
+  const vendorId = needsVendor ? takingVendorFor(profile, requestedVendor) : null;
+  if (needsVendor && !vendorId) {
+    return { ok: false, error: "Pick which vendor is taking it." };
   }
 
   const delta =
@@ -230,19 +243,18 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
 
   const admin = createAdminSupabaseClient();
 
-  // Read the tool fresh. Two phones can be on the same crib, and the
-  // page's copy of the stock may be a minute old.
+  // Read the tool fresh. Several phones can be on the same store, and
+  // the page's copy of the stock may be a minute old.
   const { data: toolRow } = await admin
     .from("cnc_tools")
-    .select("id, vendor_id, name, unit, low_stock_qty, low_alert_level, is_active")
+    .select("id, name, unit, low_stock_qty, low_alert_level, is_active")
     .eq("id", toolId)
     .maybeSingle();
   if (!toolRow) return { ok: false, error: "That tool is gone." };
   const tool = toolRow as {
-    id: string; vendor_id: string; name: string; unit: string;
+    id: string; name: string; unit: string;
     low_stock_qty: number | null; low_alert_level: number | null; is_active: boolean;
   };
-  if (tool.vendor_id !== vendorId) return { ok: false, error: "That tool belongs to another crib." };
   if (!tool.is_active) return { ok: false, error: "That tool has been archived." };
 
   const before = await stockForTool(toolId);

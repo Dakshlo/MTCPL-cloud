@@ -1,62 +1,54 @@
 // ──────────────────────────────────────────────────────────────────
-// /tools — the CNC tool crib (Migration 227)
+// /tools — the CNC tool store (Migrations 227 + 228)
 // ──────────────────────────────────────────────────────────────────
-// Replaces the physical register the CNC vendors keep for tools.
+// ONE store for the whole plant. A tool added here is available to
+// every CNC vendor; what each of them takes is recorded against them.
 //
-// DEVELOPER ONLY in v1 (Daksh, Oct 2026: "for now we will make it for
-// developer only; once done we will make it for all users which are
-// relevant"). The gate is canUseCncTools() and it is re-checked inside
-// every server action — this redirect is the courtesy, not the control.
+// This route is the MASTER view — the whole shelf, who has drawn what,
+// and the full register. A vendor gets a different screen entirely
+// (/tools/v/[vendorId]): a big Take button and their own recent
+// takings, because, as Daksh put it, their job is not to study stock.
 //
-// The crib is per vendor. In v1 the developer picks one from the
-// switcher; in v2 a vendor is pinned to their own and the switcher goes
-// away. Nothing else about the page changes, because which cribs you may
-// touch is already a question the code asks (cncToolVendorIdsFor).
+// DEVELOPER ONLY in v1. The gate is re-checked inside every server
+// action; this redirect is the courtesy, not the control.
 // ──────────────────────────────────────────────────────────────────
 
 import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
-import { canManageCncToolCrib, canUseCncTools } from "@/lib/cnc-tool-permissions";
-import { loadCrib, listToolVendors, takenByHistory } from "@/lib/cnc-tool-stock";
+import {
+  canManageCncToolStore,
+  canSeeCncToolMaster,
+  canUseCncTools,
+} from "@/lib/cnc-tool-permissions";
+import { listToolVendors, loadStore, takenByHistory } from "@/lib/cnc-tool-stock";
 
-import { CribClient } from "./crib-client";
+import { StoreClient } from "./store-client";
 
 export const dynamic = "force-dynamic";
 
-type Search = Promise<Record<string, string | string[] | undefined>>;
-
-export default async function ToolCribPage({ searchParams }: { searchParams: Search }) {
+export default async function ToolStorePage() {
   const { profile } = await requireAuth();
   if (!canUseCncTools(profile)) redirect("/");
 
-  const vendors = await listToolVendors();
-  const sp = await searchParams;
-  const wanted = typeof sp.vendor === "string" ? sp.vendor : null;
-  const active = vendors.find((v) => v.id === wanted) ?? vendors[0] ?? null;
-
-  if (!active) {
-    return (
-      <section className="page-fluid" style={{ padding: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800 }}>Tool crib</h1>
-        <p className="muted" style={{ fontSize: 14, marginTop: 8 }}>
-          There are no active CNC vendors to keep a crib for.
-        </p>
-      </section>
-    );
+  // A vendor who lands here belongs on their own screen, not the
+  // master one. (Unreachable in v1 — developer-only — but the routing
+  // is correct from the start so going live is a permission edit.)
+  if (!canSeeCncToolMaster(profile)) {
+    const own = (profile as { vendor_id?: string | null }).vendor_id;
+    if (own) redirect(`/tools/v/${own}`);
+    redirect("/");
   }
 
-  const { tools, movements } = await loadCrib(active.id);
+  const [vendors, { tools, movements }] = await Promise.all([listToolVendors(), loadStore()]);
 
   return (
-    <CribClient
+    <StoreClient
       vendors={vendors}
-      activeVendorId={active.id}
-      activeVendorName={active.name}
       tools={tools}
-      movements={movements.slice(0, 200)}
-      people={takenByHistory(movements)}
-      canManage={canManageCncToolCrib(profile)}
+      movements={movements.slice(0, 300)}
+      people={takenByHistory(movements, null)}
+      canManage={canManageCncToolStore(profile)}
     />
   );
 }

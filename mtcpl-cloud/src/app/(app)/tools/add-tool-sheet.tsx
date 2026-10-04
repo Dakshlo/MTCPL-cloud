@@ -19,16 +19,12 @@ import { Sheet } from "./sheet";
 export function AddToolSheet({
   open,
   editing,
-  vendorId,
-  vendorName,
   busy,
   onClose,
   onSubmit,
 }: {
   open: boolean;
   editing: ToolRow | null;
-  vendorId: string;
-  vendorName: string;
   busy: boolean;
   onClose: () => void;
   onSubmit: (fd: FormData, mode: "create" | "edit") => void;
@@ -56,14 +52,17 @@ export function AddToolSheet({
       open={open}
       onClose={onClose}
       title={editing ? `Edit ${editing.name}` : "Add a tool"}
-      subtitle={editing ? `In ${vendorName}'s crib` : `It goes into ${vendorName}'s crib`}
+      subtitle={
+        editing
+          ? "In the store"
+          : "It goes into the store, and every CNC vendor can take it straight away"
+      }
       footer={
         <button
           type="button"
           disabled={!ready}
           onClick={() => {
             const fd = new FormData();
-            fd.set("vendor_id", vendorId);
             if (editing) fd.set("tool_id", editing.id);
             fd.set("name", name.trim());
             fd.set("spec", spec.trim());

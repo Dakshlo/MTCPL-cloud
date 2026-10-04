@@ -24,14 +24,19 @@ const NEEDS_NAME: ToolMovementKind[] = ["issue", "return"];
 
 export function MoveSheet({
   intent,
-  vendorId,
+  vendors,
+  lockedVendorId,
   people,
   busy,
   onClose,
   onSubmit,
 }: {
   intent: MoveIntent | null;
-  vendorId: string;
+  /** Who the stock can go to. One entry on a vendor's own screen. */
+  vendors: Array<{ id: string; name: string }>;
+  /** Set on a vendor's screen: they take for themselves and the picker
+   *  is hidden. Null on the master view, where the owner chooses. */
+  lockedVendorId: string | null;
   people: string[];
   busy: boolean;
   onClose: () => void;
@@ -42,6 +47,7 @@ export function MoveSheet({
   const [typing, setTyping] = useState(false);
   const [note, setNote] = useState("");
   const [down, setDown] = useState(true);
+  const [vendorId, setVendorId] = useState<string>(lockedVendorId ?? "");
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   const tool = intent?.tool ?? null;
@@ -58,13 +64,17 @@ export function MoveSheet({
     // common case is a single tap on Confirm.
     setName(people.length === 1 ? people[0] : "");
     setTyping(people.length === 0);
-  }, [intent, people]);
+    setVendorId(lockedVendorId ?? (vendors.length === 1 ? vendors[0].id : ""));
+  }, [intent, people, lockedVendorId, vendors]);
 
   useEffect(() => {
     if (typing) nameRef.current?.focus();
   }, [typing]);
 
   const needsName = NEEDS_NAME.includes(kind);
+  // issue/return leave or re-enter the store FOR somebody; the store's
+  // own lines (stock in, scrap, fix count) belong to nobody.
+  const needsVendor = needsName;
   const signed = useMemo(() => {
     if (!tool) return 0;
     if (kind === "receive" || kind === "return") return qty;
@@ -75,7 +85,9 @@ export function MoveSheet({
   const after = (tool?.stock ?? 0) + signed;
   const wouldGoNegative = after < 0;
   const ready =
-    !!tool && qty > 0 && !wouldGoNegative && (!needsName || name.trim().length > 0) && !busy;
+    !!tool && qty > 0 && !wouldGoNegative &&
+    (!needsName || name.trim().length > 0) &&
+    (!needsVendor || !!vendorId) && !busy;
 
   if (!tool) return null;
 
@@ -91,7 +103,7 @@ export function MoveSheet({
       subtitle={
         <>
           {tool.spec ? <>{tool.spec} · </> : null}
-          <strong style={{ color: "var(--text)" }}>{tool.stock}</strong> {tool.unit} in the crib now
+          <strong style={{ color: "var(--text)" }}>{tool.stock}</strong> {tool.unit} in the store now
         </>
       }
       footer={
@@ -100,7 +112,7 @@ export function MoveSheet({
           disabled={!ready}
           onClick={() => {
             const fd = new FormData();
-            fd.set("vendor_id", vendorId);
+            if (needsVendor) fd.set("vendor_id", vendorId);
             fd.set("tool_id", tool.id);
             fd.set("kind", kind);
             fd.set("qty", String(qty));

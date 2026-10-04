@@ -36,31 +36,29 @@ export default async function ToolRegisterPage({
 
   const { data: toolRow } = await admin
     .from("cnc_tools")
-    .select("id, vendor_id, name, spec, unit, low_stock_qty, is_active")
+    .select("id, name, spec, unit, low_stock_qty, is_active")
     .eq("id", toolId)
     .maybeSingle();
   if (!toolRow) notFound();
   const tool = toolRow as {
-    id: string; vendor_id: string; name: string; spec: string | null;
+    id: string; name: string; spec: string | null;
     unit: string; low_stock_qty: number | null; is_active: boolean;
   };
 
-  const [{ data: vendorRow }, rows] = await Promise.all([
-    admin.from("vendors").select("name").eq("id", tool.vendor_id).maybeSingle(),
-    fetchAllPaged((from, to) =>
+  const rows = await fetchAllPaged((from, to) =>
       admin
         .from("cnc_tool_movements")
-        .select("id, kind, delta, taken_by, note, entered_by, created_at, undone_at")
+        .select("id, vendor_id, kind, delta, taken_by, note, entered_by, created_at, undone_at")
         .eq("tool_id", toolId)
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
-    ),
-  ]);
+  );
 
   type Row = {
-    id: string; kind: ToolMovementKind; delta: number; taken_by: string | null;
-    note: string | null; entered_by: string | null; created_at: string; undone_at: string | null;
+    id: string; vendor_id: string | null; kind: ToolMovementKind; delta: number;
+    taken_by: string | null; note: string | null; entered_by: string | null;
+    created_at: string; undone_at: string | null;
   };
   const moves = (rows ?? []) as Row[];
 
@@ -77,6 +75,13 @@ export default async function ToolRegisterPage({
   const level = levelOf(stock, lowLine);
 
   // Names, resolved once rather than per row.
+  const vendorIds = [...new Set(withBalance.map((m) => m.vendor_id).filter(Boolean))] as string[];
+  const vendorName = new Map<string, string>();
+  if (vendorIds.length) {
+    const { data: vs } = await admin.from("vendors").select("id, name").in("id", vendorIds);
+    for (const v of (vs ?? []) as Array<{ id: string; name: string }>) vendorName.set(v.id, v.name);
+  }
+
   const ids = [...new Set(withBalance.map((m) => m.entered_by).filter(Boolean))] as string[];
   const nameById = new Map<string, string>();
   if (ids.length) {
@@ -96,14 +101,14 @@ export default async function ToolRegisterPage({
   return (
     <section className="page-fluid allow-portrait" style={{ paddingBottom: 40 }}>
       <Link
-        href={`/tools?vendor=${tool.vendor_id}`}
+        href="/tools"
         style={{
           display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", marginBottom: 14,
           fontSize: 13, fontWeight: 700, textDecoration: "none", borderRadius: 10,
           border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)",
         }}
       >
-        ← {(vendorRow as { name?: string } | null)?.name ?? "Crib"}
+        ← The store
       </Link>
 
       <header
@@ -170,6 +175,7 @@ export default async function ToolRegisterPage({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)", textDecoration: voided ? "line-through" : undefined }}>
                     {KIND_LABEL[m.kind]}
+                    {m.vendor_id && <> · {vendorName.get(m.vendor_id) ?? "—"}</>}
                     {m.taken_by && <> · <span style={{ color: "var(--gold-dark)" }}>{m.taken_by}</span></>}
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.45 }}>
