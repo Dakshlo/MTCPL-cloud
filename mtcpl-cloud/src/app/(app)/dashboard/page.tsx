@@ -23,6 +23,7 @@ import {
 } from "@/lib/expenses-permissions";
 import { DprEntryCard } from "@/components/dpr-entry-card";
 import { CncLogbookEntryCard } from "@/components/cnc-logbook-entry-card";
+import { VehiclesEntryCard } from "@/components/vehicles-entry-card";
 import { PeekIframe } from "@/components/peek-iframe";
 import { CncAuditPanel } from "./cnc-audit-panel";
 
@@ -303,6 +304,10 @@ export default async function DashboardPage() {
         {/* Production DPR + CNC Logbook — owner/developer only. */}
         {isOwnerOrDev && <DprEntryCard />}
         {isOwnerOrDev && <CncLogbookEntryCard />}
+        {/* Vehicles — owner/developer, same as the two above. Shows the
+            most urgent insurance/PUC/fitness date so an expiry is visible
+            from the dashboard; the department page re-checks the role. */}
+        {isOwnerOrDev && <VehiclesEntryCard />}
         {/* Two reports, straight off the card — the old
             /reports/various-costing landing in between did nothing but
             show these same two choices. Its per-report gate moves here
