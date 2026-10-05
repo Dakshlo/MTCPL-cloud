@@ -8,6 +8,7 @@ import { canFinalAudit } from "@/lib/accounts-permissions";
 import {
   flagFinalAuditAction,
   verifyFinalAuditAction,
+  verifyFinalAuditBulkAction,
 } from "../actions";
 import {
   FinalAuditClient,
@@ -379,6 +380,7 @@ export default async function FinalAuditPage() {
         pendingRows={pendingRows}
         auditedRows={auditedRows}
         verifyAction={verifyFinalAuditAction}
+        bulkVerifyAction={verifyFinalAuditBulkAction}
         flagAction={flagFinalAuditAction}
       />
 

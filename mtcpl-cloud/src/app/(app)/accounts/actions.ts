@@ -2792,6 +2792,157 @@ export async function verifyFinalAuditAction(
   return { ok: true };
 }
 
+/**
+ * Mig 053 follow-on (Daksh, Oct 2026) — verify MANY payments in one go.
+ *
+ * Why: the queue reached 1,390 payments (₹8.6 crore). Verifying one row
+ * re-rendered the whole page, and that page fetches every pending row,
+ * so each single tick cost a full reload of 1,390 rows. Virendra asked
+ * to tick several and confirm once.
+ *
+ * This is the same check as verifyFinalAuditAction, applied to a list.
+ * It is NOT a shortcut past the check — the auditor still has to have
+ * matched each UTR against the statement; it only removes the reload
+ * between one row and the next.
+ *
+ * Safety:
+ *  - the role gate is identical (canFinalAudit);
+ *  - every id is re-read server-side; anything not `paid` + `pending` is
+ *    skipped and REPORTED, never silently stamped;
+ *  - the UPDATE carries `.eq("final_audit_status", "pending")`, so if
+ *    another auditor verified a row between the read and the write, this
+ *    call cannot overwrite their stamp;
+ *  - bounded per call, and the client sends the queue in chunks.
+ *
+ * Verifying never touches bills.amount_outstanding — exactly like the
+ * single-row action, it only stamps final_audit_* on bill_payments.
+ */
+const BULK_VERIFY_MAX = 300;
+
+export type BulkVerifyResult =
+  | { ok: true; verified: number; skipped: Array<{ id: string; reason: string }> }
+  | { ok: false; error: string };
+
+export async function verifyFinalAuditBulkAction(
+  formData: FormData,
+): Promise<BulkVerifyResult> {
+  const { profile } = await requireAuth();
+  if (!canFinalAudit(profile)) {
+    return {
+      ok: false,
+      error: "Only the final auditor, owner, or developer can verify payments.",
+    };
+  }
+  const supabase = createAdminSupabaseClient();
+
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("payment_ids") || "[]"));
+    if (Array.isArray(parsed)) {
+      ids = [...new Set(parsed.map((x) => String(x || "").trim()).filter(Boolean))];
+    }
+  } catch {
+    return { ok: false, error: "Could not read the selected payments." };
+  }
+  if (ids.length === 0) return { ok: false, error: "Nothing selected." };
+  if (ids.length > BULK_VERIFY_MAX) {
+    return {
+      ok: false,
+      error: `Too many at once — send at most ${BULK_VERIFY_MAX} per batch.`,
+    };
+  }
+
+  const { data: rows, error: loadErr } = await supabase
+    .from("bill_payments")
+    .select("id, status, bill_id, final_audit_status, paid_amount, payment_reference")
+    .in("id", ids);
+  if (loadErr) return { ok: false, error: loadErr.message };
+
+  type Row = {
+    id: string;
+    status: string;
+    bill_id: string;
+    final_audit_status: string;
+    paid_amount: number | string | null;
+    payment_reference: string | null;
+  };
+  const found = new Map<string, Row>();
+  for (const r of (rows ?? []) as Row[]) found.set(r.id, r);
+
+  const eligible: Row[] = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
+  for (const id of ids) {
+    const r = found.get(id);
+    if (!r) { skipped.push({ id, reason: "not found" }); continue; }
+    if (r.status !== "paid") { skipped.push({ id, reason: `not paid (${r.status})` }); continue; }
+    if (r.final_audit_status !== "pending") {
+      skipped.push({ id, reason: `already ${r.final_audit_status}` });
+      continue;
+    }
+    eligible.push(r);
+  }
+
+  if (eligible.length === 0) {
+    await refreshAccountsPaths();
+    return { ok: true, verified: 0, skipped };
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updErr } = await supabase
+    .from("bill_payments")
+    .update({
+      final_audit_status: "verified",
+      final_audit_at: now,
+      final_audit_by: profile.id,
+      updated_at: now,
+    })
+    .in("id", eligible.map((r) => r.id))
+    // Race guard — only rows STILL pending are stamped, so a row another
+    // auditor just verified or flagged keeps their decision.
+    .eq("final_audit_status", "pending")
+    .eq("status", "paid")
+    .select("id");
+  if (updErr) return { ok: false, error: updErr.message };
+
+  const stamped = new Set(((updated ?? []) as Array<{ id: string }>).map((r) => r.id));
+  for (const r of eligible) {
+    if (!stamped.has(r.id)) {
+      skipped.push({ id: r.id, reason: "changed while verifying — left alone" });
+    }
+  }
+
+  // One insert for the whole batch; logAudit() is per-row and 300 round
+  // trips would undo the point of batching. Same action name and detail
+  // shape as the single-row path, plus the batch size, so the log reads
+  // identically whichever button was used.
+  if (stamped.size > 0) {
+    try {
+      await supabase.from("audit_logs").insert(
+        eligible
+          .filter((r) => stamped.has(r.id))
+          .map((r) => ({
+            user_id: profile.id,
+            action: "payment_final_audit_verified",
+            entity_type: "bill_payment",
+            entity_id: r.id,
+            details: {
+              bill_id: r.bill_id,
+              paid_amount: Number(r.paid_amount ?? 0),
+              payment_reference: r.payment_reference,
+              bulk: true,
+              batch_size: stamped.size,
+            },
+          })),
+      );
+    } catch {
+      // Audit logging must never break the main flow (see lib/audit.ts).
+    }
+  }
+
+  await refreshAccountsPaths();
+  return { ok: true, verified: stamped.size, skipped };
+}
+
 export async function flagFinalAuditAction(
   formData: FormData,
 ): Promise<ActionResult> {

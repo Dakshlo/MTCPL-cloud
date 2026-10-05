@@ -16,7 +16,7 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FinanceLoadingOverlay } from "@/components/finance-loading-overlay";
 import {
@@ -80,19 +80,160 @@ export type FinalAuditRow = {
 };
 
 type ServerResult = { ok: true } | { ok: false; error: string };
+type BulkResult =
+  | { ok: true; verified: number; skipped: Array<{ id: string; reason: string }> }
+  | { ok: false; error: string };
+
+/** Must match BULK_VERIFY_MAX in accounts/actions.ts — the queue is sent
+ *  in chunks this size so one request never carries 1,390 rows. */
+const BULK_CHUNK = 300;
 
 export function FinalAuditClient({
   pendingRows,
   auditedRows,
   verifyAction,
+  bulkVerifyAction,
   flagAction,
 }: {
   pendingRows: FinalAuditRow[];
   auditedRows: FinalAuditRow[];
   verifyAction: (formData: FormData) => Promise<ServerResult>;
+  bulkVerifyAction: (formData: FormData) => Promise<BulkResult>;
   flagAction: (formData: FormData) => Promise<ServerResult>;
 }) {
+  const router = useRouter();
   const [activeFlagRow, setActiveFlagRow] = useState<FinalAuditRow | null>(null);
+
+  // ── Multi-select (Daksh, Oct 2026) ──────────────────────────────
+  // Virendra: "it loads and does one, it will take longer time —
+  // instead give multi select, he can verify multiple at once and
+  // finally verify." Ticking is free; the single confirm sends them.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // Rows this browser has already verified. The page is server-rendered
+  // from a 1,390-row query, so waiting for that round trip before the
+  // row disappears is exactly the lag being complained about. Hide them
+  // immediately and let the refresh catch up in the background.
+  const [removed, setRemoved] = useState<Set<string>>(() => new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  // A fresh server list means our optimistic hiding has been applied for
+  // real — drop it, so a row that legitimately comes back (someone else
+  // changed it) is not hidden forever by a stale id.
+  const pendingKey = pendingRows.map((r) => r.id).join(",");
+  const lastKey = useRef(pendingKey);
+  useEffect(() => {
+    if (lastKey.current !== pendingKey) {
+      lastKey.current = pendingKey;
+      setRemoved(new Set());
+    }
+  }, [pendingKey]);
+
+  const visiblePending = useMemo(
+    () => pendingRows.filter((r) => !removed.has(r.id)),
+    [pendingRows, removed],
+  );
+  const selectedRows = useMemo(
+    () => visiblePending.filter((r) => selected.has(r.id)),
+    [visiblePending, selected],
+  );
+  const selectedTotal = selectedRows.reduce((s, r) => s + r.paidAmount, 0);
+
+  function toggleRow(id: string) {
+    setConfirming(false);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+    setConfirming(false);
+  }
+
+  function selectAll() {
+    setConfirming(false);
+    setSelected(new Set(visiblePending.map((r) => r.id)));
+  }
+
+  /** Mark rows gone locally, then reconcile with the server. The refresh
+   *  deliberately sits OUTSIDE the transition: holding the overlay up for
+   *  a 1,390-row re-render is the delay we are removing. */
+  function settleVerified(ids: string[], message: string) {
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+    setToast(message);
+    router.refresh();
+  }
+
+  async function runBulkVerify() {
+    const ids = selectedRows.map((r) => r.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    setBulkError(null);
+    setConfirming(false);
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += BULK_CHUNK) chunks.push(ids.slice(i, i + BULK_CHUNK));
+
+    let verified = 0;
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const done: string[] = [];
+    setProgress({ done: 0, total: ids.length });
+
+    for (const chunk of chunks) {
+      const fd = new FormData();
+      fd.set("payment_ids", JSON.stringify(chunk));
+      let r: BulkResult;
+      try {
+        r = await bulkVerifyAction(fd);
+      } catch {
+        r = { ok: false, error: "Lost connection partway through." };
+      }
+      if (!r.ok) {
+        setBulkError(
+          `${r.error}${verified > 0 ? ` ${verified} were already verified before this.` : ""}`,
+        );
+        break;
+      }
+      verified += r.verified;
+      skipped.push(...r.skipped);
+      // Only hide what the server actually stamped.
+      const skippedIds = new Set(r.skipped.map((x) => x.id));
+      done.push(...chunk.filter((id) => !skippedIds.has(id)));
+      setProgress({ done: done.length + skippedIds.size, total: ids.length });
+    }
+
+    setBusy(false);
+    setProgress(null);
+
+    if (done.length > 0 || verified > 0) {
+      const parts = [`${verified} verified`];
+      if (skipped.length > 0) parts.push(`${skipped.length} skipped`);
+      settleVerified(done, parts.join(" · "));
+    }
+    if (skipped.length > 0 && !bulkError) {
+      setBulkError(
+        `${skipped.length} row${skipped.length === 1 ? " was" : "s were"} left alone: ` +
+          [...new Set(skipped.map((x) => x.reason))].join(", ") +
+          ". Nothing was changed for those.",
+      );
+    }
+  }
 
   // Group audited rows: flagged first (owner attention), then verified.
   const groupedAudited = useMemo(() => {
@@ -104,12 +245,12 @@ export function FinalAuditClient({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
       {/* Pending section */}
-      {pendingRows.length > 0 && (
+      {visiblePending.length > 0 && (
         <SectionBlock
           sectionId="section-pending"
           title="Awaiting verification"
           emoji="⏳"
-          count={pendingRows.length}
+          count={visiblePending.length}
           tint="#b45309"
         >
           <div
@@ -129,14 +270,185 @@ export function FinalAuditClient({
             account · same amount · actually credited</strong>. Then
             tap <strong>✓ Verified</strong>. If anything looks off,
             tap <strong>🚩 Flag a problem</strong> — the owner sees
-            the flag; no reversal happens.
+            the flag; no reversal happens. To clear several at once,
+            tick their boxes and use the bar below.
           </div>
+
+          {/* ── Selection bar ──────────────────────────────────────
+              Sticky so it stays reachable after scrolling past a few
+              hundred rows. It only ever VERIFIES — flagging stays
+              one at a time, because a flag carries a reason. */}
+          <div
+            style={{
+              position: "sticky",
+              top: 8,
+              zIndex: 5,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 12px",
+              marginBottom: 10,
+              background: selected.size > 0 ? "#0f3d23" : "#fff",
+              color: selected.size > 0 ? "#fff" : "var(--text)",
+              border: `1px solid ${selected.size > 0 ? "#166534" : ACCOUNTS_TOKENS.border}`,
+              borderRadius: 10,
+              boxShadow: ACCOUNTS_TOKENS.shadow,
+            }}
+          >
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.size > 0 && selected.size === visiblePending.length}
+                ref={(el) => {
+                  if (el) el.indeterminate = selected.size > 0 && selected.size < visiblePending.length;
+                }}
+                onChange={(e) => (e.target.checked ? selectAll() : clearSelection())}
+                style={{ width: 16, height: 16, cursor: "pointer" }}
+                aria-label="Select every payment awaiting verification"
+              />
+              Select all {visiblePending.length}
+            </label>
+
+            <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+              {selected.size > 0
+                ? `${selected.size} selected · ₹${Math.round(selectedTotal).toLocaleString("en-IN")}`
+                : "Nothing selected"}
+            </span>
+
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {busy ? (
+                <span style={{ fontSize: 12.5, fontWeight: 700 }}>
+                  Verifying… {progress ? `${progress.done} of ${progress.total}` : ""}
+                </span>
+              ) : confirming ? (
+                <>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, alignSelf: "center" }}>
+                    Verify {selected.size} payment{selected.size === 1 ? "" : "s"} ·
+                    ₹{Math.round(selectedTotal).toLocaleString("en-IN")}? This cannot be undone.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={runBulkVerify}
+                    style={{
+                      padding: "8px 14px", fontSize: 13, fontWeight: 800,
+                      background: "#15803d", color: "#fff",
+                      border: "1px solid #166534", borderRadius: 8, cursor: "pointer",
+                    }}
+                  >
+                    Yes, verify {selected.size}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(false)}
+                    style={{
+                      padding: "8px 14px", fontSize: 13, fontWeight: 700,
+                      background: "transparent", color: "inherit",
+                      border: "1px solid rgba(255,255,255,0.45)", borderRadius: 8, cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  {selected.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      style={{
+                        padding: "8px 14px", fontSize: 13, fontWeight: 700,
+                        background: "transparent", color: "inherit",
+                        border: "1px solid rgba(255,255,255,0.45)", borderRadius: 8, cursor: "pointer",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={selected.size === 0}
+                    onClick={() => setConfirming(true)}
+                    style={{
+                      padding: "8px 16px", fontSize: 13, fontWeight: 800,
+                      background: selected.size === 0 ? "var(--border)" : "#15803d",
+                      color: selected.size === 0 ? "var(--muted)" : "#fff",
+                      border: `1px solid ${selected.size === 0 ? "var(--border)" : "#166534"}`,
+                      borderRadius: 8,
+                      cursor: selected.size === 0 ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    ✓ Verify selected
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {toast && (
+            <div
+              role="status"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "9px 12px", marginBottom: 10,
+                background: "rgba(21, 128, 61, 0.10)",
+                border: "1px solid rgba(21, 128, 61, 0.35)",
+                borderRadius: 8, fontSize: 12.5, fontWeight: 700, color: "#15803d",
+              }}
+            >
+              ✓ {toast}
+              <button
+                type="button"
+                onClick={() => setToast(null)}
+                style={{ marginLeft: "auto", border: "none", background: "none", cursor: "pointer", color: "inherit", fontWeight: 800 }}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {bulkError && (
+            <div
+              role="alert"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "9px 12px", marginBottom: 10,
+                background: "rgba(185, 28, 28, 0.08)",
+                border: "1px solid rgba(185, 28, 28, 0.35)",
+                borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: "#b91c1c",
+              }}
+            >
+              ⚠ {bulkError}
+              <button
+                type="button"
+                onClick={() => setBulkError(null)}
+                style={{ marginLeft: "auto", border: "none", background: "none", cursor: "pointer", color: "inherit", fontWeight: 800 }}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {pendingRows.map((row) => (
+            {visiblePending.map((row) => (
               <PendingCard
                 key={row.id}
                 row={row}
                 verifyAction={verifyAction}
+                selected={selected.has(row.id)}
+                onToggle={() => toggleRow(row.id)}
+                onVerified={() => settleVerified([row.id], "1 verified")}
                 onFlag={() => setActiveFlagRow(row)}
               />
             ))}
@@ -286,13 +598,22 @@ function SectionBlock({
 function PendingCard({
   row,
   verifyAction,
+  selected,
+  onToggle,
+  onVerified,
   onFlag,
 }: {
   row: FinalAuditRow;
   verifyAction: (formData: FormData) => Promise<ServerResult>;
+  selected: boolean;
+  onToggle: () => void;
+  /** Parent hides the row and refreshes once — this card no longer
+   *  calls router.refresh() itself. That refresh re-runs the page's
+   *  full pending query (1,390 rows), so doing it per row is what made
+   *  ticking one payment feel slow. */
+  onVerified: () => void;
   onFlag: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -303,7 +624,7 @@ function PendingCard({
       fd.set("payment_id", row.id);
       const r = await verifyAction(fd);
       if (!r.ok) setError(r.error);
-      else router.refresh();
+      else onVerified();
     });
   }
 
@@ -317,9 +638,9 @@ function PendingCard({
     <div
       className="final-audit-row"
       style={{
-        background: "#fff",
-        border: `1px solid ${ACCOUNTS_TOKENS.border}`,
-        borderLeft: "5px solid #b45309",
+        background: selected ? "rgba(21, 128, 61, 0.05)" : "#fff",
+        border: `1px solid ${selected ? "rgba(21, 128, 61, 0.45)" : ACCOUNTS_TOKENS.border}`,
+        borderLeft: `5px solid ${selected ? "#15803d" : "#b45309"}`,
         borderRadius: 12,
         padding: "14px 16px",
         boxShadow: ACCOUNTS_TOKENS.shadow,
@@ -330,6 +651,15 @@ function PendingCard({
     >
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          {/* Tick to batch this one up; the bar at the top sends them. */}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            disabled={pending}
+            style={{ width: 18, height: 18, marginTop: 12, cursor: "pointer", flexShrink: 0 }}
+            aria-label={`Select ${row.vendorName} ₹${Math.round(row.paidAmount).toLocaleString("en-IN")} for verification`}
+          />
           <VendorAvatar name={row.vendorName} size={42} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
