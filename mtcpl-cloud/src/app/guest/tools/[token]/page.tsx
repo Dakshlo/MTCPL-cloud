@@ -1,20 +1,27 @@
 /**
- * The wardrobe QR screen (mig 229).
+ * The wardrobe QR screen (migs 229 + 230).
  *
- * Scanned off a sticker on the cupboard door, on the taker's own phone,
- * with no login. It does exactly what the paper register did: who are
- * you, what did you take, how many.
+ * Scanned off a sticker on the cupboard door, on the taker's own phone.
+ * No app login — but not anonymous either: you tap your name, a 4-digit
+ * code comes to the number on your profile, and the register is signed
+ * by that, not by whatever somebody typed.
  *
- * It shows tool names and counts and nothing else — no money, no vendor
- * balances, no bills. Taking is the only write it can make, and the
- * database enforces that, not just this page.
+ * It shows tool names and counts and nothing else. Taking is the only
+ * write it can make, and the database enforces that, not just this page.
  */
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { loadStore, orderForTaking, type ToolRow } from "@/lib/cnc-tool-stock";
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
-import { guestTakeToolAction } from "./guest-actions";
-import { GuestTakeClient, type KnownPerson, type TakeTool } from "./guest-take-client";
+import { currentToolSession, toolRoster } from "@/lib/cnc-tool-session";
+import {
+  guestTakeToolAction,
+  sendToolSignInCodeAction,
+  setToolSessionVendorAction,
+  toolSignOutAction,
+  verifyToolSignInCodeAction,
+} from "./guest-actions";
+import { GuestTakeClient, type TakeTool } from "./guest-take-client";
 
 export const dynamic = "force-dynamic";
 
@@ -40,64 +47,47 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
   const link = resolved.link;
   const admin = createAdminSupabaseClient();
 
-  const [{ tools, movements }, { data: vendorRows }] = await Promise.all([
+  const [{ tools }, roster, session, { data: vendorRows }] = await Promise.all([
     loadStore(),
+    toolRoster(),
+    currentToolSession(token, link.id),
     admin.from("vendors").select("id, name").order("name"),
   ]);
 
-  const vendors = ((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => ({
-    id: v.id,
-    name: v.name,
-  }));
-  const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
-
-  // Who has taken from this store before, most recent first, each with the
-  // company they took for. One tap for anyone who has been here; only a
-  // genuinely new person has to type.
-  const seen = new Map<string, { vendorId: string; at: number }>();
-  for (const m of movements) {
-    if (m.undone_at || m.kind !== "issue" || !m.taken_by || !m.vendor_id) continue;
-    const name = m.taken_by.trim();
-    if (!name) continue;
-    const at = new Date(m.created_at).getTime();
-    const prev = seen.get(name.toLowerCase());
-    if (!prev || at > prev.at) seen.set(name.toLowerCase(), { vendorId: m.vendor_id, at });
-  }
-  const people: KnownPerson[] = [...seen.entries()]
-    .map(([key, v]) => ({
-      // Keep the spelling actually used last time, not the lowercased key.
-      name:
-        movements.find(
-          (m) => (m.taken_by ?? "").trim().toLowerCase() === key && !m.undone_at,
-        )?.taken_by?.trim() ?? key,
-      vendorId: v.vendorId,
-      vendorName: vendorName.get(v.vendorId) ?? "—",
-      at: v.at,
-    }))
-    .sort((a, b) => b.at - a.at)
-    .slice(0, 24)
-    .map(({ name, vendorId, vendorName }) => ({ name, vendorId, vendorName }));
-
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
-  const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map(
-    (t) => ({
-      id: t.id,
-      name: t.name,
-      spec: t.spec,
-      unit: t.unit,
-      stock: t.stock,
-      level: t.level,
-    }),
-  );
+  const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map((t) => ({
+    id: t.id,
+    name: t.name,
+    spec: t.spec,
+    unit: t.unit,
+    stock: t.stock,
+    level: t.level,
+  }));
 
   return (
     <GuestTakeClient
       token={link.token}
       label={link.label}
       tools={takeable}
-      vendors={vendors}
-      people={people}
+      roster={roster}
+      vendors={((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => ({
+        id: v.id,
+        name: v.name,
+      }))}
+      session={
+        session
+          ? {
+              name: session.name,
+              vendorId: session.vendorId,
+              vendorName: session.vendorName,
+            }
+          : null
+      }
+      sendCodeAction={sendToolSignInCodeAction}
+      verifyCodeAction={verifyToolSignInCodeAction}
+      setVendorAction={setToolSessionVendorAction}
+      signOutAction={toolSignOutAction}
       takeAction={guestTakeToolAction}
     />
   );
@@ -108,8 +98,8 @@ function DeadLink({ title, note }: { title: string; note: string }) {
     <main
       style={{
         minHeight: "100dvh",
-        background: "#0f1115",
-        color: "#e8eaed",
+        background: "#f4f5f7",
+        color: "#1a1d22",
         display: "grid",
         placeItems: "center",
         padding: 24,
@@ -118,8 +108,8 @@ function DeadLink({ title, note }: { title: string; note: string }) {
     >
       <div style={{ textAlign: "center", maxWidth: 340 }}>
         <div style={{ fontSize: 46, marginBottom: 12 }} aria-hidden>🔒</div>
-        <h1 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>{title}</h1>
-        <p style={{ fontSize: 14, lineHeight: 1.6, color: "#9aa0a6", margin: 0 }}>{note}</p>
+        <h1 style={{ fontSize: 21, fontWeight: 800, margin: "0 0 8px" }}>{title}</h1>
+        <p style={{ fontSize: 14.5, lineHeight: 1.6, color: "#5c636e", margin: 0 }}>{note}</p>
       </div>
     </main>
   );

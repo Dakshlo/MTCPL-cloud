@@ -62,9 +62,9 @@ const hash = (code: string) => crypto.createHash("sha256").update(code).digest("
  *  range (00–99 at two digits) — never a restricted set like repeated
  *  digits, which would cut 100 codes down to nine. crypto.randomInt
  *  rejection-samples internally, so there is no modulo bias. */
-function newCode(): string {
-  const max = 10 ** CODE_LENGTH;
-  return String(crypto.randomInt(0, max)).padStart(CODE_LENGTH, "0");
+function newCode(digits: number): string {
+  const max = 10 ** digits;
+  return String(crypto.randomInt(0, max)).padStart(digits, "0");
 }
 
 /** Mask a phone for display: "9799868196" → "•••••• 8196". */
@@ -84,8 +84,18 @@ export async function issueActionOtp(opts: {
   subjectId: string;
   requestedBy: string;
   phone: string;
+  /** Code length. Defaults to CODE_LENGTH (2) — the in-app action codes
+   *  this file was written for, where you must ALREADY hold an owner
+   *  session to reach the prompt.
+   *
+   *  Anything that mints a session must pass a longer one; see the
+   *  header. The wardrobe QR (mig 230) passes 4: the code is the only
+   *  thing standing between a scanned sticker and a signed-in taker, so
+   *  10,000 codes against a 3-attempt cap, not 100. */
+  digits?: number;
 }): Promise<IssueResult> {
   const { action, subjectId, requestedBy, phone } = opts;
+  const digits = opts.digits ?? CODE_LENGTH;
   if (!phone || phone.replace(/\D/g, "").length < 10) {
     return { ok: false, error: "No mobile number on that account to send a code to." };
   }
@@ -100,7 +110,7 @@ export async function issueActionOtp(opts: {
     .eq("subject_id", subjectId)
     .is("consumed_at", null);
 
-  const code = newCode();
+  const code = newCode(digits);
   const { error } = await admin.from("action_otps").insert({
     action,
     subject_id: subjectId,
@@ -131,11 +141,14 @@ export async function verifyActionOtp(opts: {
   action: string;
   subjectId: string;
   code: string;
+  /** Must match the length the code was issued with. */
+  digits?: number;
 }): Promise<VerifyResult> {
   const { action, subjectId } = opts;
+  const digits = opts.digits ?? CODE_LENGTH;
   const typed = (opts.code || "").replace(/\D/g, "");
-  if (typed.length !== CODE_LENGTH) {
-    return { ok: false, error: `Enter the ${CODE_LENGTH}-digit code.` };
+  if (typed.length !== digits) {
+    return { ok: false, error: `Enter the ${digits}-digit code.` };
   }
 
   const admin = createAdminSupabaseClient();
