@@ -57,6 +57,9 @@ export type ToolMovement = {
   taken_by: string | null;
   note: string | null;
   entered_by: string | null;
+  /** Mig 229 — set when the take came through the wardrobe QR rather
+   *  than someone logged in, so the register can say which door. */
+  guest_link_id: string | null;
   created_at: string;
   undone_at: string | null;
 };
@@ -140,7 +143,7 @@ export async function loadStore(): Promise<{ tools: ToolRow[]; movements: ToolMo
     fetchAllPaged((from, to) =>
       admin
         .from("cnc_tool_movements")
-        .select("id, tool_id, vendor_id, kind, delta, taken_by, note, entered_by, created_at, undone_at")
+        .select("id, tool_id, vendor_id, kind, delta, taken_by, note, entered_by, guest_link_id, created_at, undone_at")
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to),

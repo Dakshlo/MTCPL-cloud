@@ -26,6 +26,8 @@
 // is exactly how the paper register handles a mistake.
 // ──────────────────────────────────────────────────────────────────
 
+import { randomBytes } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 
 import { requireAuth } from "@/lib/auth";
@@ -431,4 +433,65 @@ async function maybeWarnLowStock(
   } catch {
     // A warning that fails must never cost the operator their entry.
   }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// The wardrobe QR (mig 229)
+// ──────────────────────────────────────────────────────────────────
+// A sticker that opens the take screen with no login. Creating and
+// revoking one is a store-management act — the same gate as adding a
+// tool — because whoever holds the sticker can write to the register.
+
+/** Create a sticker. There is normally one (the office wardrobe), but
+ *  more than one is allowed: a second shed gets its own, and the
+ *  register then says which door a take came through. */
+export async function createToolStoreLinkAction(fd: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const label = txt(fd, "label").slice(0, 60) || "Office wardrobe";
+  const capRaw = Number(fd.get("daily_cap"));
+  const dailyCap = Number.isFinite(capRaw) && capRaw >= 10 && capRaw <= 2000 ? Math.round(capRaw) : 200;
+
+  // 32 URL-safe characters. Long enough that guessing is pointless, short
+  // enough that the QR stays coarse and scans off a printed sticker.
+  const token = randomBytes(24).toString("base64url");
+
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("cnc_tool_store_links").insert({
+    token,
+    label,
+    daily_cap: dailyCap,
+    created_by: profile.id,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "cnc_tool_qr_created", "cnc_tool_store_link", token, {
+    label,
+    daily_cap: dailyCap,
+  });
+  revalidatePath("/tools/qr");
+  return { ok: true, message: `“${label}” QR created.` };
+}
+
+/** Switch a sticker off. Nothing is deleted: takes already recorded
+ *  through it keep pointing at it, so the register still explains where
+ *  they came from. */
+export async function revokeToolStoreLinkAction(fd: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const id = txt(fd, "link_id");
+  if (!id) return { ok: false, error: "Which QR?" };
+
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("cnc_tool_store_links")
+    .update({ is_active: false, revoked_at: new Date().toISOString(), revoked_by: profile.id })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "cnc_tool_qr_revoked", "cnc_tool_store_link", id, {});
+  revalidatePath("/tools/qr");
+  return { ok: true, message: "QR switched off. Print a new one before taking the sticker down." };
 }

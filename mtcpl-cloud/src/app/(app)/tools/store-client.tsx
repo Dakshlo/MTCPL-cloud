@@ -139,9 +139,25 @@ export function StoreClient({
           </div>
         </div>
         {canManage && (
-          <button type="button" className="tc-add" onClick={() => { setEditing(null); setAddOpen(true); }}>
-            + Add tool
-          </button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
+            {/* The sticker on the wardrobe door — mig 229. Takes come in
+                through it with no login; everything else still needs one. */}
+            <Link
+              href="/tools/qr"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 7,
+                padding: "11px 16px", fontSize: 13.5, fontWeight: 700,
+                borderRadius: 13, textDecoration: "none", whiteSpace: "nowrap",
+                border: "1px solid var(--border)", background: "var(--surface)",
+                color: "var(--text)",
+              }}
+            >
+              <span aria-hidden>▦</span> Wardrobe QR
+            </Link>
+            <button type="button" className="tc-add" onClick={() => { setEditing(null); setAddOpen(true); }}>
+              + Add tool
+            </button>
+          </div>
         )}
       </header>
 
