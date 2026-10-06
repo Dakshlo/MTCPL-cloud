@@ -44,6 +44,7 @@ import { getEffectiveStatus, getDepartmentStatus } from "@/lib/system-status";
 import {
   DEPARTMENTS,
   departmentForRoute,
+  departmentLandingFor,
   effectiveDepartment,
   rolePermittedDepartments,
   type Department,
@@ -191,7 +192,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             id: dId,
             label: meta.label,
             icon: meta.icon,
-            href: meta.landingHref,
+            // Per-person landing — Inventory opens on the CNC tool
+            // store for whoever may use it (departmentLandingFor).
+            href: departmentLandingFor(dId, profile),
           });
         }
       }

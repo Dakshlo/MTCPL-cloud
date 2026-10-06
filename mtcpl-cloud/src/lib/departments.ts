@@ -33,6 +33,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import type { AppRole } from "@/lib/types";
+import { canUseCncTools } from "@/lib/cnc-tool-permissions";
 
 export type Department = "production" | "finance" | "inventory" | "invoicing" | "register" | "maintenance" | "salary" | "vehicles";
 
@@ -72,8 +73,10 @@ export const DEPARTMENTS: ReadonlyArray<{
     id: "inventory",
     label: "Inventory",
     icon: "📦",
+    // Scaffolding stays the fallback. Anyone who can open the CNC tool
+    // store lands THERE instead — see departmentLandingFor().
     landingHref: "/inventory/scaffolding",
-    tooltip: "Scaffolding · Stock movements · Site holdings",
+    tooltip: "CNC tool store · Scaffolding · Stock movements",
   },
   {
     // Mig 101 + 102 — standalone Activity Register (proof of demos /
@@ -294,4 +297,27 @@ export function canSwitchDepartment(role: AppRole): boolean {
  */
 export function rolePermittedDepartments(role: AppRole): Department[] {
   return allowedDepartmentsForRole(role);
+}
+
+/**
+ * Where a given person should land when they open a department.
+ *
+ * Daksh, Oct 2026: "when we switch Inventory make default page to CNC
+ * tool, not scaffolding." The tool store is the screen that gets used
+ * daily; scaffolding is the occasional one.
+ *
+ * It cannot simply be the department's landingHref, because /tools is
+ * still gated (developer-only in v1, see cnc-tool-permissions.ts) and
+ * sending someone who may not open it there would bounce them to the
+ * dashboard — strictly worse than the scaffolding board they get now.
+ * So the tool store is the landing for whoever may use it, and
+ * everyone else keeps scaffolding. When the store opens up to vendors
+ * and managers in v2, this follows along with no change here.
+ */
+export function departmentLandingFor(
+  dept: Department,
+  profile: Pick<{ role: AppRole }, "role"> | null | undefined,
+): string {
+  if (dept === "inventory" && profile && canUseCncTools(profile)) return "/tools";
+  return DEPARTMENTS.find((d) => d.id === dept)?.landingHref ?? "/dashboard";
 }

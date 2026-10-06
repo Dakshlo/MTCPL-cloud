@@ -19,9 +19,9 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import {
-  DEPARTMENTS,
   allowedDepartmentsForRole,
   canSwitchDepartment,
+  departmentLandingFor,
   type Department,
 } from "@/lib/departments";
 
@@ -71,7 +71,7 @@ export async function setActiveDepartmentAction(formData: FormData) {
   // to re-render with the new active_department on the next request.
   revalidatePath("/", "layout");
 
-  const landing =
-    DEPARTMENTS.find((d) => d.id === dept)?.landingHref ?? "/dashboard";
-  redirect(landing);
+  // Per-person landing: Inventory opens on the CNC tool store for
+  // whoever may use it, scaffolding for everyone else.
+  redirect(departmentLandingFor(dept, profile));
 }
