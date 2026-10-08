@@ -142,6 +142,21 @@ export function StoreClient({
           <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
             {/* The sticker on the wardrobe door — mig 229. Takes come in
                 through it with no login; everything else still needs one. */}
+            {/* The way the register actually gets in — mig 231. The team
+                would not accept per-person entry at the cupboard, so the
+                paper stays and one person types the page in. */}
+            <Link
+              href="/tools/register"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 7,
+                padding: "11px 16px", fontSize: 13.5, fontWeight: 700,
+                borderRadius: 13, textDecoration: "none", whiteSpace: "nowrap",
+                border: "1px solid var(--gold)", background: "var(--gold-subtle)",
+                color: "var(--gold-dark)",
+              }}
+            >
+              <span aria-hidden>📒</span> Enter register
+            </Link>
             <Link
               href="/tools/qr"
               style={{

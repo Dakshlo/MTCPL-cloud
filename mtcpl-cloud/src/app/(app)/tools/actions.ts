@@ -495,3 +495,200 @@ export async function revokeToolStoreLinkAction(fd: FormData): Promise<ActionRes
   revalidatePath("/tools/qr");
   return { ok: true, message: "QR switched off. Print a new one before taking the sticker down." };
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Typing the paper register in (mig 231)
+// ──────────────────────────────────────────────────────────────────
+// Each vendor keeps their own register, so a page belongs to one
+// vendor and the typist picks that once. Every line is a take; nothing
+// else can come in through this door, and the database enforces it.
+
+export type RegisterLineInput = {
+  /** The date on the register LINE (yyyy-mm-dd). */
+  date: string;
+  /** Who signed for it on the paper. */
+  person: string;
+  toolId: string;
+  qty: number;
+};
+
+export type SaveRegisterResult =
+  | { ok: true; batchId: string; lines: number }
+  | { ok: false; error: string; rowErrors?: Array<{ row: number; message: string }> };
+
+/** Save one page of one vendor's register as a single batch. Either
+ *  every line goes in or none does — a half-entered page is worse than
+ *  an un-entered one, because nobody can tell which half is missing. */
+export async function saveToolRegisterPageAction(fd: FormData): Promise<SaveRegisterResult> {
+  const { profile } = await requireAuth();
+  if (!canUseCncTools(profile)) return { ok: false, error: "Not allowed." };
+
+  const vendorId = takingVendorFor(profile, txt(fd, "vendor_id"));
+  if (!vendorId) return { ok: false, error: "Pick whose register this is." };
+
+  const registerDate = txt(fd, "register_date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(registerDate)) {
+    return { ok: false, error: "Enter the date written on the register page." };
+  }
+
+  let lines: RegisterLineInput[] = [];
+  try {
+    const parsed = JSON.parse(txt(fd, "lines") || "[]");
+    if (Array.isArray(parsed)) lines = parsed as RegisterLineInput[];
+  } catch {
+    return { ok: false, error: "Could not read the lines." };
+  }
+  if (lines.length === 0) return { ok: false, error: "There is nothing to save." };
+  if (lines.length > 300) {
+    return { ok: false, error: "That is more than 300 lines — save the page in two parts." };
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // ── Check every line before writing anything ─────────────────────
+  const { data: toolRows } = await admin
+    .from("cnc_tools")
+    .select("id, name, is_active")
+    .eq("is_active", true);
+  const tools = new Map(
+    ((toolRows ?? []) as Array<{ id: string; name: string }>).map((t) => [t.id, t.name]),
+  );
+
+  // Today in IST — a register line cannot be from the future.
+  const istToday = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+
+  const rowErrors: Array<{ row: number; message: string }> = [];
+  const wanted = new Map<string, number>(); // toolId → total taken on this page
+
+  lines.forEach((l, i) => {
+    const row = i + 1;
+    const date = String(l.date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      rowErrors.push({ row, message: "Date is missing or not a real date." });
+    } else if (date > istToday) {
+      rowErrors.push({ row, message: "Date is in the future." });
+    }
+    const person = String(l.person || "").trim().replace(/\s+/g, " ");
+    if (!person) rowErrors.push({ row, message: "Nobody is named for this line." });
+    else if (person.length > 60) rowErrors.push({ row, message: "That name is too long." });
+
+    if (!l.toolId || !tools.has(l.toolId)) {
+      rowErrors.push({ row, message: "Pick a tool from the list." });
+    }
+    const qty = Number(l.qty);
+    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
+      rowErrors.push({ row, message: "Quantity must be 1 or more." });
+    } else if (qty > 500) {
+      rowErrors.push({ row, message: "That quantity looks wrong." });
+    } else if (l.toolId) {
+      wanted.set(l.toolId, (wanted.get(l.toolId) ?? 0) + qty);
+    }
+  });
+
+  // ── The shelf has to be able to cover the whole page ─────────────
+  // Checked against the page TOTAL per tool, not line by line: five
+  // lines of 2 against a stock of 6 is a problem even though each line
+  // on its own looks fine.
+  if (wanted.size > 0) {
+    const { data: moves } = await admin
+      .from("cnc_tool_movements")
+      .select("tool_id, delta")
+      .in("tool_id", [...wanted.keys()])
+      .is("undone_at", null);
+    const stock = new Map<string, number>();
+    for (const m of (moves ?? []) as Array<{ tool_id: string; delta: number | string }>) {
+      stock.set(m.tool_id, (stock.get(m.tool_id) ?? 0) + Number(m.delta ?? 0));
+    }
+    for (const [toolId, qty] of wanted) {
+      const have = stock.get(toolId) ?? 0;
+      if (qty > have) {
+        rowErrors.push({
+          row: 0,
+          message: `${tools.get(toolId) ?? "A tool"} — the page takes ${qty} but the shelf has ${have}.`,
+        });
+      }
+    }
+  }
+
+  if (rowErrors.length > 0) {
+    return { ok: false, error: "Some lines need fixing before this page can be saved.", rowErrors };
+  }
+
+  // ── Write the page ───────────────────────────────────────────────
+  const { data: batch, error: batchErr } = await admin
+    .from("cnc_tool_register_batches")
+    .insert({
+      vendor_id: vendorId,
+      register_date: registerDate,
+      entered_by: profile.id,
+      line_count: lines.length,
+      note: txt(fd, "note").slice(0, 300) || null,
+    })
+    .select("id")
+    .single();
+  if (batchErr || !batch) {
+    return { ok: false, error: batchErr?.message ?? "Could not start the page." };
+  }
+  const batchId = (batch as { id: string }).id;
+
+  const { error: movesErr } = await admin.from("cnc_tool_movements").insert(
+    lines.map((l) => ({
+      vendor_id: vendorId,
+      tool_id: l.toolId,
+      kind: "issue",
+      delta: -Math.abs(Number(l.qty)),
+      taken_by: String(l.person).trim().replace(/\s+/g, " "),
+      occurred_on: String(l.date).slice(0, 10),
+      register_batch_id: batchId,
+      entered_by: profile.id,
+    })),
+  );
+  if (movesErr) {
+    // Take the empty batch back out so a failed save leaves nothing behind.
+    await admin.from("cnc_tool_register_batches").delete().eq("id", batchId);
+    return { ok: false, error: movesErr.message };
+  }
+
+  await logAudit(profile.id, "cnc_tool_register_page_entered", "cnc_tool_register_batch", batchId, {
+    vendor_id: vendorId,
+    register_date: registerDate,
+    lines: lines.length,
+  });
+
+  revalidatePath("/tools");
+  revalidatePath("/tools/register");
+  revalidatePath(`/tools/v/${vendorId}`);
+  return { ok: true, batchId, lines: lines.length };
+}
+
+/** Take a whole page back out. The movements are marked undone rather
+ *  than deleted, so the register still shows that the page was entered
+ *  and then withdrawn, and by whom. */
+export async function undoToolRegisterPageAction(fd: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const batchId = txt(fd, "batch_id");
+  if (!batchId) return { ok: false, error: "Which page?" };
+
+  const admin = createAdminSupabaseClient();
+  const now = new Date().toISOString();
+
+  const { error: movesErr } = await admin
+    .from("cnc_tool_movements")
+    .update({ undone_at: now, undone_by: profile.id })
+    .eq("register_batch_id", batchId)
+    .is("undone_at", null);
+  if (movesErr) return { ok: false, error: movesErr.message };
+
+  const { error } = await admin
+    .from("cnc_tool_register_batches")
+    .update({ undone_at: now, undone_by: profile.id })
+    .eq("id", batchId);
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "cnc_tool_register_page_undone", "cnc_tool_register_batch", batchId, {});
+  revalidatePath("/tools");
+  revalidatePath("/tools/register");
+  return { ok: true, message: "That page has been taken back out." };
+}
