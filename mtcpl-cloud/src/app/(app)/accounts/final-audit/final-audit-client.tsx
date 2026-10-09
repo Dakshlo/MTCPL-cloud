@@ -90,12 +90,23 @@ const BULK_CHUNK = 300;
 
 export function FinalAuditClient({
   pendingRows,
+  pendingTotalCount,
+  pendingPage,
+  pendingPageCount,
+  pendingFrom,
   auditedRows,
   verifyAction,
   bulkVerifyAction,
   flagAction,
 }: {
   pendingRows: FinalAuditRow[];
+  /** The whole queue, not this page — the tile and the wording below
+   *  must never understate the backlog (see PENDING_PAGE_SIZE). */
+  pendingTotalCount: number;
+  pendingPage: number;
+  pendingPageCount: number;
+  /** 0-based index of the first row on this page, for "showing X–Y". */
+  pendingFrom: number;
   auditedRows: FinalAuditRow[];
   verifyAction: (formData: FormData) => Promise<ServerResult>;
   bulkVerifyAction: (formData: FormData) => Promise<BulkResult>;
@@ -250,7 +261,7 @@ export function FinalAuditClient({
           sectionId="section-pending"
           title="Awaiting verification"
           emoji="⏳"
-          count={visiblePending.length}
+          count={pendingTotalCount}
           tint="#b45309"
         >
           <div
@@ -316,7 +327,7 @@ export function FinalAuditClient({
                 style={{ width: 16, height: 16, cursor: "pointer" }}
                 aria-label="Select every payment awaiting verification"
               />
-              Select all {visiblePending.length}
+              Select all {visiblePending.length} on this page
             </label>
 
             <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
@@ -452,6 +463,35 @@ export function FinalAuditClient({
                 onFlag={() => setActiveFlagRow(row)}
               />
             ))}
+          </div>
+
+          {/* The queue is served a page at a time. The count above and
+              the tile at the top of the page are the WHOLE queue, so a
+              backlog can never hide behind the page size. */}
+          <div
+            style={{
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+              marginTop: 12, padding: "11px 14px", background: "#fff",
+              border: `1px solid ${ACCOUNTS_TOKENS.border}`, borderRadius: 10,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+              Showing{" "}
+              <strong>
+                {(pendingFrom + 1).toLocaleString("en-IN")}–
+                {Math.min(pendingFrom + visiblePending.length, pendingTotalCount).toLocaleString("en-IN")}
+              </strong>{" "}
+              of <strong>{pendingTotalCount.toLocaleString("en-IN")}</strong> waiting
+            </span>
+            {pendingPageCount > 1 && (
+              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                <PageLink page={pendingPage - 1} disabled={pendingPage <= 1} label="‹ Previous" />
+                <em style={{ fontSize: 12.5, color: "var(--muted)", fontStyle: "normal", fontVariantNumeric: "tabular-nums" }}>
+                  Page {pendingPage} of {pendingPageCount}
+                </em>
+                <PageLink page={pendingPage + 1} disabled={pendingPage >= pendingPageCount} label="Next ›" />
+              </span>
+            )}
           </div>
         </SectionBlock>
       )}
@@ -592,6 +632,24 @@ function SectionBlock({
       </div>
       {children}
     </div>
+  );
+}
+
+/** Paging is a plain link, so the browser Back button walks the queue
+ *  the way the auditor expects and a page can be bookmarked. */
+function PageLink({ page, disabled, label }: { page: number; disabled: boolean; label: string }) {
+  const base: React.CSSProperties = {
+    padding: "7px 13px", fontSize: 12.5, fontWeight: 700, borderRadius: 8,
+    border: `1px solid ${ACCOUNTS_TOKENS.border}`, textDecoration: "none",
+  };
+  if (disabled) {
+    return <span style={{ ...base, color: "var(--muted)", opacity: 0.5 }}>{label}</span>;
+  }
+  return (
+    <Link href={page <= 1 ? "/accounts/final-audit" : `/accounts/final-audit?page=${page}`}
+      style={{ ...base, background: "#fff", color: "var(--text)" }}>
+      {label}
+    </Link>
   );
 }
 

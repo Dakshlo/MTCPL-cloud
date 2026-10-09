@@ -42,7 +42,28 @@ import {
  * This is NOT an approval. Money has already moved when a payment
  * lands here. Flag = "I noticed something" — no reversal happens.
  */
-export default async function FinalAuditPage() {
+/** How many pending rows go down the wire at once.
+ *
+ *  Oct 2026 — Daksh: "can we somehow limit it to 500 or less at once."
+ *  The queue reached 1,434 payments and the page was 8.56 MB, which is
+ *  the Finance slowness the accountants reported.
+ *
+ *  This is a PAGE, not a cap. The note on the query below records what
+ *  happened the last time this list was capped: at .limit(200) the tile
+ *  read 200 while 481 were unverified, the 281 oldest could not be
+ *  reached at all, and ₹2.02 crore of un-bank-verified money stayed
+ *  invisible. So the count and the rupee total on the tile are now
+ *  measured over the WHOLE queue by their own query, and every row is
+ *  still reachable — just 200 at a time instead of 1,434 at once. */
+const PENDING_PAGE_SIZE = 200;
+
+type SearchParams = Promise<{ page?: string }>;
+
+export default async function FinalAuditPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const { profile } = await requireAuth();
   if (!canFinalAudit(profile)) {
     redirect("/accounts");
@@ -65,12 +86,14 @@ export default async function FinalAuditPage() {
   // reachable. Verifying a row only stamps final_audit_status on
   // bill_payments — it never touches bills.amount_outstanding — so this
   // changes what the auditor can SEE, never what anyone is owed.
-  const pendingRaw = await fetchAllPaged((from, to) =>
-    supabase
-      .from("bill_payments")
-      .select(
-        "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, confirmed_by, confirmed_at, bills(id, token, vendor_bill_no, bill_date, bill_vendor_id, bill_vendors(id, name, bank_name, bank_account, ifsc, hdfc_bene_name))",
-      )
+  const sp = await searchParams;
+  const pageNo = Math.max(1, Number(sp.page ?? "1") || 1);
+
+  // The filters that define "the queue", in one place so the counting
+  // query and the row query cannot drift apart.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingFilter = (q: any) =>
+    q
       .eq("status", "paid")
       .eq("final_audit_status", "pending")
       // Mig 073 — synthetic advance-application rows are NOT real bank
@@ -79,11 +102,36 @@ export default async function FinalAuditPage() {
       // for synthetic debit-settlement rows (the excess already moved).
       .eq("is_advance_application", false)
       .eq("is_debit_settlement", false)
-        .eq("is_settlement", false)
-      .order("paid_at", { ascending: false })
-      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
-      .range(from, to),
+      .eq("is_settlement", false);
+
+  // The WHOLE queue's size and value, measured over every pending row —
+  // two numeric columns, so this stays small however long the backlog
+  // gets. This is what the tile shows, which is why capping the list
+  // below can no longer understate the backlog the way .limit(200) did.
+  const pendingLedger = await fetchAllPaged<{ id: string; paid_amount: number | string | null }>(
+    (from, to) =>
+      pendingFilter(supabase.from("bill_payments").select("id, paid_amount"))
+        .order("paid_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
   );
+  const pendingCount = pendingLedger.length;
+  const pendingTotal = pendingLedger.reduce((s, r) => s + Number(r.paid_amount ?? 0), 0);
+  const pendingPageCount = Math.max(1, Math.ceil(pendingCount / PENDING_PAGE_SIZE));
+  const pendingPage = Math.min(pageNo, pendingPageCount);
+  const pendingFrom = (pendingPage - 1) * PENDING_PAGE_SIZE;
+
+  const { data: pendingRaw } = await pendingFilter(
+    supabase
+      .from("bill_payments")
+      .select(
+        "id, bill_id, status, final_audit_status, paid_amount, payment_method, payment_reference, payment_note, paid_by, paid_at, confirmed_by, confirmed_at, bills(id, token, vendor_bill_no, bill_date, bill_vendor_id, bill_vendors(id, name, bank_name, bank_account, ifsc, hdfc_bene_name))",
+      ),
+  )
+    .order("paid_at", { ascending: false })
+    .order("id", { ascending: true })
+    .range(pendingFrom, pendingFrom + PENDING_PAGE_SIZE - 1);
+
 
   // ── Recently audited (last 14 days) ──────────────────────────────
   // Mix of verified + flagged for context. Owner uses the flagged
@@ -320,7 +368,8 @@ export default async function FinalAuditPage() {
     if (r.auditStatus !== "verified" || !r.auditedAt) return false;
     return new Date(r.auditedAt).getTime() > nowMs - DAY_MS;
   }).length;
-  const pendingTotal = pendingRows.reduce((s, r) => s + r.paidAmount, 0);
+  // pendingCount / pendingTotal are computed above over the WHOLE queue,
+  // never over the rows on this page — see PENDING_PAGE_SIZE.
 
   return (
     <section className="page-card">
@@ -345,9 +394,9 @@ export default async function FinalAuditPage() {
       >
         <StatChip
           label="Awaiting verification"
-          value={`${pendingRows.length}`}
+          value={`${pendingCount}`}
           subline={
-            pendingRows.length > 0
+            pendingCount > 0
               ? `₹${pendingTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
               : "All clear"
           }
@@ -377,6 +426,10 @@ export default async function FinalAuditPage() {
       </div>
 
       <FinalAuditClient
+        pendingTotalCount={pendingCount}
+        pendingPage={pendingPage}
+        pendingPageCount={pendingPageCount}
+        pendingFrom={pendingFrom}
         pendingRows={pendingRows}
         auditedRows={auditedRows}
         verifyAction={verifyFinalAuditAction}
@@ -384,7 +437,7 @@ export default async function FinalAuditPage() {
         flagAction={flagFinalAuditAction}
       />
 
-      {pendingRows.length === 0 && auditedRows.length === 0 && (
+      {pendingCount === 0 && auditedRows.length === 0 && (
         <EmptyState
           icon="🧾"
           title="No payments to audit"
