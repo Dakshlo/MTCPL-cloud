@@ -2,7 +2,6 @@ import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getProfilesMap } from "@/lib/profiles";
-import { fetchAllPaged } from "@/lib/paginate";
 import {
   canApproveBills,
   canManageAccounts,
@@ -28,7 +27,25 @@ type SearchParams = Promise<{
   /** Mig 073 — "1" filters the list to bills with at least one
    *  active vendor_advance_application row. */
   adv?: string;
+  /** Oct 2026 — 1-based page of the list. See PAGE_SIZE below. */
+  page?: string;
 }>;
+
+/** How many bill rows go down the wire at once.
+ *
+ *  Oct 2026, after the accountants reported the department running at
+ *  "50% speed": this page was shipping EVERY unarchived bill — 1,739 of
+ *  them — as one 15.6 MB document that took 6.9 s to render. The data in
+ *  those rows is only ~264 kB; the rest is markup, because React writes
+ *  each cell's inline style into the HTML and then again into the
+ *  hydration payload. 1,739 rows is also more than anyone reads.
+ *
+ *  The uncapped fetch was itself a fix — before August the list was
+ *  .limit(500) and silently hid the rest — so the answer is not to put a
+ *  cap back. It is to send one page at a time while the status counts
+ *  stay exact, which they do: they are separate head-only COUNT queries
+ *  over the whole book and are untouched by this. */
+const PAGE_SIZE = 100;
 
 const ALL_STATUSES = ["pending_approval", "approved", "rejected", "fully_paid", "cancelled"];
 const STATUS_LABELS: Record<string, string> = {
@@ -83,6 +100,7 @@ export default async function BillsListPage({
   // Mig 073 — ?adv=1 restricts to bills with at least one active
   // vendor_advance_application row.
   const advanceAppliedOnly = (sp.adv ?? "") === "1";
+  const pageNo = Math.max(1, Number(sp.page ?? "1") || 1);
 
   const restrictToOwn =
     profile.role === "biller" &&
@@ -146,14 +164,14 @@ export default async function BillsListPage({
   // rows with nothing on screen saying so — and the status pills below
   // link INTO this list, so a pill could promise more than the list
   // could show.
-  const billsRaw = await fetchAllPaged((from, to) => {
-    let q = supabase
-      .from("bills")
-      .select(
-        "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
-      )
-      // Mig 226 — archived bills are out of the accounts entirely.
-      .is("archived_at", null);
+  // The filters are applied by ONE function used by both the row query
+  // and the count query. They cannot drift apart into a pager that
+  // promises more pages than the list can show — which is the same
+  // class of bug the August fix removed from the status pills.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyFilters = (q: any) => {
+    // Mig 226 — archived bills are out of the accounts entirely.
+    q = q.is("archived_at", null);
     if (restrictToOwn) q = q.eq("submitted_by", profile.id);
     if (statusFilter && ALL_STATUSES.includes(statusFilter)) q = q.eq("status", statusFilter);
     if (vendorFilter) q = q.eq("bill_vendor_id", vendorFilter);
@@ -166,11 +184,32 @@ export default async function BillsListPage({
       q = q.eq("id", "00000000-0000-0000-0000-000000000000");
     }
     if (searchOrClause) q = q.or(searchOrClause);
-    return q
-      .order("submitted_at", { ascending: false })
-      .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
-      .range(from, to);
-  });
+    return q;
+  };
+
+  // How many bills match what is on screen right now. head: true means
+  // no rows come back, only the number — so counting is cheap however
+  // many there are.
+  const { count: matchedCountRaw } = await applyFilters(
+    supabase.from("bills").select("id", { count: "exact", head: true }),
+  );
+  const matchedCount = matchedCountRaw ?? 0;
+  const pageCount = Math.max(1, Math.ceil(matchedCount / PAGE_SIZE));
+  // A stale ?page= from a bookmark, or one left behind when a filter
+  // narrows the list, lands on the last real page instead of an empty one.
+  const currentPage = Math.min(pageNo, pageCount);
+  const rangeFrom = (currentPage - 1) * PAGE_SIZE;
+
+  const { data: billsRaw } = await applyFilters(
+    supabase
+      .from("bills")
+      .select(
+        "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
+      ),
+  )
+    .order("submitted_at", { ascending: false })
+    .order("id", { ascending: true }) // unique tiebreaker — see paginate.ts
+    .range(rangeFrom, rangeFrom + PAGE_SIZE - 1);
   const bills = ((billsRaw ?? []) as unknown) as BillRow[];
 
   // Status pill counts.
@@ -487,9 +526,91 @@ export default async function BillsListPage({
               </tbody>
             </table>
           </div>
+
+          {/* Pager. The list ships one page at a time (see PAGE_SIZE);
+              the status pills above still count the whole book. */}
+          <div
+            style={{
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+              padding: "12px 14px", borderTop: `1px solid ${ACCOUNTS_TOKENS.border}`,
+            }}
+          >
+            <span style={{ fontSize: 12.5, color: "var(--muted)" }}>
+              Showing{" "}
+              <strong style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+                {(rangeFrom + 1).toLocaleString("en-IN")}–
+                {Math.min(rangeFrom + PAGE_SIZE, matchedCount).toLocaleString("en-IN")}
+              </strong>{" "}
+              of{" "}
+              <strong style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+                {matchedCount.toLocaleString("en-IN")}
+              </strong>{" "}
+              {matchedCount === 1 ? "bill" : "bills"} matching these filters
+            </span>
+
+            {pageCount > 1 && (
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+                <PagerLink
+                  page={currentPage - 1}
+                  disabled={currentPage <= 1}
+                  label="‹ Previous"
+                  sp={sp}
+                />
+                <span style={{ fontSize: 12.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                  Page {currentPage} of {pageCount}
+                </span>
+                <PagerLink
+                  page={currentPage + 1}
+                  disabled={currentPage >= pageCount}
+                  label="Next ›"
+                  sp={sp}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>
+  );
+}
+
+/** One pager button. Carries every other filter through unchanged, so
+ *  paging never silently drops the status or vendor you were looking at. */
+function PagerLink({
+  page, disabled, label, sp,
+}: {
+  page: number;
+  disabled: boolean;
+  label: string;
+  sp: { status?: string; vendor?: string; q?: string; hold?: string; adv?: string; page?: string };
+}) {
+  const style = {
+    padding: "7px 14px",
+    fontSize: 13,
+    fontWeight: 700,
+    borderRadius: 8,
+    border: `1px solid ${ACCOUNTS_TOKENS.border}`,
+    background: disabled ? "transparent" : "#fff",
+    color: disabled ? "var(--muted)" : "var(--text)",
+    textDecoration: "none",
+    opacity: disabled ? 0.5 : 1,
+    pointerEvents: disabled ? ("none" as const) : undefined,
+  };
+  if (disabled) return <span style={style}>{label}</span>;
+
+  const params = new URLSearchParams();
+  if (sp.status) params.set("status", sp.status);
+  if (sp.vendor) params.set("vendor", sp.vendor);
+  if (sp.q) params.set("q", sp.q);
+  if (sp.hold) params.set("hold", sp.hold);
+  if (sp.adv) params.set("adv", sp.adv);
+  if (page > 1) params.set("page", String(page));
+  const qs = params.toString();
+
+  return (
+    <Link href={`/accounts/bills${qs ? `?${qs}` : ""}`} style={style}>
+      {label}
+    </Link>
   );
 }
 
