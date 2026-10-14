@@ -132,15 +132,39 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
           <thead>
             <tr>
               <th className="cp-rank">#</th>
-              <th>Machine</th>
-              <th>Vendor</th>
-              <th className="cp-num">Pieces</th>
-              <th className="cp-bar-h">Against the best of this kind</th>
-              <th className="cp-num">Hours</th>
-              <th className="cp-num">Used</th>
-              <th className="cp-num">At a time</th>
-              <th className="cp-num">Hrs / piece</th>
-              <th>Now</th>
+              <Th label="Machine" en="The machine's own number, and how many axes it has." hi="मशीन का नंबर और उसके ऐक्सिस।" />
+              <Th label="Vendor" en="Whose shed the machine stands in." hi="मशीन किस ठेकेदार के शेड में है।" />
+              <Th
+                label="Pieces" num
+                en="Pieces taken off this machine in the chosen period. This is what the ranking uses."
+                hi="चुनी हुई अवधि में इस मशीन से उतारे गए टुकड़े। क्रम इसी से बनता है।"
+              />
+              <Th
+                label="Against the best of this kind" wide
+                en="The bar compares this machine with the best machine of the same type. The dark line is the middle machine of that type."
+                hi="पट्टी इसी प्रकार की सबसे अच्छी मशीन से तुलना करती है। गहरी लकीर इस प्रकार की बीच वाली मशीन है।"
+              />
+              <Th
+                label="Hours" num
+                en="Hours the bed actually had work on it. Pieces running side by side count that hour once, not twice."
+                hi="मशीन पर सचमुच काम चलने के घंटे। साथ-साथ चल रहे टुकड़ों का वही घंटा एक ही बार गिना जाता है।"
+              />
+              <Th
+                label="Used" num
+                en="Those hours as a share of the whole period. 100% means it never stood empty."
+                hi="पूरी अवधि में से कितने प्रतिशत समय मशीन चली। 100% मतलब कभी खाली नहीं रही।"
+              />
+              <Th
+                label="At a time" num
+                en="How many pieces shared the bed on average. Two machines can run the same hours and still differ here."
+                hi="औसतन कितने टुकड़े एक साथ मशीन पर थे। एक जैसे घंटे चलने पर भी यह अलग हो सकता है।"
+              />
+              <Th
+                label="Hrs / piece" num
+                en="Average time one piece spent on the machine. Shown in red when it is much slower than others of its kind — tool, stone or a fault."
+                hi="एक टुकड़े को मशीन पर लगने वाला औसत समय। लाल मतलब अपने प्रकार से काफी धीमा — टूल, पत्थर या कोई खराबी।"
+              />
+              <Th label="Now" en="What the machine is doing at this moment." hi="मशीन इस समय क्या कर रही है।" />
             </tr>
           </thead>
           <tbody>
@@ -158,6 +182,33 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
         </table>
       </div>
     </section>
+  );
+}
+
+/**
+ * A column heading with an ⓘ that explains it in English and Hindi.
+ *
+ * Daksh: "on all column give a info thing so my dad can know what it is,
+ * in Hindi too." It opens on hover AND on focus, so a tap works on the
+ * tablet — `title` alone would never show there. The bubble drops DOWNWARD
+ * into the table because the scroll container clips anything above it.
+ */
+function Th({
+  label, en, hi, num, wide,
+}: { label: string; en: string; hi: string; num?: boolean; wide?: boolean }) {
+  return (
+    <th className={`${num ? "cp-num " : ""}${wide ? "cp-bar-h " : ""}cp-th`}>
+      <span className="cp-thwrap">
+        <span>{label}</span>
+        <button type="button" className="cp-info" aria-label={`What is ${label}? — ${en}`}>
+          i
+        </button>
+        <span className="cp-tip" role="tooltip">
+          <span className="cp-tip-en">{en}</span>
+          <span className="cp-tip-hi">{hi}</span>
+        </span>
+      </span>
+    </th>
   );
 }
 
@@ -252,10 +303,33 @@ const CSS = `
 
 .cp-scroll { overflow-x:auto; border:1px solid var(--border); border-radius:14px;
   background:var(--surface); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+/* The bubble opens downward INTO the table precisely because this
+   container scrolls — anything above the heading row would be cut off. */
 table.cp { width:100%; border-collapse:collapse; font-size:13.5px; min-width:900px; }
 table.cp th { font-size:10.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase;
   color:var(--muted); text-align:left; padding:11px 12px; border-bottom:1px solid var(--border);
   background:var(--surface-alt); white-space:nowrap; }
+/* A number column's heading has to sit over its own figures. The general
+   rule above is more specific than .cp-num, so without this the heading
+   stayed hard left while every value sat hard right — which is exactly
+   what made the table look out of line. */
+table.cp th.cp-num { text-align:right; }
+table.cp th.cp-num .cp-thwrap { justify-content:flex-end; }
+
+/* Heading + its ⓘ, with the bubble hung underneath. */
+.cp-thwrap { position:relative; display:inline-flex; align-items:center; gap:5px; }
+.cp-info { width:14px; height:14px; flex:0 0 auto; border-radius:50%; border:none;
+  background:var(--border); color:var(--muted); font-family:inherit; font-size:9.5px;
+  font-weight:800; line-height:1; cursor:help; padding:0; display:grid; place-items:center; }
+.cp-info:hover, .cp-info:focus-visible { background:var(--gold); color:#fff; outline:none; }
+.cp-tip { position:absolute; top:calc(100% + 8px); left:0; z-index:30; width:260px;
+  display:none; flex-direction:column; gap:5px; padding:10px 12px; border-radius:10px;
+  background:#1f2430; color:#eef1f6; font-size:11.5px; font-weight:500; line-height:1.5;
+  letter-spacing:0; text-transform:none; text-align:left; white-space:normal;
+  box-shadow:0 8px 24px rgba(10,15,30,.3); }
+table.cp th.cp-num .cp-tip { left:auto; right:0; }
+.cp-thwrap:hover .cp-tip, .cp-thwrap:focus-within .cp-tip { display:flex; }
+.cp-tip-hi { color:#c9d2e3; border-top:1px solid rgba(255,255,255,.14); padding-top:5px; }
 table.cp td { padding:10px 12px; border-bottom:1px solid var(--border-light); white-space:nowrap; }
 table.cp tbody tr:last-child td { border-bottom:0; }
 
