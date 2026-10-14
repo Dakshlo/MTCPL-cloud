@@ -29,7 +29,7 @@
 // ──────────────────────────────────────────────────────────────────
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { fetchAllPaged } from "@/lib/paginate";
+import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 
 export const PERIODS = [
   { key: "7d", label: "Last 7 days", days: 7 },
@@ -84,6 +84,11 @@ export type MachineRow = {
   utilisation: number;
   /** Mean full duration of the jobs it finished, in hours. */
   hoursPerJob: number | null;
+  /** Volume of stone carved — the pieces' own size, summed. */
+  cft: number;
+  /** Piece-hours per cubic foot. THIS is whether a machine is slow:
+   *  hours per PIECE punishes whoever is given the biggest stone. */
+  hoursPerCft: number | null;
   /** Mean number of pieces on the machine at the same time: piece-hours
    *  divided by wall-clock hours. These are multi-head machines, so two
    *  machines can run the same hours and still differ here. */
@@ -104,17 +109,24 @@ export type TypeGroup = {
   machines: MachineRow[];
   /** Median jobs across the machines of this type — the "same kind" bar. */
   medianJobs: number;
+  /** Same, by volume, for when the board is ranked on CFT. */
+  medianCft: number;
   medianHoursPerJob: number | null;
+  /** Median hours per cubic foot — the fair "is this machine slow" bar. */
+  medianHoursPerCft: number | null;
   totalJobs: number;
+  totalCft: number;
 };
 
 export type ProductivityReport = {
   periodKey: string;
   periodLabel: string;
+  rankBy: RankBy;
   days: number;
   from: string;
   groups: TypeGroup[];
   totalJobs: number;
+  totalCft: number;
   machinesCounted: number;
   /** Machines that finished something in the period. */
   machinesRunning: number;
@@ -135,7 +147,12 @@ const median = (xs: number[]): number => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-export async function loadCncProductivity(periodKey: string): Promise<ProductivityReport> {
+export type RankBy = "pieces" | "cft";
+
+export async function loadCncProductivity(
+  periodKey: string,
+  rankBy: RankBy = "pieces",
+): Promise<ProductivityReport> {
   const period = PERIODS.find((p) => p.key === periodKey) ?? PERIODS[0];
   const days = period.days;
   const now = Date.now();
@@ -153,11 +170,11 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
     // Only the three columns the arithmetic needs. Paged because a 90-day
     // window is a couple of thousand rows and PostgREST caps a plain
     // select at 1,000 with no error.
-    fetchAllPaged<{ completed_on_cnc_machine_id: string | null; loaded_at: string | null; unloaded_at: string }>(
+    fetchAllPaged<{ completed_on_cnc_machine_id: string | null; slab_requirement_id: string | null; loaded_at: string | null; unloaded_at: string }>(
       (f, t) =>
         admin
           .from("carving_items")
-          .select("completed_on_cnc_machine_id, loaded_at, unloaded_at")
+          .select("completed_on_cnc_machine_id, slab_requirement_id, loaded_at, unloaded_at")
           .gte("unloaded_at", fromIso)
           .not("completed_on_cnc_machine_id", "is", null)
           .order("unloaded_at", { ascending: false })
@@ -167,6 +184,21 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
     // Still on the bed — the difference between "idle" and "mid-job".
     admin.from("carving_items").select("cnc_machine_id").is("unloaded_at", null).not("cnc_machine_id", "is", null),
   ]);
+
+  // Volume of each piece, so a machine given big stone is not mistaken
+  // for a slow one. Slab dimensions are inches despite the *_ft names —
+  // a long-standing quirk of this schema, hence the 1728.
+  const slabIds = [...new Set(items.map((i) => i.slab_requirement_id).filter((x): x is string => !!x))];
+  const cftOf = new Map<string, number>();
+  for (const chunk of chunkIds(slabIds, 400)) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, length_ft, width_ft, thickness_ft")
+      .in("id", chunk);
+    for (const r of (data ?? []) as Array<{ id: string; length_ft: number; width_ft: number; thickness_ft: number }>) {
+      cftOf.set(r.id, (Number(r.length_ft) * Number(r.width_ft) * Number(r.thickness_ft)) / 1728);
+    }
+  }
 
   const onBed = new Map<string, number>();
   for (const r of (onBedRows ?? []) as Array<{ cnc_machine_id: string }>) {
@@ -183,12 +215,12 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
   // as machines "122% used". Wall-clock time has to be the UNION of the
   // loaded intervals, not their sum — so the intervals are collected per
   // machine here and merged below.
-  type Acc = { jobs: number; fullMs: number; withDuration: number; spans: Array<[number, number]>; loggedOnly: number };
+  type Acc = { jobs: number; fullMs: number; withDuration: number; spans: Array<[number, number]>; loggedOnly: number; cft: number };
   const acc = new Map<string, Acc>();
   for (const it of items) {
     const mid = it.completed_on_cnc_machine_id;
     if (!mid) continue;
-    const a = acc.get(mid) ?? { jobs: 0, fullMs: 0, withDuration: 0, spans: [], loggedOnly: 0 };
+    const a = acc.get(mid) ?? { jobs: 0, fullMs: 0, withDuration: 0, spans: [], loggedOnly: 0, cft: 0 };
 
     const end = new Date(it.unloaded_at).getTime();
     const start = it.loaded_at ? new Date(it.loaded_at).getTime() : NaN;
@@ -200,6 +232,7 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
       continue;
     }
     a.jobs += 1;
+    a.cft += cftOf.get(it.slab_requirement_id ?? "") ?? 0;
     if (Number.isFinite(start) && end > start) {
       // Full run, for "how long does a piece take on this machine".
       a.fullMs += end - start;
@@ -251,6 +284,8 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
       hoursRun,
       utilisation: windowHours > 0 ? hoursRun / windowHours : 0,
       hoursPerJob: a && a.withDuration > 0 ? a.fullMs / a.withDuration / 3_600_000 : null,
+      cft: a?.cft ?? 0,
+      hoursPerCft: a && a.cft > 0.01 ? pieceHours / a.cft : null,
       piecesAtATime: hoursRun > 0.05 ? pieceHours / hoursRun : null,
       loggedOnly: a?.loggedOnly ?? 0,
       onBedNow: onBed.get(m.id) ?? 0,
@@ -266,17 +301,27 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
 
   const groups: TypeGroup[] = [...byType.entries()]
     .map(([key, list]) => {
-      const sorted = [...list].sort(
-        (a, b) => b.jobs - a.jobs || b.hoursRun - a.hoursRun || a.code.localeCompare(b.code, undefined, { numeric: true }),
+      // Ranking basis is the owner's choice. Pieces answers "who got the
+      // most done"; CFT answers "who cut the most stone" — and they
+      // disagree sharply, because ten small pieces can be a fraction of
+      // the work in four big ones.
+      const sorted = [...list].sort((a, b) =>
+        rankBy === "cft"
+          ? b.cft - a.cft || b.jobs - a.jobs || a.code.localeCompare(b.code, undefined, { numeric: true })
+          : b.jobs - a.jobs || b.hoursRun - a.hoursRun || a.code.localeCompare(b.code, undefined, { numeric: true }),
       );
       const perJob = sorted.map((m) => m.hoursPerJob).filter((h): h is number => h != null);
+      const perCft = sorted.map((m) => m.hoursPerCft).filter((h): h is number => h != null);
       return {
         type: key === "__none__" ? null : key,
         typeLabel: machineTypeLabel(key === "__none__" ? null : key),
         machines: sorted,
         medianJobs: median(sorted.map((m) => m.jobs)),
+        medianCft: median(sorted.map((m) => m.cft)),
         medianHoursPerJob: perJob.length ? median(perJob) : null,
+        medianHoursPerCft: perCft.length ? median(perCft) : null,
         totalJobs: sorted.reduce((s, m) => s + m.jobs, 0),
+        totalCft: sorted.reduce((s, m) => s + m.cft, 0),
       };
     })
     .sort((a, b) => b.machines.length - a.machines.length);
@@ -301,9 +346,11 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
   return {
     periodKey: period.key,
     periodLabel: period.label,
+    rankBy,
     days,
     from: fromIso,
     groups,
+      totalCft: machines.reduce((s, m) => s + m.cft, 0),
     totalJobs: machines.reduce((s, m) => s + m.jobs, 0),
     machinesRunning: machines.filter((m) => m.jobs > 0).length,
     machinesMidJob: machines.filter((m) => m.jobs === 0 && m.onBedNow > 0).length,

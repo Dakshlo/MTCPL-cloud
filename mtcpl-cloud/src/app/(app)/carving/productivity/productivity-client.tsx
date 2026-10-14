@@ -67,27 +67,14 @@ export function ProductivityView({ report }: { report: ProductivityReport }) {
           ))}
         </div>
 
-        <div className="cp-kpis">
-          <span className="cp-kpi cp-kpi--gold">
-            <b>{report.totalJobs.toLocaleString("en-IN")}</b> pieces
-          </span>
-          <span className="cp-kpi cp-kpi--green">
-            <b>{report.machinesRunning}</b> ran
-          </span>
-          {report.machinesMidJob > 0 && (
-            <span className="cp-kpi cp-kpi--blue" title="Finished nothing in this period, but a bed is loaded — part-way through long work">
-              <b>{report.machinesMidJob}</b> mid-job
-            </span>
-          )}
-          <span className={`cp-kpi ${report.machinesIdle > 0 ? "cp-kpi--red" : "cp-kpi--grey"}`}>
-            <b>{report.machinesIdle}</b> standing still
-          </span>
-          {report.loggedOnly > 0 && (
-            <span className="cp-kpi cp-kpi--grey" title="Loaded and unloaded within 15 minutes — register catch-up, left out of the figures">
-              <b>{report.loggedOnly}</b> logged only
-            </span>
-          )}
+        <div className="cp-rankby">
+          <span>Rank by</span>
+          <Link href={`/carving/productivity?period=${report.periodKey}`}
+            className={`cp-rb${report.rankBy === "pieces" ? " is-on" : ""}`}>Pieces</Link>
+          <Link href={`/carving/productivity?period=${report.periodKey}&rank=cft`}
+            className={`cp-rb${report.rankBy === "cft" ? " is-on" : ""}`}>CFT</Link>
         </div>
+
       </div>
 
       {report.laggards.length > 0 && (
@@ -104,7 +91,7 @@ export function ProductivityView({ report }: { report: ProductivityReport }) {
       )}
 
       {report.groups.map((g) => (
-        <GroupTable key={g.type ?? "none"} group={g} days={report.days} />
+        <GroupTable key={g.type ?? "none"} group={g} days={report.days} rankBy={report.rankBy} />
       ))}
 
       {report.groups.length === 0 && (
@@ -114,8 +101,12 @@ export function ProductivityView({ report }: { report: ProductivityReport }) {
   );
 }
 
-function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
-  const best = group.machines[0]?.jobs ?? 0;
+function GroupTable({ group, days, rankBy }: { group: TypeGroup; days: number; rankBy: "pieces" | "cft" }) {
+  // The bar has to measure whatever the board is ranked on, or the
+  // longest bar is not the top row.
+  const byCft = rankBy === "cft";
+  const best = byCft ? (group.machines[0]?.cft ?? 0) : (group.machines[0]?.jobs ?? 0);
+  const mid = byCft ? group.medianCft : group.medianJobs;
   return (
     <section className="cp-group">
       <div className="cp-grouphead">
@@ -123,7 +114,8 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
         <span className="cp-groupmeta">
           {group.machines.length} machines · {group.totalJobs} pieces in {days}d · middle{" "}
           <b>{group.medianJobs}</b>
-          {group.medianHoursPerJob != null && <> · typically <b>{n1(group.medianHoursPerJob)}h</b> a piece</>}
+          {" "}· <b>{n1(group.totalCft)}</b> CFT
+          {group.medianHoursPerCft != null && <> · typically <b>{n1(group.medianHoursPerCft)}h</b> a CFT</>}
         </span>
       </div>
 
@@ -138,6 +130,11 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
                 label="Pieces" num
                 en="Pieces taken off this machine in the chosen period. This is what the ranking uses."
                 hi="चुनी हुई अवधि में इस मशीन से उतारे गए टुकड़े। क्रम इसी से बनता है।"
+              />
+              <Th
+                label="CFT" num
+                en="Volume of stone carved — the pieces' own size added up. Four big pieces can be far more work than ten small ones."
+                hi="कितना पत्थर तराशा गया — टुकड़ों का अपना आकार जोड़कर। चार बड़े टुकड़े दस छोटे टुकड़ों से कहीं ज़्यादा काम हो सकते हैं।"
               />
               <Th
                 label="Against the best of this kind" wide
@@ -160,9 +157,9 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
                 hi="औसतन कितने टुकड़े एक साथ मशीन पर थे। एक जैसे घंटे चलने पर भी यह अलग हो सकता है।"
               />
               <Th
-                label="Hrs / piece" num
-                en="Average time one piece spent on the machine. Shown in red when it is much slower than others of its kind — tool, stone or a fault."
-                hi="एक टुकड़े को मशीन पर लगने वाला औसत समय। लाल मतलब अपने प्रकार से काफी धीमा — टूल, पत्थर या कोई खराबी।"
+                label="Hrs / CFT" num
+                en="Hours spent per cubic foot of stone — this is whether a machine is actually slow. Hours per piece punishes whoever is given the biggest stone. Red means much slower than others of its kind: tool, stone or a fault."
+                hi="एक घन फुट पत्थर पर लगने वाले घंटे — मशीन सचमुच धीमी है या नहीं, यह इसी से पता चलता है। प्रति टुकड़ा घंटे उस मशीन को गलत ठहराते हैं जिसे सबसे बड़ा पत्थर मिला हो। लाल मतलब अपने प्रकार से काफी धीमा — टूल, पत्थर या कोई खराबी।"
               />
               <Th label="Now" en="What the machine is doing at this moment." hi="मशीन इस समय क्या कर रही है।" />
             </tr>
@@ -174,8 +171,9 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
                 m={m}
                 rank={i + 1}
                 best={best}
-                medianJobs={group.medianJobs}
-                medianHoursPerJob={group.medianHoursPerJob}
+                value={byCft ? m.cft : m.jobs}
+                mid={mid}
+                medianHoursPerCft={group.medianHoursPerCft}
               />
             ))}
           </tbody>
@@ -213,17 +211,25 @@ function Th({
 }
 
 function MachineLine({
-  m, rank, best, medianJobs, medianHoursPerJob,
+  m, rank, best, value, mid, medianHoursPerCft,
 }: {
   m: MachineRow; rank: number; best: number;
-  medianJobs: number; medianHoursPerJob: number | null;
+  /** Whatever the board is ranked on for this machine. */
+  value: number;
+  /** The middle machine of this type, on the same basis. */
+  mid: number;
+  medianHoursPerCft: number | null;
 }) {
-  const band = bandOf(m.jobs, medianJobs, m.onBedNow);
+  const band = bandOf(value, mid, m.onBedNow);
   const c = BAND[band];
-  const width = best > 0 ? (m.jobs / best) * 100 : 0;
-  const notch = best > 0 ? (medianJobs / best) * 100 : 0;
+  const width = best > 0 ? (value / best) * 100 : 0;
+  const notch = best > 0 ? (mid / best) * 100 : 0;
+  // Slowness is judged per cubic foot. Per PIECE it flagged machine 3 —
+  // which was carving the heaviest stone in the shed and was in fact the
+  // second fastest per cubic foot — while machine 6 cut ten small pieces
+  // at five times the hours per cubic foot and was never flagged.
   const slow =
-    medianHoursPerJob != null && m.hoursPerJob != null && m.hoursPerJob > medianHoursPerJob * 1.5;
+    medianHoursPerCft != null && m.hoursPerCft != null && m.hoursPerCft > medianHoursPerCft * 1.5;
   const st = STATUS[m.status] ?? { label: m.status, bg: "rgba(100,116,139,.14)", fg: "#475569" };
 
   return (
@@ -247,6 +253,7 @@ function MachineLine({
       </td>
       <td className="cp-vendor">{m.vendorName}</td>
       <td className="cp-num cp-jobs" style={{ color: c.chipFg }}>{m.jobs}</td>
+      <td className="cp-num cp-cft">{m.cft < 0.01 ? "—" : n1(m.cft)}</td>
       <td className="cp-bar-h">
         <span className="cp-bar">
           <span className="cp-barfill" style={{ width: `${width}%`, background: c.bar }} />
@@ -257,7 +264,7 @@ function MachineLine({
       <td className="cp-num">{m.hoursRun < 0.05 ? "—" : pct(m.utilisation)}</td>
       <td className="cp-num cp-soft">{m.piecesAtATime == null ? "—" : `${n1(m.piecesAtATime)}×`}</td>
       <td className={`cp-num${slow ? " cp-slow" : ""}`}>
-        {m.hoursPerJob == null ? "—" : n1(m.hoursPerJob)}
+        {m.hoursPerCft == null ? "—" : n1(m.hoursPerCft)}
       </td>
       <td>
         <span className="cp-status" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
@@ -274,15 +281,13 @@ const CSS = `
 .cp-period.is-on { background:linear-gradient(135deg,var(--gold),var(--gold-dark));
   border-color:transparent; color:#fff; box-shadow:0 3px 10px rgba(166,123,40,.28); }
 
-.cp-kpis { margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; }
-.cp-kpi { font-size:12.5px; font-weight:600; padding:7px 13px; border-radius:999px;
-  border:1px solid transparent; white-space:nowrap; }
-.cp-kpi b { font-size:15px; font-weight:800; font-variant-numeric:tabular-nums; margin-right:3px; }
-.cp-kpi--gold  { background:rgba(166,123,40,.12);  border-color:rgba(166,123,40,.3);  color:#8a6a2f; }
-.cp-kpi--green { background:rgba(34,197,94,.12);   border-color:rgba(34,197,94,.32);  color:#15803d; }
-.cp-kpi--red   { background:rgba(239,68,68,.11);   border-color:rgba(239,68,68,.32);  color:#b91c1c; }
-.cp-kpi--grey  { background:rgba(100,116,139,.11); border-color:rgba(100,116,139,.28); color:#475569; }
-.cp-kpi--blue  { background:rgba(37,99,235,.11);   border-color:rgba(37,99,235,.3);   color:#1d4ed8; }
+
+.cp-rankby { margin-left:auto; display:flex; align-items:center; gap:6px; }
+.cp-rankby > span { font-size:10.5px; font-weight:800; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--muted); margin-right:2px; }
+.cp-rb { padding:7px 14px; font-size:12.5px; font-weight:700; border-radius:9px;
+  text-decoration:none; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
+.cp-rb.is-on { background:var(--gold-subtle); border-color:var(--gold); color:var(--gold-dark); }
 
 .cp-flag { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
   background:rgba(239,68,68,.05); border:1px solid rgba(239,68,68,.26);
@@ -348,6 +353,7 @@ table.cp tbody tr:last-child td { border-bottom:0; }
 .cp-vendor { color:var(--muted); }
 .cp-soft { color:var(--muted); }
 .cp-slow { color:#b45309; font-weight:800; }
+.cp-cft { font-weight:700; color:var(--text); }
 .cp-status { font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:999px;
   text-transform:uppercase; letter-spacing:.04em; }
 
@@ -358,6 +364,5 @@ table.cp tbody tr:last-child td { border-bottom:0; }
 .cp-notch { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--text); opacity:.4; }
 
 @media (max-width: 760px) {
-  .cp-kpis { margin-left:0; width:100%; }
-}
+  }
 `;

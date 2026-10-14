@@ -17,7 +17,7 @@ import { ProductivityView } from "./productivity-client";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ period?: string }>;
+type SearchParams = Promise<{ period?: string; rank?: string }>;
 
 export default async function CncProductivityPage({
   searchParams,
@@ -29,7 +29,8 @@ export default async function CncProductivityPage({
 
   const sp = await searchParams;
   const periodKey = PERIODS.some((p) => p.key === sp.period) ? (sp.period as string) : "7d";
-  const report = await loadCncProductivity(periodKey);
+  const rankBy = sp.rank === "cft" ? "cft" : "pieces";
+  const report = await loadCncProductivity(periodKey, rankBy);
 
   return (
     <section className="page-fluid" style={{ paddingBottom: 60 }}>
