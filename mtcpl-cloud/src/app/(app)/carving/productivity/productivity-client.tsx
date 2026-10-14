@@ -3,16 +3,18 @@
 /**
  * The league table.
  *
- * Deliberately not a chart. Dad reads this to decide who to telephone,
- * so it is a ranked list with the three numbers that tell him WHICH
- * question to ask:
+ * Daksh, Oct 2026: "remove all unnecessary description ... more good UI,
+ * maybe colourful." So the prose is gone and the meaning is carried by
+ * colour instead: every machine is banded against the middle of its own
+ * kind, and the band drives the bar, the row tint and the rank chip.
  *
- *   few hours      → the machine sat idle. Why was there no work on it?
- *   high hrs/job   → it ran all week and was slow. Tool? Stone? Fault?
+ *   green   ahead of the middle of its kind
+ *   grey    around the middle
+ *   amber   behind
+ *   red     under half the middle, or never ran
  *
- * The bar is drawn against the best machine of the same type, and the
- * notch on it is that type's median, so "below the middle of its own
- * kind" is a thing you see rather than a thing you calculate.
+ * Still not a chart — dad reads this to decide who to telephone, so it
+ * stays a ranked list he can run a finger down.
  */
 
 import Link from "next/link";
@@ -21,6 +23,25 @@ import { PERIODS } from "@/lib/cnc-productivity";
 
 const n1 = (x: number) => x.toFixed(1);
 const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+type Band = "ahead" | "middle" | "behind" | "poor";
+
+const BAND: Record<Band, { bar: string; tint: string; chip: string; chipFg: string }> = {
+  ahead:  { bar: "linear-gradient(90deg,#15803d,#22c55e)", tint: "rgba(34,197,94,.05)",  chip: "rgba(34,197,94,.14)",  chipFg: "#15803d" },
+  middle: { bar: "linear-gradient(90deg,#64748b,#94a3b8)", tint: "transparent",          chip: "rgba(100,116,139,.14)", chipFg: "#475569" },
+  behind: { bar: "linear-gradient(90deg,#b45309,#f59e0b)", tint: "rgba(245,158,11,.06)", chip: "rgba(245,158,11,.16)", chipFg: "#92400e" },
+  poor:   { bar: "linear-gradient(90deg,#b91c1c,#ef4444)", tint: "rgba(239,68,68,.06)",  chip: "rgba(239,68,68,.14)",  chipFg: "#b91c1c" },
+};
+
+function bandOf(jobs: number, median: number, onBedNow = 0): Band {
+  if (median <= 0) return jobs > 0 ? "middle" : "poor";
+  // Mid-job on a loaded bed is not a poor performer, whatever it finished.
+  if (jobs <= median / 2 && onBedNow > 0) return "middle";
+  if (jobs <= median / 2) return "poor";
+  if (jobs < median) return "behind";
+  if (jobs > median) return "ahead";
+  return "middle";
+}
 
 const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
   carving: { label: "Carving", bg: "rgba(21,128,61,.12)", fg: "#15803d" },
@@ -33,47 +54,52 @@ export function ProductivityView({ report }: { report: ProductivityReport }) {
     <div>
       <style>{CSS}</style>
 
-      {/* Period picker — plain links so Back works and a view is shareable. */}
-      <div className="cp-periods">
-        {PERIODS.map((p) => (
-          <Link
-            key={p.key}
-            href={`/carving/productivity?period=${p.key}`}
-            className={`cp-period${report.periodKey === p.key ? " is-on" : ""}`}
-          >
-            {p.label}
-          </Link>
-        ))}
-        <span className="cp-summary">
-          <strong>{report.totalJobs.toLocaleString("en-IN")}</strong> pieces off{" "}
-          <strong>{report.machinesCounted}</strong> machines
-        </span>
+      <div className="cp-top">
+        <div className="cp-periods">
+          {PERIODS.map((p) => (
+            <Link
+              key={p.key}
+              href={`/carving/productivity?period=${p.key}`}
+              className={`cp-period${report.periodKey === p.key ? " is-on" : ""}`}
+            >
+              {p.label}
+            </Link>
+          ))}
+        </div>
+
+        <div className="cp-kpis">
+          <span className="cp-kpi cp-kpi--gold">
+            <b>{report.totalJobs.toLocaleString("en-IN")}</b> pieces
+          </span>
+          <span className="cp-kpi cp-kpi--green">
+            <b>{report.machinesRunning}</b> ran
+          </span>
+          {report.machinesMidJob > 0 && (
+            <span className="cp-kpi cp-kpi--blue" title="Finished nothing in this period, but a bed is loaded — part-way through long work">
+              <b>{report.machinesMidJob}</b> mid-job
+            </span>
+          )}
+          <span className={`cp-kpi ${report.machinesIdle > 0 ? "cp-kpi--red" : "cp-kpi--grey"}`}>
+            <b>{report.machinesIdle}</b> standing still
+          </span>
+          {report.loggedOnly > 0 && (
+            <span className="cp-kpi cp-kpi--grey" title="Loaded and unloaded within 15 minutes — register catch-up, left out of the figures">
+              <b>{report.loggedOnly}</b> logged only
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* The answer to "is the same kind of machine doing less". */}
       {report.laggards.length > 0 && (
         <div className="cp-flag">
-          <div className="cp-flaghead">
-            ⚠ {report.laggards.length} machine{report.laggards.length === 1 ? "" : "s"} under half
-            the middle of their own kind
-          </div>
-          <div className="cp-flagrow">
-            {report.laggards.map((m) => (
-              <span key={m.id} className="cp-flagchip">
-                <strong>{m.code}</strong>
-                <span>{m.vendorName}</span>
-                <em>
-                  {m.jobs} {m.jobs === 1 ? "piece" : "pieces"}
-                  {m.status === "maintenance" ? " · in maintenance" : m.hoursRun < 1 ? " · never ran" : ""}
-                </em>
-              </span>
-            ))}
-          </div>
-          <p className="cp-flagnote">
-            Low hours means it stood idle — ask why there was no work on it. Low
-            hours per piece with few pieces means the same. Many hours but few
-            pieces means it ran slow — tool, stone or a fault.
-          </p>
+          <span className="cp-flaghead">Under half their own kind</span>
+          {report.laggards.map((m) => (
+            <span key={m.id} className="cp-flagchip">
+              <b>{m.code}</b>
+              <span>{m.vendorName}</span>
+              <em>{m.jobs === 0 ? "never ran" : `${m.jobs} ${m.jobs === 1 ? "piece" : "pieces"}`}</em>
+            </span>
+          ))}
         </div>
       )}
 
@@ -84,17 +110,6 @@ export function ProductivityView({ report }: { report: ProductivityReport }) {
       {report.groups.length === 0 && (
         <p style={{ color: "var(--muted)", fontSize: 14 }}>No active CNC machines are set up yet.</p>
       )}
-
-      <p className="cp-foot">
-        A piece counts on the day it came off the machine. <strong>Hours run</strong> is
-        wall-clock time with the bed loaded — these are multi-head machines, so
-        pieces running side by side count that hour once, which is why Used never
-        passes 100%. <strong>At a time</strong> is how many pieces shared the bed on
-        average, so two machines can run the same hours and still differ.{" "}
-        <strong>Hrs / piece</strong> is the full time one piece spent on the machine.
-        Hours are clipped to the period, so a job loaded before it started cannot
-        stretch beyond it.
-      </p>
     </div>
   );
 }
@@ -105,10 +120,10 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
     <section className="cp-group">
       <div className="cp-grouphead">
         <h2>{group.typeLabel}</h2>
-        <span>
-          {group.machines.length} machines · {group.totalJobs} pieces in {days} days · middle
-          machine did <strong>{group.medianJobs}</strong>
-          {group.medianHoursPerJob != null && <> · typically {n1(group.medianHoursPerJob)} h a piece</>}
+        <span className="cp-groupmeta">
+          {group.machines.length} machines · {group.totalJobs} pieces in {days}d · middle{" "}
+          <b>{group.medianJobs}</b>
+          {group.medianHoursPerJob != null && <> · typically <b>{n1(group.medianHoursPerJob)}h</b> a piece</>}
         </span>
       </div>
 
@@ -120,8 +135,8 @@ function GroupTable({ group, days }: { group: TypeGroup; days: number }) {
               <th>Machine</th>
               <th>Vendor</th>
               <th className="cp-num">Pieces</th>
-              <th className="cp-bar-h">vs the best of this kind</th>
-              <th className="cp-num">Hours run</th>
+              <th className="cp-bar-h">Against the best of this kind</th>
+              <th className="cp-num">Hours</th>
               <th className="cp-num">Used</th>
               <th className="cp-num">At a time</th>
               <th className="cp-num">Hrs / piece</th>
@@ -152,35 +167,44 @@ function MachineLine({
   m: MachineRow; rank: number; best: number;
   medianJobs: number; medianHoursPerJob: number | null;
 }) {
-  const width = best > 0 ? Math.max(m.jobs / best, 0) * 100 : 0;
+  const band = bandOf(m.jobs, medianJobs, m.onBedNow);
+  const c = BAND[band];
+  const width = best > 0 ? (m.jobs / best) * 100 : 0;
   const notch = best > 0 ? (medianJobs / best) * 100 : 0;
-  const below = medianJobs > 0 && m.jobs < medianJobs;
   const slow =
     medianHoursPerJob != null && m.hoursPerJob != null && m.hoursPerJob > medianHoursPerJob * 1.5;
   const st = STATUS[m.status] ?? { label: m.status, bg: "rgba(100,116,139,.14)", fg: "#475569" };
 
   return (
-    <tr className={below ? "is-below" : undefined}>
-      <td className="cp-rank">{rank}</td>
+    <tr style={{ background: c.tint }}>
+      <td className="cp-rank">
+        <span className="cp-rankchip" style={{ background: c.chip, color: c.chipFg }}>{rank}</span>
+      </td>
       <td>
         <span className="cp-code">{m.code}</span>
         {m.axes != null && <span className="cp-axes">{m.axes}-axis</span>}
+        {m.jobs === 0 && m.onBedNow > 0 && (
+          <span className="cp-onbed" title="Still on the bed — part-way through long work, not idle">
+            {m.onBedNow} on bed
+          </span>
+        )}
+        {m.loggedOnly > 0 && (
+          <span className="cp-logged" title={`${m.loggedOnly} loaded and unloaded within 15 minutes — left out`}>
+            +{m.loggedOnly} logged
+          </span>
+        )}
       </td>
       <td className="cp-vendor">{m.vendorName}</td>
-      <td className="cp-num cp-jobs">{m.jobs}</td>
+      <td className="cp-num cp-jobs" style={{ color: c.chipFg }}>{m.jobs}</td>
       <td className="cp-bar-h">
         <span className="cp-bar">
-          <span className="cp-barfill" style={{ width: `${width}%` }} />
-          {notch > 0 && notch < 100 && (
-            <span className="cp-notch" style={{ left: `${notch}%` }} title={`middle of this kind: ${medianJobs}`} />
-          )}
+          <span className="cp-barfill" style={{ width: `${width}%`, background: c.bar }} />
+          {notch > 0 && notch < 100 && <span className="cp-notch" style={{ left: `${notch}%` }} />}
         </span>
       </td>
       <td className="cp-num">{m.hoursRun < 0.05 ? "—" : n1(m.hoursRun)}</td>
       <td className="cp-num">{m.hoursRun < 0.05 ? "—" : pct(m.utilisation)}</td>
-      <td className="cp-num cp-soft">
-        {m.piecesAtATime == null ? "—" : `${n1(m.piecesAtATime)}×`}
-      </td>
+      <td className="cp-num cp-soft">{m.piecesAtATime == null ? "—" : `${n1(m.piecesAtATime)}×`}</td>
       <td className={`cp-num${slow ? " cp-slow" : ""}`}>
         {m.hoursPerJob == null ? "—" : n1(m.hoursPerJob)}
       </td>
@@ -192,63 +216,74 @@ function MachineLine({
 }
 
 const CSS = `
-.cp-periods { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+.cp-top { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:18px; }
+.cp-periods { display:flex; gap:7px; flex-wrap:wrap; }
 .cp-period { padding:9px 16px; font-size:13.5px; font-weight:700; border-radius:10px;
-  text-decoration:none; border:1px solid var(--border); background:var(--surface);
-  color:var(--text); }
-.cp-period.is-on { background:var(--gold-subtle); border-color:var(--gold); color:var(--gold-dark); }
-.cp-summary { margin-left:auto; font-size:13px; color:var(--muted); }
-.cp-summary strong { color:var(--text); font-variant-numeric:tabular-nums; }
+  text-decoration:none; border:1px solid var(--border); background:var(--surface); color:var(--text); }
+.cp-period.is-on { background:linear-gradient(135deg,var(--gold),var(--gold-dark));
+  border-color:transparent; color:#fff; box-shadow:0 3px 10px rgba(166,123,40,.28); }
 
-.cp-flag { background:rgba(180,83,9,.06); border:1px solid rgba(180,83,9,.3);
-  border-radius:12px; padding:14px 16px; margin-bottom:20px; }
-.cp-flaghead { font-size:14px; font-weight:800; color:#92400e; margin-bottom:11px; }
-.cp-flagrow { display:flex; gap:8px; flex-wrap:wrap; }
-.cp-flagchip { display:inline-flex; align-items:baseline; gap:7px; background:var(--surface);
+.cp-kpis { margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; }
+.cp-kpi { font-size:12.5px; font-weight:600; padding:7px 13px; border-radius:999px;
+  border:1px solid transparent; white-space:nowrap; }
+.cp-kpi b { font-size:15px; font-weight:800; font-variant-numeric:tabular-nums; margin-right:3px; }
+.cp-kpi--gold  { background:rgba(166,123,40,.12);  border-color:rgba(166,123,40,.3);  color:#8a6a2f; }
+.cp-kpi--green { background:rgba(34,197,94,.12);   border-color:rgba(34,197,94,.32);  color:#15803d; }
+.cp-kpi--red   { background:rgba(239,68,68,.11);   border-color:rgba(239,68,68,.32);  color:#b91c1c; }
+.cp-kpi--grey  { background:rgba(100,116,139,.11); border-color:rgba(100,116,139,.28); color:#475569; }
+.cp-kpi--blue  { background:rgba(37,99,235,.11);   border-color:rgba(37,99,235,.3);   color:#1d4ed8; }
+
+.cp-flag { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  background:rgba(239,68,68,.05); border:1px solid rgba(239,68,68,.26);
+  border-radius:12px; padding:12px 14px; margin-bottom:22px; }
+.cp-flaghead { font-size:11px; font-weight:800; letter-spacing:.07em; text-transform:uppercase;
+  color:#b91c1c; margin-right:4px; }
+.cp-flagchip { display:inline-flex; align-items:baseline; gap:6px; background:var(--surface);
   border:1px solid var(--border); border-radius:999px; padding:5px 12px; font-size:12.5px; }
-.cp-flagchip strong { font-weight:800; }
+.cp-flagchip b { font-weight:800; }
 .cp-flagchip span { color:var(--muted); }
-.cp-flagchip em { font-style:normal; color:#b45309; font-weight:700; }
-.cp-flagnote { font-size:12.5px; color:var(--muted); line-height:1.55; margin:11px 0 0; max-width:80ch; }
+.cp-flagchip em { font-style:normal; color:#b91c1c; font-weight:700; }
 
 .cp-group { margin-bottom:26px; }
 .cp-grouphead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
-.cp-grouphead h2 { font-size:17px; font-weight:800; margin:0; letter-spacing:-.01em; }
-.cp-grouphead span { font-size:12.5px; color:var(--muted); }
-.cp-grouphead strong { color:var(--text); }
+.cp-grouphead h2 { font-size:18px; font-weight:800; margin:0; letter-spacing:-.015em; }
+.cp-groupmeta { font-size:12.5px; color:var(--muted); }
+.cp-groupmeta b { color:var(--text); font-variant-numeric:tabular-nums; }
 
-.cp-scroll { overflow-x:auto; border:1px solid var(--border); border-radius:12px;
-  background:var(--surface); }
-table.cp { width:100%; border-collapse:collapse; font-size:13.5px; min-width:860px; }
+.cp-scroll { overflow-x:auto; border:1px solid var(--border); border-radius:14px;
+  background:var(--surface); box-shadow:0 1px 2px rgba(16,24,40,.04); }
+table.cp { width:100%; border-collapse:collapse; font-size:13.5px; min-width:900px; }
 table.cp th { font-size:10.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase;
-  color:var(--muted); text-align:left; padding:10px 12px; border-bottom:1px solid var(--border);
+  color:var(--muted); text-align:left; padding:11px 12px; border-bottom:1px solid var(--border);
   background:var(--surface-alt); white-space:nowrap; }
 table.cp td { padding:10px 12px; border-bottom:1px solid var(--border-light); white-space:nowrap; }
 table.cp tbody tr:last-child td { border-bottom:0; }
-table.cp tbody tr.is-below td { background:rgba(180,83,9,.045); }
-.cp-rank { width:42px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+.cp-rank { width:50px; }
+.cp-rankchip { display:inline-grid; place-items:center; width:26px; height:26px;
+  border-radius:8px; font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; }
 .cp-num { text-align:right; font-variant-numeric:tabular-nums; }
-.cp-jobs { font-size:16px; font-weight:800; }
-.cp-code { font-weight:800; font-size:15px; }
+.cp-jobs { font-size:17px; font-weight:800; }
+.cp-code { font-weight:800; font-size:15.5px; }
 .cp-axes { margin-left:7px; font-size:10.5px; font-weight:700; color:var(--muted);
   border:1px solid var(--border); border-radius:5px; padding:1px 5px; }
+.cp-logged { margin-left:7px; font-size:10px; font-weight:700; color:#475569;
+  background:rgba(100,116,139,.12); border-radius:5px; padding:1px 6px; }
+.cp-onbed { margin-left:7px; font-size:10px; font-weight:700; color:#1d4ed8;
+  background:rgba(37,99,235,.12); border-radius:5px; padding:1px 6px; }
 .cp-vendor { color:var(--muted); }
-.cp-slow { color:#b45309; font-weight:800; }
 .cp-soft { color:var(--muted); }
+.cp-slow { color:#b45309; font-weight:800; }
 .cp-status { font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:999px;
   text-transform:uppercase; letter-spacing:.04em; }
 
-.cp-bar-h { width:34%; min-width:150px; }
-.cp-bar { position:relative; display:block; height:11px; border-radius:6px;
-  background:var(--border-light); overflow:visible; }
-.cp-barfill { position:absolute; left:0; top:0; bottom:0; border-radius:6px;
-  background:linear-gradient(90deg, var(--gold) 0%, var(--gold-dark) 100%); }
-.cp-notch { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--text);
-  opacity:.45; }
+.cp-bar-h { width:30%; min-width:140px; }
+.cp-bar { position:relative; display:block; height:12px; border-radius:7px;
+  background:var(--border-light); }
+.cp-barfill { position:absolute; left:0; top:0; bottom:0; border-radius:7px; }
+.cp-notch { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--text); opacity:.4; }
 
-.cp-foot { font-size:12px; color:var(--muted); line-height:1.6; margin-top:6px; max-width:86ch; }
-
-@media (max-width: 700px) {
-  .cp-summary { margin-left:0; width:100%; }
+@media (max-width: 760px) {
+  .cp-kpis { margin-left:0; width:100%; }
 }
 `;

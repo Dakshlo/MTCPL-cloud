@@ -46,11 +46,6 @@ export default async function CncProductivityPage({
           <h1 style={{ fontSize: 27, fontWeight: 800, letterSpacing: "-0.5px", margin: 0 }}>
             CNC Productivity
           </h1>
-          <p style={{ fontSize: 13.5, color: "var(--muted)", margin: "6px 0 0", maxWidth: "70ch", lineHeight: 1.55 }}>
-            Every machine, best first, measured against others of its own kind.
-            A machine is only compared with the same type, so a lathe is never
-            judged against a multi-head.
-          </p>
         </div>
         <Link
           href="/dashboard"

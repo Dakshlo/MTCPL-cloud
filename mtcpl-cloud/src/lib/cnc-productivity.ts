@@ -50,6 +50,23 @@ export const MACHINE_TYPE_LABEL: Record<string, string> = {
 export const machineTypeLabel = (t: string | null) =>
   t ? MACHINE_TYPE_LABEL[t] ?? t.replace(/_/g, " ") : "Unspecified";
 
+/**
+ * A spell on the machine shorter than this is not a carve.
+ *
+ * Found on the live data (Oct 2026): machine 23 came top of the 7-day
+ * board with 14 pieces and 0.1 hours — all fourteen "ran" for about 36
+ * SECONDS. Someone had loaded and unloaded them back to back in the app,
+ * catching the register up after the fact.
+ *
+ * The cut-off is not a guess. Over 30 days the durations are in two
+ * clearly separate groups: 189 jobs under 15 minutes, only 6 between 15
+ * minutes and an hour, and 555 over an hour. Nothing real lives in the
+ * gap, so anything under a quarter of an hour is a logging entry and is
+ * kept out of the productivity figures — and counted separately, so it
+ * is never silently dropped.
+ */
+const MIN_REAL_RUN_MS = 15 * 60 * 1000;
+
 export type MachineRow = {
   id: string;
   code: string;
@@ -71,6 +88,14 @@ export type MachineRow = {
    *  divided by wall-clock hours. These are multi-head machines, so two
    *  machines can run the same hours and still differ here. */
   piecesAtATime: number | null;
+  /** Pieces ticked off in under 15 minutes — register catch-up, not work.
+   *  Excluded from `jobs`, shown so nobody thinks rows went missing. */
+  loggedOnly: number;
+  /** Pieces sitting on the bed right now, still unloaded. A machine that
+   *  finished nothing this week but has a full bed is part-way through
+   *  long work, not standing idle — those are completely different
+   *  problems and must not land in the same warning. */
+  onBedNow: number;
 };
 
 export type TypeGroup = {
@@ -91,6 +116,14 @@ export type ProductivityReport = {
   groups: TypeGroup[];
   totalJobs: number;
   machinesCounted: number;
+  /** Machines that finished something in the period. */
+  machinesRunning: number;
+  /** Finished nothing but have a loaded bed — working on something long. */
+  machinesMidJob: number;
+  /** Finished nothing and have an empty bed — genuinely standing still. */
+  machinesIdle: number;
+  /** Register catch-up entries excluded from the figures, across all machines. */
+  loggedOnly: number;
   /** Machines well under the median of their own type — what dad is after. */
   laggards: MachineRow[];
 };
@@ -111,7 +144,7 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
 
   const admin = createAdminSupabaseClient();
 
-  const [{ data: machineRows }, { data: vendorRows }, items] = await Promise.all([
+  const [{ data: machineRows }, { data: vendorRows }, items, { data: onBedRows }] = await Promise.all([
     admin
       .from("cnc_machines")
       .select("id, machine_code, vendor_id, machine_type, cnc_axes, is_active, status")
@@ -131,7 +164,14 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
           .order("id", { ascending: true })
           .range(f, t),
     ),
+    // Still on the bed — the difference between "idle" and "mid-job".
+    admin.from("carving_items").select("cnc_machine_id").is("unloaded_at", null).not("cnc_machine_id", "is", null),
   ]);
+
+  const onBed = new Map<string, number>();
+  for (const r of (onBedRows ?? []) as Array<{ cnc_machine_id: string }>) {
+    onBed.set(r.cnc_machine_id, (onBed.get(r.cnc_machine_id) ?? 0) + 1);
+  }
 
   const vendorName = new Map(
     ((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => [v.id, v.name]),
@@ -143,16 +183,23 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
   // as machines "122% used". Wall-clock time has to be the UNION of the
   // loaded intervals, not their sum — so the intervals are collected per
   // machine here and merged below.
-  type Acc = { jobs: number; fullMs: number; withDuration: number; spans: Array<[number, number]> };
+  type Acc = { jobs: number; fullMs: number; withDuration: number; spans: Array<[number, number]>; loggedOnly: number };
   const acc = new Map<string, Acc>();
   for (const it of items) {
     const mid = it.completed_on_cnc_machine_id;
     if (!mid) continue;
-    const a = acc.get(mid) ?? { jobs: 0, fullMs: 0, withDuration: 0, spans: [] };
-    a.jobs += 1;
+    const a = acc.get(mid) ?? { jobs: 0, fullMs: 0, withDuration: 0, spans: [], loggedOnly: 0 };
 
     const end = new Date(it.unloaded_at).getTime();
     const start = it.loaded_at ? new Date(it.loaded_at).getTime() : NaN;
+    // A sub-15-minute spell is register catch-up, not a carve — see
+    // MIN_REAL_RUN_MS. It counts nowhere except its own tally.
+    if (Number.isFinite(start) && end - start < MIN_REAL_RUN_MS) {
+      a.loggedOnly += 1;
+      acc.set(mid, a);
+      continue;
+    }
+    a.jobs += 1;
     if (Number.isFinite(start) && end > start) {
       // Full run, for "how long does a piece take on this machine".
       a.fullMs += end - start;
@@ -205,6 +252,8 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
       utilisation: windowHours > 0 ? hoursRun / windowHours : 0,
       hoursPerJob: a && a.withDuration > 0 ? a.fullMs / a.withDuration / 3_600_000 : null,
       piecesAtATime: hoursRun > 0.05 ? pieceHours / hoursRun : null,
+      loggedOnly: a?.loggedOnly ?? 0,
+      onBedNow: onBed.get(m.id) ?? 0,
     };
   });
 
@@ -234,11 +283,17 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
 
   // "Doing less than the same kind": at or below half its type's median,
   // and only where the group is big enough for a median to mean anything.
+  //
+  // A machine with a loaded bed is NOT in this list however little it
+  // finished. Checked on the live data: machines 2, 18 and 29 finished
+  // nothing in seven days with 132, 48 and 96 pieces on them, part-way
+  // through long work — ringing their vendor would be a wasted call,
+  // and a warning that cries wolf stops being read.
   const laggards: MachineRow[] = [];
   for (const g of groups) {
     if (g.machines.length < 3 || g.medianJobs <= 0) continue;
     for (const m of g.machines) {
-      if (m.jobs <= g.medianJobs / 2) laggards.push(m);
+      if (m.jobs <= g.medianJobs / 2 && m.onBedNow === 0) laggards.push(m);
     }
   }
   laggards.sort((a, b) => a.jobs - b.jobs);
@@ -250,6 +305,10 @@ export async function loadCncProductivity(periodKey: string): Promise<Productivi
     from: fromIso,
     groups,
     totalJobs: machines.reduce((s, m) => s + m.jobs, 0),
+    machinesRunning: machines.filter((m) => m.jobs > 0).length,
+    machinesMidJob: machines.filter((m) => m.jobs === 0 && m.onBedNow > 0).length,
+    machinesIdle: machines.filter((m) => m.jobs === 0 && m.onBedNow === 0).length,
+    loggedOnly: machines.reduce((s, m) => s + m.loggedOnly, 0),
     machinesCounted: machines.length,
     laggards,
   };
