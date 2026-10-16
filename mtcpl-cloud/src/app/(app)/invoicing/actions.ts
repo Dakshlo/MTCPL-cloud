@@ -175,14 +175,10 @@ export async function saveChallanPricingAction(formData: FormData) {
       stoneGst: gstMode ? stoneGst : null,
       itemGst: gstMode ? itemGst : null,
       discount: { discount_mode: discountMode, discount_value: discountValue },
-      transport: {
-        company: txt(formData, "transport_company") || null,
-        phone: txt(formData, "transport_phone") || null,
-        lr: txt(formData, "lr_no") || null,
-        vehicle: txt(formData, "transport_vehicle_no") || null,
-        driver: txt(formData, "transport_driver_name") || null,
-        driverPhone: txt(formData, "transport_driver_phone") || null,
-      },
+      // Transport is deliberately NOT staged (Oct 2026). On an issued invoice it
+      // is edited in its own card, which saves immediately — so the form no
+      // longer posts these, and staging them would blank the live values when
+      // the owner approves. applyInvoiceEdit skips transport when it's absent.
     };
     await admin.from("challans").update({ pending_edit_payload: payload, pending_edit_at: new Date().toISOString(), pending_edit_by: profile.id } as never).eq("id", challanId);
     await logAudit(profile.id, "invoice_edit_requested", "challan", challanId, {});
@@ -2167,4 +2163,106 @@ export async function updateBulkInvoiceAction(formData: FormData): Promise<void>
   revalidatePath("/invoicing/invoices");
   revalidatePath("/invoicing/approval");
   redirect(`/invoicing/invoices?toast=${encodeURIComponent("Edit sent for approval — the invoice is unchanged until approved")}`);
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Transport details on an invoice that already exists (Oct 2026)
+// ──────────────────────────────────────────────────────────────────
+// Daksh: "accountant many times calls me to change transportation
+// details, because once the invoice is created they cannot edit these
+// fields." They were right to be stuck — every edit screen locks once
+// the invoice is issued, and the approval-gated edit payload carries
+// only items, GST and discount, so transport had no route at all.
+//
+// These six fields are safe to change directly, and the reason is
+// worth stating: NONE of them touches the taxable amount, the GST, the
+// invoice number or who is billed. They record which lorry carried the
+// goods. A wrong LR number is a clerical slip on a despatch note, not
+// an amendment to a tax invoice, so making the accountant wait for an
+// owner approval buys nothing and just routes the work through Daksh.
+//
+// Everything that DOES move money — items, rates, GST slabs, discount,
+// the party — stays exactly as it was: staged as a pending edit and
+// applied only after approval. This action cannot touch any of it; it
+// writes six named columns and nothing else.
+//
+// What it does keep is a record. The before and after go into the audit
+// log, because the table itself has no history and a transport detail
+// that changes twice would otherwise be untraceable.
+
+/** The only columns this action may write. */
+const TRANSPORT_COLUMNS = [
+  "transport_company",
+  "transport_phone",
+  "lr_no",
+  "transport_vehicle_no",
+  "transport_driver_name",
+  "transport_driver_phone",
+] as const;
+
+export type TransportSaveResult = { ok: true } | { ok: false; error: string };
+
+export async function updateInvoiceTransportAction(fd: FormData): Promise<TransportSaveResult> {
+  const { profile } = await requireAuth();
+  if (!canUseInvoicing(profile)) return { ok: false, error: "Not allowed." };
+
+  const id = txt(fd, "id");
+  const kind = txt(fd, "kind") === "other" ? "other" : "temple";
+  const table = kind === "other" ? "other_challans" : "challans";
+  if (!id) return { ok: false, error: "Which invoice?" };
+
+  const admin = createAdminSupabaseClient();
+
+  const { data: row, error: readErr } = await admin
+    .from(table)
+    .select(`id, cancelled_at, ${TRANSPORT_COLUMNS.join(", ")}`)
+    .eq("id", id)
+    .maybeSingle();
+  if (readErr || !row) return { ok: false, error: "That invoice no longer exists." };
+
+  const before = row as unknown as Record<string, string | null> & { cancelled_at: string | null };
+  // A cancelled or voided bill is a closed record — its despatch details
+  // are part of what was cancelled and must not drift afterwards.
+  if (before.cancelled_at) {
+    return { ok: false, error: "This bill is cancelled — its transport details are frozen." };
+  }
+
+  const next: Record<string, string | null> = {};
+  for (const col of TRANSPORT_COLUMNS) next[col] = txt(fd, col).slice(0, 120) || null;
+
+  const changed = TRANSPORT_COLUMNS.filter((c) => (before[c] ?? null) !== next[c]);
+  if (changed.length === 0) return { ok: true };
+
+  const { error: upErr } = await admin.from(table).update(next).eq("id", id);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  // A name typed here joins the master, exactly as it does when pricing — so
+  // the next bill offers it in the dropdown instead of being retyped.
+  if (next.transport_company) {
+    await admin.from("transport_companies").upsert({ name: next.transport_company }, { onConflict: "name" });
+  }
+
+  // An edit staged BEFORE this feature shipped carries a transport block of its
+  // own; approving it later would silently undo the correction just made. Drop
+  // that block from the staged payload — the priced figures it was filed for
+  // are untouched. (New payloads never carry transport, so this is a no-op.)
+  if (kind === "temple") {
+    const { data: pend } = await admin.from("challans").select("pending_edit_payload").eq("id", id).maybeSingle();
+    const staged = (pend as { pending_edit_payload: Record<string, unknown> | null } | null)?.pending_edit_payload ?? null;
+    if (staged && "transport" in staged) {
+      const { transport: _dropped, ...rest } = staged;
+      await admin.from("challans").update({ pending_edit_payload: rest } as never).eq("id", id);
+    }
+  }
+
+  await logAudit(profile.id, "invoice_transport_updated", kind === "other" ? "other_challan" : "challan", id, {
+    changed,
+    from: Object.fromEntries(changed.map((c) => [c, before[c] ?? null])),
+    to: Object.fromEntries(changed.map((c) => [c, next[c]])),
+  });
+
+  refreshInvoicingPaths({ challanId: id });
+  revalidatePath("/invoicing/invoices");
+  revalidatePath("/invoicing/other");
+  return { ok: true };
 }

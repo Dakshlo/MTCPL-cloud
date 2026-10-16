@@ -21,7 +21,10 @@ export type StagedDiscount = { discount_mode: "amount" | "percent" | null; disco
 export type StagedItem = { particulars: string | null; hsn: string | null; unit: string | null; quantity: number | null; rate: number | null; amount: number | null; section_index: number; section_head: string | null; section_gst?: number | null };
 
 export type EditPayload =
-  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport: Record<string, string | null>; stoneGst?: Record<string, number> | null; itemGst?: Record<string, number> | null; discount?: StagedDiscount }
+  // `transport` is only present on payloads staged before Oct 2026 — transport
+  // details are now corrected directly (they move no money), so a new payload
+  // carries none and the live values are left alone on approval.
+  | { kind: "purchase"; rates: Record<string, number | string>; gst: StagedGst; transport?: Record<string, string | null>; stoneGst?: Record<string, number> | null; itemGst?: Record<string, number> | null; discount?: StagedDiscount }
   | { kind: "running"; items: StagedItem[]; gst: StagedGst; discount?: StagedDiscount }
   | { kind: "bulk"; items: StagedItem[]; gst: StagedGst; notes: string | null; challanIds: string[]; discount?: StagedDiscount }
   | { kind: "other"; items: StagedItem[]; gst: StagedGst; discount?: StagedDiscount };
@@ -97,7 +100,10 @@ export async function applyInvoiceEdit(admin: Admin, source: ChangeSource, id: s
       const { error: upErr } = await admin.from("challan_items").update({ rate, amount, section_gst: pct } as any).eq("id", it.id);
       if (upErr) await admin.from("challan_items").update({ rate, amount }).eq("id", it.id);
     }
-    await admin.from("challans").update({ ...payload.gst, ...transportUpdate(payload.transport) } as any).eq("id", id);
+    await admin.from("challans").update({
+      ...payload.gst,
+      ...(payload.transport ? transportUpdate(payload.transport) : {}),
+    } as any).eq("id", id);
     // Mig 199 — per-stone-table GST slabs (best-effort; pre-mig schema keeps the
     // invoice-level % applied above).
     if (payload.stoneGst !== undefined) {

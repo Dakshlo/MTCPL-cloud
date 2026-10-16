@@ -18,6 +18,8 @@ import { financialYear, challanCode } from "@/lib/doc-code";
 import { fetchFreedInvoiceNumbers } from "@/lib/invoice-numbers";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { ReviewForm, type PriceItem } from "./review-form";
+import { TransportEditor } from "../../../_ui/transport-editor";
+import { updateInvoiceTransportAction } from "../../../actions";
 
 type Params = Promise<{ id: string }>;
 type Search = Promise<{ [k: string]: string | string[] | undefined }>;
@@ -34,7 +36,7 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     admin
       .from("challans")
       .select(
-        "id, challan_number, doc_fy, doc_seq, challan_date, notes, cancelled_at, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, inv_fy, inv_seq, invoice_parties(name, gstin, address, phone)",
+        "id, challan_number, doc_fy, doc_seq, challan_date, notes, cancelled_at, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone, converted_invoice_id, source_dispatch_id, temple, gst_mode, igst_percent, cgst_percent, sgst_percent, priced_at, owner_approved_at, invoice_no_override, inv_fy, inv_seq, invoice_parties(name, gstin, address, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -56,6 +58,12 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
     challan_date: string;
     notes: string | null;
     cancelled_at: string | null;
+    transport_company: string | null;
+    transport_phone: string | null;
+    lr_no: string | null;
+    transport_vehicle_no: string | null;
+    transport_driver_name: string | null;
+    transport_driver_phone: string | null;
     converted_invoice_id: string | null;
     source_dispatch_id: string | null;
     gst_mode: string | null;
@@ -333,6 +341,29 @@ export default async function ChallanReviewPage({ params, searchParams }: { para
             roundTotal={roundTotal}
             hsnUseVendor={hsnUseVendor}
           />
+
+          {/* Editing an ISSUED invoice: transport moves OUT of the pricing form
+              into its own card, which saves straight away. Changing a lorry or
+              an LR number is a correction, not an amendment, so it must not sit
+              in the owner's approval queue (Daksh, Oct 2026 — the accountants
+              were ringing him for these). Rates, GST and the discount still go
+              through approval, in the form above. */}
+          {editMode && (
+            <TransportEditor
+              id={c.id}
+              kind="temple"
+              initial={{
+                transport_company: c.transport_company ?? null,
+                transport_phone: c.transport_phone ?? null,
+                lr_no: c.lr_no ?? null,
+                transport_vehicle_no: c.transport_vehicle_no ?? null,
+                transport_driver_name: c.transport_driver_name ?? null,
+                transport_driver_phone: c.transport_driver_phone ?? null,
+              }}
+              companies={transportCompanies}
+              saveAction={updateInvoiceTransportAction}
+            />
+          )}
         </div>
 
         {/* RIGHT — the generated challan, pinned, so the reviewer verifies while

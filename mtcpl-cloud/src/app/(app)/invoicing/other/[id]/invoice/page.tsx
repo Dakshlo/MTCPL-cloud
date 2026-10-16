@@ -17,6 +17,8 @@ import type { GstMode } from "@/lib/challan-pricing";
 import type { PreviewParty } from "../../../bulk/new/bulk-invoice-preview";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { OtherInvoiceForm } from "./other-invoice-form";
+import { TransportEditor } from "../../../_ui/transport-editor";
+import { updateInvoiceTransportAction } from "../../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
 
   const { data: ocRow } = await admin
     .from("other_challans")
-    .select("id, party_id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, cancelled_at, gst_mode, igst_percent, cgst_percent, sgst_percent, other_challan_items(position, particulars, hsn, unit, quantity, rate, section_index, section_head)")
+    .select("id, party_id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, converted_at, cancelled_at, gst_mode, igst_percent, cgst_percent, sgst_percent, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone, other_challan_items(position, particulars, hsn, unit, quantity, rate, section_index, section_head)")
     .eq("id", id)
     .maybeSingle();
   const o = ocRow as any;
@@ -99,6 +101,13 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
   }
   const initNum = o.inv_seq != null ? String(o.inv_seq).padStart(2, "0") : autoNum;
 
+  // Transport-company master, for the suggestions in the transport card.
+  let transportCompanies: string[] = [];
+  {
+    const { data: tc } = await admin.from("transport_companies").select("name").eq("is_active", true).order("name");
+    transportCompanies = ((tc ?? []) as Array<{ name: string }>).map((r) => r.name).filter(Boolean);
+  }
+
   return (
     <>
       <CockpitSidebarToggle defaultCollapsed={true} />
@@ -115,6 +124,26 @@ export default async function OtherInvoicePage({ params }: { params: Params }) {
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}
       />
+      {/* Outside the pricing form on purpose — see the note in the
+          component. Saves on its own, without owner approval, because
+          none of these fields moves money. */}
+      <div style={{ padding: "0 18px 28px" }}>
+        <TransportEditor
+          id={o.id}
+          kind="other"
+          locked={!!o.cancelled_at}
+          initial={{
+            transport_company: o.transport_company ?? null,
+            transport_phone: o.transport_phone ?? null,
+            lr_no: o.lr_no ?? null,
+            transport_vehicle_no: o.transport_vehicle_no ?? null,
+            transport_driver_name: o.transport_driver_name ?? null,
+            transport_driver_phone: o.transport_driver_phone ?? null,
+          }}
+          companies={transportCompanies}
+          saveAction={updateInvoiceTransportAction}
+        />
+      </div>
     </>
   );
 }

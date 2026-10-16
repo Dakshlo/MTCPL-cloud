@@ -327,7 +327,13 @@ export function ReviewForm({
 
       {/* Mig 169 — transportation details (printed on the tax invoice). The
           company is a datalist combobox: pick an existing one or type a new one
-          (a new name is saved to the master on Save, for next time). */}
+          (a new name is saved to the master on Save, for next time).
+          Oct 2026 — hidden in edit mode: on an ISSUED invoice these live in
+          their own card below, which saves without the owner's approval (the
+          accountants correct a lorry or LR number often). Keeping them here too
+          would both duplicate the fields and drag a plain correction into the
+          approval queue. */}
+      {!editMode && (
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface)", marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 4 }}>🚚 Transportation</div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>Vehicle no. &amp; driver are prefilled from the dispatch — edit here if there&apos;s a mistake.</div>
@@ -361,12 +367,14 @@ export function ReviewForm({
               )}
             </div>
           </div>
+          <label style={tLabel}><span>Transport phone</span><input name="transport_phone" defaultValue={initTransport.phone} style={tInput} /></label>
           <label style={tLabel}><span>LR no.</span><input name="lr_no" defaultValue={initTransport.lr} style={tInput} /></label>
           <label style={tLabel}><span>Vehicle no.</span><input name="transport_vehicle_no" defaultValue={initTransport.vehicle} style={{ ...tInput, fontFamily: "ui-monospace, monospace" }} /></label>
           <label style={tLabel}><span>Driver name</span><input name="transport_driver_name" defaultValue={initTransport.driverName} style={tInput} /></label>
           <label style={tLabel}><span>Driver phone</span><input name="transport_driver_phone" defaultValue={initTransport.driverPhone} style={tInput} /></label>
         </div>
       </div>
+      )}
 
       {/* GST + totals */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 18 }}>

@@ -17,6 +17,8 @@ import { groupBulkItems } from "@/lib/bulk-items";
 import type { GstMode } from "@/lib/challan-pricing";
 import { CockpitSidebarToggle } from "@/components/cockpit-sidebar-toggle";
 import { RunningInvoiceForm } from "./running-invoice-form";
+import { TransportEditor } from "../../../_ui/transport-editor";
+import { updateInvoiceTransportAction } from "../../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +34,7 @@ export default async function RunningInvoicePage({ params }: { params: Params })
   // doesn't 404 the whole page.
   const { data: chRow } = await admin
     .from("challans")
-    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, running_challan_at, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, source_dispatch_id, challan_custom_items(position, particulars, hsn, unit, quantity, rate, section_index, section_head)")
+    .select("id, challan_number, doc_fy, doc_seq, challan_date, temple, cancelled_at, transport_company, transport_phone, lr_no, transport_vehicle_no, transport_driver_name, transport_driver_phone, running_challan_at, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, source_dispatch_id, challan_custom_items(position, particulars, hsn, unit, quantity, rate, section_index, section_head)")
     .eq("id", id)
     .maybeSingle();
   const c = chRow as any;
@@ -92,6 +94,13 @@ export default async function RunningInvoicePage({ params }: { params: Params })
   }
   const initNum = c.inv_seq != null ? String(c.inv_seq).padStart(2, "0") : autoNum;
 
+  // Transport-company master, for the suggestions in the transport card.
+  let transportCompanies: string[] = [];
+  {
+    const { data: tc } = await admin.from("transport_companies").select("name").eq("is_active", true).order("name");
+    transportCompanies = ((tc ?? []) as Array<{ name: string }>).map((r) => r.name).filter(Boolean);
+  }
+
   return (
     <>
       <CockpitSidebarToggle defaultCollapsed={true} />
@@ -109,6 +118,25 @@ export default async function RunningInvoicePage({ params }: { params: Params })
         ship={ship}
         invLabel={`${invPrefix}${initNum}`}
       />
+      {/* Outside the pricing form — saves on its own, no approval,
+          because none of these fields moves money. */}
+      <div style={{ padding: "0 18px 28px" }}>
+        <TransportEditor
+          id={c.id}
+          kind="temple"
+          locked={!!c.cancelled_at}
+          initial={{
+            transport_company: c.transport_company ?? null,
+            transport_phone: c.transport_phone ?? null,
+            lr_no: c.lr_no ?? null,
+            transport_vehicle_no: c.transport_vehicle_no ?? null,
+            transport_driver_name: c.transport_driver_name ?? null,
+            transport_driver_phone: c.transport_driver_phone ?? null,
+          }}
+          companies={transportCompanies}
+          saveAction={updateInvoiceTransportAction}
+        />
+      </div>
     </>
   );
 }
