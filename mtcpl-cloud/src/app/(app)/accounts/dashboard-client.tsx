@@ -107,6 +107,77 @@ export type DueBillRow = {
  *  explicit payment_terms_days override this. */
 export const DEFAULT_PAYMENT_TERMS_DAYS = 45;
 
+/* ── Keeping your place in the queue (Daksh, Oct 2026) ────────────────
+ * Dad works the due list top-down: tick a few bills, open one to put a
+ * hold on it, come back, carry on. The ticks already survived that trip
+ * (sessionStorage above), but the list came back at the very top, so he
+ * had to scroll down through hundreds of rows to find where he was.
+ *
+ * So we also remember the row he was looking at. Anchored to a ROW, not
+ * to a pixel offset: by the time he comes back the bill he just held may
+ * have changed height, or dropped out of the queue entirely, and every
+ * pixel below it would have moved. "This bill sat N px down the window"
+ * survives all of that; a raw scrollTop does not.
+ */
+const SCROLL_KEY = "mtcpl:due-bills:scroll";
+/** Holds the id of the bill he opened — so it both says "he is coming
+ *  back" and names the row to light up when he lands. */
+const RETURN_KEY = "mtcpl:due-bills:return";
+const FLASH_MS = 2200;
+
+type ScrollAnchor = { id: string; offset: number };
+
+/** Whatever actually scrolls this row: usually the window, but the app
+ *  shell scrolls its own main on some layouts. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 4) return n;
+  }
+  return null; // → the window
+}
+
+/** The topmost bill row still on screen, and how far down the window it
+ *  sits. That pair is the view. */
+function readAnchor(): ScrollAnchor | null {
+  const rows = document.querySelectorAll<HTMLElement>("tr[data-bill-id]");
+  for (const row of rows) {
+    const top = row.getBoundingClientRect().top;
+    if (top > -row.offsetHeight) {
+      const id = row.dataset.billId;
+      if (id) return { id, offset: Math.round(top) };
+    }
+  }
+  return null;
+}
+
+function saveAnchor() {
+  const a = readAnchor();
+  if (!a) return;
+  try {
+    sessionStorage.setItem(SCROLL_KEY, JSON.stringify(a));
+  } catch {
+    // Private mode / quota — worst case he lands at the top, as before.
+  }
+}
+
+function rowEl(id: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`tr[data-bill-id="${id}"]`);
+}
+
+/** Put the list back where it was. Returns false when the anchor row is
+ *  gone (paid, held to zero, filtered out) so the caller can fall back. */
+function restoreAnchor(a: ScrollAnchor): boolean {
+  const row = rowEl(a.id);
+  if (!row) return false;
+  const delta = row.getBoundingClientRect().top - a.offset;
+  if (Math.abs(delta) < 2) return true;
+  const sc = scrollerOf(row);
+  if (sc) sc.scrollTop += delta;
+  else window.scrollBy(0, delta);
+  return true;
+}
+
 type ProposeResult =
   | { ok: true; batchId: string; rowsCreated: number; skipped: string[] }
   | { ok: false; error: string };
@@ -300,6 +371,108 @@ export function DueBillsClient({
       // ignore
     }
   }, [amountOverrides]);
+
+  // Record where he is, as he scrolls, so leaving the page at any moment
+  // (a row link, the back button, Pay Today) captures the view. rAF-
+  // throttled: one read per frame at most, and the read is a handful of
+  // getBoundingClientRect calls, not a layout of all 600 rows.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        saveAnchor();
+      });
+    };
+    // Capture phase as well: scroll doesn't bubble, so a listener on the
+    // window alone would miss a layout where an inner shell scrolls.
+    window.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // ...and put him back there when he returns from a bill. Only then —
+  // RETURN_KEY is written by the row link and cleared once we land, so
+  // opening Finance fresh from the sidebar still starts at the top.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || restoredRef.current) return;
+    let openedId: string | null = null;
+    let anchor: ScrollAnchor | null = null;
+    try {
+      openedId = sessionStorage.getItem(RETURN_KEY);
+      if (!openedId) return;
+      const raw = sessionStorage.getItem(SCROLL_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ScrollAnchor>;
+        if (typeof parsed?.id === "string" && typeof parsed?.offset === "number") {
+          anchor = { id: parsed.id, offset: parsed.offset };
+        }
+      }
+    } catch {
+      return;
+    }
+    const opened = openedId;
+
+    // Stop fighting him the moment he takes over.
+    let userMoved = false;
+    const yieldToUser = () => { userMoved = true; };
+    const YIELD_ON = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const ev of YIELD_ON) {
+      window.addEventListener(ev, yieldToUser, { passive: true });
+    }
+
+    const apply = () => {
+      if (userMoved) return;
+      // The anchor row first; if that bill has left the queue (paid, held
+      // to nil, filtered out), settle for the one he opened; if both are
+      // gone there is nothing sensible to aim at, so leave him at the top.
+      if (!(anchor && restoreAnchor(anchor))) {
+        rowEl(opened)?.scrollIntoView({ block: "center" });
+      }
+    };
+
+    // Three passes, not one. A plain <Link> back to /accounts scrolls the
+    // new page to the top AFTER we have run, and the ?selected=… replace
+    // below re-renders the rows from the server a moment later; each pass
+    // is a no-op once the view is already right.
+    const frame = requestAnimationFrame(() => {
+      apply();
+      const row = rowEl(opened);
+      if (row) {
+        row.classList.add("db-flash");
+        window.setTimeout(() => row.classList.remove("db-flash"), FLASH_MS);
+      }
+    });
+    const t1 = window.setTimeout(apply, 350);
+    const t2 = window.setTimeout(() => {
+      apply();
+      // Spent — and only now. Clearing it up front would lose the return
+      // trip entirely under React's development double-mount, which tears
+      // the first run down before any of these passes fire.
+      restoredRef.current = true;
+      try {
+        sessionStorage.removeItem(RETURN_KEY);
+      } catch {
+        // ignore
+      }
+    }, 900);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      for (const ev of YIELD_ON) window.removeEventListener(ev, yieldToUser);
+    };
+    // Must run once per mount — the rows it looks up are in the first commit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Mig 053 follow-on (Daksh, May 2026): live quick-filter that
   // matches token / vendor name / vendor bill no on every keystroke
   // — no Apply button. Filters client-side over what the server
@@ -530,6 +703,21 @@ export function DueBillsClient({
 
   return (
     <div style={{ position: "relative" }}>
+      {/* The row he just came back from, lit for a couple of seconds so
+          his eye lands on it without hunting. On the cells, not the <tr>:
+          the row carries an inline background that a class can't beat. */}
+      <style>{`
+        tr.db-flash > td {
+          animation: dbFlash ${FLASH_MS}ms ease-out 1;
+        }
+        @keyframes dbFlash {
+          0%, 65% { background: rgba(234,179,8,0.34); }
+          100%    { background: transparent; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          tr.db-flash > td { animation: none; background: rgba(234,179,8,0.22); }
+        }
+      `}</style>
       {/* Mig 053 follow-on — branded overlay while the propose-
           payments action runs. Visible across the whole page so the
           accountant knows the click registered. */}
@@ -868,6 +1056,7 @@ export function DueBillsClient({
                       </tr>
                     )}
                     <tr
+                      data-bill-id={r.id}
                       style={{
                         background: r.hasOpenPayment
                           ? "rgba(124,58,237,0.06)" // purple tint = in-flight
@@ -979,6 +1168,17 @@ export function DueBillsClient({
                       <Link
                         href={`/accounts/bills/${r.id}`}
                         style={{ textDecoration: "none", color: "inherit" }}
+                        // He is stepping out to hold / edit this bill and will
+                        // come straight back. Save the view now, while the row
+                        // positions are still the ones he can see.
+                        onClick={() => {
+                          saveAnchor();
+                          try {
+                            sessionStorage.setItem(RETURN_KEY, r.id);
+                          } catch {
+                            // No storage — he just lands at the top, as before.
+                          }
+                        }}
                       >
                         <VendorIdentity
                           name={r.vendorName}
