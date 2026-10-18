@@ -11,7 +11,7 @@
  * normal `receive` line so the register explains where the 12 came from.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DEFAULT_LOW_STOCK, type ToolRow } from "@/lib/cnc-tool-stock";
 import { Sheet } from "./sheet";
@@ -34,6 +34,13 @@ export function AddToolSheet({
   const [unit, setUnit] = useState("pcs");
   const [low, setLow] = useState("");
   const [opening, setOpening] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  /** What the thumbnail shows right now: the new file, the saved photo,
+   *  or nothing. Kept separate from `photo` so "remove" can clear the
+   *  picture without pretending a file was chosen. */
+  const [preview, setPreview] = useState<string | null>(null);
+  const [dropped, setDropped] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -42,7 +49,21 @@ export function AddToolSheet({
     setUnit(editing?.unit ?? "pcs");
     setLow(editing?.low_stock_qty == null ? "" : String(editing.low_stock_qty));
     setOpening("");
+    setPhoto(null);
+    setDropped(false);
+    setPreview(editing?.imageUrl ?? null);
+    if (fileRef.current) fileRef.current.value = "";
   }, [open, editing]);
+
+  // A blob: URL is a live handle on the file — let it go when the
+  // preview changes or the sheet closes, or the tab leaks one per photo.
+  useEffect(() => {
+    if (!photo) return;
+    const url = URL.createObjectURL(photo);
+    setPreview(url);
+    setDropped(false);
+    return () => URL.revokeObjectURL(url);
+  }, [photo]);
 
   const mode = editing ? "edit" : "create";
   const ready = name.trim().length > 0 && !busy;
@@ -69,6 +90,8 @@ export function AddToolSheet({
             fd.set("unit", unit.trim() || "pcs");
             fd.set("low_stock_qty", low.trim());
             if (!editing && opening.trim()) fd.set("opening_qty", opening.trim());
+            if (photo) fd.set("photo", photo);
+            else if (editing && dropped) fd.set("remove_photo", "1");
             onSubmit(fd, mode);
           }}
           style={{
@@ -83,6 +106,80 @@ export function AddToolSheet({
         </button>
       }
     >
+      {/* The card as it will look on the shelf — the photo, the name and
+          the size, together, while you are still typing them. */}
+      <div style={{ display: "flex", gap: 13, alignItems: "center", marginBottom: 18 }}>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          title={preview ? "Change the photo" : "Add a photo"}
+          style={{
+            width: 86, height: 86, flex: "0 0 auto", borderRadius: 18, cursor: "pointer",
+            border: preview ? "1px solid var(--border)" : "2px dashed var(--border)",
+            background: preview ? "var(--surface-alt)" : "var(--surface)",
+            padding: 0, overflow: "hidden", display: "grid", placeItems: "center",
+            position: "relative",
+          }}
+        >
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", lineHeight: 1.4 }}>
+              <span style={{ display: "block", fontSize: 22 }} aria-hidden>📷</span>
+              Photo
+            </span>
+          )}
+        </button>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 16.5, fontWeight: 800, color: "var(--text)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {name.trim() || "New tool"}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>
+            {spec.trim() ? `${spec.trim()} · ` : ""}
+            counted in {unit}
+            {!editing && opening.trim() ? ` · starting at ${opening.trim()}` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              style={pill("var(--gold-dark)")}
+            >
+              {preview ? "Change photo" : "＋ Add photo"}
+            </button>
+            {preview && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoto(null);
+                  setPreview(null);
+                  setDropped(true);
+                  if (fileRef.current) fileRef.current.value = "";
+                }}
+                style={pill("var(--danger)")}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          // On a phone this offers the camera as well as the gallery,
+          // which is how most of these photos will actually be taken.
+          capture={undefined}
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            if (f) setPhoto(f);
+          }}
+        />
+      </div>
+
       <Field label="Name" hint="What the men call it">
         <input
           value={name}
@@ -188,6 +285,14 @@ function Field({
       )}
     </div>
   );
+}
+
+function pill(colour: string): React.CSSProperties {
+  return {
+    padding: "6px 12px", fontSize: 11.5, fontWeight: 800, borderRadius: 999,
+    cursor: "pointer", background: "var(--surface)", color: colour,
+    border: `1.5px solid ${colour}`,
+  };
 }
 
 function inp(): React.CSSProperties {

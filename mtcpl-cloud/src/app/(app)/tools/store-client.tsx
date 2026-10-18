@@ -390,9 +390,18 @@ function ToolCard({
       <div className="tc-card-band" aria-hidden />
 
       <div className="tc-card-top">
+        {/* Mig 233 — the photo, or the tool's initial in the level colour.
+            Never an empty grey square: a missing photo should still read
+            as a tool, not as a broken card. */}
+        <div className="tc-thumb" data-empty={tool.imageUrl ? undefined : "1"}>
+          {tool.imageUrl
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={tool.imageUrl} alt="" loading="lazy" />
+            : <span aria-hidden>{tool.name.trim().charAt(0).toUpperCase() || "?"}</span>}
+        </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2 className="tc-name" title={tool.name}>{tool.name}</h2>
-          {tool.spec && <div className="tc-spec">{tool.spec}</div>}
+          <div className="tc-spec">{tool.spec ? tool.spec : `Counted in ${tool.unit}`}</div>
         </div>
         {canManage && (
           <div style={{ position: "relative", flex: "0 0 auto" }}>

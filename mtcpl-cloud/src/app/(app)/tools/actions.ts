@@ -38,6 +38,7 @@ import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { canManageCncToolStore, canUseCncTools } from "@/lib/cnc-tool-permissions";
 import {
+  TOOL_IMAGE_BUCKET,
   UNDO_WINDOW_MS,
   levelOf,
   lowLineOf,
@@ -56,6 +57,62 @@ const num = (fd: FormData, k: string): number => {
 
 function refresh() {
   revalidatePath("/tools");
+}
+
+// ── The photo on a tool (mig 233) ─────────────────────────────────
+//
+// Daksh: "we may also add image to its thumbnail so user can also see
+// image-wise product." The men do not read "450mm tool" and picture a
+// 450mm tool; they picture the thing in their hand.
+//
+// Public bucket, on purpose — the cupboard QR screen has no app login
+// to sign a URL with, and a signed URL that expires is a broken image
+// on somebody's phone an hour later.
+
+const TOOL_IMG_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const TOOL_IMG_MAX_BYTES = 8 * 1024 * 1024;
+
+function imgExt(mime: string): string {
+  return mime === "image/png" ? "png"
+    : mime === "image/webp" ? "webp"
+      : mime === "image/heic" ? "heic"
+        : mime === "image/heif" ? "heif"
+          : "jpg";
+}
+
+/** Put the file in the bucket and hand back its object path. Returns a
+ *  readable reason instead of throwing — a bad photo must not lose the
+ *  tool the person was adding. */
+async function putToolPhoto(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  toolId: string,
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const mime = (file.type || "").toLowerCase();
+  if (!TOOL_IMG_MIME.has(mime)) return { ok: false, error: "The photo must be a JPG, PNG, WebP or HEIC." };
+  if (file.size === 0) return { ok: false, error: "That photo is empty." };
+  if (file.size > TOOL_IMG_MAX_BYTES) return { ok: false, error: "That photo is over 8 MB — take a smaller one." };
+
+  const path = `${toolId}/${randomBytes(8).toString("hex")}.${imgExt(mime)}`;
+  const { error } = await admin.storage
+    .from(TOOL_IMAGE_BUCKET)
+    .upload(path, Buffer.from(await file.arrayBuffer()), { contentType: mime, cacheControl: "3600", upsert: false });
+  if (error) return { ok: false, error: `Photo upload failed: ${error.message}` };
+  return { ok: true, path };
+}
+
+/** Best-effort: a tool must never be stuck because its old photo would
+ *  not delete. The row is the record; the file is a convenience. */
+async function dropToolPhoto(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  path: string | null | undefined,
+) {
+  if (!path) return;
+  try {
+    await admin.storage.from(TOOL_IMAGE_BUCKET).remove([path]);
+  } catch {
+    /* orphaned file — harmless */
+  }
 }
 
 // ── Add a tool ────────────────────────────────────────────────────
@@ -112,6 +169,18 @@ export async function createToolAction(fd: FormData): Promise<ActionResult> {
     return { ok: false, error: error.message };
   }
   if (!created) return { ok: false, error: "Could not create the tool." };
+
+  // The photo goes up AFTER the row, so it can be filed under the tool's
+  // own id and a failed upload costs a picture, never the tool.
+  const photo = fd.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    const put = await putToolPhoto(admin, created.id, photo);
+    if (put.ok) await admin.from("cnc_tools").update({ image_path: put.path }).eq("id", created.id);
+    else {
+      refresh();
+      return { ok: false, error: `${name} was added, but the photo did not: ${put.error}` };
+    }
+  }
 
   // Opening stock, if given, is a normal `receive` line — so a tool that
   // starts at 12 shows WHERE the 12 came from instead of appearing out
@@ -175,10 +244,32 @@ export async function updateToolAction(fd: FormData): Promise<ActionResult> {
   if (fd.has("is_active")) patch.is_active = txt(fd, "is_active") === "1";
 
   const admin = createAdminSupabaseClient();
+
+  // Photo: a new one replaces whatever was there, and an explicit
+  // "remove" clears it. Doing nothing leaves it alone, so an edit that
+  // only renames a tool cannot lose its picture.
+  const { data: beforeRow } = await admin
+    .from("cnc_tools").select("image_path").eq("id", toolId).maybeSingle();
+  const oldPath = (beforeRow as { image_path: string | null } | null)?.image_path ?? null;
+
+  const photo = fd.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    const put = await putToolPhoto(admin, toolId, photo);
+    if (!put.ok) return { ok: false, error: put.error };
+    patch.image_path = put.path;
+  } else if (txt(fd, "remove_photo") === "1") {
+    patch.image_path = null;
+  }
+
   const { error } = await admin.from("cnc_tools").update(patch).eq("id", toolId);
   if (error) {
     if (error.code === "23505") return { ok: false, error: "Another tool in the store already has that name." };
     return { ok: false, error: error.message };
+  }
+  // Only once the row is safely updated — otherwise a failed update
+  // would leave the tool pointing at a file that no longer exists.
+  if ("image_path" in patch && oldPath && patch.image_path !== oldPath) {
+    await dropToolPhoto(admin, oldPath);
   }
 
   await logAudit(profile.id, "cnc_tool_updated", "cnc_tool", toolId, patch);

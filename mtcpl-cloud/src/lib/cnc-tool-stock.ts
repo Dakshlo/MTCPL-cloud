@@ -35,11 +35,16 @@ export const UNDO_WINDOW_MS = 10 * 60 * 1000;
 /** The low-stock line for a tool whose owner has not set one. */
 export const DEFAULT_LOW_STOCK = 3;
 
+/** The public bucket a tool's photo lives in (mig 233). */
+export const TOOL_IMAGE_BUCKET = "cnc_tool_images";
+
 export type CncTool = {
   id: string;
   name: string;
   spec: string | null;
   unit: string;
+  /** Object path in TOOL_IMAGE_BUCKET, or null for no photo. */
+  image_path: string | null;
   low_stock_qty: number | null;
   low_alert_level: number | null;
   is_active: boolean;
@@ -65,6 +70,9 @@ export type ToolMovement = {
 export type StockLevel = "out" | "low" | "ok";
 
 export type ToolRow = CncTool & {
+  /** Ready to put straight in an <img src>. Null when there is no photo,
+   *  and the screens draw a coloured initial instead. */
+  imageUrl: string | null;
   /** On the shelf now: SUM(delta) over live movements. */
   stock: number;
   lowLine: number;
@@ -123,7 +131,7 @@ export async function loadStore(): Promise<{ tools: ToolRow[]; movements: ToolMo
   const [{ data: toolRows }, movements] = await Promise.all([
     admin
       .from("cnc_tools")
-      .select("id, name, spec, unit, low_stock_qty, low_alert_level, is_active, display_order")
+      .select("id, name, spec, unit, image_path, low_stock_qty, low_alert_level, is_active, display_order")
       .eq("is_active", true)
       .order("display_order")
       .order("name"),
@@ -159,6 +167,11 @@ export async function loadStore(): Promise<{ tools: ToolRow[]; movements: ToolMo
     const lowLine = lowLineOf(t);
     return {
       ...t,
+      // Public bucket (mig 233): no signing, so the URL keeps working on
+      // the cupboard QR screen, which has no app login to sign with.
+      imageUrl: t.image_path
+        ? admin.storage.from(TOOL_IMAGE_BUCKET).getPublicUrl(t.image_path).data.publicUrl
+        : null,
       low_stock_qty: t.low_stock_qty == null ? null : Number(t.low_stock_qty),
       low_alert_level: t.low_alert_level == null ? null : Number(t.low_alert_level),
       stock: s,

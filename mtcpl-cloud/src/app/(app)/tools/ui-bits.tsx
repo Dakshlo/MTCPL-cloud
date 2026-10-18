@@ -185,8 +185,16 @@ export const TOOLS_CSS = `
 .tc-card[data-level="ok"]  .tc-card-band { background:linear-gradient(90deg,#22c55e,#16a34a); }
 .tc-card[data-level="low"] .tc-card-band { background:linear-gradient(90deg,#fbbf24,#d97706); }
 .tc-card[data-level="out"] .tc-card-band { background:linear-gradient(90deg,#f87171,#dc2626); }
-.tc-card-top { display:flex; gap:10px; align-items:flex-start; margin-top:4px; }
-.tc-name { font-size:16px; font-weight:800; margin:0; color:var(--text);
+.tc-card-top { display:flex; gap:11px; align-items:center; margin-top:4px; }
+.tc-thumb { width:52px; height:52px; flex:0 0 auto; border-radius:14px; overflow:hidden;
+  background:var(--surface-alt); border:1px solid var(--border);
+  display:grid; place-items:center; }
+.tc-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.tc-thumb[data-empty] span { font-size:21px; font-weight:800; }
+.tc-card[data-level="ok"]  .tc-thumb[data-empty] { background:var(--tc-ok-bg);  color:var(--tc-ok); }
+.tc-card[data-level="low"] .tc-thumb[data-empty] { background:var(--tc-low-bg); color:var(--tc-low); }
+.tc-card[data-level="out"] .tc-thumb[data-empty] { background:var(--tc-out-bg); color:var(--tc-out); }
+.tc-name { font-size:16.5px; font-weight:800; margin:0; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tc-spec { font-size:12px; color:var(--muted); margin-top:2px; }
 .tc-dots { width:30px; height:30px; border-radius:9px; border:1px solid var(--border);

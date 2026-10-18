@@ -34,6 +34,9 @@ export type TakeTool = {
   unit: string;
   stock: number;
   level: "out" | "low" | "ok";
+  /** Mig 233 — the photo. A man holding the tool recognises it here
+   *  faster than he reads "450mm tool". */
+  imageUrl: string | null;
 };
 export type RosterPerson = {
   id: string;
@@ -359,9 +362,15 @@ export function GuestTakeClient({
                     onClick={() => { setTool(t); setQty(1); setStep("qty"); }}
                     disabled={pending}
                   >
+                    <span className="gt-thumb" data-empty={t.imageUrl ? undefined : "1"}>
+                      {t.imageUrl
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={t.imageUrl} alt="" loading="lazy" />
+                        : <i>{t.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+                    </span>
                     <span className="gt-tool-main">
                       <strong>{t.name}</strong>
-                      {t.spec && <span className="gt-tool-spec">{t.spec}</span>}
+                      <span className="gt-tool-spec">{t.spec ? t.spec : `counted in ${t.unit}`}</span>
                     </span>
                     <span className="gt-tool-left">
                       <b>{left}</b>
@@ -395,9 +404,17 @@ export function GuestTakeClient({
 
           <h1 className="gt-q">How many?</h1>
           <div className="gt-chosen">
-            <strong>{tool.name}</strong>
-            {tool.spec && <span>{tool.spec}</span>}
-            <em>{max} {tool.unit} on the shelf</em>
+            <span className="gt-thumb gt-thumb-lg" data-empty={tool.imageUrl ? undefined : "1"}>
+              {tool.imageUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={tool.imageUrl} alt="" />
+                : <i>{tool.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+            </span>
+            <span className="gt-chosen-text">
+              <strong>{tool.name}</strong>
+              {tool.spec && <span>{tool.spec}</span>}
+              <em>{max} {tool.unit} on the shelf</em>
+            </span>
           </div>
 
           <div className="gt-stepper">
@@ -600,10 +617,23 @@ const CSS = `
 
 /* ── quantity ───────────────────────────────────────────── */
 .gt-chosen { background:var(--card); border:1.5px solid var(--line); border-radius:18px;
-  padding:15px 16px; margin-bottom:18px; display:flex; flex-direction:column; gap:3px; }
+  padding:14px 16px; margin-bottom:18px; display:flex; align-items:center; gap:13px; }
+.gt-chosen-text { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .gt-chosen strong { font-size:18px; font-weight:800; }
-.gt-chosen span { font-size:13px; color:var(--dim); }
+.gt-chosen-text span { font-size:13px; color:var(--dim); }
 .gt-chosen em { font-style:normal; font-size:12.5px; font-weight:700; color:var(--ok); margin-top:4px; }
+
+/* the photo (mig 233) — or the tool's initial in its level colour, so a
+   tool without one still reads as a tool rather than a broken box */
+.gt-thumb { width:52px; height:52px; flex:0 0 auto; border-radius:15px; overflow:hidden;
+  display:grid; place-items:center; background:#f1f1ee; }
+.gt-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.gt-thumb i { font-style:normal; font-size:21px; font-weight:800; }
+.gt-thumb-lg { width:62px; height:62px; border-radius:17px; }
+.gt-tool[data-level="ok"]  .gt-thumb[data-empty] { background:var(--okbg);  color:var(--ok); }
+.gt-tool[data-level="low"] .gt-thumb[data-empty] { background:var(--lowbg); color:var(--low); }
+.gt-tool[data-level="out"] .gt-thumb[data-empty] { background:var(--outbg); color:var(--out); }
+.gt-chosen .gt-thumb[data-empty] { background:var(--okbg); color:var(--ok); }
 .gt-stepper { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
 .gt-stepper button {
   width:74px; height:74px; flex:0 0 auto; border-radius:24px; font-size:34px;

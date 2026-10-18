@@ -62,6 +62,7 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
     unit: t.unit,
     stock: t.stock,
     level: t.level,
+    imageUrl: t.imageUrl,
   }));
 
   return (
