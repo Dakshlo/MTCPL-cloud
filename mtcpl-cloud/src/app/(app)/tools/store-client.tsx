@@ -1,18 +1,25 @@
 "use client";
 
 /**
- * The MASTER view of the tool store.
+ * The tool store, for the one person who keeps it.
  *
- * Daksh: "there will be a master view for me or owner or whatever role
- * we decide — they will see info." So this screen answers the owner's
- * questions, not the vendor's:
+ * Oct 2026 — this screen was doing four jobs and doing none of them
+ * well: a vendor switcher, a paper-register typing grid, per-tool pages,
+ * and five kinds of movement behind a ⋯ menu. Daksh: "the inventory
+ * looks really cluttered and not attractive to useable, so drop all
+ * other features."
  *
- *   • what is on the shelf, and what is about to run out
- *   • who has been drawing what out of it
- *   • the whole register, in order
+ * So there are now exactly two jobs in the whole module, and they live
+ * on different screens:
  *
- * The vendor's screen is deliberately a different page, not a filtered
- * version of this one — see /tools/v/[vendorId].
+ *   HERE (keeper, logged in)    keep the shelf full — add a tool, add
+ *                               stock, correct a count, see what is
+ *                               running out, read the register.
+ *   THE QR (taker, phone)       take something. Nothing else.
+ *
+ * Taking is deliberately NOT possible from this screen. If it were, the
+ * register would quietly go back to being somebody typing in what he
+ * thinks happened, which is the paper book we are replacing.
  */
 
 import { useMemo, useOptimistic, useState, useTransition } from "react";
@@ -21,28 +28,21 @@ import Link from "next/link";
 
 import {
   KIND_LABEL,
-  KIND_VERB,
   orderForTaking,
   shortages,
-  takenByVendor,
   type ToolMovement,
-  type ToolMovementKind,
   type ToolRow,
 } from "@/lib/cnc-tool-stock";
 import { createToolAction, recordMovementAction, undoMovementAction, updateToolAction } from "./actions";
 import { MoveSheet, type MoveIntent } from "./move-sheet";
 import { AddToolSheet } from "./add-tool-sheet";
-import { UndoToast, TOOLS_CSS, ago, describe, type Done } from "./ui-bits";
-
-type Vendor = { id: string; name: string };
+import { UndoToast, TOOLS_CSS, ago, type Done } from "./ui-bits";
 
 export function StoreClient({
-  vendors, tools, movements, people, canManage,
+  tools, movements, canManage,
 }: {
-  vendors: Vendor[];
   tools: ToolRow[];
   movements: ToolMovement[];
-  people: string[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -55,6 +55,8 @@ export function StoreClient({
   const [done, setDone] = useState<Done | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** Set by the History chip on a card — the register, one tool only. */
+  const [onlyTool, setOnlyTool] = useState<string | null>(null);
 
   const [optimistic, applyOptimistic] = useOptimistic(
     tools,
@@ -62,12 +64,7 @@ export function StoreClient({
       state.map((t) => (t.id === patch.toolId ? { ...t, stock: t.stock + patch.delta } : t)),
   );
 
-  const vendorName = useMemo(
-    () => new Map(vendors.map((v) => [v.id, v.name])),
-    [vendors],
-  );
   const short = useMemo(() => shortages(optimistic), [optimistic]);
-  const draws = useMemo(() => takenByVendor(movements), [movements]);
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const base = orderForTaking(optimistic);
@@ -79,9 +76,9 @@ export function StoreClient({
 
   const takenToday = useMemo(() => {
     const start = new Date(); start.setHours(0, 0, 0, 0);
-    return movements.filter(
-      (m) => !m.undone_at && m.kind === "issue" && new Date(m.created_at).getTime() >= start.getTime(),
-    ).length;
+    return movements
+      .filter((m) => !m.undone_at && m.kind === "issue" && new Date(m.created_at).getTime() >= start.getTime())
+      .reduce((n, m) => n + Math.abs(Number(m.delta)), 0);
   }, [movements]);
 
   function run(
@@ -99,14 +96,10 @@ export function StoreClient({
 
   function submitMove(fd: FormData) {
     const toolId = String(fd.get("tool_id"));
-    const kind = String(fd.get("kind")) as ToolMovementKind;
+    const kind = String(fd.get("kind"));
     const qty = Number(fd.get("qty"));
-    const signed =
-      kind === "receive" || kind === "return" ? qty
-        : kind === "issue" || kind === "scrap" ? -qty
-          : String(fd.get("direction")) === "down" ? -qty : qty;
+    const signed = kind === "receive" ? qty : String(fd.get("direction")) === "down" ? -qty : qty;
     const tool = optimistic.find((t) => t.id === toolId);
-    const who = String(fd.get("taken_by") ?? "");
     setIntent(null);
     startTransition(async () => {
       applyOptimistic({ toolId, delta: signed });
@@ -114,84 +107,80 @@ export function StoreClient({
       if (!r.ok) { setErr(r.error); router.refresh(); return; }
       setDone({
         at: Date.now(),
-        text: kind === "issue"
-          ? `${who} took ${qty} × ${tool?.name ?? "tool"}`
-          : `${KIND_VERB[kind]} ${qty} × ${tool?.name ?? "tool"}`,
+        text: kind === "receive"
+          ? `Added ${qty} × ${tool?.name ?? "tool"}`
+          : `Count fixed · ${tool?.name ?? "tool"}`,
       });
       router.refresh();
     });
   }
 
+  const outCount = short.filter((t) => t.stock <= 0).length;
+
   return (
     <section className="page-fluid tc-page allow-portrait" style={{ paddingBottom: 110 }}>
       <style>{TOOLS_CSS}</style>
 
-      <header className="tc-head">
-        <div style={{ minWidth: 0 }}>
-          <div className="tc-eyebrow">🧰 Tool store</div>
-          <h1 className="tc-title">The store</h1>
-          <div className="tc-sub">
-            {optimistic.length} tool{optimistic.length === 1 ? "" : "s"} on the shelf
-            {takenToday > 0 && <> · {takenToday} taken today</>}
-            {short.length > 0 && (
-              <> · <span style={{ color: "var(--danger)", fontWeight: 700 }}>{short.length} short</span></>
-            )}
+      {/* ── hero ──────────────────────────────────────────────── */}
+      <header className="tc-hero">
+        <div className="tc-hero-row">
+          <div className="tc-hero-id">
+            <span className="tc-hero-icon" aria-hidden>🧰</span>
+            <div style={{ minWidth: 0 }}>
+              <div className="tc-eyebrow">CNC tool store</div>
+              <h1 className="tc-title">The store</h1>
+            </div>
+          </div>
+          {canManage && (
+            <div className="tc-hero-actions">
+              <Link href="/tools/qr" className="tc-btn tc-btn-ghost">
+                <span aria-hidden>▦</span> Wardrobe QR
+              </Link>
+              <button
+                type="button"
+                className="tc-btn tc-btn-solid"
+                onClick={() => { setEditing(null); setAddOpen(true); }}
+              >
+                <span aria-hidden>＋</span> Add tool
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="tc-stats">
+          <div className="tc-stat" data-tone="blue">
+            <b>{optimistic.length}</b>
+            <span>tool{optimistic.length === 1 ? "" : "s"} on the shelf</span>
+          </div>
+          <div className="tc-stat" data-tone="green">
+            <b>{takenToday}</b>
+            <span>taken today</span>
+          </div>
+          <div className="tc-stat" data-tone={outCount > 0 ? "red" : short.length > 0 ? "amber" : "grey"}>
+            <b>{short.length}</b>
+            <span>{outCount > 0 ? `running out · ${outCount} empty` : "running low"}</span>
           </div>
         </div>
-        {canManage && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 9, flexWrap: "wrap" }}>
-            {/* The sticker on the wardrobe door — mig 229. Takes come in
-                through it with no login; everything else still needs one. */}
-            {/* The way the register actually gets in — mig 231. The team
-                would not accept per-person entry at the cupboard, so the
-                paper stays and one person types the page in. */}
-            <Link
-              href="/tools/register"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 7,
-                padding: "11px 16px", fontSize: 13.5, fontWeight: 700,
-                borderRadius: 13, textDecoration: "none", whiteSpace: "nowrap",
-                border: "1px solid var(--gold)", background: "var(--gold-subtle)",
-                color: "var(--gold-dark)",
-              }}
-            >
-              <span aria-hidden>📒</span> Enter register
-            </Link>
-            <Link
-              href="/tools/qr"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 7,
-                padding: "11px 16px", fontSize: 13.5, fontWeight: 700,
-                borderRadius: 13, textDecoration: "none", whiteSpace: "nowrap",
-                border: "1px solid var(--border)", background: "var(--surface)",
-                color: "var(--text)",
-              }}
-            >
-              <span aria-hidden>▦</span> Wardrobe QR
-            </Link>
-            <button type="button" className="tc-add" onClick={() => { setEditing(null); setAddOpen(true); }}>
-              + Add tool
-            </button>
-          </div>
-        )}
       </header>
 
-      {/* Each vendor's own screen, one tap away. The master takes on
-          their behalf from here; they take for themselves from there. */}
-      {vendors.length > 0 && (
-        <div className="tc-vendors">
-          <span className="tc-vendors-label">Vendor screens</span>
-          {vendors.map((v) => {
-            const d = draws.get(v.id);
-            return (
-              <Link key={v.id} href={`/tools/v/${v.id}`} className="tc-vendor">
-                {v.name}
-                {d && d.taken > 0 && <i>{d.taken}</i>}
-              </Link>
-            );
-          })}
+      {/* ── how it works ──────────────────────────────────────────
+          Two screens, two jobs. Written on the page because the keeper
+          and the takers are different people and neither sees the
+          other's side. */}
+      <div className="tc-how">
+        <div className="tc-how-step" data-n="1">
+          <strong>You keep it full</strong>
+          <span>Add a tool, add stock, fix a count — from this screen.</span>
         </div>
-      )}
+        <div className="tc-how-step" data-n="2">
+          <strong>They scan the cupboard</strong>
+          <span>The QR on the door, on their own phone. Name, then a code to that phone.</span>
+        </div>
+        <div className="tc-how-step" data-n="3">
+          <strong>The register writes itself</strong>
+          <span>Every take is signed by the person who took it. Nobody types it up.</span>
+        </div>
+      </div>
 
       {err && (
         <div className="tc-err" role="alert">
@@ -204,12 +193,12 @@ export function StoreClient({
         <div className="tc-short">
           <div className="tc-short-head">
             <span className="tc-short-dot" />
-            {short.filter((t) => t.stock <= 0).length > 0
-              ? `${short.filter((t) => t.stock <= 0).length} finished, ${short.filter((t) => t.stock > 0).length} running low`
+            {outCount > 0
+              ? `${outCount} finished${short.length > outCount ? `, ${short.length - outCount} running low` : ""}`
               : `${short.length} tool${short.length === 1 ? "" : "s"} running low`}
           </div>
           <div className="tc-short-list">
-            {short.slice(0, 6).map((t) => (
+            {short.slice(0, 8).map((t) => (
               <button
                 key={t.id} type="button" className="tc-short-pill"
                 data-out={t.stock <= 0 ? "1" : undefined}
@@ -220,7 +209,7 @@ export function StoreClient({
                 <span>{t.stock <= 0 ? "empty" : `${t.stock} left`}</span>
               </button>
             ))}
-            {short.length > 6 && <span className="tc-short-more">+{short.length - 6} more</span>}
+            {short.length > 8 && <span className="tc-short-more">+{short.length - 8} more</span>}
           </div>
         </div>
       )}
@@ -229,14 +218,18 @@ export function StoreClient({
         <button type="button" className={tab === "stock" ? "on" : ""} onClick={() => setTab("stock")}>
           On the shelf
         </button>
-        <button type="button" className={tab === "register" ? "on" : ""} onClick={() => setTab("register")}>
+        <button
+          type="button"
+          className={tab === "register" ? "on" : ""}
+          onClick={() => { setTab("register"); setOnlyTool(null); }}
+        >
           Register {movements.length > 0 && <i>{movements.length}</i>}
         </button>
       </div>
 
       {tab === "stock" ? (
         <>
-          {optimistic.length > 0 && (
+          {optimistic.length > 4 && (
             <div className="tc-search">
               <span aria-hidden>🔍</span>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the store…" aria-label="Search tools" />
@@ -251,7 +244,7 @@ export function StoreClient({
               <p>
                 There is no fixed list of tools — you build it. Add the first one the way the men
                 say it, like <strong>450mm tool</strong>, and put the stock you have in hand against
-                it. It becomes available to every CNC vendor at once.
+                it. It is on the cupboard QR the moment you save.
               </p>
               {canManage && (
                 <button type="button" onClick={() => { setEditing(null); setAddOpen(true); }}>
@@ -269,22 +262,26 @@ export function StoreClient({
                   menuOpen={menuFor === t.id}
                   onMenu={() => setMenuFor((m) => (m === t.id ? null : t.id))}
                   onCloseMenu={() => setMenuFor(null)}
-                  onMove={(kind) => { setMenuFor(null); setIntent({ tool: t, kind }); }}
+                  onAddStock={() => { setMenuFor(null); setIntent({ tool: t, kind: "receive" }); }}
+                  onFixCount={() => { setMenuFor(null); setIntent({ tool: t, kind: "adjust" }); }}
                   onEdit={() => { setMenuFor(null); setEditing(t); setAddOpen(true); }}
+                  onHistory={() => { setMenuFor(null); setOnlyTool(t.id); setTab("register"); }}
                 />
               ))}
             </div>
           )}
         </>
       ) : (
-        <Register movements={movements} tools={tools} vendorName={vendorName} />
+        <Register
+          movements={movements}
+          tools={tools}
+          onlyTool={onlyTool}
+          onClearFilter={() => setOnlyTool(null)}
+        />
       )}
 
       <MoveSheet
         intent={intent}
-        vendors={vendors}
-        lockedVendorId={null}
-        people={people}
         busy={pending}
         onClose={() => setIntent(null)}
         onSubmit={submitMove}
@@ -318,68 +315,80 @@ export function StoreClient({
   );
 }
 
-// ── The register, whole-store ──────────────────────────────────────
+// ── The register ───────────────────────────────────────────────────
 
 function Register({
-  movements, tools, vendorName,
+  movements, tools, onlyTool, onClearFilter,
 }: {
   movements: ToolMovement[];
   tools: ToolRow[];
-  vendorName: Map<string, string>;
+  onlyTool: string | null;
+  onClearFilter: () => void;
 }) {
   const toolName = useMemo(() => new Map(tools.map((t) => [t.id, t.name])), [tools]);
-  if (movements.length === 0) {
-    return <div className="tc-empty-search">Nothing has moved yet.</div>;
-  }
+  const rows = onlyTool ? movements.filter((m) => m.tool_id === onlyTool) : movements;
+
   return (
-    <div className="tc-reg">
-      {movements.map((m) => {
-        const voided = !!m.undone_at;
-        const positive = Number(m.delta) > 0;
-        return (
-          <div key={m.id} className="tc-reg-row" data-void={voided ? "1" : undefined}>
-            <div className="tc-reg-delta" data-up={positive ? "1" : undefined}>
-              {positive ? "+" : ""}{m.delta}
-            </div>
-            <div className="tc-reg-main">
-              <div className="tc-reg-title">
-                {toolName.get(m.tool_id) ?? "—"}
-                <span className="tc-reg-kind"> · {KIND_LABEL[m.kind]}</span>
+    <>
+      {onlyTool && (
+        <button type="button" className="tc-filter" onClick={onClearFilter}>
+          {toolName.get(onlyTool) ?? "This tool"} only · <span>show everything ✕</span>
+        </button>
+      )}
+      {rows.length === 0 ? (
+        <div className="tc-empty-search">Nothing has moved yet.</div>
+      ) : (
+        <div className="tc-reg">
+          {rows.map((m) => {
+            const voided = !!m.undone_at;
+            const positive = Number(m.delta) > 0;
+            return (
+              <div key={m.id} className="tc-reg-row" data-void={voided ? "1" : undefined}>
+                <div className="tc-reg-delta" data-up={positive ? "1" : undefined}>
+                  {positive ? "+" : ""}{m.delta}
+                </div>
+                <div className="tc-reg-main">
+                  <div className="tc-reg-title">
+                    {toolName.get(m.tool_id) ?? "—"}
+                    <span className="tc-reg-kind" data-kind={m.kind}>{KIND_LABEL[m.kind]}</span>
+                  </div>
+                  <div className="tc-reg-sub">
+                    {m.taken_by ? <strong>{m.taken_by}</strong> : <>Store</>}
+                    {m.guest_link_id && <span className="tc-reg-qr" title="Taken at the cupboard QR">▦</span>}
+                    {" · "}{ago(m.created_at)}
+                    {m.note && <> · {m.note}</>}
+                    {voided && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
+                  </div>
+                </div>
               </div>
-              <div className="tc-reg-sub">
-                {m.vendor_id
-                  ? <><strong>{vendorName.get(m.vendor_id) ?? "—"}</strong>{m.taken_by ? <> · {m.taken_by}</> : null}</>
-                  : <>Store</>}
-                {" · "}{ago(m.created_at)}
-                {m.note && <> · {m.note}</>}
-                {voided && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
 // ── Tool card ──────────────────────────────────────────────────────
 
 function ToolCard({
-  tool, canManage, menuOpen, onMenu, onCloseMenu, onMove, onEdit,
+  tool, canManage, menuOpen, onMenu, onCloseMenu, onAddStock, onFixCount, onEdit, onHistory,
 }: {
   tool: ToolRow; canManage: boolean; menuOpen: boolean;
   onMenu: () => void; onCloseMenu: () => void;
-  onMove: (k: ToolMovementKind) => void; onEdit: () => void;
+  onAddStock: () => void; onFixCount: () => void; onEdit: () => void; onHistory: () => void;
 }) {
   const level = tool.stock <= 0 ? "out" : tool.stock <= tool.lowLine ? "low" : "ok";
   // Stock against three times the warning line — a scale that means
   // something per tool, rather than a percentage of a maximum no tool
   // actually has.
   const full = Math.max(tool.lowLine * 3, tool.stock, 1);
-  const pct = Math.max(tool.stock > 0 ? 4 : 0, Math.min(100, (tool.stock / full) * 100));
+  const pct = Math.max(tool.stock > 0 ? 5 : 0, Math.min(100, (tool.stock / full) * 100));
 
   return (
     <article className="tc-card" data-level={level}>
+      <div className="tc-card-band" aria-hidden />
+
       <div className="tc-card-top">
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2 className="tc-name" title={tool.name}>{tool.name}</h2>
@@ -392,11 +401,8 @@ function ToolCard({
               <>
                 <div className="tc-menu-scrim" onClick={onCloseMenu} />
                 <div className="tc-menu" role="menu">
-                  <button type="button" onClick={() => onMove("receive")}>➕ Add stock</button>
-                  <button type="button" onClick={() => onMove("issue")}>📤 Give to a vendor</button>
-                  <button type="button" onClick={() => onMove("return")}>↩ Returned</button>
-                  <button type="button" onClick={() => onMove("scrap")}>🗑 Scrap</button>
-                  <button type="button" onClick={() => onMove("adjust")}>⚖ Fix count</button>
+                  <button type="button" onClick={onFixCount}>⚖ Fix count</button>
+                  <button type="button" onClick={onHistory}>📜 This tool&apos;s register</button>
                   <div className="tc-menu-sep" />
                   <button type="button" onClick={onEdit}>✎ Edit tool</button>
                 </div>
@@ -406,23 +412,29 @@ function ToolCard({
         )}
       </div>
 
-      <div className="tc-stock">
-        <span className="tc-stock-n">{tool.stock}</span>
-        <span className="tc-stock-u">{tool.unit}</span>
+      <div className="tc-stockline">
+        <div className="tc-stock">
+          <span className="tc-stock-n">{tool.stock}</span>
+          <span className="tc-stock-u">{tool.unit}</span>
+        </div>
+        <span className="tc-chip">
+          {level === "out" ? "Empty" : level === "low" ? `Low · warns at ${tool.lowLine}` : "In stock"}
+        </span>
       </div>
 
       <div className="tc-bar" aria-hidden><i style={{ width: `${pct}%` }} /></div>
 
       <div className="tc-last">
-        {level === "out" ? <span className="tc-flag">Empty — nothing left</span>
-          : level === "low" ? <span className="tc-flag">Low — warns at {tool.lowLine}</span>
-            : tool.lastMovement ? <>{describe(tool.lastMovement)} · {ago(tool.lastMovement.created_at)}</>
-              : <>Nothing taken yet</>}
+        {tool.lastMovement
+          ? <>{tool.lastMovement.taken_by ? `${tool.lastMovement.taken_by} took ${Math.abs(Number(tool.lastMovement.delta))}` : KIND_LABEL[tool.lastMovement.kind]} · {ago(tool.lastMovement.created_at)}</>
+          : <>Nothing taken yet</>}
       </div>
 
-      <div className="tc-actions">
-        <Link href={`/tools/${tool.id}`} className="tc-take-link">Register</Link>
-      </div>
+      {canManage && (
+        <button type="button" className="tc-addstock" onClick={onAddStock}>
+          ＋ Add stock
+        </button>
+      )}
     </article>
   );
 }

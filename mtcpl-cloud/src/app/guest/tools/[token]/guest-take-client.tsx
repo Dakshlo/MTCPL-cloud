@@ -1,16 +1,25 @@
 "use client";
 
 /**
- * The wardrobe screen, in a thumb. Light, because the cupboard is in a
- * bright office and this gets read at arm's length.
+ * The wardrobe screen, in a thumb.
  *
- * Signing in (migs 230):
  *   name → a 4-digit code to that person's own phone → in for the shift
- *
- * Then, one question per screen:
- *   tool → what are you taking?   search + the store's common tools first
- *   qty  → how many?              big − / + , never more than the shelf
+ *   tool → what are you taking?
+ *   qty  → how many?
  *   done → a tick, and "Take another" with the person still signed in
+ *
+ * Oct 2026 — the company step is gone. Daksh: "why you ask vendors
+ * selection, no need of that — eg Mohit login, then if he take any stock
+ * that means its taken from his account." The OTP already proves who is
+ * standing there, and that is the whole signature; asking a man who he
+ * works for, at a cupboard, every time, was a screen that told us
+ * nothing we did not know.
+ *
+ * Colour does real work here. This is read at arm's length, in a bright
+ * office, by someone holding a tool in the other hand — so the stock
+ * level is a colour before it is a number, the live step is the only
+ * bright thing on the screen, and the only button that writes anything
+ * is the big green one.
  *
  * Everything here is take-only. Adding stock, scrap and fix-count are
  * not in this file because they are not reachable from this door.
@@ -29,45 +38,52 @@ export type TakeTool = {
 export type RosterPerson = {
   id: string;
   name: string;
-  vendorId: string | null;
-  vendorName: string | null;
   maskedPhone: string;
 };
-type Vendor = { id: string; name: string };
-type Session = { name: string; vendorId: string | null; vendorName: string | null };
+type Session = { name: string };
 
 type SendRes = { ok: true; sentTo: string } | { ok: false; error: string };
 type VerifyRes =
-  | { ok: true; name: string; vendorId: string | null; vendorName: string | null; needsVendor: boolean }
+  | { ok: true; name: string }
   | { ok: false; error: string; attemptsLeft?: number };
 type TakeRes =
   | { ok: true; left: number; toolName: string; qty: number }
   | { ok: false; error: string; signedOut?: boolean };
 
-type Step = "who" | "code" | "company" | "tool" | "qty" | "done";
+type Step = "who" | "code" | "tool" | "qty" | "done";
 
 const DIGITS = 4;
 
+/** One colour per person, picked from their name so it is the same every
+ *  morning — the men recognise their own tile before they read it. */
+const PERSON_COLOURS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6"];
+function colourFor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PERSON_COLOURS[h % PERSON_COLOURS.length];
+}
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
 export function GuestTakeClient({
-  token, label, tools, roster, vendors, session,
-  sendCodeAction, verifyCodeAction, setVendorAction, signOutAction, takeAction,
+  token, label, tools, roster, session,
+  sendCodeAction, verifyCodeAction, signOutAction, takeAction,
 }: {
   token: string;
   label: string;
   tools: TakeTool[];
   roster: RosterPerson[];
-  vendors: Vendor[];
   session: Session | null;
   sendCodeAction: (fd: FormData) => Promise<SendRes>;
   verifyCodeAction: (fd: FormData) => Promise<VerifyRes>;
-  setVendorAction: (fd: FormData) => Promise<{ ok: boolean; error?: string }>;
   signOutAction: (fd: FormData) => Promise<{ ok: boolean }>;
   takeAction: (fd: FormData) => Promise<TakeRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
-  const [step, setStep] = useState<Step>(
-    session ? (session.vendorId ? "tool" : "company") : "who",
-  );
+  const [step, setStep] = useState<Step>(session ? "tool" : "who");
   const [picked, setPicked] = useState<RosterPerson | null>(null);
   const [sentTo, setSentTo] = useState("");
   const [code, setCode] = useState("");
@@ -86,12 +102,11 @@ export function GuestTakeClient({
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const live = tools.filter((t) => stockOf(t) > 0);
+    const live = tools.filter((t) => Math.max(0, t.stock - (taken[t.id] ?? 0)) > 0);
     if (!needle) return live;
     return live.filter(
       (t) => t.name.toLowerCase().includes(needle) || (t.spec ?? "").toLowerCase().includes(needle),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools, q, taken]);
 
   // "Send again" is deliberately slow to come back — every tap is a real
@@ -135,25 +150,14 @@ export function GuestTakeClient({
       fd.set("code", typed);
       const r = await verifyCodeAction(fd);
       if (!r.ok) {
-        setErr(r.attemptsLeft != null ? `${r.error} ${r.attemptsLeft} ${r.attemptsLeft === 1 ? "try" : "tries"} left.` : r.error);
+        setErr(r.attemptsLeft != null
+          ? `${r.error} ${r.attemptsLeft} ${r.attemptsLeft === 1 ? "try" : "tries"} left.`
+          : r.error);
         setCode("");
         codeRef.current?.focus();
         return;
       }
-      setWho({ name: r.name, vendorId: r.vendorId, vendorName: r.vendorName });
-      setStep(r.needsVendor ? "company" : "tool");
-    });
-  }
-
-  function chooseCompany(v: Vendor) {
-    setErr(null);
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.set("token", token);
-      fd.set("vendor_id", v.id);
-      const r = await setVendorAction(fd);
-      if (!r.ok) { setErr(r.error ?? "Could not set the company."); return; }
-      setWho((w) => (w ? { ...w, vendorId: v.id, vendorName: v.name } : w));
+      setWho({ name: r.name });
       setStep("tool");
     });
   }
@@ -193,43 +197,56 @@ export function GuestTakeClient({
   const max = tool ? stockOf(tool) : 1;
 
   return (
-    <main className="gt">
+    <main className="gt allow-portrait">
       <style>{CSS}</style>
 
       <header className="gt-head">
-        <div className="gt-brand">
-          <span className="gt-dot" aria-hidden />
-          <span>Tool store · {label}</span>
+        <div className="gt-head-row">
+          <div className="gt-brand">
+            <span className="gt-logo" aria-hidden>🧰</span>
+            <div>
+              <div className="gt-brand-label">{label}</div>
+              <div className="gt-brand-sub">Tool store</div>
+            </div>
+          </div>
+          {who && (
+            <button type="button" className="gt-me" onClick={signOut} disabled={pending}>
+              <span className="gt-me-dot" style={{ background: colourFor(who.name) }}>
+                {initials(who.name)}
+              </span>
+              <span className="gt-me-name">{who.name}</span>
+              <span className="gt-me-out">Sign out</span>
+            </button>
+          )}
         </div>
-        {who && (
-          <button type="button" className="gt-whochip" onClick={signOut} disabled={pending}>
-            <span className="gt-ava sm" aria-hidden>{initials(who.name)}</span>
-            <span className="gt-whotext">
-              <strong>{who.name}</strong>
-              {who.vendorName && <span>{who.vendorName}</span>}
-            </span>
-            <span className="gt-out">Sign out</span>
-          </button>
+
+        {/* Where you are, in three dots — so a man knows the screen is
+            going somewhere and how far is left. */}
+        {who && step !== "done" && (
+          <div className="gt-steps" aria-hidden>
+            <i data-on={step === "tool" ? "1" : undefined} data-done={step !== "tool" ? "1" : undefined} />
+            <i data-on={step === "qty" ? "1" : undefined} />
+          </div>
         )}
       </header>
 
       {err && (
         <div className="gt-err" role="alert">
+          <span aria-hidden>⚠</span>
           <span>{err}</span>
           <button type="button" onClick={() => setErr(null)} aria-label="Close">✕</button>
         </div>
       )}
 
-      {/* ── 1. WHO ─────────────────────────────────────────────────── */}
+      {/* ── 1. who ─────────────────────────────────────────────── */}
       {step === "who" && (
         <section className="gt-body">
           <h1 className="gt-q">Who is taking?</h1>
-          <p className="gt-sub">कौन ले रहा है? · एक कोड आपके फ़ोन पर आएगा</p>
-
+          <p className="gt-hint">Tap your name. A 4-digit code comes to your phone.</p>
           {roster.length === 0 ? (
-            <p className="gt-empty">
-              Nobody is set up to take tools yet. The office has to add people first.
-            </p>
+            <div className="gt-blank">
+              Nobody is set up for this cupboard yet. Ask the office.
+            </div>
           ) : (
             <div className="gt-people">
               {roster.map((p) => (
@@ -237,147 +254,119 @@ export function GuestTakeClient({
                   key={p.id}
                   type="button"
                   className="gt-person"
+                  style={{ ["--who" as string]: colourFor(p.name) }}
                   onClick={() => sendCode(p)}
                   disabled={pending}
                 >
-                  <span className="gt-ava" aria-hidden>{initials(p.name)}</span>
-                  <span className="gt-pmain">
-                    <span className="gt-pname">{p.name}</span>
-                    <span className="gt-pvendor">
-                      {p.vendorName ?? "Office"} · code to {p.maskedPhone}
-                    </span>
+                  <span className="gt-pface">{initials(p.name)}</span>
+                  <span className="gt-pbody">
+                    <strong>{p.name}</strong>
+                    <span>code to {p.maskedPhone}</span>
                   </span>
-                  <span className="gt-chev" aria-hidden>›</span>
+                  <span className="gt-pgo" aria-hidden>→</span>
                 </button>
               ))}
             </div>
           )}
-          <p className="gt-fineprint">
-            Only these people can take from the store. The code goes to the
-            number already saved for them — nothing can be typed in here.
-          </p>
         </section>
       )}
 
-      {/* ── 2. CODE ────────────────────────────────────────────────── */}
+      {/* ── 2. code ────────────────────────────────────────────── */}
       {step === "code" && picked && (
         <section className="gt-body">
-          <button type="button" className="gt-back" onClick={() => { setStep("who"); setErr(null); }}>
-            ‹ Not you?
-          </button>
-          <h1 className="gt-q">Enter the code</h1>
-          <p className="gt-sub">
-            Sent to {sentTo} · {picked.name}
+          <h1 className="gt-q">Your code</h1>
+          <p className="gt-hint">
+            Sent to <strong>{sentTo || picked.maskedPhone}</strong> — {picked.name}
           </p>
 
-          <div className="gt-otpwrap">
+          <div className="gt-otp" onClick={() => codeRef.current?.focus()}>
+            {Array.from({ length: DIGITS }).map((_, i) => (
+              <span key={i} className="gt-otp-box" data-filled={code[i] ? "1" : undefined} data-live={code.length === i ? "1" : undefined}>
+                {code[i] ?? ""}
+              </span>
+            ))}
             <input
               ref={codeRef}
-              className="gt-otp"
+              className="gt-otp-input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={DIGITS}
               value={code}
+              disabled={pending}
               onChange={(e) => {
                 const v = e.target.value.replace(/\D/g, "").slice(0, DIGITS);
                 setCode(v);
                 if (v.length === DIGITS) verify(v);
               }}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]*"
-              maxLength={DIGITS}
-              placeholder="····"
-              aria-label={`${DIGITS} digit code`}
-              disabled={pending}
+              aria-label="4-digit code"
             />
-            <div className="gt-otpdots" aria-hidden>
-              {Array.from({ length: DIGITS }).map((_, i) => (
-                <span key={i} className={`gt-otpdot${i < code.length ? " is-on" : ""}`} />
-              ))}
-            </div>
           </div>
 
-          {pending && <p className="gt-checking">Checking…</p>}
-
-          <button
-            type="button"
-            className="gt-resend"
-            disabled={cooldown > 0 || pending}
-            onClick={() => picked && sendCode(picked)}
-          >
-            {cooldown > 0 ? `Send again in ${cooldown}s` : "Send the code again"}
-          </button>
-          <p className="gt-fineprint">
-            The code lasts 10 minutes. Three wrong tries and it stops working —
-            ask for a new one.
-          </p>
-        </section>
-      )}
-
-      {/* ── 2b. COMPANY (developer only) ───────────────────────────── */}
-      {step === "company" && (
-        <section className="gt-body">
-          <h1 className="gt-q">Taking for which company?</h1>
-          <p className="gt-sub">किस कंपनी के लिए?</p>
-          <div className="gt-people">
-            {vendors.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                className="gt-person"
-                onClick={() => chooseCompany(v)}
-                disabled={pending}
-              >
-                <span className="gt-ava" aria-hidden>{initials(v.name)}</span>
-                <span className="gt-pmain"><span className="gt-pname">{v.name}</span></span>
-                <span className="gt-chev" aria-hidden>›</span>
-              </button>
-            ))}
+          <div className="gt-code-actions">
+            <button
+              type="button"
+              className="gt-ghost"
+              onClick={() => { setStep("who"); setCode(""); setErr(null); }}
+              disabled={pending}
+            >
+              ← Not me
+            </button>
+            <button
+              type="button"
+              className="gt-ghost"
+              onClick={() => sendCode(picked)}
+              disabled={pending || cooldown > 0}
+            >
+              {cooldown > 0 ? `Send again in ${cooldown}s` : "Send again"}
+            </button>
           </div>
         </section>
       )}
 
-      {/* ── 3. TOOL ────────────────────────────────────────────────── */}
+      {/* ── 3. tool ────────────────────────────────────────────── */}
       {step === "tool" && (
         <section className="gt-body">
           <h1 className="gt-q">What are you taking?</h1>
-          <p className="gt-sub">क्या ले रहे हैं?</p>
 
-          <div className="gt-search">
-            <span aria-hidden>🔍</span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search a tool…"
-              aria-label="Search tools"
-              autoComplete="off"
-            />
-            {q && <button type="button" onClick={() => setQ("")} aria-label="Clear">✕</button>}
-          </div>
+          {tools.length > 6 && (
+            <div className="gt-search">
+              <span aria-hidden>🔍</span>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search the shelf…"
+                aria-label="Search tools"
+              />
+              {q && <button type="button" onClick={() => setQ("")} aria-label="Clear">✕</button>}
+            </div>
+          )}
 
           {shown.length === 0 ? (
-            <p className="gt-empty">
-              {q ? `Nothing matches “${q}”.` : "The store has nothing on the shelf. Tell the office."}
-            </p>
+            <div className="gt-blank">
+              {q ? `Nothing matches “${q}”.` : "The shelf is empty. Tell the office."}
+            </div>
           ) : (
             <div className="gt-tools">
               {shown.map((t) => {
-                const s = stockOf(t);
-                const lvl = s <= 0 ? "out" : s <= 3 ? "low" : "ok";
+                const left = stockOf(t);
+                const lvl = left <= 0 ? "out" : t.level === "ok" ? "ok" : "low";
                 return (
                   <button
                     key={t.id}
                     type="button"
                     className="gt-tool"
+                    data-level={lvl}
                     onClick={() => { setTool(t); setQty(1); setStep("qty"); }}
+                    disabled={pending}
                   >
-                    <span className={`gt-stock is-${lvl}`}>{s}</span>
-                    <span className="gt-tmain">
-                      <span className="gt-tname">{t.name}</span>
-                      <span className="gt-tmeta">
-                        {t.spec ? `${t.spec} · ` : ""}
-                        {lvl === "low" ? "running low" : `${t.unit} on the shelf`}
-                      </span>
+                    <span className="gt-tool-main">
+                      <strong>{t.name}</strong>
+                      {t.spec && <span className="gt-tool-spec">{t.spec}</span>}
                     </span>
-                    <span className="gt-chev" aria-hidden>›</span>
+                    <span className="gt-tool-left">
+                      <b>{left}</b>
+                      <i>{t.unit}</i>
+                    </span>
                   </button>
                 );
               })}
@@ -386,256 +375,276 @@ export function GuestTakeClient({
 
           {tally.length > 0 && (
             <div className="gt-tally">
-              <p className="gt-tallyhead">Taken just now</p>
+              <span className="gt-tally-head">Taken just now</span>
               {tally.map((t, i) => (
-                <div key={i} className="gt-tallyrow">
-                  <span className="gt-tallyqty">{t.qty}</span>
-                  <span>{t.toolName}</span>
-                </div>
+                <span key={i} className="gt-tally-chip">
+                  {t.qty} × {t.toolName}
+                </span>
               ))}
             </div>
           )}
         </section>
       )}
 
-      {/* ── 4. QTY ─────────────────────────────────────────────────── */}
+      {/* ── 4. qty ─────────────────────────────────────────────── */}
       {step === "qty" && tool && (
-        <section className="gt-body gt-qtystep">
-          <button type="button" className="gt-back" onClick={() => setStep("tool")}>‹ Back</button>
-          <h1 className="gt-q">How many?</h1>
-          <p className="gt-sub">कितने?</p>
+        <section className="gt-body">
+          <button type="button" className="gt-back" onClick={() => { setTool(null); setStep("tool"); }}>
+            ← Pick another tool
+          </button>
 
-          <div className="gt-toolcard">
-            <div className="gt-tname lg">{tool.name}</div>
-            {tool.spec && <div className="gt-tmeta">{tool.spec}</div>}
-            <div className="gt-tmeta">{stockOf(tool)} {tool.unit} on the shelf</div>
+          <h1 className="gt-q">How many?</h1>
+          <div className="gt-chosen">
+            <strong>{tool.name}</strong>
+            {tool.spec && <span>{tool.spec}</span>}
+            <em>{max} {tool.unit} on the shelf</em>
           </div>
 
           <div className="gt-stepper">
-            <button type="button" onClick={() => setQty((n) => Math.max(1, n - 1))} disabled={qty <= 1} aria-label="One less">−</button>
-            <span className="gt-qtynum">{qty}</span>
-            <button type="button" onClick={() => setQty((n) => Math.min(max, n + 1))} disabled={qty >= max} aria-label="One more">＋</button>
-          </div>
-
-          {max > 1 && (
-            <div className="gt-quick">
-              {[1, 2, 5, 10].filter((n) => n <= max).map((n) => (
-                <button key={n} type="button" className={`gt-quickbtn${qty === n ? " is-on" : ""}`} onClick={() => setQty(n)}>
-                  {n}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="gt-bottom">
-            <button type="button" className="gt-primary gt-big" onClick={submit} disabled={pending}>
-              {pending ? "Recording…" : `Take ${qty} × ${tool.name}`}
+            <button
+              type="button"
+              onClick={() => setQty((n) => Math.max(1, n - 1))}
+              disabled={pending || qty <= 1}
+              aria-label="One less"
+            >
+              −
             </button>
-            <p className="gt-fine">Signed by <strong>{who?.name}</strong> · {who?.vendorName}</p>
+            <div className="gt-qty">
+              <b>{qty}</b>
+              <i>{tool.unit}</i>
+            </div>
+            <button
+              type="button"
+              onClick={() => setQty((n) => Math.min(max, n + 1))}
+              disabled={pending || qty >= max}
+              aria-label="One more"
+            >
+              +
+            </button>
           </div>
+
+          <button type="button" className="gt-take" onClick={submit} disabled={pending}>
+            {pending ? "Recording…" : `Take ${qty} ${tool.unit}`}
+          </button>
+          <p className="gt-fine">Signed by <strong>{who?.name}</strong></p>
         </section>
       )}
 
-      {/* ── 5. DONE ────────────────────────────────────────────────── */}
+      {/* ── 5. done ────────────────────────────────────────────── */}
       {step === "done" && done && (
-        <section className="gt-body gt-done">
+        <section className="gt-body gt-donestep">
           <div className="gt-tick" aria-hidden>✓</div>
-          <h1 className="gt-q">Written in the register</h1>
-          <p className="gt-doneline"><strong>{done.qty} × {done.toolName}</strong></p>
-          <p className="gt-sub">{done.left} left on the shelf · signed by {who?.name}</p>
+          <h1 className="gt-donetitle">
+            {done.qty} × {done.toolName}
+          </h1>
+          <p className="gt-donesub">
+            Written in the register against <strong>{who?.name}</strong>.
+            <br />
+            {done.left} left on the shelf.
+          </p>
+
+          <button
+            type="button"
+            className="gt-take"
+            onClick={() => { setTool(null); setDone(null); setQ(""); setStep("tool"); }}
+          >
+            Take something else
+          </button>
+          <button type="button" className="gt-ghost gt-wide" onClick={signOut} disabled={pending}>
+            That is all — sign out
+          </button>
 
           {tally.length > 1 && (
             <div className="gt-tally">
-              <p className="gt-tallyhead">Everything you took just now</p>
+              <span className="gt-tally-head">This visit</span>
               {tally.map((t, i) => (
-                <div key={i} className="gt-tallyrow">
-                  <span className="gt-tallyqty">{t.qty}</span>
-                  <span>{t.toolName}</span>
-                </div>
+                <span key={i} className="gt-tally-chip">{t.qty} × {t.toolName}</span>
               ))}
             </div>
           )}
-
-          <div className="gt-bottom">
-            <button
-              type="button"
-              className="gt-primary gt-big"
-              onClick={() => { setTool(null); setQty(1); setDone(null); setStep("tool"); }}
-            >
-              Take another
-            </button>
-            <button type="button" className="gt-ghost gt-wide" onClick={signOut} disabled={pending}>
-              Done — sign out
-            </button>
-          </div>
         </section>
       )}
     </main>
   );
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 const CSS = `
 .gt {
-  --bg:#f4f5f7; --card:#ffffff; --line:#e3e6ea; --line2:#eef0f3;
-  --ink:#171a1f; --muted:#5f6773;
-  --gold:#a67b28; --gold-bg:#fbf4e4; --gold-line:#e7d2a2;
-  --ok:#157f4a; --ok-bg:#e7f6ed; --low:#9a6400; --low-bg:#fdf3e0;
-  --out:#b3261e; --out-bg:#fdecea;
-  min-height:100dvh; background:var(--bg); color:var(--ink);
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
-  display:flex; flex-direction:column;
-  padding-bottom:env(safe-area-inset-bottom,0px);
-  -webkit-tap-highlight-color:transparent;
+  --ink:#15181d; --dim:#6b7280; --line:#e6e4df; --card:#ffffff;
+  --brand:#4f46e5; --brand2:#7c3aed;
+  --ok:#059669; --okbg:#ecfdf5; --low:#d97706; --lowbg:#fffbeb;
+  --out:#dc2626; --outbg:#fef2f2;
+  min-height:100dvh; background:#f6f6f4; color:var(--ink);
+  font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  padding-bottom:40px; -webkit-text-size-adjust:100%;
 }
-.gt * { box-sizing:border-box; }
-.gt button { font-family:inherit; }
+.gt *, .gt *::before, .gt *::after { box-sizing:border-box; }
 
-.gt-head { position:sticky; top:0; z-index:5; background:rgba(244,245,247,.94);
-  backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
-  padding:calc(12px + env(safe-area-inset-top,0px)) 16px 12px;
-  display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.gt-brand { display:flex; align-items:center; gap:8px; font-size:11.5px;
-  font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); }
-.gt-dot { width:8px; height:8px; border-radius:50%; background:var(--gold);
-  box-shadow:0 0 0 3px rgba(166,123,40,.16); }
-.gt-whochip { margin-left:auto; display:flex; align-items:center; gap:9px;
-  background:var(--card); border:1px solid var(--line); border-radius:999px;
-  padding:5px 7px 5px 5px; color:var(--ink); cursor:pointer; }
-.gt-whotext { display:flex; flex-direction:column; line-height:1.2; text-align:left; }
-.gt-whotext strong { font-size:12.5px; font-weight:800; }
-.gt-whotext span { font-size:10.5px; color:var(--muted); }
-.gt-out { font-size:10.5px; font-weight:800; text-transform:uppercase;
-  letter-spacing:.05em; color:var(--gold); padding-left:4px; }
+/* ── header ─────────────────────────────────────────────── */
+.gt-head {
+  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
+  color:#fff; padding:16px 16px 14px; border-radius:0 0 22px 22px;
+  box-shadow:0 10px 28px rgba(79,70,229,.26);
+}
+.gt-head-row { display:flex; align-items:center; gap:12px; }
+.gt-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+.gt-logo {
+  width:40px; height:40px; flex:0 0 auto; border-radius:13px; font-size:20px;
+  display:grid; place-items:center; background:rgba(255,255,255,.18);
+}
+.gt-brand-label { font-size:16px; font-weight:800; letter-spacing:-.2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gt-brand-sub { font-size:11px; font-weight:700; letter-spacing:.1em;
+  text-transform:uppercase; color:rgba(255,255,255,.72); }
+.gt-me {
+  margin-left:auto; display:flex; align-items:center; gap:7px; max-width:46%;
+  padding:6px 10px 6px 6px; border-radius:999px; border:none; cursor:pointer;
+  background:rgba(255,255,255,.17); color:#fff; font:inherit;
+}
+.gt-me-dot { width:26px; height:26px; flex:0 0 auto; border-radius:50%;
+  display:grid; place-items:center; font-size:11px; font-weight:800; color:#fff;
+  box-shadow:0 0 0 2px rgba(255,255,255,.45); }
+.gt-me-name { font-size:12.5px; font-weight:700; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.gt-me-out { font-size:10px; font-weight:700; opacity:.8; white-space:nowrap; }
+.gt-steps { display:flex; gap:6px; margin:12px 2px 0; }
+.gt-steps i { height:4px; flex:1; border-radius:99px; background:rgba(255,255,255,.28); }
+.gt-steps i[data-done] { background:rgba(255,255,255,.62); }
+.gt-steps i[data-on] { background:#fff; }
 
-.gt-body { flex:1; padding:24px 16px 28px; display:flex; flex-direction:column; }
-.gt-q { font-size:27px; font-weight:800; letter-spacing:-.025em; margin:0; line-height:1.15; }
-.gt-sub { font-size:14px; color:var(--muted); margin:6px 0 22px; line-height:1.45; }
-
-.gt-err { margin:12px 16px 0; display:flex; gap:10px; align-items:flex-start;
-  background:var(--out-bg); border:1px solid rgba(179,38,30,.3);
-  color:#8c1d18; border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.45; }
+/* ── shared body ────────────────────────────────────────── */
+.gt-body { padding:20px 16px 0; max-width:560px; margin:0 auto; }
+.gt-q { font-size:23px; font-weight:800; letter-spacing:-.4px; margin:0 0 6px; }
+.gt-hint { font-size:14px; color:var(--dim); line-height:1.5; margin:0 0 18px; }
+.gt-blank { padding:26px 18px; text-align:center; font-size:14.5px; color:var(--dim);
+  background:var(--card); border:1px dashed var(--line); border-radius:16px; }
+.gt-err {
+  display:flex; align-items:center; gap:9px; margin:14px 16px 0; padding:12px 14px;
+  background:var(--outbg); border:1px solid #fecaca; border-radius:14px;
+  color:#991b1b; font-size:13.5px; font-weight:600; line-height:1.4;
+}
 .gt-err button { margin-left:auto; background:none; border:none; color:inherit;
-  font-size:16px; cursor:pointer; flex:0 0 auto; }
+  font-size:15px; cursor:pointer; padding:0 2px; }
+.gt-back { background:none; border:none; padding:0 0 12px; font:inherit;
+  font-size:13.5px; font-weight:700; color:var(--brand); cursor:pointer; }
 
-.gt-people { display:flex; flex-direction:column; gap:10px; }
-.gt-person { display:flex; align-items:center; gap:13px; width:100%;
-  background:var(--card); border:1px solid var(--line); border-radius:16px;
-  padding:13px 14px; min-height:72px; cursor:pointer; text-align:left; color:var(--ink);
-  box-shadow:0 1px 2px rgba(16,24,40,.04); }
-.gt-person:active { background:#fafbfc; }
-.gt-person:disabled { opacity:.55; }
-.gt-ava { width:44px; height:44px; border-radius:14px; flex:0 0 auto;
-  display:grid; place-items:center; background:var(--gold-bg);
-  color:var(--gold); font-size:14px; font-weight:800; border:1px solid var(--gold-line); }
-.gt-ava.sm { width:28px; height:28px; border-radius:9px; font-size:10.5px; }
-.gt-pmain { display:flex; flex-direction:column; min-width:0; flex:1; }
-.gt-pname { font-size:17px; font-weight:750; }
-.gt-pvendor { font-size:12.5px; color:var(--muted); margin-top:2px; }
-
-.gt-empty { color:var(--muted); font-size:14.5px; line-height:1.6; margin-top:14px; }
-.gt-fineprint { margin-top:auto; padding-top:26px; font-size:12px; color:var(--muted);
-  line-height:1.55; }
-
-.gt-back { align-self:flex-start; background:none; border:none; color:var(--muted);
-  font-size:15px; font-weight:700; padding:0 0 12px; cursor:pointer; }
-
-.gt-otpwrap { position:relative; margin-top:6px; }
-.gt-otp { width:100%; height:86px; border-radius:18px; border:1.5px solid var(--line);
-  background:var(--card); color:transparent; caret-color:transparent;
-  font-size:1px; text-align:center; outline:none; }
-.gt-otp:focus { border-color:var(--gold); box-shadow:0 0 0 4px rgba(166,123,40,.1); }
-.gt-otpdots { position:absolute; inset:0; display:flex; align-items:center;
-  justify-content:center; gap:16px; pointer-events:none; }
-.gt-otpdot { width:48px; height:58px; border-radius:14px; background:#f7f8fa;
-  border:1.5px solid var(--line); }
-.gt-otpdot.is-on { background:var(--gold-bg); border-color:var(--gold);
-  box-shadow:inset 0 0 0 10px var(--card); }
-.gt-checking { text-align:center; font-size:13px; color:var(--muted); margin:14px 0 0; }
-.gt-resend { margin-top:20px; width:100%; min-height:52px; border-radius:14px;
-  background:transparent; border:1px solid var(--line); color:var(--ink);
-  font-size:14.5px; font-weight:700; cursor:pointer; }
-.gt-resend:disabled { color:var(--muted); cursor:not-allowed; }
-
-.gt-primary { min-height:58px; border-radius:15px; border:none;
-  background:var(--gold); color:#fff; font-size:16px; font-weight:800;
-  cursor:pointer; flex:1; box-shadow:0 2px 8px rgba(166,123,40,.25); }
-.gt-primary:disabled { background:#d7dbe0; color:#8b929b; box-shadow:none; cursor:not-allowed; }
-.gt-big { width:100%; min-height:64px; font-size:17px; }
-.gt-ghost { min-height:56px; border-radius:15px; background:transparent;
-  border:1px solid var(--line); color:var(--muted); font-size:15px;
-  font-weight:700; cursor:pointer; padding:0 22px; }
-.gt-wide { width:100%; margin-top:10px; }
-
-.gt-search { display:flex; align-items:center; gap:10px; background:var(--card);
-  border:1px solid var(--line); border-radius:15px; padding:0 14px;
-  min-height:54px; margin-bottom:14px; }
-.gt-search input { flex:1; background:none; border:none; outline:none;
-  color:var(--ink); font-size:16px; min-width:0; }
-.gt-search button { background:none; border:none; color:var(--muted);
-  font-size:15px; cursor:pointer; }
-
-.gt-tools { display:flex; flex-direction:column; gap:10px; }
-.gt-tool { display:flex; align-items:center; gap:13px; width:100%;
-  background:var(--card); border:1px solid var(--line); border-radius:16px;
-  padding:13px 14px; min-height:74px; cursor:pointer; text-align:left; color:var(--ink);
-  box-shadow:0 1px 2px rgba(16,24,40,.04); }
-.gt-tool:active { background:#fafbfc; }
-.gt-stock { width:48px; height:48px; border-radius:14px; flex:0 0 auto;
-  display:grid; place-items:center; font-size:18px; font-weight:800;
-  font-variant-numeric:tabular-nums; }
-.gt-stock.is-ok { background:var(--ok-bg); color:var(--ok); }
-.gt-stock.is-low { background:var(--low-bg); color:var(--low); }
-.gt-stock.is-out { background:var(--out-bg); color:var(--out); }
-.gt-tmain { display:flex; flex-direction:column; min-width:0; flex:1; }
-.gt-tname { font-size:16.5px; font-weight:750; overflow-wrap:anywhere; }
-.gt-tname.lg { font-size:22px; font-weight:800; }
-.gt-tmeta { font-size:12.5px; color:var(--muted); margin-top:2px; }
-.gt-chev { color:#b6bcc5; font-size:21px; flex:0 0 auto; }
-
-.gt-toolcard { background:var(--card); border:1px solid var(--line);
-  border-radius:18px; padding:18px; margin-bottom:26px;
-  box-shadow:0 1px 2px rgba(16,24,40,.04); }
-.gt-stepper { display:flex; align-items:center; justify-content:center; gap:24px; }
-.gt-stepper button { width:76px; height:76px; border-radius:50%;
-  background:var(--card); border:1.5px solid var(--line); color:var(--ink);
-  font-size:32px; font-weight:700; cursor:pointer; box-shadow:0 1px 3px rgba(16,24,40,.06); }
-.gt-stepper button:disabled { opacity:.4; cursor:not-allowed; box-shadow:none; }
-.gt-qtynum { font-size:60px; font-weight:800; min-width:92px; text-align:center;
-  font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
-.gt-quick { display:flex; gap:9px; justify-content:center; margin-top:22px; }
-.gt-quickbtn { min-width:58px; min-height:46px; border-radius:13px;
-  background:var(--card); border:1px solid var(--line); color:var(--muted);
-  font-size:15.5px; font-weight:700; cursor:pointer; }
-.gt-quickbtn.is-on { background:var(--gold-bg); border-color:var(--gold); color:var(--gold); }
-
-.gt-bottom { margin-top:auto; padding-top:28px; }
-.gt-fine { text-align:center; font-size:12.5px; color:var(--muted); margin:12px 0 0; }
-
-.gt-done { align-items:center; text-align:center; }
-.gt-tick { width:80px; height:80px; border-radius:50%; display:grid;
-  place-items:center; font-size:40px; font-weight:800;
-  background:var(--ok-bg); color:var(--ok); margin-bottom:20px; }
-.gt-doneline { font-size:20px; margin:8px 0 0; }
-.gt-done .gt-bottom { width:100%; }
-
-.gt-tally { margin-top:26px; border-top:1px solid var(--line); padding-top:16px; width:100%; }
-.gt-tallyhead { font-size:11px; font-weight:800; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
-.gt-tallyrow { display:flex; align-items:center; gap:12px; padding:7px 0;
-  font-size:15px; text-align:left; }
-.gt-tallyqty { min-width:32px; height:32px; border-radius:9px; display:grid;
-  place-items:center; background:var(--gold-bg); color:var(--gold);
-  font-size:13.5px; font-weight:800; }
-
-@media (prefers-reduced-motion: no-preference) {
-  .gt-tick { animation: gt-pop .32s ease-out; }
-  @keyframes gt-pop { from { transform:scale(.7); opacity:0; } to { transform:scale(1); opacity:1; } }
+/* ── people ─────────────────────────────────────────────── */
+.gt-people { display:flex; flex-direction:column; gap:11px; }
+.gt-person {
+  display:flex; align-items:center; gap:13px; width:100%; text-align:left;
+  padding:14px; border-radius:18px; cursor:pointer; font:inherit;
+  background:var(--card); border:1.5px solid var(--line);
+  box-shadow:0 2px 10px rgba(20,20,30,.05);
 }
+.gt-person:active { transform:scale(.99); }
+.gt-person:disabled { opacity:.55; }
+.gt-pface {
+  width:46px; height:46px; flex:0 0 auto; border-radius:15px; color:#fff;
+  display:grid; place-items:center; font-size:16px; font-weight:800;
+  background:var(--who); box-shadow:0 4px 12px color-mix(in srgb, var(--who) 40%, transparent);
+}
+.gt-pbody { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.gt-pbody strong { font-size:16.5px; font-weight:800; }
+.gt-pbody span { font-size:12.5px; color:var(--dim); }
+.gt-pgo { font-size:18px; color:var(--who); font-weight:800; }
+
+/* ── otp ────────────────────────────────────────────────── */
+.gt-otp { position:relative; display:flex; gap:10px; justify-content:center; margin:6px 0 20px; }
+.gt-otp-box {
+  width:60px; height:72px; border-radius:16px; display:grid; place-items:center;
+  font-size:30px; font-weight:800; background:var(--card);
+  border:2px solid var(--line); color:var(--ink);
+}
+.gt-otp-box[data-filled] { border-color:var(--brand); background:#eef2ff; }
+.gt-otp-box[data-live] { border-color:var(--brand); box-shadow:0 0 0 4px rgba(79,70,229,.14); }
+.gt-otp-input { position:absolute; inset:0; width:100%; height:100%;
+  opacity:0; border:none; background:transparent; font-size:30px; }
+.gt-code-actions { display:flex; gap:10px; justify-content:space-between; }
+.gt-ghost { padding:12px 14px; border-radius:13px; font:inherit; font-size:13.5px;
+  font-weight:700; cursor:pointer; background:var(--card);
+  border:1.5px solid var(--line); color:var(--ink); }
+.gt-ghost:disabled { opacity:.5; }
+.gt-wide { display:block; width:100%; margin-top:10px; }
+
+/* ── tools ──────────────────────────────────────────────── */
+.gt-search {
+  display:flex; align-items:center; gap:9px; padding:0 14px; margin-bottom:14px;
+  background:var(--card); border:1.5px solid var(--line); border-radius:15px;
+}
+.gt-search input { flex:1; min-width:0; border:none; outline:none; background:none;
+  font:inherit; font-size:15.5px; padding:14px 0; color:var(--ink); }
+.gt-search button { background:none; border:none; color:var(--dim); font-size:15px; cursor:pointer; }
+.gt-tools { display:flex; flex-direction:column; gap:11px; }
+.gt-tool {
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  padding:15px 15px 15px 18px; border-radius:18px; cursor:pointer; font:inherit;
+  background:var(--card); border:1.5px solid var(--line); position:relative;
+  overflow:hidden; box-shadow:0 2px 10px rgba(20,20,30,.05);
+}
+.gt-tool::before { content:""; position:absolute; left:0; top:0; bottom:0; width:6px; }
+.gt-tool[data-level="ok"]::before  { background:var(--ok); }
+.gt-tool[data-level="low"]::before { background:var(--low); }
+.gt-tool[data-level="out"]::before { background:var(--out); }
+.gt-tool:active { transform:scale(.99); }
+.gt-tool-main { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
+.gt-tool-main strong { font-size:16.5px; font-weight:800; }
+.gt-tool-spec { font-size:12.5px; color:var(--dim); }
+.gt-tool-left { flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
+  min-width:58px; padding:7px 10px; border-radius:13px; }
+.gt-tool-left b { font-size:21px; font-weight:800; line-height:1; }
+.gt-tool-left i { font-style:normal; font-size:10px; font-weight:700;
+  letter-spacing:.06em; text-transform:uppercase; opacity:.75; }
+.gt-tool[data-level="ok"]  .gt-tool-left { background:var(--okbg);  color:var(--ok); }
+.gt-tool[data-level="low"] .gt-tool-left { background:var(--lowbg); color:var(--low); }
+.gt-tool[data-level="out"] .gt-tool-left { background:var(--outbg); color:var(--out); }
+
+/* ── quantity ───────────────────────────────────────────── */
+.gt-chosen { background:var(--card); border:1.5px solid var(--line); border-radius:18px;
+  padding:15px 16px; margin-bottom:18px; display:flex; flex-direction:column; gap:3px; }
+.gt-chosen strong { font-size:18px; font-weight:800; }
+.gt-chosen span { font-size:13px; color:var(--dim); }
+.gt-chosen em { font-style:normal; font-size:12.5px; font-weight:700; color:var(--ok); margin-top:4px; }
+.gt-stepper { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
+.gt-stepper button {
+  width:74px; height:74px; flex:0 0 auto; border-radius:24px; font-size:34px;
+  font-weight:700; cursor:pointer; background:var(--card); color:var(--brand);
+  border:2px solid var(--line); line-height:1;
+}
+.gt-stepper button:disabled { opacity:.35; }
+.gt-stepper button:active:not(:disabled) { background:#eef2ff; }
+.gt-qty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%); color:#fff;
+  border-radius:24px; padding:12px 8px; box-shadow:0 8px 22px rgba(79,70,229,.3); }
+.gt-qty b { font-size:42px; font-weight:800; line-height:1; }
+.gt-qty i { font-style:normal; font-size:11px; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; opacity:.85; margin-top:3px; }
+.gt-take {
+  display:block; width:100%; padding:19px; border-radius:20px; border:none;
+  font:inherit; font-size:17.5px; font-weight:800; color:#fff; cursor:pointer;
+  background:linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow:0 10px 24px rgba(5,150,105,.34);
+}
+.gt-take:disabled { opacity:.6; }
+.gt-take:active:not(:disabled) { transform:translateY(1px); }
+.gt-fine { text-align:center; font-size:12.5px; color:var(--dim); margin:12px 0 0; }
+
+/* ── done ───────────────────────────────────────────────── */
+.gt-donestep { text-align:center; padding-top:34px; }
+.gt-tick { width:88px; height:88px; margin:0 auto 18px; border-radius:50%;
+  display:grid; place-items:center; font-size:44px; color:#fff;
+  background:linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow:0 12px 30px rgba(16,185,129,.4); animation:gtPop .32s cubic-bezier(.2,1.3,.4,1) both; }
+@keyframes gtPop { from { transform:scale(.6); opacity:0; } to { transform:scale(1); opacity:1; } }
+.gt-donetitle { font-size:25px; font-weight:800; letter-spacing:-.4px; margin:0 0 8px; }
+.gt-donesub { font-size:14.5px; color:var(--dim); line-height:1.6; margin:0 0 24px; }
+
+/* ── tally ──────────────────────────────────────────────── */
+.gt-tally { display:flex; flex-wrap:wrap; gap:7px; align-items:center;
+  margin-top:22px; padding-top:16px; border-top:1px dashed var(--line); }
+.gt-tally-head { width:100%; font-size:10.5px; font-weight:800; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--dim); margin-bottom:2px; }
+.gt-tally-chip { font-size:12.5px; font-weight:700; padding:6px 11px; border-radius:999px;
+  background:var(--okbg); color:var(--ok); border:1px solid #a7f3d0; }
+
+@media (prefers-reduced-motion: reduce) { .gt-tick { animation:none; } }
 `;

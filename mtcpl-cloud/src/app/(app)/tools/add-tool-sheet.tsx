@@ -75,10 +75,8 @@ export function AddToolSheet({
             width: "100%", padding: "15px 18px", fontSize: 16, fontWeight: 800,
             borderRadius: 13, border: "none", color: "#fff",
             cursor: ready ? "pointer" : "not-allowed",
-            background: ready
-              ? "linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%)"
-              : "var(--border)",
-            boxShadow: ready ? "0 6px 18px rgba(166,123,40,0.3)" : "none",
+            background: ready ? "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)" : "var(--border)",
+            boxShadow: ready ? "0 8px 20px rgba(234,88,12,0.3)" : "none",
           }}
         >
           {busy ? "Saving…" : editing ? "Save changes" : "Add tool"}

@@ -6,9 +6,13 @@
 // Every write to cnc_tools / cnc_tool_movements goes through here.
 //
 // ONE STORE. A tool belongs to the plant, not to a vendor, and every
-// CNC vendor draws from the same shelf. `vendor_id` on a movement says
-// WHO IT WAS FOR — required on issue/return, NULL on receive/scrap/
-// adjust, and the database enforces that shape (mig 228).
+// CNC vendor draws from the same shelf.
+//
+// Oct 2026 — what a logged-in person may write here is now just TWO
+// things: stock in, and a count correction. Taking moved out entirely,
+// to the cupboard QR, where it is signed by the person taking it (mig
+// 232). A "give to vendor" button here would be the keeper guessing on
+// somebody's behalf, which is the paper register with extra steps.
 // RLS on those tables is read-only for `authenticated`, so the admin
 // client below is the only way in and these gates are the real door.
 //
@@ -18,12 +22,10 @@
 // register would quietly go back to being paper. The protection is an
 // append-only ledger plus a 10-minute undo, not a gate.
 //
-// Corrections after the undo window are RECORDED, never edited:
-//   • took too many        → `return`
-//   • it was never there   → `adjust`
-//   • it broke             → `scrap`
-// The wrong line stays visible with the right line underneath it, which
-// is exactly how the paper register handles a mistake.
+// Corrections after the undo window are RECORDED, never edited: a
+// `adjust` line puts the register back in step with the shelf and says
+// why. The wrong line stays visible with the right line underneath it,
+// which is exactly how the paper register handles a mistake.
 // ──────────────────────────────────────────────────────────────────
 
 import { randomBytes } from "node:crypto";
@@ -34,11 +36,7 @@ import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import {
-  canManageCncToolStore,
-  canUseCncTools,
-  takingVendorFor,
-} from "@/lib/cnc-tool-permissions";
+import { canManageCncToolStore, canUseCncTools } from "@/lib/cnc-tool-permissions";
 import {
   UNDO_WINDOW_MS,
   levelOf,
@@ -203,10 +201,8 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   const { profile } = await requireAuth();
   if (!canUseCncTools(profile)) return { ok: false, error: "Not allowed." };
 
-  const requestedVendor = txt(fd, "vendor_id") || null;
   const toolId = txt(fd, "tool_id");
   const kind = txt(fd, "kind") as ToolMovementKind;
-  const takenBy = txt(fd, "taken_by");
   const note = txt(fd, "note") || null;
   const qty = num(fd, "qty");
   // `adjust` is the only one that may go either way, so it carries its
@@ -214,34 +210,20 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   const down = txt(fd, "direction") === "down";
 
   if (!toolId) return { ok: false, error: "Missing tool." };
-  if (!["receive", "issue", "return", "scrap", "adjust"].includes(kind)) {
-    return { ok: false, error: "Unknown movement." };
+  // Only the keeper's two. A take has to be signed by the person taking
+  // it, and the only door that can do that is the cupboard QR, so it is
+  // refused here however the form is posted.
+  if (kind !== "receive" && kind !== "adjust") {
+    return { ok: false, error: "Taking is done at the cupboard QR, signed by the person taking it." };
   }
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, error: "Enter how many." };
 
-  // scrap and adjust are the two that can hide a loss, so they stay
-  // behind the manage gate even though taking and returning are open.
-  if ((kind === "scrap" || kind === "adjust") && !canManageCncToolStore(profile)) {
-    return { ok: false, error: "Only a manager can scrap or fix the count." };
-  }
-  if (kind === "issue" && !takenBy) {
-    return { ok: false, error: "Write who is taking it — that is the whole point of the register." };
+  // A count fix can hide a loss, so it stays behind the manage gate.
+  if (kind === "adjust" && !canManageCncToolStore(profile)) {
+    return { ok: false, error: "Only a manager can fix the count." };
   }
 
-  // A take leaves the store FOR somebody, so it must name a vendor; the
-  // store's own lines (stock in, scrap, count fix) must not pretend to.
-  // Mig 228's CHECK enforces the same shape, so a tampered form cannot
-  // slip past this.
-  const needsVendor = kind === "issue" || kind === "return";
-  const vendorId = needsVendor ? takingVendorFor(profile, requestedVendor) : null;
-  if (needsVendor && !vendorId) {
-    return { ok: false, error: "Pick which vendor is taking it." };
-  }
-
-  const delta =
-    kind === "receive" || kind === "return" ? qty
-      : kind === "issue" || kind === "scrap" ? -qty
-        : down ? -qty : qty;
+  const delta = kind === "receive" ? qty : down ? -qty : qty;
 
   const admin = createAdminSupabaseClient();
 
@@ -276,11 +258,11 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   const { data: inserted, error } = await admin
     .from("cnc_tool_movements")
     .insert({
-      vendor_id: vendorId,
+      // Store-level by definition: neither of these belongs to a company.
+      vendor_id: null,
       tool_id: toolId,
       kind,
       delta,
-      taken_by: kind === "issue" || kind === "return" ? takenBy || null : null,
       note,
       entered_by: profile.id,
     })
@@ -291,11 +273,10 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   const after = before + delta;
 
   await logAudit(profile.id, `cnc_tool_${kind}`, "cnc_tool", toolId, {
-    vendor_id: vendorId,
     tool: tool.name,
     qty,
     delta,
-    taken_by: takenBy || null,
+    note,
     stock_before: before,
     stock_after: after,
     movement_id: inserted?.id ?? null,
@@ -494,201 +475,4 @@ export async function revokeToolStoreLinkAction(fd: FormData): Promise<ActionRes
   await logAudit(profile.id, "cnc_tool_qr_revoked", "cnc_tool_store_link", id, {});
   revalidatePath("/tools/qr");
   return { ok: true, message: "QR switched off. Print a new one before taking the sticker down." };
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Typing the paper register in (mig 231)
-// ──────────────────────────────────────────────────────────────────
-// Each vendor keeps their own register, so a page belongs to one
-// vendor and the typist picks that once. Every line is a take; nothing
-// else can come in through this door, and the database enforces it.
-
-export type RegisterLineInput = {
-  /** The date on the register LINE (yyyy-mm-dd). */
-  date: string;
-  /** Who signed for it on the paper. */
-  person: string;
-  toolId: string;
-  qty: number;
-};
-
-export type SaveRegisterResult =
-  | { ok: true; batchId: string; lines: number }
-  | { ok: false; error: string; rowErrors?: Array<{ row: number; message: string }> };
-
-/** Save one page of one vendor's register as a single batch. Either
- *  every line goes in or none does — a half-entered page is worse than
- *  an un-entered one, because nobody can tell which half is missing. */
-export async function saveToolRegisterPageAction(fd: FormData): Promise<SaveRegisterResult> {
-  const { profile } = await requireAuth();
-  if (!canUseCncTools(profile)) return { ok: false, error: "Not allowed." };
-
-  const vendorId = takingVendorFor(profile, txt(fd, "vendor_id"));
-  if (!vendorId) return { ok: false, error: "Pick whose register this is." };
-
-  const registerDate = txt(fd, "register_date");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(registerDate)) {
-    return { ok: false, error: "Enter the date written on the register page." };
-  }
-
-  let lines: RegisterLineInput[] = [];
-  try {
-    const parsed = JSON.parse(txt(fd, "lines") || "[]");
-    if (Array.isArray(parsed)) lines = parsed as RegisterLineInput[];
-  } catch {
-    return { ok: false, error: "Could not read the lines." };
-  }
-  if (lines.length === 0) return { ok: false, error: "There is nothing to save." };
-  if (lines.length > 300) {
-    return { ok: false, error: "That is more than 300 lines — save the page in two parts." };
-  }
-
-  const admin = createAdminSupabaseClient();
-
-  // ── Check every line before writing anything ─────────────────────
-  const { data: toolRows } = await admin
-    .from("cnc_tools")
-    .select("id, name, is_active")
-    .eq("is_active", true);
-  const tools = new Map(
-    ((toolRows ?? []) as Array<{ id: string; name: string }>).map((t) => [t.id, t.name]),
-  );
-
-  // Today in IST — a register line cannot be from the future.
-  const istToday = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
-
-  const rowErrors: Array<{ row: number; message: string }> = [];
-  const wanted = new Map<string, number>(); // toolId → total taken on this page
-
-  lines.forEach((l, i) => {
-    const row = i + 1;
-    const date = String(l.date || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      rowErrors.push({ row, message: "Date is missing or not a real date." });
-    } else if (date > istToday) {
-      rowErrors.push({ row, message: "Date is in the future." });
-    }
-    const person = String(l.person || "").trim().replace(/\s+/g, " ");
-    if (!person) rowErrors.push({ row, message: "Nobody is named for this line." });
-    else if (person.length > 60) rowErrors.push({ row, message: "That name is too long." });
-
-    if (!l.toolId || !tools.has(l.toolId)) {
-      rowErrors.push({ row, message: "Pick a tool from the list." });
-    }
-    const qty = Number(l.qty);
-    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
-      rowErrors.push({ row, message: "Quantity must be 1 or more." });
-    } else if (qty > 500) {
-      rowErrors.push({ row, message: "That quantity looks wrong." });
-    } else if (l.toolId) {
-      wanted.set(l.toolId, (wanted.get(l.toolId) ?? 0) + qty);
-    }
-  });
-
-  // ── The shelf has to be able to cover the whole page ─────────────
-  // Checked against the page TOTAL per tool, not line by line: five
-  // lines of 2 against a stock of 6 is a problem even though each line
-  // on its own looks fine.
-  if (wanted.size > 0) {
-    const { data: moves } = await admin
-      .from("cnc_tool_movements")
-      .select("tool_id, delta")
-      .in("tool_id", [...wanted.keys()])
-      .is("undone_at", null);
-    const stock = new Map<string, number>();
-    for (const m of (moves ?? []) as Array<{ tool_id: string; delta: number | string }>) {
-      stock.set(m.tool_id, (stock.get(m.tool_id) ?? 0) + Number(m.delta ?? 0));
-    }
-    for (const [toolId, qty] of wanted) {
-      const have = stock.get(toolId) ?? 0;
-      if (qty > have) {
-        rowErrors.push({
-          row: 0,
-          message: `${tools.get(toolId) ?? "A tool"} — the page takes ${qty} but the shelf has ${have}.`,
-        });
-      }
-    }
-  }
-
-  if (rowErrors.length > 0) {
-    return { ok: false, error: "Some lines need fixing before this page can be saved.", rowErrors };
-  }
-
-  // ── Write the page ───────────────────────────────────────────────
-  const { data: batch, error: batchErr } = await admin
-    .from("cnc_tool_register_batches")
-    .insert({
-      vendor_id: vendorId,
-      register_date: registerDate,
-      entered_by: profile.id,
-      line_count: lines.length,
-      note: txt(fd, "note").slice(0, 300) || null,
-    })
-    .select("id")
-    .single();
-  if (batchErr || !batch) {
-    return { ok: false, error: batchErr?.message ?? "Could not start the page." };
-  }
-  const batchId = (batch as { id: string }).id;
-
-  const { error: movesErr } = await admin.from("cnc_tool_movements").insert(
-    lines.map((l) => ({
-      vendor_id: vendorId,
-      tool_id: l.toolId,
-      kind: "issue",
-      delta: -Math.abs(Number(l.qty)),
-      taken_by: String(l.person).trim().replace(/\s+/g, " "),
-      occurred_on: String(l.date).slice(0, 10),
-      register_batch_id: batchId,
-      entered_by: profile.id,
-    })),
-  );
-  if (movesErr) {
-    // Take the empty batch back out so a failed save leaves nothing behind.
-    await admin.from("cnc_tool_register_batches").delete().eq("id", batchId);
-    return { ok: false, error: movesErr.message };
-  }
-
-  await logAudit(profile.id, "cnc_tool_register_page_entered", "cnc_tool_register_batch", batchId, {
-    vendor_id: vendorId,
-    register_date: registerDate,
-    lines: lines.length,
-  });
-
-  revalidatePath("/tools");
-  revalidatePath("/tools/register");
-  revalidatePath(`/tools/v/${vendorId}`);
-  return { ok: true, batchId, lines: lines.length };
-}
-
-/** Take a whole page back out. The movements are marked undone rather
- *  than deleted, so the register still shows that the page was entered
- *  and then withdrawn, and by whom. */
-export async function undoToolRegisterPageAction(fd: FormData): Promise<ActionResult> {
-  const { profile } = await requireAuth();
-  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
-
-  const batchId = txt(fd, "batch_id");
-  if (!batchId) return { ok: false, error: "Which page?" };
-
-  const admin = createAdminSupabaseClient();
-  const now = new Date().toISOString();
-
-  const { error: movesErr } = await admin
-    .from("cnc_tool_movements")
-    .update({ undone_at: now, undone_by: profile.id })
-    .eq("register_batch_id", batchId)
-    .is("undone_at", null);
-  if (movesErr) return { ok: false, error: movesErr.message };
-
-  const { error } = await admin
-    .from("cnc_tool_register_batches")
-    .update({ undone_at: now, undone_by: profile.id })
-    .eq("id", batchId);
-  if (error) return { ok: false, error: error.message };
-
-  await logAudit(profile.id, "cnc_tool_register_page_undone", "cnc_tool_register_batch", batchId, {});
-  revalidatePath("/tools");
-  revalidatePath("/tools/register");
-  return { ok: true, message: "That page has been taken back out." };
 }

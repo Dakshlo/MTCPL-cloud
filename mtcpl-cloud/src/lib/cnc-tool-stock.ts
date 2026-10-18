@@ -10,8 +10,9 @@
  *
  *     stock(tool) = SUM(delta) WHERE tool_id = tool AND undone_at IS NULL
  *
- * `vendor_id` on a movement means WHO IT WAS FOR, not where it happened:
- * set on issue/return, NULL on receive/scrap/adjust (store-level).
+ * `vendor_id` on a movement means WHO IT WAS FOR. Since mig 232 nothing
+ * asks for it: a take is signed by `taken_by_profile_id`, the person who
+ * stood at the cupboard, and the column is kept for the older rows.
  *
  * TAKEN MEANS USED. Daksh: "there is no return thing, they take the
  * tool and it gets used — maybe sometimes they will take an item which
@@ -26,9 +27,6 @@ import { fetchAllPaged } from "@/lib/paginate";
 
 export const TOOL_MOVEMENT_KINDS = ["receive", "issue", "return", "scrap", "adjust"] as const;
 export type ToolMovementKind = (typeof TOOL_MOVEMENT_KINDS)[number];
-
-/** Movements that belong to a vendor rather than to the store. */
-export const VENDOR_KINDS: ToolMovementKind[] = ["issue", "return"];
 
 /** How long a mistake can be taken back. Matches the Work Diary's
  *  unsend window, so "you have ten minutes" is one rule across the app. */
@@ -109,17 +107,6 @@ export const KIND_VERB: Record<ToolMovementKind, string> = {
 };
 
 // ── Loaders ────────────────────────────────────────────────────────
-
-export async function listToolVendors(): Promise<Array<{ id: string; name: string }>> {
-  const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("vendors")
-    .select("id, name")
-    .eq("vendor_type", "CNC")
-    .eq("is_active", true)
-    .order("name");
-  return (data ?? []) as Array<{ id: string; name: string }>;
-}
 
 /**
  * The whole store: the catalogue plus every movement, reduced into
@@ -202,55 +189,6 @@ export async function stockForTool(toolId: string): Promise<number> {
 }
 
 // ── Views ──────────────────────────────────────────────────────────
-
-/** What one vendor has taken (and returned), newest first. This is the
- *  vendor's whole screen — a log, not a balance. */
-export function takingsFor(movements: ToolMovement[], vendorId: string): ToolMovement[] {
-  return movements.filter((m) => m.vendor_id === vendorId);
-}
-
-/**
- * Names that have carried something away for this vendor, most recent
- * first.
- *
- * This is what stops the register being a typing exercise. No people
- * table, no admin screen: the list builds itself from what has already
- * been written, so by the end of the first week it is one tap.
- */
-export function takenByHistory(
-  movements: ToolMovement[],
-  vendorId: string | null,
-  limit = 12,
-): string[] {
-  const seen = new Map<string, number>();
-  for (const m of movements) {
-    if (m.undone_at || !m.taken_by) continue;
-    if (vendorId && m.vendor_id !== vendorId) continue;
-    const name = m.taken_by.trim();
-    if (!name) continue;
-    const t = new Date(m.created_at).getTime();
-    if (!seen.has(name) || t > (seen.get(name) as number)) seen.set(name, t);
-  }
-  return [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([n]) => n);
-}
-
-/** Per-vendor totals for the master view: how much each one has drawn
- *  out of the store, net of anything brought back. */
-export function takenByVendor(
-  movements: ToolMovement[],
-): Map<string, { taken: number; returned: number; lines: number; last: string | null }> {
-  const out = new Map<string, { taken: number; returned: number; lines: number; last: string | null }>();
-  for (const m of movements) {
-    if (m.undone_at || !m.vendor_id) continue;
-    const e = out.get(m.vendor_id) ?? { taken: 0, returned: 0, lines: 0, last: null };
-    if (m.kind === "issue") e.taken += Math.abs(Number(m.delta));
-    if (m.kind === "return") e.returned += Number(m.delta);
-    e.lines += 1;
-    if (!e.last || m.created_at > e.last) e.last = m.created_at;
-    out.set(m.vendor_id, e);
-  }
-  return out;
-}
 
 /** Tools worth showing first when taking: what the store has actually
  *  been touching, then everything else alphabetically. */

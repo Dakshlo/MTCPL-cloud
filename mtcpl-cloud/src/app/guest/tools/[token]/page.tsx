@@ -6,18 +6,19 @@
  * code comes to the number on your profile, and the register is signed
  * by that, not by whatever somebody typed.
  *
+ * Mig 232 — and nothing else is asked. The company picker that used to
+ * follow the code is gone: the person IS the account.
+ *
  * It shows tool names and counts and nothing else. Taking is the only
  * write it can make, and the database enforces that, not just this page.
  */
 
-import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { loadStore, orderForTaking, type ToolRow } from "@/lib/cnc-tool-stock";
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
 import { currentToolSession, toolRoster } from "@/lib/cnc-tool-session";
 import {
   guestTakeToolAction,
   sendToolSignInCodeAction,
-  setToolSessionVendorAction,
   toolSignOutAction,
   verifyToolSignInCodeAction,
 } from "./guest-actions";
@@ -45,13 +46,11 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
   }
 
   const link = resolved.link;
-  const admin = createAdminSupabaseClient();
 
-  const [{ tools }, roster, session, { data: vendorRows }] = await Promise.all([
+  const [{ tools }, roster, session] = await Promise.all([
     loadStore(),
     toolRoster(),
     currentToolSession(token, link.id),
-    admin.from("vendors").select("id, name").order("name"),
   ]);
 
   // Only what can actually be taken. A tool at zero is not offered —
@@ -71,22 +70,9 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       label={link.label}
       tools={takeable}
       roster={roster}
-      vendors={((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => ({
-        id: v.id,
-        name: v.name,
-      }))}
-      session={
-        session
-          ? {
-              name: session.name,
-              vendorId: session.vendorId,
-              vendorName: session.vendorName,
-            }
-          : null
-      }
+      session={session ? { name: session.name } : null}
       sendCodeAction={sendToolSignInCodeAction}
       verifyCodeAction={verifyToolSignInCodeAction}
-      setVendorAction={setToolSessionVendorAction}
       signOutAction={toolSignOutAction}
       takeAction={guestTakeToolAction}
     />

@@ -80,7 +80,7 @@ export async function sendToolSignInCodeAction(fd: FormData): Promise<SendCodeRe
 }
 
 export type VerifyCodeResult =
-  | { ok: true; name: string; vendorId: string | null; vendorName: string | null; needsVendor: boolean }
+  | { ok: true; name: string }
   | { ok: false; error: string; attemptsLeft?: number };
 
 /** Step 2 — the code they typed. On success this mints the take-only
@@ -97,14 +97,11 @@ export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCo
   const admin = createAdminSupabaseClient();
   const { data } = await admin
     .from("profiles")
-    .select("id, full_name, role, is_active, vendor_id, vendors(name)")
+    .select("id, full_name, role, is_active, vendor_id")
     .eq("id", profileId)
     .maybeSingle();
   const p = data as
-    | {
-        id: string; full_name: string | null; role: string; is_active: boolean;
-        vendor_id: string | null; vendors: { name: string } | { name: string }[] | null;
-      }
+    | { id: string; full_name: string | null; role: string; is_active: boolean; vendor_id: string | null }
     | null;
   if (!p || !p.is_active || !["vendor", "developer"].includes(p.role)) {
     return { ok: false, error: "That name is not on the list any more." };
@@ -134,38 +131,11 @@ export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCo
     maxAge: SESSION_HOURS * 3600,
   });
 
-  const v = Array.isArray(p.vendors) ? p.vendors[0] ?? null : p.vendors;
-  return {
-    ok: true,
-    name: (p.full_name || "Unnamed").trim(),
-    vendorId: p.vendor_id,
-    vendorName: v?.name ?? null,
-    // A developer has no company of their own, so they say who they are
-    // taking for. Everyone else is already fixed to theirs.
-    needsVendor: !p.vendor_id,
-  };
-}
-
-/** A developer picking which company this take belongs to. Written onto
- *  the session row, so the choice is server-side like everything else. */
-export async function setToolSessionVendorAction(fd: FormData): Promise<{ ok: boolean; error?: string }> {
-  const token = String(fd.get("token") || "").trim();
-  const vendorId = String(fd.get("vendor_id") || "").trim();
-
-  const resolved = await resolveToolStoreLink(token);
-  if ("problem" in resolved) return { ok: false, error: "This QR is not working." };
-  const session = await currentToolSession(token, resolved.link.id);
-  if (!session) return { ok: false, error: "Signed out. Tap your name again." };
-
-  const admin = createAdminSupabaseClient();
-  const { data: vendor } = await admin.from("vendors").select("id").eq("id", vendorId).maybeSingle();
-  if (!vendor) return { ok: false, error: "That company is not on the list." };
-
-  const { error } = await admin
-    .from("cnc_tool_sessions")
-    .update({ vendor_id: vendorId })
-    .eq("id", session.id);
-  return error ? { ok: false, error: error.message } : { ok: true };
+  // The session still carries the person's own company when they have
+  // one — it costs nothing and keeps the older rows comparable. Nobody
+  // is ASKED for it any more (mig 232); the code to their phone is the
+  // signature, and the company adds nothing the person did not say.
+  return { ok: true, name: (p.full_name || "Unnamed").trim() };
 }
 
 /** Sign out — one tap when you hand the phone back. */
@@ -217,10 +187,6 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
   if (!session) {
     return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
   }
-  if (!session.vendorId) {
-    return { ok: false, error: "Pick which company this is for first." };
-  }
-
   // ── 3. What they asked for ───────────────────────────────────────
   if (!toolId) return { ok: false, error: "Pick a tool first." };
   if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
@@ -271,6 +237,8 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
   // taken_by keeps the readable name every existing screen already
   // shows; taken_by_profile_id is the part that cannot be typed.
   const { error } = await admin.from("cnc_tool_movements").insert({
+    // Whatever company the person belongs to, if any — never asked for,
+    // never required (mig 232). taken_by_profile_id is the signature.
     vendor_id: session.vendorId,
     tool_id: toolId,
     kind: "issue",
@@ -287,7 +255,6 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
     .eq("id", session.id);
 
   revalidatePath("/tools");
-  revalidatePath(`/tools/v/${session.vendorId}`);
 
   return { ok: true, left: stock - qty, toolName, qty };
 }

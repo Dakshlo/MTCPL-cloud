@@ -31,9 +31,6 @@ export const sessionCookieName = (token: string) => `tool_sess_${token.slice(0, 
 export type ToolPerson = {
   id: string;
   name: string;
-  /** Null for a developer, who has no company of their own and picks. */
-  vendorId: string | null;
-  vendorName: string | null;
   /** "•••••• 6785" — never the whole number. */
   maskedPhone: string;
 };
@@ -58,35 +55,29 @@ export type ToolSession = {
  * Anyone without a usable phone is left out rather than shown as a dead
  * button: tapping a name that can never receive a code is worse than not
  * seeing the name.
+ *
+ * Mig 232 — the company a person belongs to is no longer part of this.
+ * The roster is people, and a person is the whole signature.
  */
 export async function toolRoster(): Promise<ToolPerson[]> {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
     .from("profiles")
-    .select("id, full_name, role, phone, vendor_id, is_active, vendors(id, name)")
+    .select("id, full_name, role, phone, is_active")
     .in("role", ["vendor", "developer"])
     .eq("is_active", true)
     .order("full_name");
   if (error) return [];
 
-  type Row = {
-    id: string; full_name: string | null; role: string; phone: string | null;
-    vendor_id: string | null;
-    vendors: { id: string; name: string } | { id: string; name: string }[] | null;
-  };
+  type Row = { id: string; full_name: string | null; role: string; phone: string | null };
 
   return ((data ?? []) as Row[])
     .filter((p) => (p.phone ?? "").replace(/\D/g, "").length >= 10)
-    .map((p) => {
-      const v = Array.isArray(p.vendors) ? p.vendors[0] ?? null : p.vendors;
-      return {
-        id: p.id,
-        name: (p.full_name || "Unnamed").trim(),
-        vendorId: p.vendor_id ?? null,
-        vendorName: v?.name ?? null,
-        maskedPhone: maskTail(p.phone ?? ""),
-      };
-    });
+    .map((p) => ({
+      id: p.id,
+      name: (p.full_name || "Unnamed").trim(),
+      maskedPhone: maskTail(p.phone ?? ""),
+    }));
 }
 
 function maskTail(raw: string): string {
