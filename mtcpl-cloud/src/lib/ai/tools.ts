@@ -18,6 +18,8 @@ import { loadVehicleExpirySummary, daysToExpiry, EXPIRY_SOON_DAYS } from "@/lib/
 import { loadStore as loadToolStore, shortages as toolShortages } from "@/lib/cnc-tool-stock";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
+import { cftFromSlab, faceSftFromSlab } from "@/lib/dimensions";
+import { fetchAllPaged } from "@/lib/paginate";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
 import {
   buildLineages,
@@ -652,6 +654,9 @@ export const AI_TOOLS = [
         },
         limit: { type: "number", description: "Max blocks to return. Default 20, max 50." },
         id_contains: { type: "string", description: "Substring match on the block id (e.g. '042' matches 'MT-B-042')." },
+        category: { type: "string", enum: ["Fresh", "Reused"], description: "'Fresh' = bought as a block. 'Reused' = a RESTOCK / remainder piece left over from an earlier cut (ids carry a -1 / -2 suffix). Use Reused for 'restock blocks available'." },
+        added_from: { type: "string", description: "Only blocks added to the yard on or after this date (YYYY-MM-DD, IST). Use with added_to for 'how many blocks did we buy in September' — the count then covers the whole window, not just one page." },
+        added_to: { type: "string", description: "Only blocks added on or before this date (YYYY-MM-DD, IST, inclusive)." },
       },
       additionalProperties: false,
     },
@@ -698,6 +703,41 @@ export const AI_TOOLS = [
     description:
       "The MACHINE REGISTER and MAINTENANCE department. Returns how many machines are on the register (split by status and by section/department), which machines are flagged down for maintenance right now and for how many days, and the open maintenance tickets (count by stage, plus the oldest ones with machine, problem, priority and expected-back date). A ticket runs raised → inspected → quoted → approved → repairing → closed. Use for 'kaunsi machine kharab hai', 'maintenance mein kya pending hai', 'how many machines do we have', 'machine down kitne din se hai', 'maintenance tickets'.",
     input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_dispatch_activity",
+    description:
+      "HOW MUCH WENT OUT, in CFT — dispatch with volume and a time window, which get_dispatch_snapshot (current state, counts only) cannot give you. Returns slabs dispatched in the window, total CFT and SFT, how many truck trips, a per-TEMPLE breakdown and a per-COMPONENT breakdown (CHHAJA, PILLAR, JALI...). Optionally scope to one temple. Use for 'September mein kitna CFT dispatch hua', 'how much did we dispatch last month', 'kitna maal gaya Rohtak ka', 'how many chhaja tekra dispatched in Rohtak', 'this week ka dispatch'. Counted from the dispatch log, dated when the slab was loaded onto the trip.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Fixed window. Defaults to this_month." },
+        from: { type: "string", description: "Start date YYYY-MM-DD (IST). Use with `to` for a named month — 'September' asked in October means from 2026-09-01 to 2026-09-30, NOT this_month." },
+        to: { type: "string", description: "End date YYYY-MM-DD (IST), inclusive." },
+        days_ago: { type: "number", description: "Last N calendar days including today." },
+        temple: { type: "string", description: "Scope to one temple (fuzzy — 'rohtak' resolves)." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "find_slabs",
+    description:
+      "SEARCH SLABS across every temple and every status — by SIZE, temple, component label, stone or id. The size matches in ANY column order (the dimension columns hold entry order, not length/width/thickness roles), with a tolerance in inches. Returns how many were found, their total CFT and SFT, a split BY STATUS, and the rows themselves. Use for 'slab of 24X19X19 wherever it is', 'Rohtak ke 24x21x21 pillar jo CNC se complete hain par dispatch nahi hue' (size + temple + label + status=completed), 'how many chhaja tekra are left', 'find slab UM-0042'. Statuses: open → planned → cut_done → carving_assigned → carving_in_progress → completed (carved, dispatch-ready) → dispatched; 'rejected' is archived. This is the tool for ANY 'how many of this size / this component' question — get_temple_requirements only ever shows OPEN slabs for one temple.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        size: { type: "string", description: "Dimensions as the user says them, e.g. '24x21x21' or '24 X 19 X 19'. Two numbers match the two largest dims." },
+        size_tolerance: { type: "number", description: "Inches of slack on each dimension. Default 0.5." },
+        temple: { type: "string", description: "Temple name, fuzzy ('rohtak')." },
+        status: { type: "string", description: "Exact status, e.g. 'completed' (carved, not yet dispatched), 'dispatched', 'open', 'cut_done'." },
+        stone: { type: "string", description: "Stone contains, e.g. 'yellow'." },
+        label_contains: { type: "string", description: "Component name — matches the label OR the description, e.g. 'pillar', 'chhaja'." },
+        id_contains: { type: "string", description: "Substring of the slab id." },
+        limit: { type: "number", description: "Max rows returned. Default 40, max 100. Totals always cover every match, not just the returned rows." },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "get_tool_store_snapshot",
@@ -790,6 +830,10 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getMachinesSnapshot());
       case "get_tool_store_snapshot":
         return JSON.stringify(await getToolStoreSnapshot());
+      case "get_dispatch_activity":
+        return JSON.stringify(await getDispatchActivity(input));
+      case "find_slabs":
+        return JSON.stringify(await findSlabs(input));
       case "get_carving_time":
         return JSON.stringify(
           await answerCarvingTime(
@@ -1183,7 +1227,11 @@ async function getCuttingActivity(input: Record<string, unknown>) {
   const manualMarbleCftEquiv = manualMarbleTonnes * 8;
 
   return {
-    range,
+    // The label the model will narrate. Echoing the fixed `range` while an
+    // explicit window was used made it say "today" over a June total.
+    range: winArgs.from ? `${winArgs.from} → ${winArgs.to ?? winArgs.from}`
+      : winArgs.days_ago ? `last ${winArgs.days_ago} day(s)`
+      : range,
     from,
     to,
 
@@ -1630,12 +1678,52 @@ async function suggestBlocksToBuy(input: Record<string, unknown>) {
   };
 }
 
+// ─── stone name resolver ─────────────────────────────────────────────────────
+// Oct 2026, from NIKHIL's chats: he asked for "the yellow stone" twice and got
+// a confident ZERO back both times, because the stone is called YellowMarble
+// and the filter matched nothing. A filter that silently returns nothing is
+// worse than an error — it reads as an answer. So every stone filter resolves
+// through here, and a miss comes back as an error carrying the real names.
+
+async function resolveStoneName(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  input: string,
+): Promise<{ kind: "resolved"; stone: string } | { kind: "not_found"; available: string[] }> {
+  const { data } = await admin.from("blocks").select("stone");
+  const names = [...new Set(((data ?? []) as Array<{ stone: string | null }>).map((r) => r.stone).filter(Boolean))] as string[];
+  const norm = (x: string) => x.toLowerCase().replace(/[\s_-]+/g, "");
+  const want = norm(input);
+
+  const exact = names.find((n) => norm(n) === want);
+  if (exact) return { kind: "resolved", stone: exact };
+  const contains = names.filter((n) => norm(n).includes(want) || want.includes(norm(n)));
+  if (contains.length === 1) return { kind: "resolved", stone: contains[0] };
+  // "yellow stone" → YellowMarble: match on the colour word alone when only
+  // one stone carries that colour.
+  const colour = want.replace(/stone|marble/g, "");
+  if (colour.length >= 3) {
+    const byColour = names.filter((n) => norm(n).includes(colour));
+    if (byColour.length === 1) return { kind: "resolved", stone: byColour[0] };
+  }
+  return { kind: "not_found", available: names.sort() };
+}
+
 // ─── list_blocks ─────────────────────────────────────────────────────────────
 
 async function listBlocks(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
 
-  const stone = typeof input.stone === "string" ? input.stone : undefined;
+  let stone = typeof input.stone === "string" ? input.stone : undefined;
+  if (stone) {
+    const r = await resolveStoneName(admin, stone);
+    if (r.kind === "not_found") {
+      return { error: `No stone called "${stone}".`, availableStones: r.available, note: "Pick the closest name and ask again — never report zero for a stone that does not exist under that name." };
+    }
+    stone = r.stone;
+  }
+  const category = typeof input.category === "string" && input.category.trim() ? input.category.trim() : undefined;
+  const addedFrom = typeof input.added_from === "string" ? input.added_from : undefined;
+  const addedTo = typeof input.added_to === "string" ? input.added_to : undefined;
   const facility = input.facility === "mtcpl" || input.facility === "riico" ? (input.facility as Facility) : undefined;
   const yard = typeof input.yard === "number" ? input.yard : undefined;
   const status = typeof input.status === "string" ? input.status : "available"; // default: only in-yard stock
@@ -1652,6 +1740,15 @@ async function listBlocks(input: Record<string, unknown>) {
     .select("id, stone, yard, category, length_ft, width_ft, height_ft, status, quality, created_at, updated_at");
 
   if (stone) query = query.eq("stone", stone);
+  // Category: "Fresh" = bought as a block, "Reused" = a restock/remainder
+  // piece left over from an earlier cut — what NIKHIL calls "restock blocks".
+  // `category` is an enum column, so it takes an equality match, not ilike.
+  if (category) query = query.eq("category", category);
+  // When the block came INTO the yard — "how many did we buy in September".
+  if (addedFrom || addedTo) {
+    const w = resolveWindow({ range: "this_month", from: addedFrom ?? null, to: addedTo ?? null, days_ago: null });
+    query = query.gte("created_at", w.from).lt("created_at", w.to);
+  }
   if (typeof yard === "number") query = query.eq("yard", yard);
   if (quality) query = query.eq("quality", quality);
   if (idContains) query = query.ilike("id", `%${idContains}%`);
@@ -1661,7 +1758,11 @@ async function listBlocks(input: Record<string, unknown>) {
 
   // For volume sorts we need to compute CFT per row, so fetch a generous
   // slice and sort in JS. For recency sorts we can use the DB index.
-  if (sortBy === "newest") query = query.order("created_at", { ascending: false }).limit(limit);
+  // A windowed question ("blocks bought in September") is asking HOW MANY, so
+  // the whole window has to be counted, not the first page of it.
+  const windowed = !!(addedFrom || addedTo);
+  if (windowed) query = query.order("created_at", { ascending: false }).limit(1000);
+  else if (sortBy === "newest") query = query.order("created_at", { ascending: false }).limit(limit);
   else if (sortBy === "oldest") query = query.order("created_at", { ascending: true }).limit(limit);
   else query = query.order("created_at", { ascending: false }).limit(200);
 
@@ -1683,6 +1784,16 @@ async function listBlocks(input: Record<string, unknown>) {
   };
 
   const rows = (data ?? []) as Row[];
+  // "How many blocks did we buy in September" is a COUNT question. `count`
+  // below is the length of the returned page, so a windowed call carries the
+  // whole-window figures separately — otherwise limit:3 reads as "3 blocks".
+  const windowTotals = windowed
+    ? {
+        blocksInWindow: rows.length,
+        cftInWindow: Number(rows.reduce((a, b) => a + toCFT(Number(b.length_ft) * Number(b.width_ft) * Number(b.height_ft)), 0).toFixed(2)),
+        note: "blocksInWindow / cftInWindow cover the WHOLE date window. `count` and `blocks` below are only the rows returned — quote the window figures for 'how many'.",
+      }
+    : null;
 
   let shaped = rows.map((b) => {
     const L = Number(b.length_ft);
@@ -1709,6 +1820,7 @@ async function listBlocks(input: Record<string, unknown>) {
   shaped = shaped.slice(0, limit);
 
   return {
+    ...(windowTotals ? { window: { from: addedFrom ?? null, to: addedTo ?? null }, ...windowTotals } : {}),
     count: shaped.length,
     totalCft: Number(shaped.reduce((sum, b) => sum + b.cft, 0).toFixed(2)),
     filters: { stone: stone ?? "any", facility: facility ?? "any", yard: yard ?? "any", status, quality: quality ?? "any", sortBy, idContains: idContains ?? null },
@@ -2434,7 +2546,14 @@ async function getBlockJourney(input: Record<string, unknown>) {
 
 async function getStoneEfficiency(input: Record<string, unknown>) {
   const admin = createAdminSupabaseClient();
-  const stone = typeof input.stone === "string" ? input.stone : undefined;
+  let stone = typeof input.stone === "string" ? input.stone : undefined;
+  if (stone) {
+    const r = await resolveStoneName(admin, stone);
+    if (r.kind === "not_found") {
+      return { error: `No stone called "${stone}".`, availableStones: r.available, note: "Pick the closest name and ask again — never report 0% efficiency for a stone that does not exist under that name." };
+    }
+    stone = r.stone;
+  }
   const facility = input.facility === "mtcpl" || input.facility === "riico" ? (input.facility as Facility) : undefined;
   const quality = input.quality === "A" || input.quality === "B" ? input.quality : undefined;
   const resolvedOnly = input.resolved_only === true;
@@ -2522,8 +2641,23 @@ async function getStoneEfficiency(input: Record<string, unknown>) {
     })),
   ];
 
+  // A wall of zeros is not an answer. Marble never enters a cut session — it
+  // is cut manually and the block simply goes `consumed` — so there is no
+  // lineage to measure and this tool CANNOT produce a yield % for it. Saying
+  // that is the truth; "0%" is a lie the model would happily repeat.
+  const marbleAsked = !!stone && /marble/i.test(stone);
+  const nothingFound = agg.totalLineages === 0;
+
   return {
     filters: { stone: stone ?? "all", facility: facility ?? "all", quality: quality ?? "all", resolvedOnly },
+    ...(nothingFound
+      ? {
+          noData: true,
+          whyNoData: marbleAsked
+            ? `${stone} is MARBLE. Marble is bought by the tonne and cut manually — it never goes through a cut session, so there is no block-to-slab lineage and NO yield % exists for it. Do not report 0%. Use get_cutting_activity (manualCutting.marble gives tonnes in and slabs out, at 8 CFT per tonne) and say plainly that yield % is a sandstone measure.`
+            : `No cut lineage recorded for ${stone ?? "this filter"} yet — nothing has been cut and resolved. Report that as "not cut yet", never as 0% efficiency.`,
+        }
+      : {}),
     lineagesAnalyzed: agg.totalLineages,
     resolvedCount: agg.resolvedCount,
     inProgressCount: agg.inProgressCount,
@@ -4553,5 +4687,204 @@ async function getToolStoreSnapshot() {
     })),
     note: "The CNC tool store (migs 227-233). One keeper fills the shelf at /tools; everybody else takes at the cupboard QR on their own phone, signed by a code to that phone. Stock is the sum of the register, never a stored number.",
     route: "/tools",
+  };
+}
+
+// ─── The questions NIKHIL kept asking and never got an answer to ─────────────
+// Oct 2026. Reading his 43 chats back, the same four shapes failed over and
+// over, and the assistant said so in its own words:
+//   "I can't give you an exact September dispatched-CFT figure from my tools."
+// It had COUNTS for carving and dispatch but no volume, no time window and no
+// way to search a slab by size, label or status. These close that.
+
+/** Slab volume + face area, using the app's own rules (the real thickness is
+ *  the smallest dim, whichever column it sits in). */
+function slabMeasure(l: unknown, w: unknown, t: unknown) {
+  return { cft: cftFromSlab(l as number, w as number, t as number), sft: faceSftFromSlab(l as number, w as number, t as number) };
+}
+
+const round2n = (x: number) => Math.round(x * 100) / 100;
+
+async function getDispatchActivity(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const range =
+    input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
+      ? input.range
+      : "this_month";
+  const window = resolveWindow({
+    range,
+    from: typeof input.from === "string" ? input.from : null,
+    to: typeof input.to === "string" ? input.to : null,
+    days_ago: typeof input.days_ago === "number" ? input.days_ago : null,
+  });
+  const windowLabel =
+    typeof input.from === "string" ? `${input.from} → ${input.to ?? input.from}` : String(range);
+
+  // The log is the join: one row per slab that went onto a trip.
+  const logs = await fetchAllPaged((from, to) =>
+    admin
+      .from("dispatch_logs")
+      .select("slab_requirement_id, dispatch_id, dispatched_at")
+      .gte("dispatched_at", window.from)
+      .lt("dispatched_at", window.to)
+      .order("dispatched_at", { ascending: false })
+      .range(from, to),
+  );
+  const rows = (logs ?? []) as Array<{ slab_requirement_id: string | null; dispatch_id: string | null; dispatched_at: string }>;
+  if (rows.length === 0) {
+    return { window: windowLabel, slabs: 0, totalCft: 0, totalSft: 0, trips: 0, byTemple: [], byComponent: [], note: "Nothing was dispatched in this window.", route: "/dispatch" };
+  }
+
+  const slabIds = [...new Set(rows.map((r) => r.slab_requirement_id).filter(Boolean))] as string[];
+  const slabById = new Map<string, { temple: string | null; label: string | null; description: string | null; stone: string | null; cft: number; sft: number }>();
+  for (let i = 0; i < slabIds.length; i += 300) {
+    const { data } = await admin
+      .from("slab_requirements")
+      .select("id, temple, label, description, stone, length_ft, width_ft, thickness_ft")
+      .in("id", slabIds.slice(i, i + 300));
+    for (const s of (data ?? []) as Array<Record<string, unknown>>) {
+      const m = slabMeasure(s.length_ft, s.width_ft, s.thickness_ft);
+      slabById.set(String(s.id), {
+        temple: (s.temple as string | null) ?? null,
+        label: (s.label as string | null) ?? null,
+        description: (s.description as string | null) ?? null,
+        stone: (s.stone as string | null) ?? null,
+        cft: m.cft,
+        sft: m.sft,
+      });
+    }
+  }
+
+  const templeFilter = typeof input.temple === "string" && input.temple.trim() ? input.temple.trim() : null;
+  let wantTemple: string | null = null;
+  if (templeFilter) {
+    const r = await resolveTempleName(admin, templeFilter);
+    if (r.kind === "ambiguous") return { ambiguous: true, candidates: r.candidates, note: "Which temple did you mean?" };
+    if (r.kind === "not_found") return { error: `No temple matching "${templeFilter}".`, availableTemples: r.available };
+    wantTemple = r.temple;
+  }
+
+  type Agg = { slabs: number; cft: number; sft: number };
+  const add = (m: Map<string, Agg>, key: string, cft: number, sft: number) => {
+    const a = m.get(key) ?? { slabs: 0, cft: 0, sft: 0 };
+    a.slabs += 1; a.cft += cft; a.sft += sft;
+    m.set(key, a);
+  };
+
+  const byTemple = new Map<string, Agg>();
+  const byComponent = new Map<string, Agg>();
+  const trips = new Set<string>();
+  let slabs = 0, cft = 0, sft = 0;
+
+  for (const r of rows) {
+    const s = r.slab_requirement_id ? slabById.get(r.slab_requirement_id) : null;
+    if (!s) continue;
+    if (wantTemple && s.temple !== wantTemple) continue;
+    slabs += 1; cft += s.cft; sft += s.sft;
+    if (r.dispatch_id) trips.add(r.dispatch_id);
+    add(byTemple, s.temple ?? "—", s.cft, s.sft);
+    // The component is what the men call it — "CHHAJA TEKRA", "PILLAR".
+    add(byComponent, (s.label || s.description || "—").toString().trim().toUpperCase(), s.cft, s.sft);
+  }
+
+  const shape = (m: Map<string, Agg>, limit: number) =>
+    [...m.entries()]
+      .map(([name, a]) => ({ name, slabs: a.slabs, cft: round2n(a.cft), sft: round2n(a.sft) }))
+      .sort((a, b) => b.cft - a.cft)
+      .slice(0, limit);
+
+  return {
+    window: windowLabel,
+    temple: wantTemple,
+    slabs,
+    totalCft: round2n(cft),
+    totalSft: round2n(sft),
+    trips: trips.size,
+    byTemple: shape(byTemple, 15),
+    byComponent: shape(byComponent, 20),
+    note: "Counted from the dispatch log — one row per slab that actually went onto a trip, dated when it was loaded. CFT is L×W×T/1728; SFT is the two largest dims, so a thin slab reads as area.",
+    route: "/dispatch",
+  };
+}
+
+async function findSlabs(input: Record<string, unknown>) {
+  const admin = createAdminSupabaseClient();
+  const limit = Math.max(1, Math.min(Number(input.limit) || 40, 100));
+
+  let q = admin
+    .from("slab_requirements")
+    .select("id, temple, label, description, stone, quality, status, is_parked, length_ft, width_ft, thickness_ft, deadline");
+
+  const templeIn = typeof input.temple === "string" && input.temple.trim() ? input.temple.trim() : null;
+  if (templeIn) {
+    const r = await resolveTempleName(admin, templeIn);
+    if (r.kind === "ambiguous") return { ambiguous: true, candidates: r.candidates, note: "Which temple did you mean?" };
+    if (r.kind === "not_found") return { error: `No temple matching "${templeIn}".`, availableTemples: r.available };
+    q = q.eq("temple", r.temple);
+  }
+  if (typeof input.status === "string" && input.status.trim()) q = q.eq("status", input.status.trim());
+  if (typeof input.stone === "string" && input.stone.trim()) q = q.ilike("stone", `%${input.stone.trim()}%`);
+  if (typeof input.label_contains === "string" && input.label_contains.trim()) {
+    const t = input.label_contains.trim();
+    q = q.or(`label.ilike.%${t}%,description.ilike.%${t}%`);
+  }
+  if (typeof input.id_contains === "string" && input.id_contains.trim()) q = q.ilike("id", `%${input.id_contains.trim()}%`);
+
+  // "24x21x21" — match the three numbers in ANY column order, because the
+  // dimension columns hold entry order, not length/width/thickness roles.
+  let wantDims: number[] | null = null;
+  if (typeof input.size === "string" && input.size.trim()) {
+    const nums = input.size.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+    if (nums.length >= 2) wantDims = nums.slice(0, 3).sort((a, b) => a - b);
+  }
+
+  const rows = (await fetchAllPaged((from, to) => q.range(from, to))) as Array<Record<string, unknown>>;
+
+  const tol = Number(input.size_tolerance) || 0.5;
+  const matched = rows.filter((s) => {
+    if (!wantDims) return true;
+    const got = [Number(s.length_ft) || 0, Number(s.width_ft) || 0, Number(s.thickness_ft) || 0].sort((a, b) => a - b);
+    const want = wantDims as number[];
+    if (want.length === 2) {
+      // two numbers given — match the two largest dims
+      return Math.abs(got[2] - want[1]) <= tol && Math.abs(got[1] - want[0]) <= tol;
+    }
+    return want.every((v, i) => Math.abs(got[i] - v) <= tol);
+  });
+
+  type Agg = { slabs: number; cft: number };
+  const byStatus = new Map<string, Agg>();
+  let cft = 0, sft = 0;
+  for (const s of matched) {
+    const m = slabMeasure(s.length_ft, s.width_ft, s.thickness_ft);
+    cft += m.cft; sft += m.sft;
+    const k = String(s.status ?? "—");
+    const a = byStatus.get(k) ?? { slabs: 0, cft: 0 };
+    a.slabs += 1; a.cft += m.cft;
+    byStatus.set(k, a);
+  }
+
+  return {
+    filters: {
+      size: (input.size as string) ?? null,
+      sizeToleranceInches: wantDims ? tol : null,
+      temple: templeIn, status: (input.status as string) ?? null,
+      stone: (input.stone as string) ?? null, labelContains: (input.label_contains as string) ?? null,
+    },
+    found: matched.length,
+    totalCft: round2n(cft),
+    totalSft: round2n(sft),
+    byStatus: [...byStatus.entries()].map(([status, a]) => ({ status, slabs: a.slabs, cft: round2n(a.cft) })).sort((a, b) => b.slabs - a.slabs),
+    slabs: matched.slice(0, limit).map((s) => {
+      const m = slabMeasure(s.length_ft, s.width_ft, s.thickness_ft);
+      return {
+        id: s.id, temple: s.temple, label: s.label, description: s.description, stone: s.stone,
+        quality: s.quality, status: s.status, inStorage: !!s.is_parked,
+        dimensions: `${s.length_ft} × ${s.width_ft} × ${s.thickness_ft} in`,
+        cft: round2n(m.cft), sft: round2n(m.sft), deadline: s.deadline,
+      };
+    }),
+    note: "Slab statuses: open → planned → cut_done → carving_assigned → carving_in_progress → completed (carved, dispatch-ready) → dispatched. 'rejected' is archived. inStorage = parked in Main Storage. A size matches in ANY column order, because the dimension columns hold entry order, not roles.",
+    route: "/slabs/view",
   };
 }
