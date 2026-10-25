@@ -12,6 +12,10 @@
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { answerCarvingTime, MIN_SAMPLES } from "@/lib/carving-time";
+import { applyDiscount, computeGroupedGstTotals, type GstRateGroup } from "@/lib/challan-pricing";
+import { fyLabel } from "@/lib/invoice-code";
+import { loadVehicleExpirySummary, daysToExpiry, EXPIRY_SOON_DAYS } from "@/lib/vehicle-expiry";
+import { loadStore as loadToolStore, shortages as toolShortages } from "@/lib/cnc-tool-stock";
 import { runOptimization, type BlockRow, type SlabRow } from "@/lib/planning/packing";
 import { facilityOfYard, YARDS_BY_FACILITY, type Facility } from "@/lib/yards";
 import { POST_CUT_STATUSES } from "@/lib/slab-statuses";
@@ -652,6 +656,55 @@ export const AI_TOOLS = [
       additionalProperties: false,
     },
   },
+
+  // ── Oct 2026: the four departments the assistant could not see ──
+  {
+    name: "get_invoice_detail",
+    description:
+      "ONE invoice or challan, looked up by its number. Accepts 'INV-26/27-229', 'CH-2026-187', or a bare running number. Searches ALL FOUR invoice kinds, which share one INV number series: temple tax invoice (a priced challan), running bill (custom whole-piece), work-order (bulk) invoice, and Other Sales (non-temple client). Returns the party/temple, date, line count, subtotal, every GST slab on it, discount, round-off, the AMOUNT PAYABLE, where it is in the approval flow, and its transport details (LR no, vehicle, driver). A number that was VOIDED (cancelled on record) comes back saying so with the reason — that is a real answer, not a miss. Use for 'INV-26/27-229 ka detail', 'show invoice 229', 'kis temple ka hai ye bill', 'is invoice ka amount kitna hai', 'CH-2026-187 kahan tak pahuncha', 'which truck went on this invoice'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        number: { type: "string", description: "The invoice or challan number as the user said it, e.g. 'INV-26/27-229', 'CH-2026-187', or '229'." },
+      },
+      required: ["number"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_invoices",
+    description:
+      "Invoices RAISED in a date window, with money — not just counts. Each row: number, date, temple/client, amount payable, kind. Returns the window total and a split by kind (purchase / running / work_order / other). Use for 'is mahine kitne invoice bane', 'how much did we bill in September', 'last week ke invoices', 'kitni billing hui', 'June ka total billing'. For ONE specific invoice use get_invoice_detail instead. Accepts range/from/to/days_ago exactly like the other day-level tools.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        range: { type: "string", enum: ["today", "yesterday", "this_week", "this_month"], description: "Fixed window. Defaults to this_month." },
+        from: { type: "string", description: "Start date YYYY-MM-DD (IST). Use with `to` for a named month or an explicit span." },
+        to: { type: "string", description: "End date YYYY-MM-DD (IST), inclusive. Defaults to `from`." },
+        days_ago: { type: "number", description: "Last N calendar days including today." },
+        limit: { type: "number", description: "Max rows. Default 40, max 80." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_vehicles_snapshot",
+    description:
+      "The VEHICLES department — the company fleet and its papers. Returns how many vehicles (split commercial / personal), which papers are EXPIRED and which expire within 30 days (insurance, PUC, fitness, RC — each named with the vehicle and the date), and the EMI commitment (how many vehicles are on EMI, the monthly total, and any loan ending within 90 days). Use for 'kaunsi gaadi ka insurance khatam ho raha hai', 'vehicle papers status', 'konsa paper expire ho gaya', 'kitni EMI jaati hai mahine ki', 'fleet status', 'gaadiyon ka kya haal hai'. IMPORTANT: a paper with no date on record is NOT clear — report it as 'not on record', never as fine.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_machines_snapshot",
+    description:
+      "The MACHINE REGISTER and MAINTENANCE department. Returns how many machines are on the register (split by status and by section/department), which machines are flagged down for maintenance right now and for how many days, and the open maintenance tickets (count by stage, plus the oldest ones with machine, problem, priority and expected-back date). A ticket runs raised → inspected → quoted → approved → repairing → closed. Use for 'kaunsi machine kharab hai', 'maintenance mein kya pending hai', 'how many machines do we have', 'machine down kitne din se hai', 'maintenance tickets'.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_tool_store_snapshot",
+    description:
+      "The CNC TOOL STORE (the cupboard/wardrobe register — 450mm tools, segments, bits). Returns every tool on the shelf with its stock and whether it is low or empty, how much was taken in the last 24 hours and the last 7 days, who took it, and the most recent takings. Taking happens at the QR sticker on the cupboard door, signed by a code to that person's own phone; one keeper fills the shelf. Use for 'tool store mein kya hai', 'kaunsa tool khatam ho gaya', 'kisne tool liye', 'cnc tool stock', 'wardrobe register', 'how many 450mm tools left'.",
+    input_schema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
 ];
 
 // ─── Tool handler dispatcher ─────────────────────────────────────────────────
@@ -726,6 +779,17 @@ export async function runTool(name: string, input: Record<string, unknown>): Pro
         return JSON.stringify(await getSalarySnapshot(input));
       case "get_work_diary":
         return JSON.stringify(await getWorkDiary());
+      // Oct 2026 — invoicing lookups, vehicles, machines, tool store
+      case "get_invoice_detail":
+        return JSON.stringify(await getInvoiceDetail(input));
+      case "list_invoices":
+        return JSON.stringify(await listInvoices(input));
+      case "get_vehicles_snapshot":
+        return JSON.stringify(await getVehiclesSnapshot());
+      case "get_machines_snapshot":
+        return JSON.stringify(await getMachinesSnapshot());
+      case "get_tool_store_snapshot":
+        return JSON.stringify(await getToolStoreSnapshot());
       case "get_carving_time":
         return JSON.stringify(
           await answerCarvingTime(
@@ -3968,5 +4032,526 @@ async function listScaffoldingComponents(input: Record<string, unknown>) {
         totalQuantity: total,
       };
     }),
+  };
+}
+
+// ─── Invoicing lookups / Vehicles / Machines / Tool store ────────────────────
+// Daksh Oct 2026: "that MTCPL AI, it's been un-updated from long... make it
+// good to answer, and if there are questions which it's not able to answer,
+// look up on those also."
+//
+// The gap was never the model — it was that four departments shipped after the
+// last brain update and the assistant had no way to see them, so it answered
+// "open the page" to questions it should simply answer. These five close the
+// biggest holes. Still READ-ONLY, like everything else in this file.
+
+type InvoiceKind = "purchase" | "running" | "work_order" | "other";
+
+const INVOICE_ROUTE: Record<InvoiceKind, string> = {
+  purchase: "/invoicing/invoices",
+  running: "/invoicing/invoices",
+  work_order: "/invoicing/bulk",
+  other: "/invoicing/other",
+};
+
+/** Money on one invoice, computed with the app's OWN helpers so the figure the
+ *  assistant quotes is the figure printed on the bill — per-table GST slabs
+ *  (mig 199), discount (mig 200) and whole-rupee rounding (mig 220) included. */
+function invoiceMoney(
+  items: Array<{ amount: number | string | null; section_gst: number | string | null }>,
+  row: {
+    gst_mode: string | null;
+    igst_percent: number | null;
+    cgst_percent: number | null;
+    sgst_percent: number | null;
+    discount_mode?: string | null;
+    discount_value?: number | null;
+    round_total?: boolean | null;
+  },
+) {
+  const mode = row.gst_mode === "igst" || row.gst_mode === "cgst_sgst" ? row.gst_mode : null;
+  const totals = computeGroupedGstTotals(
+    items.map((it) => ({
+      amount: Number(it.amount) || 0,
+      gstPercent: it.section_gst == null ? null : Number(it.section_gst),
+    })),
+    {
+      mode,
+      igst: Number(row.igst_percent) || 0,
+      cgst: Number(row.cgst_percent) || 0,
+      sgst: Number(row.sgst_percent) || 0,
+    },
+  );
+  const disc = applyDiscount(totals.grand, row.discount_mode ?? null, row.discount_value ?? null, row.round_total ?? null);
+  return {
+    lines: items.length,
+    subtotal: totals.subtotal,
+    gstMode: mode,
+    gstSlabs: totals.groups.map((g: GstRateGroup) => ({ percent: g.pct, taxable: g.taxable, tax: g.taxAmt })),
+    mixedGstSlabs: totals.multi,
+    gstTotal: totals.gstTotal,
+    grandBeforeDiscount: totals.grand,
+    discount: disc.amt > 0 ? { mode: disc.mode, value: disc.value, amount: disc.amt } : null,
+    roundOff: disc.roundOff,
+    amountPayable: disc.payable,
+  };
+}
+
+/** What the user typed, turned into something we can search on.
+ *  "INV-26/27-229" → {fy:"26/27", seq:229}; "CH-2026-187" → {code}; "229" → {seq}. */
+function parseInvoiceQuery(raw: string) {
+  const s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  const inv = s.match(/^INV[-/]?(\d{2}\/\d{2})[-/](\d+)$/);
+  if (inv) return { fy: inv[1], seq: Number(inv[2]), code: null as string | null, bare: null as number | null };
+  const ch = s.match(/^(CH|INV)[-/]?(\d{4})[-/](\d+)$/);
+  if (ch) return { fy: null, seq: null, code: `CH-${ch[2]}-${ch[3]}`, bare: Number(ch[3]) };
+  const bare = s.match(/^(\d+)$/);
+  if (bare) return { fy: null, seq: null, code: null, bare: Number(bare[1]) };
+  return { fy: null, seq: null, code: s || null, bare: null };
+}
+
+async function getInvoiceDetail(input: Record<string, unknown>) {
+  const raw = String((input as { number?: unknown }).number ?? "").trim();
+  if (!raw) return { error: "Give an invoice or challan number, e.g. 'INV-26/27-229' or 'CH-2026-187'." };
+  const q = parseInvoiceQuery(raw);
+  const admin = createAdminSupabaseClient();
+
+  type Hit = { kind: InvoiceKind; id: string; row: Record<string, unknown> };
+  const hits: Hit[] = [];
+
+  // ── challans: both the temple purchase bill and the running bill live here
+  {
+    let qb = admin
+      .from("challans")
+      .select(
+        "id, challan_number, challan_date, temple, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, priced_at, owner_approved_at, owner_rejected_at, converted_invoice_id, cancelled_at, custom_billed_at, pending_edit_at, pending_cancel_at, pending_void_at, transport_company, lr_no, transport_vehicle_no, transport_driver_name, source_dispatch_id",
+      )
+      .limit(8);
+    if (q.fy && q.seq != null) qb = qb.eq("inv_fy", q.fy).eq("inv_seq", q.seq);
+    else if (q.code) qb = qb.eq("challan_number", q.code);
+    else if (q.bare != null) qb = qb.eq("inv_seq", q.bare);
+    const { data } = await qb;
+    for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+      hits.push({ kind: r.custom_billed_at ? "running" : "purchase", id: String(r.id), row: r });
+    }
+  }
+
+  // ── other sales
+  {
+    let qb = admin
+      .from("other_challans")
+      .select(
+        "id, party_id, challan_date, doc_fy, doc_seq, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, converted_at, cancelled_at, pending_edit_at, pending_cancel_at, pending_void_at, transport_company, lr_no, transport_vehicle_no, transport_driver_name",
+      )
+      .limit(8);
+    if (q.fy && q.seq != null) qb = qb.eq("inv_fy", q.fy).eq("inv_seq", q.seq);
+    else if (q.bare != null) qb = qb.eq("inv_seq", q.bare);
+    else if (q.code) qb = qb.eq("inv_seq", -1); // a CH-code never matches other sales
+    const { data } = await qb;
+    for (const r of (data ?? []) as Array<Record<string, unknown>>) hits.push({ kind: "other", id: String(r.id), row: r });
+  }
+
+  // ── work order (bulk)
+  {
+    let qb = admin
+      .from("bulk_invoices")
+      .select(
+        "id, temple, invoice_date, inv_fy, inv_seq, invoice_no_override, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, notes, owner_approved_at, owner_rejected_at, cancelled_at, pending_edit_at, pending_cancel_at, pending_void_at",
+      )
+      .limit(8);
+    if (q.fy && q.seq != null) qb = qb.eq("inv_fy", q.fy).eq("inv_seq", q.seq);
+    else if (q.bare != null) qb = qb.eq("inv_seq", q.bare);
+    else if (q.code) qb = qb.eq("inv_seq", -1);
+    const { data } = await qb;
+    for (const r of (data ?? []) as Array<Record<string, unknown>>) hits.push({ kind: "work_order", id: String(r.id), row: r });
+  }
+
+  if (hits.length === 0) {
+    // Burned on record (mig 203) is a real answer, not a miss.
+    if (q.fy && q.seq != null) {
+      const { data: voided } = await admin
+        .from("voided_invoices")
+        .select("inv_fy, inv_seq, reason, voided_at")
+        .eq("inv_fy", q.fy)
+        .eq("inv_seq", q.seq)
+        .maybeSingle();
+      if (voided) {
+        const v = voided as { reason: string | null; voided_at: string | null };
+        return {
+          found: false,
+          voided: true,
+          number: raw,
+          reason: v.reason,
+          voidedAt: v.voided_at,
+          note: "This number was VOIDED (cancelled on record, mig 203). The number is burned — it is never reissued. The goods went out on a fresh number.",
+        };
+      }
+    }
+    return {
+      found: false,
+      number: raw,
+      note: "No invoice or challan with that number. Ask the user to check the number, or call list_invoices for the window they mean.",
+      route: "/invoicing/invoices",
+    };
+  }
+
+  const out = [];
+  for (const h of hits) {
+    const r = h.row;
+    const itemTable =
+      h.kind === "purchase" ? "challan_items"
+        : h.kind === "running" ? "challan_custom_items"
+          : h.kind === "work_order" ? "bulk_invoice_items"
+            : "other_challan_items";
+    const fk =
+      h.kind === "work_order" ? "bulk_invoice_id" : h.kind === "other" ? "other_challan_id" : "challan_id";
+    const { data: items } = await admin.from(itemTable).select("amount, section_gst").eq(fk, h.id);
+
+    const money = invoiceMoney(
+      (items ?? []) as Array<{ amount: number | string | null; section_gst: number | string | null }>,
+      r as Parameters<typeof invoiceMoney>[1],
+    );
+
+    const date = String(r.challan_date ?? r.invoice_date ?? "");
+    const invNo =
+      r.inv_seq != null
+        ? `INV-${r.inv_fy ?? fyLabel(date) ?? "??"}-${r.inv_seq}`
+        : (r.invoice_no_override as string | null) ?? null;
+
+    let party: string | null = (r.temple as string | null) ?? null;
+    if (h.kind === "other" && r.party_id) {
+      const { data: p } = await admin.from("invoice_parties").select("name").eq("id", r.party_id).maybeSingle();
+      party = (p as { name: string } | null)?.name ?? null;
+    }
+
+    const status =
+      r.cancelled_at ? "cancelled"
+        : r.pending_void_at ? "void requested — waiting for approval"
+          : r.pending_cancel_at ? "cancel requested — waiting for approval"
+            : r.pending_edit_at ? "edit requested — waiting for approval"
+              : r.inv_seq != null || r.converted_at ? "invoiced"
+                : r.owner_rejected_at ? "sent back by the owner"
+                  : r.owner_approved_at ? "owner approved"
+                    : r.priced_at ? "priced — waiting for owner approval"
+                      : "open challan, not priced yet";
+
+    out.push({
+      kind: h.kind,
+      kindLabel:
+        h.kind === "purchase" ? "Temple tax invoice (priced challan)"
+          : h.kind === "running" ? "Running bill (custom whole-piece)"
+            : h.kind === "work_order" ? "Work-order (bulk) invoice"
+              : "Other Sales invoice",
+      invoiceNo: invNo,
+      challanNo: (r.challan_number as string | null) ?? null,
+      date,
+      party,
+      status,
+      ...money,
+      transport: {
+        company: (r.transport_company as string | null) ?? null,
+        lrNo: (r.lr_no as string | null) ?? null,
+        vehicle: (r.transport_vehicle_no as string | null) ?? null,
+        driver: (r.transport_driver_name as string | null) ?? null,
+      },
+      route: INVOICE_ROUTE[h.kind],
+    });
+  }
+
+  return {
+    found: true,
+    query: raw,
+    matches: out.length,
+    invoices: out,
+    note: "amountPayable is what the customer actually pays — after the per-table GST slabs, any discount, and whole-rupee rounding. Quote THAT figure, not the subtotal.",
+  };
+}
+
+async function listInvoices(input: Record<string, unknown>) {
+  const range =
+    input.range === "today" || input.range === "yesterday" || input.range === "this_week" || input.range === "this_month"
+      ? input.range
+      : "this_month";
+  const window = resolveWindow({
+    range,
+    from: typeof input.from === "string" ? input.from : null,
+    to: typeof input.to === "string" ? input.to : null,
+    days_ago: typeof input.days_ago === "number" ? input.days_ago : null,
+  });
+  const from = window.from;
+  const to = window.to;
+  const label = typeof input.from === "string" ? `${input.from} → ${input.to ?? input.from}` : String(range);
+  const limit = Math.min(Number((input as { limit?: unknown }).limit) || 40, 80);
+  const admin = createAdminSupabaseClient();
+  const fromDay = from.slice(0, 10);
+  const toDay = to.slice(0, 10);
+
+  type Row = { kind: InvoiceKind; code: string; date: string; party: string | null; payable: number; status: string };
+  const rows: Row[] = [];
+
+  const push = async (
+    kind: InvoiceKind,
+    parent: Array<Record<string, unknown>>,
+    itemTable: string,
+    fk: string,
+  ) => {
+    for (const r of parent) {
+      const { data: items } = await admin.from(itemTable).select("amount, section_gst").eq(fk, String(r.id));
+      const money = invoiceMoney(
+        (items ?? []) as Array<{ amount: number | string | null; section_gst: number | string | null }>,
+        r as Parameters<typeof invoiceMoney>[1],
+      );
+      const date = String(r.challan_date ?? r.invoice_date ?? "");
+      rows.push({
+        kind,
+        code: `INV-${r.inv_fy ?? fyLabel(date) ?? "??"}-${r.inv_seq}`,
+        date,
+        party: (r.temple as string | null) ?? null,
+        payable: money.amountPayable,
+        status: r.cancelled_at ? "cancelled" : "invoiced",
+      });
+    }
+  };
+
+  const [{ data: ch }, { data: oc }, { data: bi }] = await Promise.all([
+    admin.from("challans")
+      .select("id, challan_number, challan_date, temple, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, cancelled_at, custom_billed_at")
+      .not("inv_seq", "is", null).gte("challan_date", fromDay).lte("challan_date", toDay)
+      .order("inv_seq", { ascending: false }).limit(limit),
+    admin.from("other_challans")
+      .select("id, party_id, challan_date, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, cancelled_at")
+      .not("inv_seq", "is", null).gte("challan_date", fromDay).lte("challan_date", toDay)
+      .order("inv_seq", { ascending: false }).limit(limit),
+    admin.from("bulk_invoices")
+      .select("id, temple, invoice_date, inv_fy, inv_seq, gst_mode, igst_percent, cgst_percent, sgst_percent, discount_mode, discount_value, round_total, cancelled_at")
+      .not("inv_seq", "is", null).gte("invoice_date", fromDay).lte("invoice_date", toDay)
+      .order("inv_seq", { ascending: false }).limit(limit),
+  ]);
+
+  const chRows = (ch ?? []) as Array<Record<string, unknown>>;
+  await push("purchase", chRows.filter((r) => !r.custom_billed_at), "challan_items", "challan_id");
+  await push("running", chRows.filter((r) => !!r.custom_billed_at), "challan_custom_items", "challan_id");
+  await push("work_order", (bi ?? []) as Array<Record<string, unknown>>, "bulk_invoice_items", "bulk_invoice_id");
+
+  // Other sales carry a client, not a temple — name them properly.
+  const ocRows = (oc ?? []) as Array<Record<string, unknown>>;
+  if (ocRows.length) {
+    const ids = [...new Set(ocRows.map((r) => r.party_id).filter(Boolean))] as string[];
+    const { data: parties } = await admin.from("invoice_parties").select("id, name").in("id", ids);
+    const byId = new Map(((parties ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]));
+    for (const r of ocRows) {
+      const { data: items } = await admin.from("other_challan_items").select("amount, section_gst").eq("other_challan_id", String(r.id));
+      const money = invoiceMoney(
+        (items ?? []) as Array<{ amount: number | string | null; section_gst: number | string | null }>,
+        r as Parameters<typeof invoiceMoney>[1],
+      );
+      rows.push({
+        kind: "other",
+        code: `INV-${r.inv_fy ?? "??"}-${r.inv_seq}`,
+        date: String(r.challan_date ?? ""),
+        party: byId.get(String(r.party_id)) ?? null,
+        payable: money.amountPayable,
+        status: r.cancelled_at ? "cancelled" : "invoiced",
+      });
+    }
+  }
+
+  rows.sort((a, b) => b.date.localeCompare(a.date));
+  const live = rows.filter((r) => r.status !== "cancelled");
+  const byKind: Record<string, { count: number; value: number }> = {};
+  for (const r of live) {
+    const k = byKind[r.kind] ?? { count: 0, value: 0 };
+    k.count += 1;
+    k.value = Math.round((k.value + r.payable) * 100) / 100;
+    byKind[r.kind] = k;
+  }
+
+  return {
+    window: label,
+    invoices: rows.slice(0, limit),
+    count: live.length,
+    totalValue: Math.round(live.reduce((a, r) => a + r.payable, 0) * 100) / 100,
+    byKind,
+    note: "Value is the AMOUNT PAYABLE on each invoice (after GST, discount and rounding). Four kinds share one INV number series: purchase (temple, priced challan), running (custom whole-piece bill), work_order (bulk), other (non-temple client).",
+    route: "/invoicing/invoices",
+  };
+}
+
+async function getVehiclesSnapshot() {
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("vehicles")
+    .select("kind, name, reg_no, make_model, owner_name, insurance_expiry, puc_expiry, fitness_expiry, rc_expiry, emi_active, emi_amount, emi_day, emi_lender, emi_end")
+    .order("reg_no");
+  if (error) return { available: false, note: "The Vehicles department is not set up on this database yet." };
+
+  type V = {
+    kind: string | null; name: string | null; reg_no: string | null; make_model: string | null;
+    owner_name: string | null; insurance_expiry: string | null; puc_expiry: string | null;
+    fitness_expiry: string | null; rc_expiry: string | null;
+    emi_active: boolean | null; emi_amount: number | null; emi_day: number | null;
+    emi_lender: string | null; emi_end: string | null;
+  };
+  const rows = (data ?? []) as V[];
+  const who = (v: V) => v.reg_no || v.name || "—";
+
+  // Fitness is a commercial-vehicle paper; a personal car has none, so a blank
+  // there is not a gap. Same rule the Vehicles cards use.
+  const papers = (v: V): Array<{ label: string; date: string | null }> => [
+    { label: "Insurance", date: v.insurance_expiry },
+    { label: "PUC", date: v.puc_expiry },
+    ...(v.kind === "commercial" ? [{ label: "Fitness", date: v.fitness_expiry }] : []),
+    { label: "RC", date: v.rc_expiry },
+  ];
+
+  const expired: Array<{ vehicle: string; paper: string; on: string; daysAgo: number }> = [];
+  const dueSoon: Array<{ vehicle: string; paper: string; on: string; daysLeft: number }> = [];
+  let tracked = 0;
+  for (const v of rows) {
+    for (const p of papers(v)) {
+      const d = daysToExpiry(p.date);
+      if (d == null) continue;
+      tracked++;
+      if (d < 0) expired.push({ vehicle: who(v), paper: p.label, on: p.date as string, daysAgo: -d });
+      else if (d <= EXPIRY_SOON_DAYS) dueSoon.push({ vehicle: who(v), paper: p.label, on: p.date as string, daysLeft: d });
+    }
+  }
+  expired.sort((a, b) => b.daysAgo - a.daysAgo);
+  dueSoon.sort((a, b) => a.daysLeft - b.daysLeft);
+
+  const onEmi = rows.filter((v) => v.emi_active);
+  const monthlyEmi = Math.round(onEmi.reduce((a, v) => a + (Number(v.emi_amount) || 0), 0));
+  // Both ends of the same question. A loan whose end date has passed while the
+  // vehicle is still flagged "on EMI" is worth saying out loud — it is either a
+  // closed loan nobody un-ticked, or a payment still running past its term.
+  const emiNearEnd = onEmi
+    .map((v) => {
+      const daysLeft = daysToExpiry(v.emi_end);
+      return {
+        vehicle: who(v),
+        lender: v.emi_lender,
+        amount: Number(v.emi_amount) || 0,
+        endsOn: v.emi_end,
+        daysLeft,
+        state: daysLeft == null ? "no end date on record" : daysLeft < 0 ? `term ended ${-daysLeft} days ago, still marked active` : "ending soon",
+      };
+    })
+    .filter((e) => e.daysLeft != null && e.daysLeft <= 90)
+    .sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
+
+  const byKind: Record<string, number> = {};
+  for (const v of rows) byKind[v.kind ?? "unknown"] = (byKind[v.kind ?? "unknown"] ?? 0) + 1;
+
+  return {
+    available: true,
+    vehicles: rows.length,
+    byKind,
+    papersTracked: tracked,
+    expiredCount: expired.length,
+    dueSoonCount: dueSoon.length,
+    expired: expired.slice(0, 12),
+    dueSoon: dueSoon.slice(0, 12),
+    emi: {
+      vehiclesOnEmi: onEmi.length,
+      monthlyTotal: monthlyEmi,
+      nearOrPastEnd: emiNearEnd.slice(0, 8),
+    },
+    note: `A paper with no date on record is NOT counted as clear — it is simply untracked, so say "not on record" rather than "fine". Due-soon means expiring within ${EXPIRY_SOON_DAYS} days. Fitness applies to commercial vehicles only.`,
+    route: "/vehicles",
+  };
+}
+
+async function getMachinesSnapshot() {
+  const admin = createAdminSupabaseClient();
+  const { data: mData, error } = await admin
+    .from("company_machines")
+    .select("machine_code, name, category, section, status, location, under_maintenance_since");
+  if (error) return { available: false, note: "The machine register is not set up on this database yet." };
+
+  type M = { machine_code: string | null; name: string | null; category: string | null; section: string | null; status: string | null; location: string | null; under_maintenance_since: string | null };
+  const machines = (mData ?? []) as M[];
+  const byStatus: Record<string, number> = {};
+  const bySection: Record<string, number> = {};
+  for (const m of machines) {
+    byStatus[m.status ?? "unknown"] = (byStatus[m.status ?? "unknown"] ?? 0) + 1;
+    if (m.section) bySection[m.section] = (bySection[m.section] ?? 0) + 1;
+  }
+  const down = machines
+    .filter((m) => m.under_maintenance_since)
+    .map((m) => ({
+      machine: m.name || m.machine_code,
+      section: m.section,
+      since: m.under_maintenance_since,
+      daysDown: Math.max(0, Math.floor((Date.now() - new Date(m.under_maintenance_since as string).getTime()) / 86_400_000)),
+    }))
+    .sort((a, b) => b.daysDown - a.daysDown);
+
+  const { data: tData } = await admin
+    .from("machine_maintenance_tickets")
+    .select("ticket_no, machine_name, section, problem, priority, status, raised_at, approved_at, repair_expected_at")
+    .neq("status", "closed")
+    .order("raised_at", { ascending: true })
+    .limit(40);
+  type T = { ticket_no: string | number | null; machine_name: string | null; section: string | null; problem: string | null; priority: string | null; status: string | null; raised_at: string | null; repair_expected_at: string | null };
+  const tickets = (tData ?? []) as T[];
+  const openByStatus: Record<string, number> = {};
+  for (const t of tickets) openByStatus[t.status ?? "unknown"] = (openByStatus[t.status ?? "unknown"] ?? 0) + 1;
+
+  return {
+    available: true,
+    machines: machines.length,
+    byStatus,
+    bySection,
+    downNow: down.length,
+    downMachines: down.slice(0, 10),
+    openTickets: tickets.length,
+    openByStatus,
+    oldestOpenTickets: tickets.slice(0, 8).map((t) => ({
+      ticket: t.ticket_no,
+      machine: t.machine_name,
+      section: t.section,
+      problem: t.problem,
+      priority: t.priority,
+      status: t.status,
+      raised: t.raised_at,
+      expectedBack: t.repair_expected_at,
+      ageDays: t.raised_at ? Math.floor((Date.now() - new Date(t.raised_at).getTime()) / 86_400_000) : null,
+    })),
+    note: "A maintenance ticket runs raised → inspected → quoted → approved → repairing → closed. 'downNow' is machines flagged under maintenance on the register itself.",
+    route: "/maintenance",
+  };
+}
+
+async function getToolStoreSnapshot() {
+  const { tools, movements } = await loadToolStore();
+  const short = toolShortages(tools);
+  const dayStart = Date.now() - 24 * 3600 * 1000;
+  const weekStart = Date.now() - 7 * 24 * 3600 * 1000;
+  const live = movements.filter((m) => !m.undone_at);
+  const takes = live.filter((m) => m.kind === "issue");
+  const sum = (rows: typeof takes) => rows.reduce((a, m) => a + Math.abs(Number(m.delta)), 0);
+
+  const byPerson = new Map<string, number>();
+  for (const m of takes.filter((t) => new Date(t.created_at).getTime() >= weekStart)) {
+    const who = (m.taken_by ?? "—").trim();
+    byPerson.set(who, (byPerson.get(who) ?? 0) + Math.abs(Number(m.delta)));
+  }
+
+  return {
+    tools: tools.length,
+    onShelf: tools.map((t) => ({ name: t.name, spec: t.spec, stock: t.stock, unit: t.unit, level: t.level, warnsAt: t.lowLine })),
+    lowOrEmpty: short.map((t) => ({ name: t.name, stock: t.stock, unit: t.unit, state: t.stock <= 0 ? "empty" : "low" })),
+    takenLast24h: sum(takes.filter((m) => new Date(m.created_at).getTime() >= dayStart)),
+    takenLast7Days: sum(takes.filter((m) => new Date(m.created_at).getTime() >= weekStart)),
+    takersLast7Days: [...byPerson.entries()].sort((a, b) => b[1] - a[1]).map(([name, qty]) => ({ name, qty })),
+    recentTakes: takes.slice(0, 10).map((m) => ({
+      tool: tools.find((t) => t.id === m.tool_id)?.name ?? "—",
+      qty: Math.abs(Number(m.delta)),
+      by: m.taken_by,
+      at: m.created_at,
+      viaCupboardQr: !!m.guest_link_id,
+    })),
+    note: "The CNC tool store (migs 227-233). One keeper fills the shelf at /tools; everybody else takes at the cupboard QR on their own phone, signed by a code to that phone. Stock is the sum of the register, never a stored number.",
+    route: "/tools",
   };
 }
