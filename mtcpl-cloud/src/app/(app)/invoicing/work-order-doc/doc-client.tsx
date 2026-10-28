@@ -117,7 +117,7 @@ export function WorkOrderDocClient({
   const groupTotal = (g: Group) => (Number(g.qty) || 0) * (Number(g.rate) || 0);
 
   const vendorOptions: VendorPickerOption[] = useMemo(
-    () => financeVendors.map((v) => ({ id: v.id, name: v.name, category: v.category || null, gstin: v.gstin || null })),
+    () => financeVendors.map((v) => ({ id: v.id, name: v.name, nickname: (v as { nickname?: string | null }).nickname ?? null, category: v.category || null, gstin: v.gstin || null })),
     [financeVendors],
   );
   const selectedVendor = useMemo(

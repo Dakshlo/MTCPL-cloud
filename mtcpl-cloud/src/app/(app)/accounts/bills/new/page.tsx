@@ -27,7 +27,7 @@ export default async function NewBillPage({
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
     .select(
-      "id, name, category, gstin, tds_applicable, default_tds_percent, tcs_applicable, default_tcs_percent",
+      "id, name, nickname, category, gstin, tds_applicable, default_tds_percent, tcs_applicable, default_tcs_percent",
     )
     .eq("is_active", true)
     .order("name");

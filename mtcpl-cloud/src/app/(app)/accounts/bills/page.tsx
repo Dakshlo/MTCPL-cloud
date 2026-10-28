@@ -73,7 +73,7 @@ type BillRow = {
   submitted_by: string | null;
   submitted_at: string | null;
   bill_vendor_id: string;
-  bill_vendors: { id: string; name: string } | null;
+  bill_vendors: { id: string; name: string; nickname: string | null } | null;
 };
 
 export default async function BillsListPage({
@@ -112,9 +112,9 @@ export default async function BillsListPage({
 
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
-    .select("id, name")
+    .select("id, name, nickname")
     .order("name");
-  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string }>;
+  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string; nickname: string | null }>;
 
   // Mig 073 — pre-fetch the set of bill IDs with at least one
   // active advance application. Used both as a filter pre-condition
@@ -136,15 +136,23 @@ export default async function BillsListPage({
   // pure function of (from, to) with no await inside the loop body.
   let searchOrClause: string | null = null;
   if (searchQuery) {
-    const safe = searchQuery.replace(/[%,]/g, " ");
+    // Parens and dots would break the PostgREST or() grammar below, and
+    // % / , are wildcards and separators — strip the lot before it goes
+    // anywhere near a filter string.
+    const safe = searchQuery.replace(/[%,().]/g, " ");
     // Resolve matching vendor IDs (case-insensitive substring). No
     // .limit() — there are ~292 vendors, well under the 1000-row cap,
     // and the old .limit(200) silently dropped matches on a broad
     // search, which then dropped those vendors' bills from the results.
+    //
+    // Oct 2026 — the NICKNAME matches too (Daksh: "in due bills search
+    // make it this way we search with nickname too"). Several firms
+    // share a name; the nickname is the owner's handle, and it is what
+    // the accountant actually types.
     const { data: matchingVendorRows } = await supabase
       .from("bill_vendors")
       .select("id")
-      .ilike("name", `%${safe}%`);
+      .or(`name.ilike.%${safe}%,nickname.ilike.%${safe}%`);
     const vendorIds = (matchingVendorRows ?? []).map((r) => r.id as string);
     const orParts = [
       `token.ilike.%${safe}%`,
@@ -204,7 +212,7 @@ export default async function BillsListPage({
     supabase
       .from("bills")
       .select(
-        "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name)",
+        "id, token, vendor_bill_no, bill_date, description, cost_head, amount_total, amount_paid, amount_outstanding, held_amount, status, submitted_by, submitted_at, bill_vendor_id, bill_vendors(id, name, nickname)",
       ),
   )
     .order("submitted_at", { ascending: false })
@@ -356,7 +364,7 @@ export default async function BillsListPage({
               <option value="">All</option>
               {vendors.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.name}
+                  {v.nickname ? `${v.name} ✦ ${v.nickname}` : v.name}
                 </option>
               ))}
             </select>
@@ -418,6 +426,14 @@ export default async function BillsListPage({
                           name={b.bill_vendors?.name ?? "—"}
                           subLabel={b.token}
                         />
+                        {b.bill_vendors?.nickname && (
+                          <div
+                            style={{ marginTop: 2, fontSize: 10, fontStyle: "italic", color: "var(--muted)" }}
+                            title="Vendor nickname / owner handle"
+                          >
+                            ✦ {b.bill_vendors.nickname}
+                          </div>
+                        )}
                       </Link>
                     </td>
                     <td style={TABLE_STYLES.td}>

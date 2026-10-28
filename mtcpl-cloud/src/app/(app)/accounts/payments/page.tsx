@@ -50,9 +50,9 @@ export default async function PaymentsHistoryPage({
 
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
-    .select("id, name")
+    .select("id, name, nickname")
     .order("name");
-  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string }>;
+  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string; nickname: string | null }>;
 
   const fromIso = new Date(`${fromFilter}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${toFilter}T23:59:59.999Z`).toISOString();
@@ -203,7 +203,7 @@ export default async function PaymentsHistoryPage({
             <option value="">All vendors</option>
             {vendors.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.name}
+                {v.nickname ? `${v.name} ✦ ${v.nickname}` : v.name}
               </option>
             ))}
           </select>

@@ -5,7 +5,13 @@
  *
  *   • Trigger button shows the selected vendor (avatar + name + category).
  *   • Click opens a panel below with a search input + filtered list.
- *   • Type to filter by name / category / GSTIN (substring match).
+ *   • Type to filter by name / NICKNAME / category / GSTIN (substring match).
+ *
+ * Oct 2026 — the nickname earns its place here more than anywhere else.
+ * Several firms share a name ("SHREE GAUTAM RISHI MARBLE SUPPLIERS" and
+ * "GAUTAM RISHI MARBLE"), and the nickname is the owner's handle — the thing
+ * the accountant actually says out loud. Picking the wrong firm here puts the
+ * bill, and later the payment, on the wrong account.
  *   • Click an option, hit Enter on a highlighted row, or pick with arrows + Enter.
  *   • Escape or click-outside closes.
  *
@@ -24,6 +30,9 @@ import {
 export type VendorPickerOption = {
   id: string;
   name: string;
+  /** Mig 066 — the owner's handle. Two firms can share a name; this is what
+   *  tells them apart, so it sits right under the name, not behind a tooltip. */
+  nickname: string | null;
   category: string | null;
   gstin: string | null;
 };
@@ -54,6 +63,7 @@ export function VendorPicker({
     return vendors.filter(
       (v) =>
         v.name.toLowerCase().includes(q) ||
+        (v.nickname ?? "").toLowerCase().includes(q) ||
         (v.category ?? "").toLowerCase().includes(q) ||
         (v.gstin ?? "").toLowerCase().includes(q),
     );
@@ -157,6 +167,14 @@ export function VendorPicker({
               }}
             >
               {selected.name}
+              {selected.nickname && (
+                <span
+                  style={{ color: "var(--muted)", fontWeight: 400, fontStyle: "italic", marginLeft: 6 }}
+                  title="Vendor nickname / owner handle"
+                >
+                  ✦ {selected.nickname}
+                </span>
+              )}
               {(selected.category || selected.gstin) && (
                 <span style={{ color: "var(--muted)", fontWeight: 400, marginLeft: 6 }}>
                   ·{" "}
@@ -237,7 +255,7 @@ export function VendorPicker({
                 setActiveIndex(0);
               }}
               onKeyDown={handleKey}
-              placeholder="Search by name, category, or GSTIN…"
+              placeholder="Search by name, nickname, category, or GSTIN…"
               style={{
                 ...INPUT_STYLE,
                 fontSize: 13,
@@ -331,6 +349,21 @@ export function VendorPicker({
                       >
                         {v.name}
                       </div>
+                      {v.nickname && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontStyle: "italic",
+                            color: ACCOUNTS_TOKENS.accent,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title="Vendor nickname / owner handle"
+                        >
+                          ✦ {v.nickname}
+                        </div>
+                      )}
                       {(v.category || v.gstin) && (
                         <div
                           style={{

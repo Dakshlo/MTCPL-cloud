@@ -46,7 +46,7 @@ export function LiveDueBillsFilters({
   customCategories = [],
   tokens: { borderStrong, border, shadow, surface },
 }: {
-  vendors: Array<{ id: string; name: string }>;
+  vendors: Array<{ id: string; name: string; nickname?: string | null }>;
   initialToken: string;
   initialVendor: string;
   initialCategory: string;
@@ -240,7 +240,7 @@ export function LiveDueBillsFilters({
           <option value="">All vendors</option>
           {vendors.map((v) => (
             <option key={v.id} value={v.id}>
-              {v.name}
+              {v.nickname ? `${v.name} ✦ ${v.nickname}` : v.name}
             </option>
           ))}
         </select>

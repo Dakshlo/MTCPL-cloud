@@ -28,6 +28,9 @@ import { isBlockPurchaseCategory } from "@/lib/bill-vendor-categories";
 export type BillVendorOption = {
   id: string;
   name: string;
+  /** Mig 066 — the owner's handle, shown in the picker so two firms with
+   *  almost the same name can be told apart before the bill is filed. */
+  nickname: string | null;
   category: string | null;
   gstin: string | null;
   /** Mig 042 — when true, the form will surface a TDS% input

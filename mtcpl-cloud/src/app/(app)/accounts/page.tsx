@@ -103,10 +103,10 @@ export default async function AccountsHomePage({
 
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
-    .select("id, name")
+    .select("id, name, nickname")
     .eq("is_active", true)
     .order("name");
-  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string }>;
+  const vendors = (vendorRows ?? []) as Array<{ id: string; name: string; nickname: string | null }>;
 
   let dueQuery = supabase
     .from("bills")
