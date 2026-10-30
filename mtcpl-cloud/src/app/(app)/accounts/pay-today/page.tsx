@@ -155,6 +155,10 @@ export default async function PayTodayPage() {
       paymentTermsDays: terms,
       prematureForPayment: terms > 0 && d !== null && d < terms,
       hdfcCsvDownloaded: r.hdfc_csv_downloaded_at != null,
+    // Carry the TIME, not just the flag. A locked batch that can say
+    // "bank file taken at 6:25 pm" proves the download worked — which is
+    // the thing the accountants could never tell (Daksh, Oct 2026).
+    hdfcCsvDownloadedAt: r.hdfc_csv_downloaded_at,
       bankDeclineStatus: (r.bank_decline_status ?? null) as
         | "pending"
         | "approved"

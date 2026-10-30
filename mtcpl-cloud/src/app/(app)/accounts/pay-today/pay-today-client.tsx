@@ -58,6 +58,8 @@ export type PayTodayRow = {
    *  a previous HDFC CSV download. Used to render a 🔒 badge on
    *  the row and to exclude from the "downloadable now" count. */
   hdfcCsvDownloaded: boolean;
+  /** When the bank file that contains this row was taken. */
+  hdfcCsvDownloadedAt?: string | null;
   /** Mig 090 — bank-decline approval state. 'pending' = the
    *  accountant requested a bank decline and it's awaiting owner
    *  approval (row shows "Decline in approval", actions hidden).
@@ -216,6 +218,7 @@ export function PayTodayClient({
       prematureForPayment: false,
       paymentTermsDays: DEFAULT_PAYMENT_TERMS_DAYS,
       hdfcCsvDownloaded: false,
+      hdfcCsvDownloadedAt: null,
     };
   }
 
@@ -960,6 +963,14 @@ function ConfirmedBatch({
   // panel below the buttons; if ok, fire the actual download URL.
   const [missing, setMissing] = useState<MissingFieldReason[] | null>(null);
   const [otherError, setOtherError] = useState<string | null>(null);
+  // Oct 2026 — the download used to finish SILENTLY: the card just
+  // greyed out. The bank file is named 56043010.001, which Windows shows
+  // with no icon (7-Zip even claims it as a split archive), so the
+  // accountant could not tell a success from a failure. They would then
+  // click the only button still alive — "Preview (Excel)" — collect two
+  // .xlsx files, and ring Daksh for an unlock. The audit log shows that
+  // exact sequence on 30 Oct, 2 Oct, 16 Sep and 18 Jun.
+  const [downloaded, setDownloaded] = useState<{ filename: string; count: number; total: number } | null>(null);
   const [checking, setChecking] = useState<"" | "xlsx" | "csv">("");
 
   // Earliest proposedAt in the batch (used in the header label).
@@ -968,6 +979,17 @@ function ConfirmedBatch({
     if (!acc) return r.proposedAt;
     return r.proposedAt < acc ? r.proposedAt : acc;
   }, null);
+
+  // When the bank file for this batch was taken — shown on the locked
+  // button so "did it work?" is answered on the card, not by ringing the
+  // developer.
+  const lockedAtIso = rows.map((r) => r.hdfcCsvDownloadedAt).filter(Boolean).sort()[0] as string | undefined;
+  const lockedAtLabel = lockedAtIso
+    ? new Date(lockedAtIso).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata", day: "numeric", month: "short",
+        hour: "numeric", minute: "2-digit", hour12: true,
+      })
+    : null;
 
   const isUnbatched = batchId === "unbatched";
   const previewHref = isUnbatched
@@ -1182,16 +1204,19 @@ function ConfirmedBatch({
               fontSize: 12,
               fontWeight: 700,
               background: "#fff",
-              color: "var(--gold-dark)",
-              border: "1.5px solid var(--gold-dark)",
+              // Once the bank file is taken, this is the only live button
+              // left — so it must stop looking like the next step, or it
+              // gets clicked by anyone still hunting for the file.
+              color: downloadableCount > 0 ? "var(--gold-dark)" : "var(--muted)",
+              border: `1.5px solid ${downloadableCount > 0 ? "var(--gold-dark)" : "var(--border)"}`,
               borderRadius: 8,
               whiteSpace: "nowrap",
               cursor: checking ? "wait" : "pointer",
-              opacity: checking === "xlsx" ? 0.6 : 1,
+              opacity: checking === "xlsx" ? 0.6 : downloadableCount > 0 ? 1 : 0.75,
             }}
-            title="Preview this batch as an .xlsx with header row. Doesn't lock anything."
+            title="Opens an .xlsx copy WITH a header row, only to read on screen. This is NOT the file HDFC accepts — the bank file is the CSV button next to this one."
           >
-            {checking === "xlsx" ? "Checking…" : "👁 Preview (Excel)"}
+            {checking === "xlsx" ? "Checking…" : "👁 Check in Excel — not the bank file"}
           </button>
           <button
             type="button"
@@ -1200,6 +1225,7 @@ function ConfirmedBatch({
               if (downloadableCount === 0) return;
               setMissing(null);
               setOtherError(null);
+              setDownloaded(null);
               setChecking("csv");
               try {
                 const checkUrl = `${previewHref.replace("format=xlsx", "format=csv")}&check_only=1`;
@@ -1256,6 +1282,16 @@ function ConfirmedBatch({
                     a.click();
                     document.body.removeChild(a);
                     setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    // Say so, out loud. An empty blob means the browser
+                    // was handed nothing — worth shouting about, because
+                    // the server has already locked the rows by then.
+                    if (blob.size === 0) {
+                      setOtherError(
+                        "The bank file came back EMPTY. The batch is now locked — ask a developer to re-allow one download before trying again.",
+                      );
+                    } else {
+                      setDownloaded({ filename: fname, count: downloadableCount, total: totalToPay });
+                    }
                     // Server has now locked the rows → re-pull so this
                     // batch flips to ✓ In HDFC file + sinks to the
                     // bottom, and the next confirmed batch is active.
@@ -1307,8 +1343,8 @@ function ConfirmedBatch({
             {checking === "csv"
               ? "Checking…"
               : downloadableCount === 0
-                ? "🔒 In HDFC file"
-                : `📥 Download CSV (${downloadableCount})`}
+                ? `🔒 Bank file already taken${lockedAtLabel ? ` · ${lockedAtLabel}` : ""}`
+                : `📥 Download bank file (${downloadableCount})`}
           </button>
           {/* Developer override — re-open a locked batch for one more CSV
               download (re-locks automatically on the next download). */}
@@ -1329,6 +1365,57 @@ function ConfirmedBatch({
           )}
         </div>
       </div>
+
+      {/* The download worked — say so, name the file, and explain the
+          extension. Everything the accountants were missing when they
+          went hunting through the Excel button. */}
+      {downloaded && (
+        <div
+          role="status"
+          style={{
+            margin: "0 12px 12px",
+            padding: "12px 14px",
+            background: "rgba(22, 163, 74, 0.07)",
+            border: "1px solid rgba(22, 163, 74, 0.35)",
+            borderLeft: "4px solid #15803d",
+            borderRadius: 10,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#14532d" }}>
+            ✓ Bank file downloaded — {downloaded.count} payment
+            {downloaded.count === 1 ? "" : "s"}, ₹{downloaded.total.toLocaleString("en-IN")}
+          </div>
+          <div style={{ fontSize: 12, color: "#166534", marginTop: 5, lineHeight: 1.6 }}>
+            It is in your <strong>Downloads</strong> folder as{" "}
+            <code
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                background: "#fff",
+                border: "1px solid rgba(22,163,74,.3)",
+                borderRadius: 4,
+                padding: "1px 6px",
+              }}
+            >
+              {downloaded.filename}
+            </code>
+            . <strong>That is the right file.</strong> HDFC asks for this exact name and the{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace" }}>.001</code> ending — do not
+            rename it, do not open it in Excel first, and do not download the Excel copy instead.
+            Upload this one to HDFC ENet.
+          </div>
+          <button
+            type="button"
+            onClick={() => setDownloaded(null)}
+            style={{
+              marginTop: 8, fontSize: 11.5, fontWeight: 700, padding: "5px 11px",
+              borderRadius: 7, border: "1px solid rgba(22,163,74,.4)",
+              background: "#fff", color: "#15803d", cursor: "pointer",
+            }}
+          >
+            Got it
+          </button>
+        </div>
+      )}
 
       {/* Mig 048 follow-on — missing-fields panel. Shown when a
           preflight came back with missing[]. Each row links to the
