@@ -194,3 +194,27 @@ export function canReadRequiredSizes(
   if (profile.role === "block_slab_entry") return true;
   return false;
 }
+
+/**
+ * Download the raw CNC data as Excel (/api/carving/raw-export.xlsx).
+ *
+ * Daksh Nov 2026 — the office team only, deliberately NOT the same
+ * audience as canAccessCarvingPage. That gate lets a CNC vendor in
+ * (role='vendor' + can_assign_carving, e.g. Mohit) so he can assign
+ * and monitor his own queue; the raw sheet carries every vendor's
+ * jobwork rate and amount on every row, so handing it to one vendor
+ * hands him his competitors' pricing.
+ *
+ * Same five roles as the Outsource lane on /carving, which is the
+ * existing "sees jobwork money" tier. team_head signs carving off on
+ * the floor but has no business with the rate card, so they are out
+ * here too.
+ */
+export function canExportCarvingRaw(profile: Pick<Profile, "role">): boolean {
+  if (profile.role === "developer") return true;
+  if (profile.role === "owner") return true;
+  if (profile.role === "carving_head") return true;
+  if (profile.role === "senior_incharge") return true;
+  if (profile.role === "tender_manager") return true;
+  return false;
+}

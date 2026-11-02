@@ -1,0 +1,249 @@
+"use client";
+
+/**
+ * "Excel (raw data)" on the Carving header — downloads every carving
+ * job as a flat sheet to pivot (Daksh, Nov 2026).
+ *
+ * Filters are optional and all default to everything. Only the date
+ * range really matters: temple, vendor and status are one click of
+ * Excel's own autofilter once the file is open, so narrowing here is
+ * a convenience, not the point.
+ *
+ * Downloaded through fetch + blob rather than a plain link so the
+ * button can say when the file is actually in hand. The Pay Today
+ * bank file taught us that a download nobody confirms is a download
+ * people do three times.
+ */
+
+import { useRef, useState } from "react";
+
+const STATUSES = [
+  "carving_assigned",
+  "carving_in_progress",
+  "completed",
+  "carving_on_hold",
+  "carving_rejected",
+  "dispatched",
+  "cancelled",
+] as const;
+
+const labelOf = (s: string) =>
+  s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+
+export function RawExportButton({
+  temples,
+  vendors,
+}: {
+  temples: string[];
+  vendors: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [temple, setTemple] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [status, setStatus] = useState("");
+
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+
+  const narrowed = Boolean(from || to || temple || vendor || status);
+
+  async function download() {
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      const qs = new URLSearchParams();
+      if (from) qs.set("from", from);
+      if (to) qs.set("to", to);
+      if (temple) qs.set("temple", temple);
+      if (vendor) qs.set("vendor", vendor);
+      if (status) qs.set("status", status);
+
+      const res = await fetch(`/api/carving/raw-export.xlsx?${qs.toString()}`);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(
+          res.status === 403
+            ? "You do not have access to this export."
+            : text.slice(0, 200) || `Export failed (${res.status}).`,
+        );
+      }
+      const blob = await res.blob();
+      if (blob.size === 0) throw new Error("The file came back empty — nothing was downloaded.");
+
+      const stamp = new Date().toISOString().slice(0, 10);
+      const name = `cnc-raw-data-${stamp}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Give the browser a beat to start the save before the handle goes.
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+      const kb = Math.max(1, Math.round(blob.size / 1024));
+      setDone(`${name} · ${kb.toLocaleString("en-IN")} KB`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div ref={anchorRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Download the raw CNC data as Excel"
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "8px 14px", fontSize: 12, fontWeight: 700,
+          color: "var(--text)", background: "var(--surface)",
+          border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer",
+        }}
+      >
+        ⬇ Excel{narrowed ? " (filtered)" : ""}
+      </button>
+
+      {open && (
+        <>
+          {/* Click-away. Sits behind the panel, over everything else. */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 40 }}
+          />
+          <div
+            style={{
+              position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 41,
+              width: 310, padding: 14, textAlign: "left",
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
+              Raw CNC data
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>
+              One row per carving job, every column. Filter it however you like in
+              Excel — these are just to keep the file small.
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <label style={{ flex: 1 }}>
+                <span style={lbl}>From</span>
+                <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={inp} />
+              </label>
+              <label style={{ flex: 1 }}>
+                <span style={lbl}>To</span>
+                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={inp} />
+              </label>
+            </div>
+
+            <label style={{ display: "block", marginTop: 9 }}>
+              <span style={lbl}>Temple</span>
+              <select value={temple} onChange={(e) => setTemple(e.target.value)} style={inp}>
+                <option value="">All temples</option>
+                {temples.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: "block", marginTop: 9 }}>
+              <span style={lbl}>Operator / vendor</span>
+              <select value={vendor} onChange={(e) => setVendor(e.target.value)} style={inp}>
+                <option value="">All operators</option>
+                {vendors.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: "block", marginTop: 9 }}>
+              <span style={lbl}>Job status</span>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={inp}>
+                <option value="">All statuses</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>{labelOf(s)}</option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              disabled={busy}
+              onClick={download}
+              style={{
+                width: "100%", marginTop: 13, padding: "11px 14px",
+                fontSize: 13, fontWeight: 800, borderRadius: 10, border: "none",
+                color: "#fff", cursor: busy ? "wait" : "pointer",
+                background: busy
+                  ? "var(--border)"
+                  : "linear-gradient(135deg, #0f766e 0%, #115e59 100%)",
+              }}
+            >
+              {busy ? "Building the sheet…" : narrowed ? "Download filtered" : "Download everything"}
+            </button>
+
+            {narrowed && !busy && (
+              <button
+                type="button"
+                onClick={() => { setFrom(""); setTo(""); setTemple(""); setVendor(""); setStatus(""); }}
+                style={{
+                  width: "100%", marginTop: 7, padding: "7px 10px", fontSize: 11.5,
+                  fontWeight: 700, borderRadius: 8, cursor: "pointer",
+                  background: "transparent", color: "var(--muted)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+
+            {done && (
+              <div
+                style={{
+                  marginTop: 10, padding: "9px 11px", borderRadius: 9, fontSize: 11.5,
+                  lineHeight: 1.5, color: "#15803d",
+                  background: "rgba(21,128,61,0.09)", border: "1px solid rgba(21,128,61,0.3)",
+                }}
+              >
+                <strong>Downloaded.</strong><br />{done}
+              </div>
+            )}
+            {error && (
+              <div
+                style={{
+                  marginTop: 10, padding: "9px 11px", borderRadius: 9, fontSize: 11.5,
+                  lineHeight: 1.5, color: "var(--danger)",
+                  background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.3)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const lbl: React.CSSProperties = {
+  display: "block", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
+  textTransform: "uppercase", color: "var(--muted)", marginBottom: 4,
+};
+
+const inp: React.CSSProperties = {
+  width: "100%", padding: "8px 10px", fontSize: 12.5, borderRadius: 8,
+  border: "1px solid var(--border)", background: "var(--surface-alt)",
+  color: "var(--text)", outline: "none",
+};

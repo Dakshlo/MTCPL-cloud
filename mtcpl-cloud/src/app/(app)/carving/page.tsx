@@ -7,8 +7,10 @@ import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 import {
   canAccessCarvingPage,
   canAddExternalCutSlab,
+  canExportCarvingRaw,
   canSeeAwaitingReview,
 } from "@/lib/cutting-permissions";
+import { RawExportButton } from "./raw-export-button";
 import { CarvingDashboardClient } from "./dashboard-client";
 import { DirectDispatchTab } from "./direct-dispatch-tab";
 import { getProfilesMap } from "@/lib/profiles";
@@ -60,6 +62,10 @@ export default async function CarvingDashboardPage({
     profile.role === "carving_head" ||
     profile.role === "senior_incharge" ||
     profile.role === "tender_manager";
+  // Daksh Nov 2026 — raw CNC data as Excel, for pivoting in the
+  // office. Same money-seeing tier as Outsource: the sheet carries
+  // every vendor's jobwork rate on every row.
+  const canExportRaw = canExportCarvingRaw(profile);
   // Mig 130 — third lane: Direct Dispatch. Slabs that skip carving
   // entirely (cut → straight onto a truck). Office team only, same
   // gate as Outsource.
@@ -866,6 +872,14 @@ export default async function CarvingDashboardPage({
             profile.role === "senior_incharge" ||
             profile.role === "tender_manager") && (
             <VendorsManagerPeek vendors={vendorsForPeek} />
+          )}
+          {canExportRaw && (
+            <RawExportButton
+              temples={((templesForExternal ?? []) as Array<{ name: string }>)
+                .map((t) => t.name)
+                .filter(Boolean)}
+              vendors={vendorsForPeek.map((v) => v.name).filter(Boolean)}
+            />
           )}
           {/* Mig 125 — Temporary Storage: park the cut-done backlog out of
               the Unassigned list. Owner / dev / carving_head. */}
