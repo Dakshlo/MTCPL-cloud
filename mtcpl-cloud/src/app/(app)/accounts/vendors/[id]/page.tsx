@@ -11,6 +11,7 @@ import { upsertBillVendorAction } from "../../actions";
 import { VendorForm } from "../vendor-form";
 import { PrivateNotesModal } from "./private-notes-modal";
 import { RoyaltyNetPeek } from "./royalty-net-peek";
+import { KeepYourPlace } from "@/components/keep-your-place";
 import {
   AccountsHero,
   ACCOUNTS_TOKENS,
@@ -670,6 +671,11 @@ export default async function BillVendorDetailPage({
               borderBottom: `1px solid ${ACCOUNTS_TOKENS.border}`,
             }}
           >
+            {/* Daksh Nov 2026 — step into a bill from here and come back
+                to the row you were on, lit, exactly as the Due Bills and
+                Vendor Account lists do. Scoped per vendor so one vendor's
+                position never moves another's. */}
+            <KeepYourPlace scope={`vendor-bills:${vendor.id}`} rowAttr="data-bill-id" />
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Bill history</h3>
             <span style={{ fontSize: 12, color: "var(--muted)" }}>
               {billsCount} bill{billsCount === 1 ? "" : "s"}
@@ -716,6 +722,7 @@ export default async function BillVendorDetailPage({
                     {bills.map((b, idx) => (
                       <tr
                         key={b.id}
+                        data-bill-id={b.id}
                         style={{ background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted }}
                       >
                         <td style={TABLE_STYLES.td}>
