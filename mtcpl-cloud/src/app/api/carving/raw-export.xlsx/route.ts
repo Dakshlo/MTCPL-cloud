@@ -28,10 +28,29 @@ import { buildCarvingRawWorkbook } from "@/lib/carving-raw-workbook";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * requireAuth() says "go to /login" by THROWING Next's redirect
+ * error, so a blanket catch turns an expired session into a 500
+ * reading `CNC export failed: NEXT_REDIRECT` instead of a login
+ * page. Rethrow anything carrying a Next control-flow digest and
+ * let the framework do its job.
+ *
+ * (The same swallow exists in /api/accounts/vendor-outstanding-export,
+ * which this route was modelled on — not touched here.)
+ */
+function isNextControlFlow(e: unknown): boolean {
+  const digest = (e as { digest?: unknown } | null)?.digest;
+  return (
+    typeof digest === "string" &&
+    (digest.startsWith("NEXT_REDIRECT") || digest === "NEXT_NOT_FOUND")
+  );
+}
+
 export async function GET(req: NextRequest) {
   try {
     return await handle(req);
   } catch (e) {
+    if (isNextControlFlow(e)) throw e;
     const msg = e instanceof Error ? e.message : "Unknown error";
     console.error("[/api/carving/raw-export.xlsx] crashed", e);
     return NextResponse.json({ error: "CNC export failed: " + msg }, { status: 500 });
