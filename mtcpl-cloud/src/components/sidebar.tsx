@@ -143,7 +143,18 @@ export function Sidebar({
   // something goes wrong server-side.
   const [switching, setSwitching] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<Department | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const prevActiveDeptRef = useRef<Department | null>(activeDepartment ?? null);
+  // Held in a ref so every exit path can cancel it. The old code only
+  // cleared it on throw, so a successful switch left a 12s timer armed
+  // that could blank the bar in the middle of the NEXT switch.
+  const safetyRef = useRef<number | null>(null);
+  const clearSafety = () => {
+    if (safetyRef.current !== null) {
+      window.clearTimeout(safetyRef.current);
+      safetyRef.current = null;
+    }
+  };
 
   // Daksh May 2026 — hamburger / slide-in mobile sidebar. The mobile
   // viewport hides the static sidebar (`transform: translateX(-100%)`
@@ -174,39 +185,57 @@ export function Sidebar({
   useEffect(() => {
     const incoming = activeDepartment ?? null;
     if (switching && prevActiveDeptRef.current !== incoming) {
+      clearSafety();
       setSwitching(false);
       setSwitchingTo(null);
+      setSwitchError(null);
     }
     prevActiveDeptRef.current = incoming;
   }, [activeDepartment, switching]);
 
   async function handleSwitchDepartment(dept: Department) {
-    if (switching) return;
+    // Clicking the tile that is already in flight does nothing; clicking
+    // a DIFFERENT one supersedes it. The old guard was `if (switching)
+    // return`, and every tile was disabled while switching — so a switch
+    // that stalled took the switcher down with it and the only way out
+    // was to close the app. The escape hatch must never be the thing
+    // that is broken.
+    if (switching && switchingTo === dept) return;
+    clearSafety();
+    setSwitchError(null);
     setSwitching(true);
     setSwitchingTo(dept);
 
-    // 12s safety net — if for any reason the activeDepartment prop
-    // never changes (server action errored silently, network
-    // hung, etc.), still drop the overlay so the UI isn't stuck.
-    const safetyTimer = setTimeout(() => {
+    // Safety net — if the prop never flips, say so rather than spin on.
+    safetyRef.current = window.setTimeout(() => {
+      safetyRef.current = null;
       setSwitching(false);
       setSwitchingTo(null);
-    }, 12_000);
+      setSwitchError("That switch didn't go through. Tap the department again.");
+    }, 8_000);
 
     try {
       const fd = new FormData();
       fd.set("department", dept);
-      await setActiveDepartmentAction(fd);
-      router.refresh();
-      // Don't drop `switching` here — the useEffect above watches
-      // for the activeDepartment prop change and drops it then,
-      // so the overlay covers the full visible-transition window
-      // (not just the action's promise resolution).
+      const res = await setActiveDepartmentAction(fd);
+      if (!res.ok) {
+        clearSafety();
+        setSwitching(false);
+        setSwitchingTo(null);
+        setSwitchError(res.error);
+        return;
+      }
+      // One navigation. This used to be redirect() inside the action
+      // AND router.refresh() here, which fetched the destination twice.
+      router.push(res.href);
+      // `switching` drops in the effect above, once the new
+      // activeDepartment prop actually lands — so the bar covers the
+      // whole visible transition rather than just the action's promise.
     } catch (err) {
-      // On error, drop immediately + clear safety timer.
-      clearTimeout(safetyTimer);
+      clearSafety();
       setSwitching(false);
       setSwitchingTo(null);
+      setSwitchError("Couldn't switch department. Check the connection and try again.");
       console.error("[sidebar] dept switch failed", err);
     }
   }
@@ -488,7 +517,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => handleSwitchDepartment(d.id)}
                     title={d.tooltip}
-                    disabled={switching}
+                    disabled={switching && switchingTo === d.id}
                     style={{
                       width: "100%",
                       display: "flex",
@@ -503,8 +532,11 @@ export function Sidebar({
                       color: "rgba(255,255,255,0.78)",
                       border: `1px solid rgba(255,255,255,0.08)`,
                       borderTop: `2px solid ${accent}`,
-                      cursor: switching ? "wait" : "pointer",
-                      opacity: switching ? 0.55 : 1,
+                      // Only the tile being switched TO looks busy. The
+                      // others stay live so a stalled switch can be
+                      // escaped by picking a different department.
+                      cursor: switchingTo === d.id ? "wait" : "pointer",
+                      opacity: switching ? (switchingTo === d.id ? 0.55 : 0.8) : 1,
                       transition:
                         "background 0.12s ease, color 0.12s ease, transform 0.12s ease",
                     }}
@@ -546,6 +578,27 @@ export function Sidebar({
           window — no flash. */}
       {switchable && switching && (
         <DeptSwitchTopBar targetDept={switchingTo} />
+      )}
+
+      {/* A switch that fails now says so, instead of leaving a spinner
+          running and the sidebar quietly insisting you never moved. */}
+      {switchable && switchError && (
+        <div
+          role="alert"
+          style={{
+            margin: "6px 10px 0",
+            padding: "8px 10px",
+            borderRadius: 8,
+            fontSize: 11,
+            lineHeight: 1.45,
+            fontWeight: 600,
+            color: "#fecaca",
+            background: "rgba(220,38,38,0.16)",
+            border: "1px solid rgba(248,113,113,0.5)",
+          }}
+        >
+          {switchError}
+        </div>
       )}
 
       {/* User */}
