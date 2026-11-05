@@ -458,25 +458,37 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .is("cancelled_at", null)
       .is("converted_invoice_id", null);
     if (iErr) return null;
-    // Bulk (work-order) invoices also queue for approval — count them too so the
-    // badge matches the Approval page. Best-effort (pre-mig deploys just skip).
-    let bulk = 0;
-    {
-      const { count: b, error: bErr } = await supabase
+    // Bulk (work-order) invoices also queue for approval, and mig 184 added
+    // invoice change requests (edit/cancel) across three tables.
+    //
+    // Daksh Nov 2026 — these four counts used to run one after another,
+    // after the one above: FIVE round trips in series inside a function that
+    // the surrounding Promise.all assumes is a single hop. It made this the
+    // long pole of the whole badge block (1,287 ms against ~450 ms for every
+    // other badge, measured in dev), and the layout runs on EVERY navigation.
+    // Same queries, same results, one hop.
+    const CHANGE_TABLES = ["challans", "bulk_invoices", "other_challans"] as const;
+    const [bulkRes, ...changeRes] = await Promise.all([
+      supabase
         .from("bulk_invoices")
         .select("*", { count: "exact", head: true })
         .is("owner_approved_at", null)
         .is("owner_rejected_at", null)
-        .is("cancelled_at", null);
-      if (!bErr) bulk = b ?? 0;
-    }
-    // Mig 184 — invoice change requests (edit/cancel) also queue for approval.
-    // Best-effort so a pre-migration deploy simply skips them.
-    let changes = 0;
-    for (const t of ["challans", "bulk_invoices", "other_challans"] as const) {
-      const { count: c, error } = await supabase.from(t).select("*", { count: "exact", head: true }).or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null");
-      if (!error) changes += c ?? 0;
-    }
+        .is("cancelled_at", null),
+      ...CHANGE_TABLES.map((t) =>
+        supabase
+          .from(t)
+          .select("*", { count: "exact", head: true })
+          .or("pending_edit_at.not.is.null,pending_cancel_at.not.is.null"),
+      ),
+    ]);
+    // Best-effort throughout: a pre-migration deploy simply skips the ones
+    // whose columns don't exist yet, exactly as the serial version did.
+    const bulk = bulkRes.error ? 0 : bulkRes.count ?? 0;
+    const changes = changeRes.reduce(
+      (sum, r) => sum + (r.error ? 0 : r.count ?? 0),
+      0,
+    );
     return (count ?? 0) + bulk + changes;
   }
 
@@ -544,6 +556,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     salaryApprovalBadge,
     templeCancelAlert,
     diaryBadge,
+    templeCodeRowsRes,
   ] = await Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
@@ -564,15 +577,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     fetchSalaryApprovalBadge(),
     fetchTempleCancelAlert(),
     fetchDiaryBadge(),
+    // Tablet keyboard quick-chips — every active temple's code, so the chips
+    // show on EVERY field the keyboard attaches to (not just the few with
+    // data-temple-codes). Cheap select; deduped + uppercased.
+    //
+    // Daksh Nov 2026 — folded into the batch. It was a round trip in series
+    // AFTER nineteen parallel ones, so the layout waited for it on every
+    // navigation for no reason.
+    supabase.from("temples").select("code_prefix, name").eq("is_active", true),
   ]);
-
-  // Tablet keyboard quick-chips — every active temple's code, so the chips
-  // show on EVERY field the keyboard attaches to (not just the few with
-  // data-temple-codes). Cheap select; deduped + uppercased.
-  const { data: templeCodeRows } = await supabase
-    .from("temples")
-    .select("code_prefix, name")
-    .eq("is_active", true);
+  const templeCodeRows = templeCodeRowsRes.data;
   const tabletTempleCodes = [
     ...new Set(
       (templeCodeRows ?? [])

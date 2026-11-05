@@ -19,11 +19,29 @@ export default async function BillVendorsPage() {
   }
   const canEdit = canManageBillVendors(profile);
   const supabase = createAdminSupabaseClient();
-  const { data: vendorsRaw } = await supabase
-    .from("bill_vendors")
-    .select("id, name, nickname, category, gstin, phone, email, is_active, created_at")
-    .order("is_active", { ascending: false })
-    .order("name");
+  // Daksh Nov 2026 — these three used to await one after another, so the
+  // page cost three round trips before it rendered a thing. None of them
+  // depends on the others.
+  const [{ data: vendorsRaw }, { data: customCategoriesRaw }, { data: outstandingRaw }] =
+    await Promise.all([
+      supabase
+        .from("bill_vendors")
+        .select("id, name, nickname, category, gstin, phone, email, is_active, created_at")
+        .order("is_active", { ascending: false })
+        .order("name"),
+      // Mig 082 — user-created categories so the create-vendor form + the
+      // table pills resolve them with proper labels + colours.
+      supabase
+        .from("bill_vendor_custom_categories")
+        .select("value, label, pill_fg, pill_bg")
+        .eq("is_active", true)
+        .order("label"),
+      supabase
+        .from("bills")
+        .select("bill_vendor_id, amount_outstanding")
+        .eq("status", "approved")
+        .gt("amount_outstanding", 0),
+    ]);
   const vendors = (vendorsRaw ?? []) as Array<{
     id: string;
     name: string;
@@ -36,13 +54,6 @@ export default async function BillVendorsPage() {
     created_at: string;
   }>;
 
-  // Mig 082 — user-created categories so the create-vendor form +
-  // the table pills resolve them with proper labels + colours.
-  const { data: customCategoriesRaw } = await supabase
-    .from("bill_vendor_custom_categories")
-    .select("value, label, pill_fg, pill_bg")
-    .eq("is_active", true)
-    .order("label");
   const customCategories = (customCategoriesRaw ?? []) as Array<{
     value: string;
     label: string;
@@ -50,11 +61,6 @@ export default async function BillVendorsPage() {
     pill_bg: string;
   }>;
 
-  const { data: outstandingRaw } = await supabase
-    .from("bills")
-    .select("bill_vendor_id, amount_outstanding")
-    .eq("status", "approved")
-    .gt("amount_outstanding", 0);
   const outstandingByVendor = new Map<string, number>();
   for (const r of outstandingRaw ?? []) {
     const id = r.bill_vendor_id as string;
