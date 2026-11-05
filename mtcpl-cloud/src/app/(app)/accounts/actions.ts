@@ -25,6 +25,7 @@ import {
   canConfirmPayments,
   canFinalAudit,
   canHoldBill,
+  canEditPaidBill,
   canManageAccounts,
   canManageBillVendors,
   canMarkPaid,
@@ -628,7 +629,10 @@ export async function editBillAction(
 
   const { data: bill, error: loadErr } = await supabase
     .from("bills")
-    .select("id, token, status, submitted_by, bill_date, vendor_bill_no")
+    // NOTE: one single string literal, not a concatenation — Supabase
+    // infers the row type from the select text, and splitting it over
+    // `+` collapses every column to GenericStringError.
+    .select("id, token, status, submitted_by, bill_date, vendor_bill_no, bill_vendor_id, amount_subtotal, amount_paid, amount_payable_to_vendor, partial_rejection_amount, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent")
     .eq("id", billId)
     .maybeSingle();
   if (loadErr) return { ok: false, error: loadErr.message };
@@ -707,18 +711,37 @@ export async function editBillAction(
     };
   }
 
-  // Lock once any non-cancelled payment row exists.
+  // ── Bills that already have payment activity ──────────────────
+  // Daksh Nov 2026. This used to be a flat refusal telling you to
+  // find a developer, which is exactly what happened — corrections
+  // were made by hand in SQL. The owner can now do it here, under
+  // one hard rule enforced further down: the bill may go UP freely,
+  // but it can never be cut below the money that has already left
+  // the bank. The amount checks need the submitted fields, so they
+  // sit after the reads; permission and status are decided here.
   const { count: nonCancelledPayments } = await supabase
     .from("bill_payments")
     .select("*", { count: "exact", head: true })
     .eq("bill_id", billId)
     .neq("status", "cancelled");
-  if ((nonCancelledPayments ?? 0) > 0) {
-    return {
-      ok: false,
-      error:
-        "Bill is locked because a payment has been proposed or made. Contact a developer if a correction is genuinely needed.",
-    };
+  const hasPaymentActivity = (nonCancelledPayments ?? 0) > 0;
+  const paidSoFar = Number(bill.amount_paid) || 0;
+
+  if (hasPaymentActivity) {
+    if (!canEditPaidBill(profile)) {
+      return {
+        ok: false,
+        error:
+          "A payment has already been made against this bill — only the owner can correct it now.",
+      };
+    }
+    if (bill.status !== "approved") {
+      return {
+        ok: false,
+        error:
+          `A bill with payment activity can only be corrected from the due list (this one is ${bill.status}).`,
+      };
+    }
   }
 
   // Read updated fields. Empty strings mean "leave unchanged"? No —
@@ -779,6 +802,50 @@ export async function editBillAction(
     return { ok: false, error: "TDS / TCS must each be between 0 and 100." };
   }
 
+  // ── The floor, on a bill that is already part paid ────────────
+  // What the vendor ends up owed must still cover what they have
+  // already been given. The arithmetic mirrors the DB's generated
+  // amount_payable_to_vendor exactly — base = subtotal minus any
+  // partial rejection, GST and TDS on base, TCS on base + GST — so
+  // the check and the stored value cannot disagree.
+  const editReason = String(formData.get("edit_reason") || "").trim();
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const inr = (n: number) =>
+    "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+  if (hasPaymentActivity) {
+    if (editReason.length < 3) {
+      return {
+        ok: false,
+        error: "Give a reason for changing a bill that has already been part paid.",
+      };
+    }
+    // The vendor is NOT changeable here. The money already went to
+    // the firm named on this bill; repointing it would silently
+    // hand their payments to somebody else.
+    if (billVendorId !== String(bill.bill_vendor_id ?? "")) {
+      return {
+        ok: false,
+        error:
+          "The vendor can't be changed once a payment has been made against this bill. Reverse the payment first, or raise a separate bill.",
+      };
+    }
+    const base = amountSubtotal - (Number(bill.partial_rejection_amount) || 0);
+    const gstAmt = r2((base * gstPercent) / 100);
+    const tdsAmt = r2((base * tdsPercent) / 100);
+    const tcsAmt = r2(((base + gstAmt) * tcsPercent) / 100);
+    const newPayable = r2(base + gstAmt - tdsAmt + tcsAmt);
+    if (newPayable < paidSoFar) {
+      return {
+        ok: false,
+        error:
+          `Already paid ${inr(paidSoFar)} on this bill. This change would drop the payable to ` +
+          `${inr(newPayable)}, below what the vendor has been given — the bill can go up, ` +
+          `but not below what has already left the bank. Reverse a payment first if that is what you mean to do.`,
+      };
+    }
+  }
+
   const now = new Date().toISOString();
   const updatePayload: Record<string, unknown> = {
     bill_vendor_id: billVendorId,
@@ -819,12 +886,62 @@ export async function editBillAction(
     return { ok: false, error: updErr.message };
   }
 
+  // Measured, not computed. The floor above was checked before the
+  // write; a payment confirmed in that gap could still have put the
+  // bill underwater. Re-read what the database actually stored and,
+  // if it went negative, put the money fields back exactly as they
+  // were rather than leave a vendor retrospectively overpaid.
+  if (hasPaymentActivity) {
+    const { data: after } = await supabase
+      .from("bills")
+      .select("amount_outstanding, amount_paid")
+      .eq("id", billId)
+      .maybeSingle();
+    if (after && Number(after.amount_outstanding) < 0) {
+      await supabase
+        .from("bills")
+        .update({
+          amount_subtotal: bill.amount_subtotal,
+          gst_percent: bill.gst_percent,
+          cgst_percent: bill.cgst_percent,
+          sgst_percent: bill.sgst_percent,
+          igst_percent: bill.igst_percent,
+          tds_percent: bill.tds_percent,
+          tcs_percent: bill.tcs_percent,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", billId);
+      return {
+        ok: false,
+        error:
+          `A payment landed while you were editing — ${inr(Number(after.amount_paid) || 0)} is now paid on ` +
+          `this bill, which the new amount would not cover. The amounts have been put back as they were; ` +
+          `reopen the bill and try again.`,
+      };
+    }
+  }
+
   void Promise.all([
-    logAudit(profile.id, "bill_edited", "bill", billId, {
-      token: bill.token,
-      from_status: bill.status,
-      to_status: nextStatus ?? bill.status,
-    }),
+    logAudit(
+      profile.id,
+      hasPaymentActivity ? "bill_edited_after_payment" : "bill_edited",
+      "bill",
+      billId,
+      {
+        token: bill.token,
+        from_status: bill.status,
+        to_status: nextStatus ?? bill.status,
+        ...(hasPaymentActivity
+          ? {
+              reason: editReason,
+              paid_so_far: paidSoFar,
+              subtotal_from: Number(bill.amount_subtotal) || 0,
+              subtotal_to: amountSubtotal,
+              payable_from: Number(bill.amount_payable_to_vendor) || 0,
+            }
+          : {}),
+      },
+    ),
     nextStatus === "pending_approval"
       ? notify(
           "bill_resubmitted",

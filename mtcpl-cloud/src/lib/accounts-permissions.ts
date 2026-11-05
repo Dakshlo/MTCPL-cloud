@@ -256,3 +256,23 @@ export function canApproveDebit(p: Pick<Profile, "role">): boolean {
   if (p.role === "owner") return true;
   return false;
 }
+
+/**
+ * Correct a bill that has ALREADY been part paid.
+ *
+ * Daksh Nov 2026 — until now any non-cancelled payment row froze the
+ * bill outright and the UI said "contact a developer", which is
+ * literally what happened: corrections were being made by hand in
+ * SQL. The owner can now do it in the app.
+ *
+ * Tighter than canConfirmPayments (which also lets in accountant_star
+ * and can_approve_bills holders) because this rewrites the value of a
+ * bill against which money has already left the bank. Owner and dev
+ * only. The amount floor in editBillAction is enforced regardless of
+ * who is asking.
+ */
+export function canEditPaidBill(p: Pick<Profile, "role">): boolean {
+  if (p.role === "developer") return true;
+  if (p.role === "owner") return true;
+  return false;
+}

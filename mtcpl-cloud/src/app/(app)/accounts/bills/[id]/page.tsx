@@ -6,6 +6,7 @@ import { getProfilesMap } from "@/lib/profiles";
 import {
   canApproveBills,
   canConfirmPayments,
+  canEditPaidBill,
   canHoldBill,
   canSettleBills,
   canManageAccounts,
@@ -251,9 +252,16 @@ export default async function BillDetailPage({
       p.status === "bank_rejected",
   );
   const isLocked = payments.some((p) => p.status !== "cancelled");
+  // Daksh Nov 2026 — a part-paid bill is no longer a dead end. The
+  // owner can correct the amount; editBillAction holds a floor at
+  // the money already paid and freezes the vendor. Everything else
+  // a payment blocks (cancel, delete) stays blocked.
+  const canCorrectPaidBill =
+    isLocked && bill.status === "approved" && canEditPaidBill(profile);
   const isOwnBill = bill.submitted_by === profile.id;
   const canEdit =
-    !isLocked &&
+    canCorrectPaidBill ||
+    (!isLocked &&
     ((bill.status === "rejected" &&
       (canApproveBills(profile) || isOwnBill || canSubmitBills(profile))) ||
       // Mig 058 follow-on (Daksh): pending bills are also editable
@@ -267,7 +275,7 @@ export default async function BillDetailPage({
       // Mig 042 follow-on (Daksh): once a bill is in the due-bills
       // list, only the owner can edit. Accountant cannot — they must
       // ask the owner. The button stays hidden for them.
-      (bill.status === "approved" && canConfirmPayments(profile)));
+      (bill.status === "approved" && canConfirmPayments(profile))));
 
   // Timeline events for the right rail
   const timeline: Array<{ at: string; label: string; by: string | null; tone: string }> = [];
@@ -1722,7 +1730,9 @@ export default async function BillDetailPage({
 
           {isLocked && (
             <p style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
-              Bill is locked — payment activity exists. Contact a developer for corrections.
+              {canCorrectPaidBill
+                ? "Payment activity exists — the bill can still be corrected, but not below the amount already paid, and the vendor is fixed."
+                : "Bill is locked — payment activity exists. Only the owner can correct it now."}
             </p>
           )}
         </div>
@@ -1778,7 +1788,7 @@ export default async function BillDetailPage({
                 Actions
               </div>
               <Link href={`/accounts/bills/${bill.id}/edit`} style={BUTTON_STYLES.secondary}>
-                ✏ Edit bill
+                {canCorrectPaidBill ? "✏ Correct bill (part paid)" : "✏ Edit bill"}
               </Link>
               {/* Mig 058 follow-on (Daksh) — accountant + biller
                   can now cancel their own pending/rejected bills

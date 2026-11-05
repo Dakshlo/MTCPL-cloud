@@ -73,6 +73,7 @@ export function BillEntryForm({
   billId,
   preSelectedVendorId,
   lockedFields,
+  paidEdit,
 }: {
   vendors: BillVendorOption[];
   initialValues?: {
@@ -101,11 +102,18 @@ export function BillEntryForm({
    *  Pass a list of field names to render those inputs disabled
    *  + show a callout explaining "cancel + recreate" is the way
    *  to change them. */
-  lockedFields?: Array<"bill_date" | "vendor_bill_no">;
+  lockedFields?: Array<"bill_date" | "vendor_bill_no" | "bill_vendor_id">;
   /** When the user adds a vendor from the page-header button, the
    *  add-vendor flow redirects to `?picked=<id>` and we auto-select
    *  that vendor here. */
   preSelectedVendorId?: string | null;
+  /** Daksh Nov 2026 — set when the bill being edited has already
+   *  been part paid. The amount may go UP freely but can never be
+   *  cut below `paidAmount`, the vendor is frozen, and a reason is
+   *  required. editBillAction re-checks all three server-side; this
+   *  is here so the owner sees the floor while typing instead of
+   *  being refused on save. */
+  paidEdit?: { paidAmount: number; partialRejection: number };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -113,7 +121,9 @@ export function BillEntryForm({
   const locked = new Set(lockedFields ?? []);
   const billDateLocked = locked.has("bill_date");
   const vendorBillNoLocked = locked.has("vendor_bill_no");
+  const vendorLocked = locked.has("bill_vendor_id");
   const anyTokenFieldLocked = billDateLocked || vendorBillNoLocked;
+  const [editReason, setEditReason] = useState("");
   // Mig 042 follow-on (Daksh) — duplicate-bill errors get their own
   // small centered modal. Captures the conflicting bill no + vendor
   // name + financial year so the popup can show "Invoice X with
@@ -178,15 +188,44 @@ export function BillEntryForm({
   const inferredMode: "intra" | "inter" =
     initialIgst > 0 ? "inter" : "intra";
 
+  // Daksh Nov 2026 — 9 / 9 / 18 are NEW-bill conveniences, and they
+  // must not leak into an edit. A bill that genuinely carries 0% GST
+  // has initialCgst = initialGst = 0 and used to fall straight through
+  // to "9", so simply opening the edit screen on a zero-GST bill and
+  // saving re-presented it with 18% tax added — e.g. T-2025-357 would
+  // have jumped from ₹4,20,636 to ₹4,96,350 with nobody typing a
+  // figure. In edit mode a zero is a fact about the bill, not a blank
+  // to fill in.
+  const isEdit = mode === "edit";
   const [gstMode, setGstMode] = useState<"intra" | "inter">(inferredMode);
   const [cgstPercent, setCgstPercent] = useState<string>(
-    initialCgst > 0 ? String(initialCgst) : initialGst > 0 && inferredMode === "intra" ? String(initialGst / 2) : "9",
+    initialCgst > 0
+      ? String(initialCgst)
+      : initialGst > 0 && inferredMode === "intra"
+        ? String(initialGst / 2)
+        : isEdit
+          ? "0"
+          : "9",
   );
   const [sgstPercent, setSgstPercent] = useState<string>(
-    initialSgst > 0 ? String(initialSgst) : initialGst > 0 && inferredMode === "intra" ? String(initialGst / 2) : "9",
+    initialSgst > 0
+      ? String(initialSgst)
+      : initialGst > 0 && inferredMode === "intra"
+        ? String(initialGst / 2)
+        : isEdit
+          ? "0"
+          : "9",
   );
   const [igstPercent, setIgstPercent] = useState<string>(
-    initialIgst > 0 ? String(initialIgst) : "18",
+    initialIgst > 0
+      ? String(initialIgst)
+      : isEdit
+        ? // Switching an existing intra-state bill to inter-state should
+          // carry its own combined rate across, not an invented 18.
+          initialGst > 0
+          ? String(initialGst)
+          : "0"
+        : "18",
   );
 
   const [tdsPercent, setTdsPercent] = useState<string>(
@@ -228,6 +267,20 @@ export function BillEntryForm({
   // Mig 062 — show the CFT input when this vendor sells raw stone
   // blocks (any of the Block Purchase sub-types). Hidden otherwise.
   const showBlockCft = isBlockPurchaseCategory(selectedVendor?.category);
+
+  // Daksh Nov 2026 — the floor on a part-paid bill. Recomputed from
+  // the DB's own formula (base = subtotal minus any partial
+  // rejection; GST and TDS on base; TCS on base + GST) rather than
+  // reusing `payableToVendor` above, which predates partial
+  // rejections and would read high on a bill that has one.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const floorBase = subtotalNum - (paidEdit?.partialRejection ?? 0);
+  const floorGst = r2((floorBase * gstNum) / 100);
+  const floorTds = r2((floorBase * (showTds ? tdsNum : 0)) / 100);
+  const floorTcs = r2(((floorBase + floorGst) * (showTcs ? tcsNum : 0)) / 100);
+  const newPayable = r2(floorBase + floorGst - floorTds + floorTcs);
+  const belowFloor = paidEdit != null && newPayable < paidEdit.paidAmount;
+  const reasonMissing = paidEdit != null && editReason.trim().length < 3;
 
   // Gating: every other field stays disabled until a vendor is
   // picked. Daksh's employees were submitting bills with the vendor
@@ -423,6 +476,15 @@ export function BillEntryForm({
       return setError("TDS% must be between 0 and 100.");
     if (showTcs && (!Number.isFinite(tcsNum) || tcsNum < 0 || tcsNum > 100))
       return setError("TCS% must be between 0 and 100.");
+    if (paidEdit) {
+      if (reasonMissing)
+        return setError("Say why this already-paid bill is being changed.");
+      if (belowFloor)
+        return setError(
+          `Already paid ₹${paidEdit.paidAmount.toLocaleString("en-IN")}. This would drop the payable to ` +
+            `₹${newPayable.toLocaleString("en-IN")} — a bill can go up, but not below what has already been paid.`,
+        );
+    }
 
     const formData = new FormData();
     if (mode === "edit" && billId) formData.set("bill_id", billId);
@@ -438,6 +500,7 @@ export function BillEntryForm({
     formData.set("gst_percent", String(gstNum));
     formData.set("tds_percent", String(showTds ? tdsNum : 0));
     formData.set("tcs_percent", String(showTcs ? tcsNum : 0));
+    if (paidEdit) formData.set("edit_reason", editReason.trim());
     // Mig 062 — only attach block_cft when the selected vendor is a
     // block-purchase one. Otherwise leave the form key absent so the
     // action sets the column to NULL (or keeps existing NULL on edit).
@@ -624,12 +687,35 @@ export function BillEntryForm({
             </div>
           ) : (
             <>
-              <FormField label="Vendor" required>
-                <VendorPicker
-                  vendors={vendors}
-                  selectedId={vendorId}
-                  onChange={handleVendorChange}
-                />
+              <FormField
+                label="Vendor"
+                required
+                hint={
+                  vendorLocked
+                    ? "Locked — money has already gone to this vendor on this bill."
+                    : undefined
+                }
+              >
+                {vendorLocked ? (
+                  <div
+                    style={{
+                      ...lockedInputOverlay,
+                      padding: "11px 13px",
+                      borderWidth: 1,
+                      borderRadius: 9,
+                      fontSize: 14,
+                      fontWeight: 700,
+                    }}
+                  >
+                    🔒 {selectedVendor?.name ?? "—"}
+                  </div>
+                ) : (
+                  <VendorPicker
+                    vendors={vendors}
+                    selectedId={vendorId}
+                    onChange={handleVendorChange}
+                  />
+                )}
               </FormField>
               <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
                 Click the field above to search and pick a vendor. Need a new one? Use the{" "}
@@ -1205,23 +1291,126 @@ export function BillEntryForm({
           </>
         ) : null}
 
+        {/* Daksh Nov 2026 — the already-paid floor, shown while the
+            owner types rather than sprung on them at save time. */}
+        {paidEdit && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              padding: "12px 13px",
+              borderRadius: 10,
+              background: belowFloor ? "rgba(220,38,38,0.07)" : ACCOUNTS_TOKENS.warningLight,
+              border: `1px solid ${belowFloor ? "rgba(220,38,38,0.45)" : ACCOUNTS_TOKENS.warning}`,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 8,
+                fontSize: 11.5,
+                fontWeight: 800,
+                color: belowFloor ? "#b91c1c" : ACCOUNTS_TOKENS.warning,
+              }}
+            >
+              <span>ALREADY PAID</span>
+              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
+                ₹{paidEdit.paidAmount.toLocaleString("en-IN")}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                color: belowFloor ? "#b91c1c" : "var(--muted)",
+              }}
+            >
+              {belowFloor ? (
+                <>
+                  <strong>This would leave the vendor overpaid.</strong> The new payable is
+                  ₹{newPayable.toLocaleString("en-IN")}, below what they have already been
+                  given. A bill can go up, but not below money that has left the bank.
+                </>
+              ) : (
+                <>
+                  New payable ₹{newPayable.toLocaleString("en-IN")} — leaves{" "}
+                  <strong>₹{(newPayable - paidEdit.paidAmount).toLocaleString("en-IN")}</strong>{" "}
+                  outstanding. The vendor is locked on a bill that has been paid.
+                </>
+              )}
+            </div>
+            <label style={{ display: "block" }}>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--muted)",
+                  marginBottom: 4,
+                }}
+              >
+                Why is this changing? *
+              </span>
+              <textarea
+                value={editReason}
+                onChange={(e) => setEditReason(e.target.value)}
+                rows={2}
+                maxLength={300}
+                placeholder="e.g. vendor sent a revised bill with extra material"
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  fontSize: 12.5,
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "#fff",
+                  color: "var(--text)",
+                  outline: "none",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                }}
+              />
+            </label>
+          </div>
+        )}
+
         <button
           type="submit"
-          disabled={pending}
+          disabled={pending || belowFloor || reasonMissing}
+          title={
+            belowFloor
+              ? "The new amount is below what has already been paid."
+              : reasonMissing
+                ? "Give a reason for the change."
+                : undefined
+          }
           style={{
             ...BUTTON_STYLES.primary,
             width: "100%",
             justifyContent: "center",
             padding: "11px 18px",
             fontSize: 14,
+            ...(belowFloor || reasonMissing ? { opacity: 0.5, cursor: "not-allowed" } : null),
           }}
         >
-          {pending ? "Saving…" : mode === "edit" ? "Save & resubmit" : "Submit for audit"}
+          {pending
+            ? "Saving…"
+            : paidEdit
+              ? "Save correction"
+              : mode === "edit"
+                ? "Save & resubmit"
+                : "Submit for audit"}
         </button>
 
         <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
-          The bill goes to the owner's audit queue. Once approved, it
-          lands in the accountant's due list.
+          {paidEdit
+            ? "The bill stays in the due list and keeps its payments. The change is recorded against your name with the reason you gave."
+            : "The bill goes to the owner's audit queue. Once approved, it lands in the accountant's due list."}
         </p>
       </aside>
     </form>

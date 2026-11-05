@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   canApproveBills,
   canConfirmPayments,
+  canEditPaidBill,
   canSubmitBills,
 } from "@/lib/accounts-permissions";
 import {
@@ -28,7 +29,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
   const { data: bill } = await supabase
     .from("bills")
     .select(
-      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, block_cft, status, submitted_by",
+      "id, bill_vendor_id, vendor_bill_no, bill_date, description, cost_head, amount_subtotal, gst_percent, cgst_percent, sgst_percent, igst_percent, tds_percent, tcs_percent, block_cft, status, submitted_by, amount_paid, partial_rejection_amount",
     )
     .eq("id", id)
     .maybeSingle();
@@ -58,17 +59,32 @@ export default async function EditBillPage({ params }: { params: Params }) {
   // While pending approval, lock the two fields that feed the
   // token. The user is told to cancel + recreate if they need to
   // change either.
-  const lockedFields: Array<"bill_date" | "vendor_bill_no"> =
+  const lockedFields: Array<"bill_date" | "vendor_bill_no" | "bill_vendor_id"> =
     bill.status === "pending_approval" ? ["bill_date", "vendor_bill_no"] : [];
 
+  // Daksh Nov 2026 — a part-paid bill is no longer a dead end. The
+  // owner can correct it, but the vendor is frozen (the money has
+  // already gone to them) and the form holds a floor at the amount
+  // already paid. editBillAction re-checks both server-side.
   const { count: lockedPayments } = await supabase
     .from("bill_payments")
     .select("*", { count: "exact", head: true })
     .eq("bill_id", id)
     .neq("status", "cancelled");
-  if ((lockedPayments ?? 0) > 0) {
-    redirect(`/accounts/bills/${id}?error=Bill+is+locked+%E2%80%94+a+payment+has+been+proposed+or+made.`);
+  const hasPaymentActivity = (lockedPayments ?? 0) > 0;
+  if (hasPaymentActivity && !canEditPaidBill(profile)) {
+    redirect(
+      `/accounts/bills/${id}?error=A+payment+has+already+been+made+on+this+bill+%E2%80%94+only+the+owner+can+correct+it.`,
+    );
   }
+  if (hasPaymentActivity) lockedFields.push("bill_vendor_id");
+
+  const paidEdit = hasPaymentActivity
+    ? {
+        paidAmount: Number(bill.amount_paid) || 0,
+        partialRejection: Number(bill.partial_rejection_amount) || 0,
+      }
+    : undefined;
 
   const { data: vendorRows } = await supabase
     .from("bill_vendors")
@@ -100,11 +116,13 @@ export default async function EditBillPage({ params }: { params: Params }) {
       <AccountsHero
         title="Edit bill"
         description={
-          bill.status === "rejected"
-            ? "This bill was sent back for edit. Fix the entry and resave — it goes back to the audit queue."
-            : bill.status === "approved"
-              ? "Owner-only edit. The bill stays in 'approved' (due) status; only the entry details change. Locked once any payment is proposed."
-              : "You're editing a bill while it's still in audit. Status stays the same after save. Bill date and vendor invoice number are locked — they feed the token; cancel + recreate to change either."
+          paidEdit
+            ? `This bill has already been paid ₹${paidEdit.paidAmount.toLocaleString("en-IN")}. You can correct the amount — it can go up freely, but it cannot be cut below what the vendor has already been given. The vendor is locked, and a reason is required.`
+            : bill.status === "rejected"
+              ? "This bill was sent back for edit. Fix the entry and resave — it goes back to the audit queue."
+              : bill.status === "approved"
+                ? "Owner-only edit. The bill stays in 'approved' (due) status; only the entry details change."
+                : "You're editing a bill while it's still in audit. Status stays the same after save. Bill date and vendor invoice number are locked — they feed the token; cancel + recreate to change either."
         }
         actions={
           <>
@@ -122,6 +140,7 @@ export default async function EditBillPage({ params }: { params: Params }) {
         mode="edit"
         billId={id}
         lockedFields={lockedFields}
+        paidEdit={paidEdit}
         initialValues={{
           bill_vendor_id: bill.bill_vendor_id,
           vendor_bill_no: bill.vendor_bill_no,
