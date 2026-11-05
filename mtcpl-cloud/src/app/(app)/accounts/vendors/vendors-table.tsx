@@ -9,6 +9,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+
+import { KEEP_YOUR_PLACE_CSS, useKeepYourPlace } from "@/lib/use-keep-your-place";
 import {
   ACCOUNTS_TOKENS,
   BUTTON_STYLES,
@@ -52,6 +54,10 @@ export function VendorsTable({
   customCategories?: CustomBillVendorCategory[];
 }) {
   const [query, setQuery] = useState("");
+  // Daksh Nov 2026 — 323 vendors; stepping into a profile and
+  // coming back used to dump you at the top. Same behaviour as
+  // Due Bills, same hook.
+  const { onOpen } = useKeepYourPlace("vendors", "data-vendor-id");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -74,6 +80,9 @@ export function VendorsTable({
 
   return (
     <>
+      {/* Lights the row you just came back from for a couple of
+          seconds, so your eye lands on it without hunting. */}
+      <style>{KEEP_YOUR_PLACE_CSS}</style>
       <div
         style={{
           display: "flex",
@@ -133,6 +142,7 @@ export function VendorsTable({
                   return (
                     <tr
                       key={v.id}
+                      data-vendor-id={v.id}
                       style={{
                         background: idx % 2 === 0 ? "#fff" : ACCOUNTS_TOKENS.surfaceMuted,
                         opacity: v.isActive ? 1 : 0.6,
@@ -148,6 +158,7 @@ export function VendorsTable({
                           subLabel={v.nickname ?? v.email ?? undefined}
                           size={36}
                           href={`/accounts/vendors/${v.id}`}
+                          onClick={() => onOpen(v.id)}
                         />
                       </td>
                       <td style={TABLE_STYLES.td}>
@@ -213,6 +224,7 @@ export function VendorsTable({
                         <div style={{ display: "flex", gap: 6 }}>
                           <Link
                             href={`/accounts/vendors/${v.id}`}
+                            onClick={() => onOpen(v.id)}
                             style={{ ...BUTTON_STYLES.secondary, padding: "5px 12px", fontSize: 11 }}
                           >
                             View

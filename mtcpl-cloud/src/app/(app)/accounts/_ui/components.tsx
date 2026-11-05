@@ -230,11 +230,15 @@ export function VendorIdentity({
   subLabel,
   size = 32,
   href,
+  onClick,
 }: {
   name: string;
   subLabel?: string | null;
   size?: number;
   href?: string;
+  /** Fires on the link — used by the keep-your-place hook to record
+   *  the row being opened before the navigation happens. */
+  onClick?: () => void;
 }) {
   const body = (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -253,7 +257,7 @@ export function VendorIdentity({
   );
   if (href) {
     return (
-      <Link href={href} className="acct-link" style={{ textDecoration: "none", color: "inherit" }}>
+      <Link href={href} onClick={onClick} className="acct-link" style={{ textDecoration: "none", color: "inherit" }}>
         {body}
       </Link>
     );
