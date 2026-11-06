@@ -27,6 +27,8 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import { useLiveStock } from "@/lib/use-live-stock";
+
 export type TakeTool = {
   id: string;
   name: string;
@@ -48,8 +50,21 @@ export type RosterPerson = {
   /** The man whose company it is — he heads his own group. */
   isPrincipal: boolean;
 };
-export type TeamMate = { id: string; name: string; maskedPhone: string };
-type Session = { name: string; company: string | null; canEnrol: boolean };
+export type TeamMate = {
+  id: string;
+  name: string;
+  maskedPhone: string;
+  /** Only on the developer's view, where one list covers all three. */
+  company?: string;
+};
+export type VendorChoice = { id: string; name: string };
+type Session = {
+  name: string;
+  company: string | null;
+  canEnrol: boolean;
+  /** "own" = a vendor's own men · "any" = the developer, who picks. */
+  enrolScope: "own" | "any" | null;
+};
 
 type SendRes = { ok: true; sentTo: string } | { ok: false; error: string };
 type TeamRes =
@@ -80,18 +95,28 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
+/** How often the cupboard asks whether the shelf moved. Two men can
+ *  genuinely be standing here at once, so this one is quick — it is a
+ *  few hundred bytes and it stops dead while the phone is pocketed. */
+const QR_POLL_MS = 2500;
+
 export function GuestTakeClient({
-  token, label, tools, roster, session, team: initialTeam,
+  token, label, tools, stockSig, roster, session, team: initialTeam, vendorChoices,
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
   enrolAction, removeOperatorAction,
 }: {
   token: string;
   label: string;
   tools: TakeTool[];
+  /** The shelf as the server last rendered it (mig 236). */
+  stockSig: string;
   roster: RosterPerson[];
   session: Session | null;
   /** The signed-in vendor's own men, if he has any. */
   team: TeamMate[];
+  /** Companies the developer may enrol under. Empty for a vendor,
+   *  whose company is fixed by his session. */
+  vendorChoices: VendorChoice[];
   sendCodeAction: (fd: FormData) => Promise<SendRes>;
   verifyCodeAction: (fd: FormData) => Promise<VerifyRes>;
   signOutAction: (fd: FormData) => Promise<{ ok: boolean }>;
@@ -119,8 +144,28 @@ export function GuestTakeClient({
   const [team, setTeam] = useState<TeamMate[]>(initialTeam);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newVendor, setNewVendor] = useState("");
   const [teamMsg, setTeamMsg] = useState<string | null>(null);
   const [dropping, setDropping] = useState<string | null>(null);
+
+  // Only while somebody is actually looking at the shelf. On the name
+  // and code steps there is no number on screen to go stale.
+  useLiveStock({
+    signature: stockSig,
+    everyMs: QR_POLL_MS,
+    token,
+    enabled: step === "tool" || step === "qty",
+  });
+
+  // `taken` is what THIS visit has taken, held locally so the shelf
+  // drops the moment he taps rather than waiting for a round trip.
+  // Once the poll pulls fresh numbers in, the server's figure already
+  // includes those takes — so the local tally has to be dropped at the
+  // same instant or it would be subtracted twice and the shelf would
+  // read short. The signature changing IS that instant.
+  useEffect(() => {
+    setTaken({});
+  }, [stockSig]);
 
   const stockOf = (t: TakeTool) => Math.max(0, t.stock - (taken[t.id] ?? 0));
 
@@ -186,9 +231,12 @@ export function GuestTakeClient({
       setWho({
         name: r.name,
         company: picked.company,
-        // Only the man whose company it is. The server decides this
-        // again on every team call; this is just what to draw.
-        canEnrol: picked.kind === "profile" && picked.isPrincipal,
+        // The server decides this again on every team call; this is
+        // only what to draw. A vendor principal manages his own men;
+        // the developer (no company, so no principal flag) manages all
+        // three and is given a picker.
+        canEnrol: picked.kind === "profile" && (picked.isPrincipal || vendorChoices.length > 0),
+        enrolScope: picked.kind !== "profile" ? null : picked.isPrincipal ? "own" : "any",
       });
       setStep("tool");
     });
@@ -223,7 +271,7 @@ export function GuestTakeClient({
       setWho(null); setPicked(null); setTally([]); setTaken({});
       setTool(null); setDone(null); setCode(""); setErr(null);
       setTeamOpen(false); setTeam([]); setTeamMsg(null);
-      setNewName(""); setNewPhone(""); setDropping(null);
+      setNewName(""); setNewPhone(""); setNewVendor(""); setDropping(null);
       setStep("who");
     });
   }
@@ -235,6 +283,7 @@ export function GuestTakeClient({
       fd.set("token", token);
       fd.set("name", newName);
       fd.set("phone", newPhone);
+      if (newVendor) fd.set("vendor_id", newVendor);
       const r = await enrolAction(fd);
       if (!r.ok) { setErr(r.error); return; }
       setTeam(r.team);
@@ -478,7 +527,8 @@ export function GuestTakeClient({
               >
                 <span aria-hidden>👷</span>
                 <span className="gt-team-label">
-                  My men{team.length > 0 ? ` · ${team.length}` : ""}
+                  {who.enrolScope === "any" ? "The men" : "My men"}
+                  {team.length > 0 ? ` · ${team.length}` : ""}
                 </span>
                 <span className="gt-team-caret" aria-hidden>{teamOpen ? "▴" : "▾"}</span>
               </button>
@@ -486,9 +536,19 @@ export function GuestTakeClient({
               {teamOpen && (
                 <div className="gt-team-body">
                   <p className="gt-team-note">
-                    Anyone you add here can scan this cupboard and take tools on
-                    his own phone. It shows in the office register as his name,
-                    under {who.company ?? "you"}.
+                    {who.enrolScope === "any" ? (
+                      <>
+                        Anyone added here can scan this cupboard and take tools on his
+                        own phone. Pick whose man he is — the office register files
+                        every take under that company.
+                      </>
+                    ) : (
+                      <>
+                        Anyone you add here can scan this cupboard and take tools on
+                        his own phone. It shows in the office register as his name,
+                        under {who.company ?? "you"}.
+                      </>
+                    )}
                   </p>
 
                   {team.length > 0 && (
@@ -500,7 +560,9 @@ export function GuestTakeClient({
                           </span>
                           <span className="gt-mate-body">
                             <strong>{m.name}</strong>
-                            <span>{m.maskedPhone}</span>
+                            <span>
+                              {m.company ? `${m.company} · ` : ""}{m.maskedPhone}
+                            </span>
                           </span>
                           {dropping === m.id ? (
                             <span className="gt-mate-confirm">
@@ -527,6 +589,18 @@ export function GuestTakeClient({
                   )}
 
                   <div className="gt-addmate">
+                    {who.enrolScope === "any" && (
+                      <select
+                        value={newVendor}
+                        onChange={(e) => setNewVendor(e.target.value)}
+                        aria-label="Which vendor he works for"
+                      >
+                        <option value="">Which vendor?</option>
+                        {vendorChoices.map((v) => (
+                          <option key={v.id} value={v.id}>{v.name}</option>
+                        ))}
+                      </select>
+                    )}
                     <input
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
@@ -546,7 +620,12 @@ export function GuestTakeClient({
                       type="button"
                       className="gt-addmate-go"
                       onClick={addMate}
-                      disabled={pending || newName.trim().length < 2 || newPhone.replace(/\D/g, "").length < 10}
+                      disabled={
+                        pending ||
+                        newName.trim().length < 2 ||
+                        newPhone.replace(/\D/g, "").length < 10 ||
+                        (who.enrolScope === "any" && !newVendor)
+                      }
                     >
                       {pending ? "Adding…" : "Add him"}
                     </button>
@@ -795,7 +874,12 @@ const CSS = `
   border-radius:13px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
   outline:none;
 }
-.gt-addmate input:focus { border-color:var(--brand); }
+.gt-addmate select {
+  width:100%; padding:13px 14px; font:inherit; font-size:16px;
+  border-radius:13px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
+  outline:none; appearance:none;
+}
+.gt-addmate input:focus, .gt-addmate select:focus { border-color:var(--brand); }
 .gt-addmate-go {
   padding:13px 16px; border-radius:13px; border:none; cursor:pointer; font:inherit;
   font-size:15px; font-weight:800; color:#fff;

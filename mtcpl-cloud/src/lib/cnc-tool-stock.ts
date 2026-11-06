@@ -205,6 +205,77 @@ export async function stockForTool(toolId: string): Promise<number> {
   return (rows ?? []).reduce((a, r) => a + Number((r as { delta: number }).delta), 0);
 }
 
+// ── What mig 235's atomic write hands back ─────────────────────────
+
+/**
+ * The answer from cnc_tool_record_move.
+ *
+ * Every write to the register goes through that function, because the
+ * read-then-insert the actions used to do could be interleaved by a
+ * second phone at the same cupboard: both read "1 left", both passed
+ * the check, both took it. The function holds a lock on the tool from
+ * the read to the insert; no amount of care in TypeScript can.
+ *
+ * It lives HERE and not beside the actions because a "use server"
+ * module may only export async functions — a plain helper in one is a
+ * build error, and one that tsc does not catch.
+ */
+export type MoveOutcome = {
+  ok: boolean;
+  noop?: boolean;
+  code?: "missing" | "archived" | "short";
+  movement_id?: string | null;
+  stock_before?: number;
+  stock_after?: number;
+  delta?: number;
+  stock?: number;
+  tool?: string;
+  unit?: string;
+};
+
+/** The sentence a refusal turns into. Written here rather than in the
+ *  database so it stays in the same voice as the rest of the screen,
+ *  and written once so the cupboard and the office say the same thing. */
+export function moveRefusal(r: MoveOutcome, opts?: { unit?: boolean }): string {
+  if (r.code === "missing") return "That tool is gone.";
+  if (r.code === "archived") return `${r.tool ?? "That tool"} is no longer in the store.`;
+  if (r.code === "short") {
+    const left = Number(r.stock ?? 0);
+    if (left <= 0) return `${r.tool ?? "That tool"} is finished. Tell the office.`;
+    const unit = opts?.unit === false ? "" : ` ${r.unit ?? "pcs"}`;
+    return `Only ${left}${unit} left — somebody has just taken some. Take ${left} or fewer.`;
+  }
+  return "Could not record that. Try again.";
+}
+
+// ── Is what you are looking at still true? (mig 236) ───────────────
+
+/**
+ * One short string for the whole shelf.
+ *
+ * Daksh: "stock should update every second." Rather than stream the
+ * numbers, both screens poll this and reload only when it changes —
+ * so the common case, where nothing moved, costs one small aggregate
+ * and no re-render at all.
+ *
+ * Sorted by id and formatted through Number() on BOTH sides, so the
+ * "25.00" that comes back from a numeric column and the 25 the page is
+ * holding produce the same character.
+ */
+export function stockSignature(rows: Array<{ id: string; stock: number }>): string {
+  return [...rows]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((r) => `${r.id}:${Number(r.stock)}`)
+    .join("|");
+}
+
+/** The same string, from the one-aggregate RPC the poll endpoint uses. */
+export function stockSignatureFromMap(map: Record<string, number | string>): string {
+  return stockSignature(
+    Object.entries(map).map(([id, stock]) => ({ id, stock: Number(stock) })),
+  );
+}
+
 // ── Views ──────────────────────────────────────────────────────────
 
 /** Tools worth showing first when taking: what the store has actually

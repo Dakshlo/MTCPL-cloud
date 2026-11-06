@@ -20,14 +20,17 @@ import {
   resolveToolStoreLink,
   takesThroughLinkToday,
 } from "@/lib/cnc-tool-guest";
+import { moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
 import {
   SESSION_HOURS,
   TOOL_OTP_DIGITS,
   currentToolSession,
+  enrollableVendors,
   sessionCookieName,
   startToolSession,
 } from "@/lib/cnc-tool-session";
 import {
+  allActiveOperators,
   operatorsForVendor,
   phoneAlreadyTaken,
   phoneDigits,
@@ -275,50 +278,36 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
     };
   }
 
-  // ── 5. The tool, and whether the shelf can cover it ──────────────
-  const { data: tool } = await admin
-    .from("cnc_tools")
-    .select("id, name, is_active")
-    .eq("id", toolId)
-    .maybeSingle();
-  if (!tool || !(tool as { is_active: boolean }).is_active) {
-    return { ok: false, error: "That tool is no longer in the store." };
-  }
-  const toolName = (tool as { name: string }).name;
-
-  // Stock is the sum of the register, never a stored number.
-  const { data: moves } = await admin
-    .from("cnc_tool_movements")
-    .select("delta")
-    .eq("tool_id", toolId)
-    .is("undone_at", null);
-  const stock = (moves ?? []).reduce(
-    (s, m) => s + Number((m as { delta: number | string }).delta ?? 0),
-    0,
-  );
-  if (stock <= 0) return { ok: false, error: `${toolName} is finished. Tell the office.` };
-  if (qty > stock) {
-    return { ok: false, error: `Only ${stock} left on the shelf. Take ${stock} or fewer.` };
-  }
-
-  // ── 6. Record it ─────────────────────────────────────────────────
-  // taken_by keeps the readable name every existing screen already
-  // shows; taken_by_profile_id is the part that cannot be typed.
-  const { error } = await admin.from("cnc_tool_movements").insert({
-    // The company this man belongs to — never asked for, taken from the
-    // session. It is what groups the office register: MOHIT, and under
-    // him whoever actually stood at the cupboard.
-    vendor_id: session.vendorId,
-    tool_id: toolId,
-    kind: "issue",
-    delta: -Math.abs(qty),
-    taken_by: session.name,
-    // Exactly one of these two, which mig 234 also enforces.
-    taken_by_profile_id: session.profileId,
-    taken_by_operator_id: session.operatorId,
-    guest_link_id: link.id,
+  // ── 5. Check the shelf and write the line, as ONE step ───────────
+  //
+  // Mig 235. This used to read the stock, decide, and then insert —
+  // three statements with daylight between them. Two men at the
+  // cupboard at the same second both read "1 left", both passed the
+  // check, and both took the last one. The check and the insert now
+  // happen inside a lock on that tool, so the second man's read
+  // already includes the first man's take and he is told the truth.
+  //
+  // taken_by keeps the readable name every existing screen shows;
+  // taken_by_profile_id / _operator_id is the part that cannot be
+  // typed, and vendor_id is what groups him under his company.
+  const { data: raw, error } = await admin.rpc("cnc_tool_record_move", {
+    p_tool_id: toolId,
+    p_kind: "issue",
+    p_delta: -Math.abs(qty),
+    p_taken_by: session.name,
+    p_taken_by_profile: session.profileId,
+    p_taken_by_operator: session.operatorId,
+    p_vendor_id: session.vendorId,
+    p_guest_link: link.id,
   });
   if (error) return { ok: false, error: error.message };
+
+  const res = (raw ?? {}) as MoveOutcome;
+
+  // The unit is dropped here: on the cupboard screen the number sits
+  // next to a big "PCS" already, and "only 3 pcs pcs left" is how that
+  // reads if both say it.
+  if (!res.ok) return { ok: false, error: moveRefusal(res, { unit: false }) };
 
   await admin
     .from("cnc_tool_sessions")
@@ -327,7 +316,12 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
 
   revalidatePath("/tools");
 
-  return { ok: true, left: stock - qty, toolName, qty };
+  return {
+    ok: true,
+    left: Number(res.stock_after ?? 0),
+    toolName: res.tool ?? "tool",
+    qty,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -348,17 +342,37 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
 // What this creates is NOT an app login. See mig 234 for why that line
 // matters more than it looks.
 
-export type TeamMember = { id: string; name: string; maskedPhone: string };
+export type TeamMember = {
+  id: string;
+  name: string;
+  maskedPhone: string;
+  /** Only filled on the developer's view, where one list covers all
+   *  three companies and the name alone would not say whose man it is. */
+  company?: string;
+};
 
 export type TeamResult =
   | { ok: true; team: TeamMember[]; message?: string }
   | { ok: false; error: string };
 
-const asTeam = (rows: ToolOperator[]): TeamMember[] =>
-  rows.map((o) => ({ id: o.id, name: o.name, maskedPhone: o.maskedPhone }));
+const asTeam = (rows: ToolOperator[], withCompany = false): TeamMember[] =>
+  rows.map((o) => ({
+    id: o.id,
+    name: o.name,
+    maskedPhone: o.maskedPhone,
+    ...(withCompany ? { company: o.vendorName } : {}),
+  }));
 
-/** The signed-in vendor, if they are allowed to manage a team. */
-async function enrollingVendor(token: string) {
+/**
+ * The signed-in person, if they may manage a team at all.
+ *
+ * Two shapes. A vendor principal manages HIS OWN men and the company
+ * is fixed by his session — a tampered form cannot reach another
+ * firm's list. The developer manages all three and therefore has to
+ * say which, so the company arrives on the form and is checked against
+ * the companies that actually have an account.
+ */
+async function enrollingVendor(token: string, wantVendorId?: string) {
   const resolved = await resolveToolStoreLink(token);
   if ("problem" in resolved) {
     return { ok: false as const, error: "This QR is not working. Ask the office." };
@@ -367,24 +381,60 @@ async function enrollingVendor(token: string) {
   if (!session) {
     return { ok: false as const, error: "Your sign-in has run out. Tap your name again." };
   }
-  if (!session.canEnrol || !session.vendorId || !session.profileId) {
-    return { ok: false as const, error: "Only the vendor can change their own team." };
+  if (!session.canEnrol || !session.profileId) {
+    return { ok: false as const, error: "Only a vendor can change a team." };
   }
-  return { ok: true as const, session, vendorId: session.vendorId, profileId: session.profileId };
+
+  if (session.enrolScope === "own") {
+    if (!session.vendorId) {
+      return { ok: false as const, error: "Only a vendor can change a team." };
+    }
+    return {
+      ok: true as const,
+      scope: "own" as const,
+      vendorId: session.vendorId,
+      profileId: session.profileId,
+    };
+  }
+
+  // The developer. No company of his own, so one has to be named.
+  const picked = (wantVendorId ?? "").trim();
+  if (!picked) {
+    return { ok: true as const, scope: "any" as const, vendorId: null, profileId: session.profileId };
+  }
+  const allowed = await enrollableVendors();
+  if (!allowed.some((v) => v.id === picked)) {
+    return { ok: false as const, error: "That is not one of the vendors." };
+  }
+  return { ok: true as const, scope: "any" as const, vendorId: picked, profileId: session.profileId };
 }
 
-/** Who is on my team right now. */
+/** Who is on the team right now — mine, or everybody's. */
 export async function myTeamAction(fd: FormData): Promise<TeamResult> {
   const who = await enrollingVendor(String(fd.get("token") || "").trim());
   if (!who.ok) return who;
-  return { ok: true, team: asTeam(await operatorsForVendor(who.vendorId)) };
+  if (who.scope === "any") {
+    return { ok: true, team: asTeam(await allActiveOperators(), true) };
+  }
+  return { ok: true, team: asTeam(await operatorsForVendor(who.vendorId!)) };
+}
+
+/** The list after a change, in whichever shape this signer sees. */
+async function teamFor(scope: "own" | "any", vendorId: string | null): Promise<TeamMember[]> {
+  return scope === "any"
+    ? asTeam(await allActiveOperators(), true)
+    : asTeam(await operatorsForVendor(vendorId!));
 }
 
 /** Add one of my men. Name and number, nothing else — anything more
  *  and a vendor standing at a cupboard will not finish the form. */
 export async function enrolOperatorAction(fd: FormData): Promise<TeamResult> {
-  const who = await enrollingVendor(String(fd.get("token") || "").trim());
+  const who = await enrollingVendor(
+    String(fd.get("token") || "").trim(),
+    String(fd.get("vendor_id") || "").trim(),
+  );
   if (!who.ok) return who;
+  if (!who.vendorId) return { ok: false, error: "Pick which vendor he works for." };
 
   const name = String(fd.get("name") || "").trim().replace(/\s+/g, " ");
   const phoneRaw = String(fd.get("phone") || "").trim();
@@ -409,6 +459,7 @@ export async function enrolOperatorAction(fd: FormData): Promise<TeamResult> {
     name,
     phone,
   });
+  const vendorId = who.vendorId;
   if (error) {
     // 23505 = the one-live-operator-per-number index. Two phones racing
     // the same enrolment land here rather than making two of him.
@@ -420,7 +471,7 @@ export async function enrolOperatorAction(fd: FormData): Promise<TeamResult> {
   revalidatePath("/tools");
   return {
     ok: true,
-    team: asTeam(await operatorsForVendor(who.vendorId)),
+    team: await teamFor(who.scope, vendorId),
     message: `${name} can now sign in at the cupboard.`,
   };
 }
@@ -439,9 +490,10 @@ export async function removeOperatorAction(fd: FormData): Promise<TeamResult> {
   if (!operatorId) return { ok: false, error: "Which man?" };
 
   const admin = createAdminSupabaseClient();
-  // .eq on the vendor as well as the id: a tampered form cannot remove
-  // another company's man.
-  const { data, error } = await admin
+  // A vendor is pinned to his own company, so a tampered form cannot
+  // reach another firm's man. The developer is not pinned, because
+  // all three teams are his to clean up.
+  let q = admin
     .from("cnc_tool_operators")
     .update({
       is_active: false,
@@ -449,10 +501,10 @@ export async function removeOperatorAction(fd: FormData): Promise<TeamResult> {
       removed_by: who.profileId,
     })
     .eq("id", operatorId)
-    .eq("vendor_id", who.vendorId)
-    .eq("is_active", true)
-    .select("name")
-    .maybeSingle();
+    .eq("is_active", true);
+  if (who.scope === "own") q = q.eq("vendor_id", who.vendorId!);
+
+  const { data, error } = await q.select("name").maybeSingle();
   if (error) return { ok: false, error: error.message };
 
   revalidatePath(`/guest/tools/${token}`);
@@ -460,7 +512,7 @@ export async function removeOperatorAction(fd: FormData): Promise<TeamResult> {
   const gone = (data as { name: string } | null)?.name;
   return {
     ok: true,
-    team: asTeam(await operatorsForVendor(who.vendorId)),
+    team: await teamFor(who.scope, who.vendorId),
     message: gone ? `${gone} taken off the list.` : "Already off the list.",
   };
 }

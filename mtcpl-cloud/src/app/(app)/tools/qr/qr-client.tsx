@@ -97,12 +97,21 @@ export function QrManager({
     doc.open();
     // Empty <title> on purpose: if the browser's own "Headers and
     // footers" box is ticked, the title is what it prints across the top.
+    //
+    // One line under the square and nothing else — Daksh, Nov 2026:
+    // "under that print qr could you write something like tools keliye
+    // scan kre." In Devanagari rather than romanised: the men reading
+    // it off a cupboard door read that faster.
     doc.write(
       '<!doctype html><html><head><meta charset="utf-8"><title></title><style>' +
         "@page{margin:12mm}" +
-        "html,body{margin:0;padding:0;background:#fff}" +
+        "html,body{margin:0;padding:0;background:#fff;color:#000}" +
         "svg{display:block;margin:0 auto;width:100%;height:auto;max-width:150mm}" +
-        "</style></head><body>" + svg + "</body></html>",
+        "p{margin:8mm 0 0;text-align:center;font-family:system-ui,-apple-system," +
+        "'Segoe UI','Nirmala UI','Noto Sans Devanagari',Arial,sans-serif;" +
+        "font-size:22pt;font-weight:700}" +
+        "</style></head><body>" + svg +
+        "<p>" + SCAN_LINE + "</p></body></html>",
     );
     doc.close();
 
@@ -168,10 +177,11 @@ export function QrManager({
             <>
               {/* ── The sticker. The heading names the door so two
                    cards can be told apart on screen; the printer gets
-                   the square on its own. ─────────────────────────── */}
+                   the square and the one line under it. ──────────── */}
               <div className="qr-sheet">
                 <div className="qr-sheet-head">TOOL STORE · {c.label.toUpperCase()}</div>
                 <div className="qr-code" dangerouslySetInnerHTML={{ __html: c.svg }} />
+                <div className="qr-sheet-scan">{SCAN_LINE}</div>
               </div>
 
               {/* ── Office-side detail, never printed ───────────── */}
@@ -252,6 +262,10 @@ export function QrManager({
   );
 }
 
+/** The one line that goes under the printed square. Kept here so the
+ *  preview on screen and the paper can never say different things. */
+const SCAN_LINE = "औज़ार के लिए यहाँ स्कैन करें";
+
 const CSS = `
 .qr-note { padding:11px 14px; border-radius:10px; font-size:13px; font-weight:600;
   margin-bottom:14px; display:flex; gap:8px; align-items:center; }
@@ -281,6 +295,7 @@ const CSS = `
   color:#8a6a2f; margin-bottom:16px; }
 .qr-code { display:grid; place-items:center; }
 .qr-code svg { width:100%; height:auto; max-width:300px; display:block; }
+.qr-sheet-scan { margin-top:14px; font-size:19px; font-weight:700; color:#111; }
 
 .qr-meta { flex:1 1 300px; min-width:0; display:flex; flex-direction:column; gap:12px; }
 .qr-metarow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -311,6 +326,7 @@ const CSS = `
 @media print {
   .no-print, nav, header.topbar, aside,
   .tc-page > header, .qr-sheet-head { display:none !important; }
+  .qr-sheet-scan { font-size:22pt; margin-top:8mm; }
   .qr-card { page-break-inside:avoid; display:block; }
   .qr-sheet { border:none; box-shadow:none; width:100%; max-width:none;
     padding:0; margin:0 auto; }

@@ -25,7 +25,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { canManageCncToolStore, canUseCncTools } from "@/lib/cnc-tool-permissions";
-import { loadStore } from "@/lib/cnc-tool-stock";
+import { loadStore, stockSignature } from "@/lib/cnc-tool-stock";
 import { allActiveOperators } from "@/lib/cnc-tool-operators";
 
 import { StoreClient } from "./store-client";
@@ -55,6 +55,7 @@ export default async function ToolStorePage() {
     <StoreClient
       tools={tools}
       movements={movements.slice(0, 300)}
+      stockSig={stockSignature(tools)}
       vendorNames={vendorNames}
       operators={operators.map((o) => ({
         id: o.id,

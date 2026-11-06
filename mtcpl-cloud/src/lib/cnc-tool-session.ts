@@ -66,11 +66,42 @@ export type ToolSession = {
   name: string;
   vendorId: string | null;
   vendorName: string | null;
-  /** May this session add somebody to its own team? True only for a
-   *  vendor principal: the man whose company it is. */
+  /** May this session add somebody to a team? */
   canEnrol: boolean;
+  /** WHOSE team. A vendor principal manages his own and only his own;
+   *  the developer (Daksh, Nov 2026: "as a developer in my number when
+   *  i login through qr i can also enroll operator under these 3
+   *  vendors") picks the company each time. */
+  enrolScope: "own" | "any" | null;
   expiresAt: string;
 };
+
+/** The companies a developer may enrol under: the ones with a vendor
+ *  account of their own, which is the same set the roster heads. */
+export async function enrollableVendors(): Promise<Array<{ id: string; name: string }>> {
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("profiles")
+    .select("vendor_id, is_active, role, vendors(name)")
+    .eq("role", "vendor")
+    .eq("is_active", true)
+    .not("vendor_id", "is", null);
+
+  const rows = (data ?? []) as Array<{
+    vendor_id: string | null;
+    vendors: { name: string } | { name: string }[] | null;
+  }>;
+
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    if (!r.vendor_id) continue;
+    const v = Array.isArray(r.vendors) ? r.vendors[0] ?? null : r.vendors;
+    out.set(r.vendor_id, v?.name ?? "—");
+  }
+  return [...out.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 /**
  * The roster the QR screen shows.
@@ -209,7 +240,7 @@ export async function currentToolSession(
   const admin = createAdminSupabaseClient();
   const { data } = await admin
     .from("cnc_tool_sessions")
-    .select("id, profile_id, operator_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name, is_active, vendor_id), cnc_tool_operators(name, is_active, vendor_id), vendors(name)")
+    .select("id, profile_id, operator_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name, is_active, vendor_id, role), cnc_tool_operators(name, is_active, vendor_id), vendors(name)")
     .eq("token", raw)
     .maybeSingle();
   if (!data) return null;
@@ -257,14 +288,27 @@ export async function currentToolSession(
     name,
     vendorId: row.vendor_id,
     vendorName: vend?.name ?? null,
-    // Only the man whose company it is. An operator cannot grow a team
-    // of his own, and the developer has no company to grow one under.
-    canEnrol: !!row.profile_id && !!row.vendor_id,
+    // A vendor principal, or the developer. An operator can never grow
+    // a team of his own — that is the one thing the two kinds of
+    // signer genuinely differ on.
+    canEnrol: !!row.profile_id && (!!row.vendor_id || prof?.role === "developer"),
+    enrolScope: !row.profile_id
+      ? null
+      : prof?.role === "developer"
+        ? "any"
+        : row.vendor_id
+          ? "own"
+          : null,
     expiresAt: row.expires_at,
   };
 }
 
-type ProfileSide = { full_name: string | null; is_active: boolean; vendor_id: string | null };
+type ProfileSide = {
+  full_name: string | null;
+  is_active: boolean;
+  vendor_id: string | null;
+  role: string;
+};
 type OperatorSide = { name: string | null; is_active: boolean; vendor_id: string | null };
 
 function one<T>(v: T | T[] | null): T | null {

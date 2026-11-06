@@ -42,7 +42,9 @@ import {
   UNDO_WINDOW_MS,
   levelOf,
   lowLineOf,
+  moveRefusal,
   stockForTool,
+  type MoveOutcome,
   type ToolMovementKind,
 } from "@/lib/cnc-tool-stock";
 
@@ -454,12 +456,11 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
     return { ok: false, error: "Only a manager can fix the count." };
   }
 
-  const delta = kind === "receive" ? qty : down ? -qty : qty;
-
   const admin = createAdminSupabaseClient();
 
-  // Read the tool fresh. Several phones can be on the same store, and
-  // the page's copy of the stock may be a minute old.
+  // The warn line and the photo still come off the row; the STOCK does
+  // not, because anything read out here is already out of date by the
+  // time it is used. Mig 235 re-reads it under a lock.
   const { data: toolRow } = await admin
     .from("cnc_tools")
     .select("id, name, unit, low_stock_qty, low_alert_level, is_active")
@@ -472,45 +473,55 @@ export async function recordMovementAction(fd: FormData): Promise<ActionResult> 
   };
   if (!tool.is_active) return { ok: false, error: "That tool has been archived." };
 
-  const before = await stockForTool(toolId);
-
-  // Going negative means the register and the shelf already disagree.
-  // Refusing is the honest answer: "fix the count" exists for exactly
-  // this, and it leaves a line explaining the correction.
-  if (delta < 0 && before + delta < 0) {
-    return {
-      ok: false,
-      error:
-        `Only ${before} ${tool.unit} of ${tool.name} are on the books. ` +
-        `Use Fix count if the shelf says different.`,
-    };
+  // ── Add stock is a delta; fix count is an absolute ──────────────
+  //
+  // "The register says 10 — what does the shelf say?" is a statement
+  // about a NUMBER, not a nudge. So the sheet sends the figure the man
+  // was looking at, and the target is that figure plus his correction.
+  // Mig 235 then works out whatever delta reaches that target from the
+  // stock that is true inside the lock. If a take landed while he was
+  // counting, his count still wins and the take is still on the record
+  // underneath it.
+  const isAdjust = kind === "adjust";
+  const seen = num(fd, "seen_stock");
+  const target = isAdjust && Number.isFinite(seen) ? seen + (down ? -qty : qty) : null;
+  if (isAdjust && target != null && target < 0) {
+    return { ok: false, error: "A shelf cannot hold less than nothing." };
   }
+  const delta = isAdjust ? (down ? -qty : qty) : qty;
 
-  const { data: inserted, error } = await admin
-    .from("cnc_tool_movements")
-    .insert({
-      // Store-level by definition: neither of these belongs to a company.
-      vendor_id: null,
-      tool_id: toolId,
-      kind,
-      delta,
-      note,
-      entered_by: profile.id,
-    })
-    .select("id")
-    .maybeSingle();
+  const { data: raw, error } = await admin.rpc("cnc_tool_record_move", {
+    p_tool_id: toolId,
+    p_kind: kind,
+    // Store-level by definition: neither of these belongs to a company.
+    p_delta: target == null ? delta : null,
+    p_target: target,
+    p_note: note,
+    p_entered_by: profile.id,
+  });
   if (error) return { ok: false, error: error.message };
 
-  const after = before + delta;
+  const res = (raw ?? {}) as MoveOutcome;
+  if (!res.ok) return { ok: false, error: moveRefusal(res) };
+
+  const before = Number(res.stock_before ?? 0);
+  const after = Number(res.stock_after ?? before);
+
+  if (res.noop) {
+    return {
+      ok: true,
+      message: `Already ${after} ${tool.unit} — the register was put right by somebody else first.`,
+    };
+  }
 
   await logAudit(profile.id, `cnc_tool_${kind}`, "cnc_tool", toolId, {
     tool: tool.name,
     qty,
-    delta,
+    delta: res.delta ?? delta,
     note,
     stock_before: before,
     stock_after: after,
-    movement_id: inserted?.id ?? null,
+    movement_id: res.movement_id ?? null,
   });
 
   await maybeWarnLowStock(tool, before, after, profile.id);

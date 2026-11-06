@@ -70,7 +70,14 @@ export function MoveSheet({
             fd.set("tool_id", tool.id);
             fd.set("kind", kind);
             fd.set("qty", String(qty));
-            if (kind === "adjust") fd.set("direction", down ? "down" : "up");
+            if (kind === "adjust") {
+              fd.set("direction", down ? "down" : "up");
+              // Mig 235 — the number this man was looking at when he
+              // counted. The server turns it into an absolute target,
+              // so a take that lands while he is counting cannot make
+              // his correction come out wrong.
+              fd.set("seen_stock", String(tool.stock));
+            }
             if (note.trim()) fd.set("note", note.trim());
             onSubmit(fd);
           }}

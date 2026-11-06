@@ -33,6 +33,7 @@ import {
   type ToolMovement,
   type ToolRow,
 } from "@/lib/cnc-tool-stock";
+import { useLiveStock } from "@/lib/use-live-stock";
 import {
   createToolAction,
   deleteToolAction,
@@ -54,11 +55,18 @@ export type OperatorRow = {
   vendorName: string;
 };
 
+/** How often the keeper screen asks whether the shelf moved. Slower
+ *  than the cupboard's: nobody is standing here about to take the last
+ *  one, and a reload here costs a whole page of data. */
+const OFFICE_POLL_MS = 6000;
+
 export function StoreClient({
-  tools, movements, vendorNames, operators, canManage,
+  tools, movements, stockSig, vendorNames, operators, canManage,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
+  /** The shelf as the server last rendered it (mig 236). */
+  stockSig: string;
   /** vendor id → company name, for the register's group headings. */
   vendorNames: Record<string, string>;
   operators: OperatorRow[];
@@ -67,6 +75,10 @@ export function StoreClient({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [tab, setTab] = useState<"stock" | "register">("stock");
+
+  // Somebody at the cupboard can empty a shelf while this screen sits
+  // open. Poll the short signature; reload only when it differs.
+  useLiveStock({ signature: stockSig, everyMs: OFFICE_POLL_MS });
   const [q, setQ] = useState("");
   const [intent, setIntent] = useState<MoveIntent | null>(null);
   const [addOpen, setAddOpen] = useState(false);

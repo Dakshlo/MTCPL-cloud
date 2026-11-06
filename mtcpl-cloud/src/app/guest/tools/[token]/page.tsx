@@ -15,10 +15,10 @@
  * is still take-only, enforced in the database and not just here.
  */
 
-import { loadStore, orderForTaking, type ToolRow } from "@/lib/cnc-tool-stock";
+import { loadStore, orderForTaking, stockSignature, type ToolRow } from "@/lib/cnc-tool-stock";
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
-import { currentToolSession, toolRoster } from "@/lib/cnc-tool-session";
-import { operatorsForVendor } from "@/lib/cnc-tool-operators";
+import { currentToolSession, enrollableVendors, toolRoster } from "@/lib/cnc-tool-session";
+import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators";
 import {
   enrolOperatorAction,
   guestTakeToolAction,
@@ -59,12 +59,22 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
   ]);
 
   // His own men, ready on first paint — a vendor opening the team
-  // panel should not watch a spinner to see three names.
-  const team = session?.canEnrol && session.vendorId
-    ? (await operatorsForVendor(session.vendorId)).map((o) => ({
-        id: o.id, name: o.name, maskedPhone: o.maskedPhone,
-      }))
-    : [];
+  // panel should not watch a spinner to see three names. The developer
+  // sees all three companies at once, so his list carries whose man
+  // each one is, and he gets the list of companies to pick from.
+  const anyVendor = session?.canEnrol && session.enrolScope === "any";
+  const team = !session?.canEnrol
+    ? []
+    : anyVendor
+      ? (await allActiveOperators()).map((o) => ({
+          id: o.id, name: o.name, maskedPhone: o.maskedPhone, company: o.vendorName,
+        }))
+      : session.vendorId
+        ? (await operatorsForVendor(session.vendorId)).map((o) => ({
+            id: o.id, name: o.name, maskedPhone: o.maskedPhone,
+          }))
+        : [];
+  const vendorChoices = anyVendor ? await enrollableVendors() : [];
 
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
@@ -83,6 +93,9 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       token={link.token}
       label={link.label}
       tools={takeable}
+      // Over ALL live tools, not just the takeable ones — the last of
+      // something going to zero has to count as the shelf moving.
+      stockSig={stockSignature(tools)}
       roster={roster}
       session={
         session
@@ -90,10 +103,12 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
               name: session.name,
               company: session.vendorName,
               canEnrol: session.canEnrol,
+              enrolScope: session.enrolScope,
             }
           : null
       }
       team={team}
+      vendorChoices={vendorChoices}
       sendCodeAction={sendToolSignInCodeAction}
       verifyCodeAction={verifyToolSignInCodeAction}
       signOutAction={toolSignOutAction}
