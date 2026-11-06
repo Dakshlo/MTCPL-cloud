@@ -66,6 +66,31 @@ export function canEnrolForAnyVendor(p: ToolProfile): boolean {
   return canUseCncTools(p);
 }
 
+/**
+ * May this person fill the shelf FROM THE CUPBOARD — add stock, add a
+ * tool, correct a count?
+ *
+ * The office three, and the CNC vendors themselves. Daksh, Nov 2026:
+ * "that add stock feature on qr login, enable that for mohit also, he
+ * can also maintain and add stock."
+ *
+ * He named Mohit; this opens it to all three vendor principals, because
+ * they are the same kind of person doing the same job at the same
+ * cupboard and naming one of them in code would be a rule nobody could
+ * explain in six months. Their OPERATORS still cannot: a man enrolled
+ * off a sticker can take a tool and nothing else.
+ *
+ * Note what this is NOT. It is not canUseCncTools: a vendor still has
+ * no business on the office screen, where the whole register and every
+ * company's takes are laid out. This is the cupboard he stands at.
+ */
+export function canKeepAtCupboard(
+  p: ToolProfile,
+  opts: { hasOwnCompany: boolean },
+): boolean {
+  return canUseCncTools(p) || opts.hasOwnCompany;
+}
+
 /** May this person change the catalogue (add a tool, set its warn line,
  *  delete an empty one) and record a count correction?
  *

@@ -16,8 +16,8 @@ import { revalidatePath } from "next/cache";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   canEnrolForAnyVendor,
+  canKeepAtCupboard,
   canSignInAtCupboard,
-  canUseCncTools,
 } from "@/lib/cnc-tool-permissions";
 import { issueActionOtp, verifyActionOtp } from "@/lib/action-otp";
 import {
@@ -162,7 +162,9 @@ async function resolveSigner(
       vendorName: pv?.name ?? null,
       canEnrol: !!p.vendor_id || anyVendor,
       enrolScope: p.vendor_id ? "own" : anyVendor ? "any" : null,
-      canKeep: canUseCncTools(p as Parameters<typeof canUseCncTools>[0]),
+      canKeep: canKeepAtCupboard(p as Parameters<typeof canKeepAtCupboard>[0], {
+        hasOwnCompany: !!p.vendor_id,
+      }),
     },
   };
 }
@@ -637,12 +639,21 @@ export async function keeperAddStockAction(fd: FormData): Promise<KeeperResult> 
   if (!Number.isInteger(qty) || qty < 1) return { ok: false, error: "How many came in?" };
   if (qty > 10_000) return { ok: false, error: "That is a lot — add it on the office screen." };
 
+  // Daksh, Nov 2026: "in add stock when we add stock it should give
+  // option or field to add note like it shows in laptop." His note
+  // first, then who put it in — the bill number is what somebody
+  // reading the register back in six months is looking for.
+  const typed = String(fd.get("note") || "").trim().slice(0, 220);
+  const note = typed
+    ? `${typed} · added at the cupboard by ${who.name}`
+    : `Added at the cupboard by ${who.name}`;
+
   const admin = createAdminSupabaseClient();
   const { data: raw, error } = await admin.rpc("cnc_tool_record_move", {
     p_tool_id: toolId,
     p_kind: "receive",
     p_delta: qty,
-    p_note: `Added at the cupboard by ${who.name}`,
+    p_note: note,
     p_entered_by: who.profileId,
   });
   if (error) return { ok: false, error: error.message };

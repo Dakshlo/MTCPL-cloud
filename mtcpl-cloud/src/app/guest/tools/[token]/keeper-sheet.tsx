@@ -61,6 +61,10 @@ export function KeeperSheet({
   const [picked, setPicked] = useState<KeeperTool | null>(null);
   const [n, setN] = useState(1);
   const [q, setQ] = useState("");
+  /** Daksh, Nov 2026 — the same note box the office screen has. The
+   *  bill number of the box that just arrived is the thing somebody
+   *  reading the register back actually wants. */
+  const [stockNote, setStockNote] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -84,6 +88,7 @@ export function KeeperSheet({
 
   function reset() {
     setJob("menu"); setPicked(null); setN(1); setQ(""); setErr(null);
+    setStockNote("");
     setName(""); setUnit("pcs"); setOpening(0);
     setPhoto(null); setPhotoNote(null);
     if (photoUrl) URL.revokeObjectURL(photoUrl);
@@ -164,14 +169,18 @@ export function KeeperSheet({
                   <span><strong>Add stock</strong><em>A box has arrived</em></span>
                   <span className="ks-go" aria-hidden>›</span>
                 </button>
-                <button type="button" onClick={() => setJob("count")}>
-                  <span className="ks-ic" data-t="fix" aria-hidden>⚖</span>
-                  <span><strong>Fix count</strong><em>The shelf and the register disagree</em></span>
-                  <span className="ks-go" aria-hidden>›</span>
-                </button>
+                {/* Order asked for, Nov 2026, and it is the right one:
+                    most days to least, with the one that can hide a
+                    loss at the bottom where it is not reached by
+                    accident. */}
                 <button type="button" onClick={() => setJob("new")}>
                   <span className="ks-ic" data-t="new" aria-hidden>✚</span>
                   <span><strong>New tool</strong><em>Something the store has never had</em></span>
+                  <span className="ks-go" aria-hidden>›</span>
+                </button>
+                <button type="button" onClick={() => setJob("count")}>
+                  <span className="ks-ic" data-t="fix" aria-hidden>⚖</span>
+                  <span><strong>Fix count</strong><em>The shelf and the register disagree</em></span>
                   <span className="ks-go" aria-hidden>›</span>
                 </button>
               </div>
@@ -282,6 +291,18 @@ export function KeeperSheet({
                   ))}
                 </div>
 
+                {job === "stock" && (
+                  <label className="ks-field">
+                    <span>Note — optional</span>
+                    <input
+                      value={stockNote}
+                      onChange={(e) => setStockNote(e.target.value)}
+                      placeholder="bill no, who brought it…"
+                      maxLength={220}
+                    />
+                  </label>
+                )}
+
                 <button
                   type="button"
                   className="ks-go-btn"
@@ -290,8 +311,14 @@ export function KeeperSheet({
                     const fd = new FormData();
                     fd.set("token", token);
                     fd.set("tool_id", picked.id);
-                    if (job === "stock") { fd.set("qty", String(n)); run(() => addStockAction(fd)); }
-                    else { fd.set("counted", String(n)); run(() => fixCountAction(fd)); }
+                    if (job === "stock") {
+                      fd.set("qty", String(n));
+                      fd.set("note", stockNote);
+                      run(() => addStockAction(fd));
+                    } else {
+                      fd.set("counted", String(n));
+                      run(() => fixCountAction(fd));
+                    }
                   }}
                 >
                   {pending

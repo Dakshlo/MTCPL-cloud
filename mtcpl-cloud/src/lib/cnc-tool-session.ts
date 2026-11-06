@@ -27,7 +27,11 @@ import { cookies } from "next/headers";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { allActiveOperators, maskTail } from "@/lib/cnc-tool-operators";
-import { canEnrolForAnyVendor, canSignInAtCupboard, canUseCncTools } from "@/lib/cnc-tool-permissions";
+import {
+  canEnrolForAnyVendor,
+  canKeepAtCupboard,
+  canSignInAtCupboard,
+} from "@/lib/cnc-tool-permissions";
 
 /** One shift. Long enough that a man is not re-typing a code all
  *  morning, short enough that a forgotten phone stops working today. */
@@ -308,7 +312,11 @@ export async function currentToolSession(
     // team of his own: that is the one thing the two kinds of signer
     // genuinely differ on.
     canKeep:
-      !!row.profile_id && !!prof && canUseCncTools(prof as Parameters<typeof canUseCncTools>[0]),
+      !!row.profile_id &&
+      !!prof &&
+      canKeepAtCupboard(prof as Parameters<typeof canKeepAtCupboard>[0], {
+        hasOwnCompany: !!row.vendor_id,
+      }),
     canEnrol:
       !!row.profile_id &&
       (!!row.vendor_id || (!!prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0]))),

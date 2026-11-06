@@ -346,13 +346,37 @@ export function GuestTakeClient({
 
       <header className="gt-head">
         <div className="gt-head-row">
+          {/* "Tool store" leads, the door name sits under it. Daksh,
+              Nov 2026 — what the thing IS matters more at a glance
+              than which cupboard it is, and the door name still has to
+              be there because a second shed gets its own sticker. */}
           <div className="gt-brand">
             <span className="gt-logo" aria-hidden>🧰</span>
             <div>
-              <div className="gt-brand-label">{label}</div>
-              <div className="gt-brand-sub">Tool store</div>
+              <div className="gt-brand-label">Tool store</div>
+              {/* The door name only before you are signed in. Once you
+                  are, you scanned the sticker thirty seconds ago and
+                  know which cupboard you are standing at — and the
+                  header has a man's name and a Sign out in it by then,
+                  which is all the room there is. */}
+              {!who && <div className="gt-brand-sub">{label}</div>}
             </div>
           </div>
+
+          {who?.canEnrol && (
+            <button
+              type="button"
+              className="gt-men"
+              data-on={teamOpen ? "1" : undefined}
+              onClick={() => { setTeamOpen((o) => !o); setTeamMsg(null); }}
+              aria-expanded={teamOpen}
+              aria-label={who.enrolScope === "any" ? "The men" : "My men"}
+            >
+              <span aria-hidden>👷</span>
+              {team.length > 0 && <i>{team.length}</i>}
+            </button>
+          )}
+
           {who && (
             <button type="button" className="gt-me" onClick={signOut} disabled={pending}>
               <span className="gt-me-dot" style={{ background: colourFor(who.name) }}>
@@ -382,6 +406,113 @@ export function GuestTakeClient({
         </div>
       )}
 
+      {/* ── the men (mig 234) ─────────────────────────────────
+          Opened from the 👷 in the header, beside Sign out — Daksh,
+          Nov 2026: "put that next to sign out button." It belongs
+          there: that corner of the screen is already about WHO, and
+          under the shelf it was competing with the tools. */}
+      {who?.canEnrol && teamOpen && (
+        <div className="gt-team-body gt-team-panel">
+          <p className="gt-team-note">
+            {who.enrolScope === "any" ? (
+              <>
+                Anyone added here can scan this cupboard and take tools on his
+                own phone. Pick whose man he is — the office register files
+                every take under that company.
+              </>
+            ) : (
+              <>
+                Anyone you add here can scan this cupboard and take tools on
+                his own phone. It shows in the office register as his name,
+                under {who.company ?? "you"}.
+              </>
+            )}
+          </p>
+
+          {team.length > 0 && (
+            <div className="gt-mates">
+              {team.map((m) => (
+                <div key={m.id} className="gt-mate">
+                  <span className="gt-mate-face" style={{ background: colourFor(m.name) }}>
+                    {initials(m.name)}
+                  </span>
+                  <span className="gt-mate-body">
+                    <strong>{m.name}</strong>
+                    <span>
+                      {m.company ? `${m.company} · ` : ""}{m.maskedPhone}
+                    </span>
+                  </span>
+                  {dropping === m.id ? (
+                    <span className="gt-mate-confirm">
+                      <button type="button" className="gt-mate-yes" onClick={() => dropMate(m.id)} disabled={pending}>
+                        Remove
+                      </button>
+                      <button type="button" className="gt-mate-no" onClick={() => setDropping(null)}>
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="gt-mate-x"
+                      onClick={() => setDropping(m.id)}
+                      aria-label={`Take ${m.name} off the list`}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="gt-addmate">
+            {who.enrolScope === "any" && (
+              <select
+                value={newVendor}
+                onChange={(e) => setNewVendor(e.target.value)}
+                aria-label="Which vendor he works for"
+              >
+                <option value="">Which vendor?</option>
+                {vendorChoices.map((v) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+            )}
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="His name"
+              maxLength={60}
+              aria-label="Name"
+            />
+            <input
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value.replace(/[^\d +]/g, ""))}
+              placeholder="10-digit mobile"
+              inputMode="tel"
+              maxLength={15}
+              aria-label="Mobile number"
+            />
+            <button
+              type="button"
+              className="gt-addmate-go"
+              onClick={addMate}
+              disabled={
+                pending ||
+                newName.trim().length < 2 ||
+                newPhone.replace(/\D/g, "").length < 10 ||
+                (who.enrolScope === "any" && !newVendor)
+              }
+            >
+              {pending ? "Adding…" : "Add him"}
+            </button>
+          </div>
+
+          {teamMsg && <div className="gt-team-ok">✓ {teamMsg}</div>}
+        </div>
+      )}
+
       {err && (
         <div className="gt-err" role="alert">
           <span aria-hidden>⚠</span>
@@ -394,7 +525,7 @@ export function GuestTakeClient({
       {step === "who" && (
         <section className="gt-body">
           <h1 className="gt-q">Who is taking?</h1>
-          <p className="gt-hint">Tap your name. A 4-digit code comes to your phone.</p>
+          <p className="gt-hint">Tap your name — a code comes to your phone.</p>
           {roster.length === 0 ? (
             <div className="gt-blank">
               Nobody is set up for this cupboard yet. Ask the office.
@@ -402,14 +533,17 @@ export function GuestTakeClient({
           ) : (
             <div className="gt-people">
               {roster.map((p, i) => {
-                // A heading each time the company changes. The man
-                // scanning looks for his boss's name first, then for
-                // his own underneath it.
+                // A heading each time the company changes — but only
+                // where it earns its line. A heading saying MANTHAN
+                // directly above a single row saying MANTHAN is the
+                // word twice for nothing; it is worth printing when
+                // there are several names under it to tell apart.
                 const prev = i > 0 ? roster[i - 1] : null;
                 const newGroup = !prev || prev.company !== p.company;
+                const groupSize = roster.filter((x) => x.company === p.company).length;
                 return (
                   <div key={p.id} className="gt-pgroup">
-                    {newGroup && (
+                    {newGroup && groupSize > 1 && (
                       <div className="gt-pco">{p.company ?? "Office"}</div>
                     )}
                     <button
@@ -421,11 +555,13 @@ export function GuestTakeClient({
                       disabled={pending}
                     >
                       <span className="gt-pface">{initials(p.name)}</span>
-                      <span className="gt-pbody">
-                        <strong>{p.name}</strong>
-                        <span>code to {p.maskedPhone}</span>
-                      </span>
-                      <span className="gt-pgo" aria-hidden>→</span>
+                      {/* The name and nothing else. The masked number
+                          used to ride along on every row and said the
+                          same thing six times over; the very next
+                          screen tells you where the code went, which
+                          is the moment it matters. */}
+                      <span className="gt-pname">{p.name}</span>
+                      <span className="gt-pgo" aria-hidden>›</span>
                     </button>
                   </div>
                 );
@@ -554,129 +690,6 @@ export function GuestTakeClient({
             </div>
           )}
 
-          {/* ── my men (mig 234) ──────────────────────────────────
-              Only the vendor sees this, and only for his own company.
-              Tucked under the shelf because taking a tool is why he
-              opened the phone; adding a man is a once-a-month job. */}
-          {who?.canEnrol && (
-            <div className="gt-team">
-              <button
-                type="button"
-                className="gt-team-toggle"
-                onClick={() => { setTeamOpen((o) => !o); setTeamMsg(null); }}
-                aria-expanded={teamOpen}
-              >
-                <span aria-hidden>👷</span>
-                <span className="gt-team-label">
-                  {who.enrolScope === "any" ? "The men" : "My men"}
-                  {team.length > 0 ? ` · ${team.length}` : ""}
-                </span>
-                <span className="gt-team-caret" aria-hidden>{teamOpen ? "▴" : "▾"}</span>
-              </button>
-
-              {teamOpen && (
-                <div className="gt-team-body">
-                  <p className="gt-team-note">
-                    {who.enrolScope === "any" ? (
-                      <>
-                        Anyone added here can scan this cupboard and take tools on his
-                        own phone. Pick whose man he is — the office register files
-                        every take under that company.
-                      </>
-                    ) : (
-                      <>
-                        Anyone you add here can scan this cupboard and take tools on
-                        his own phone. It shows in the office register as his name,
-                        under {who.company ?? "you"}.
-                      </>
-                    )}
-                  </p>
-
-                  {team.length > 0 && (
-                    <div className="gt-mates">
-                      {team.map((m) => (
-                        <div key={m.id} className="gt-mate">
-                          <span className="gt-mate-face" style={{ background: colourFor(m.name) }}>
-                            {initials(m.name)}
-                          </span>
-                          <span className="gt-mate-body">
-                            <strong>{m.name}</strong>
-                            <span>
-                              {m.company ? `${m.company} · ` : ""}{m.maskedPhone}
-                            </span>
-                          </span>
-                          {dropping === m.id ? (
-                            <span className="gt-mate-confirm">
-                              <button type="button" className="gt-mate-yes" onClick={() => dropMate(m.id)} disabled={pending}>
-                                Remove
-                              </button>
-                              <button type="button" className="gt-mate-no" onClick={() => setDropping(null)}>
-                                Keep
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="gt-mate-x"
-                              onClick={() => setDropping(m.id)}
-                              aria-label={`Take ${m.name} off the list`}
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="gt-addmate">
-                    {who.enrolScope === "any" && (
-                      <select
-                        value={newVendor}
-                        onChange={(e) => setNewVendor(e.target.value)}
-                        aria-label="Which vendor he works for"
-                      >
-                        <option value="">Which vendor?</option>
-                        {vendorChoices.map((v) => (
-                          <option key={v.id} value={v.id}>{v.name}</option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder="His name"
-                      maxLength={60}
-                      aria-label="Name"
-                    />
-                    <input
-                      value={newPhone}
-                      onChange={(e) => setNewPhone(e.target.value.replace(/[^\d +]/g, ""))}
-                      placeholder="10-digit mobile"
-                      inputMode="tel"
-                      maxLength={15}
-                      aria-label="Mobile number"
-                    />
-                    <button
-                      type="button"
-                      className="gt-addmate-go"
-                      onClick={addMate}
-                      disabled={
-                        pending ||
-                        newName.trim().length < 2 ||
-                        newPhone.replace(/\D/g, "").length < 10 ||
-                        (who.enrolScope === "any" && !newVendor)
-                      }
-                    >
-                      {pending ? "Adding…" : "Add him"}
-                    </button>
-                  </div>
-
-                  {teamMsg && <div className="gt-team-ok">✓ {teamMsg}</div>}
-                </div>
-              )}
-            </div>
-          )}
         </section>
       )}
 
@@ -809,17 +822,23 @@ const CSS = `
   box-shadow:0 10px 28px rgba(79,70,229,.26);
 }
 .gt-head-row { display:flex; align-items:center; gap:12px; }
-.gt-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+.gt-brand { display:flex; align-items:center; gap:10px; min-width:0; flex:1; }
+.gt-brand > div { min-width:0; }
 .gt-logo {
   width:40px; height:40px; flex:0 0 auto; border-radius:13px; font-size:20px;
   display:grid; place-items:center; background:rgba(255,255,255,.18);
 }
 .gt-brand-label { font-size:16px; font-weight:800; letter-spacing:-.2px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.gt-brand-sub { font-size:11px; font-weight:700; letter-spacing:.1em;
-  text-transform:uppercase; color:rgba(255,255,255,.72); }
+.gt-brand-sub {
+  /* Sentence case and no tracking: "OFFICE WARDROBE" in caps with
+     letter-spacing wrapped to two lines next to the men button and
+     the signed-in pill, which is a lot of header for a door name. */
+  font-size:11.5px; font-weight:600; color:rgba(255,255,255,.75);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
 .gt-me {
-  margin-left:auto; display:flex; align-items:center; gap:7px; max-width:46%;
+  margin-left:auto; display:flex; align-items:center; gap:7px; max-width:44%;
   padding:6px 10px 6px 6px; border-radius:999px; border:none; cursor:pointer;
   background:rgba(255,255,255,.17); color:#fff; font:inherit;
 }
@@ -829,6 +848,20 @@ const CSS = `
 .gt-me-name { font-size:12.5px; font-weight:700; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
 .gt-me-out { font-size:10px; font-weight:700; opacity:.8; white-space:nowrap; }
+.gt-men {
+  margin-left:auto; position:relative; flex:0 0 auto; cursor:pointer; font:inherit;
+  width:38px; height:38px; border-radius:50%; border:none; font-size:17px;
+  background:rgba(255,255,255,.17); color:#fff; display:grid; place-items:center;
+}
+.gt-men[data-on] { background:#fff; }
+.gt-men i {
+  position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px;
+  border-radius:99px; background:#fff; color:var(--brand);
+  font-style:normal; font-size:10.5px; font-weight:800; line-height:17px;
+}
+/* With the men button present, the signed-in pill no longer needs to
+   push itself to the right — the button does. */
+.gt-men + .gt-me { margin-left:8px; }
 .gt-steps { display:flex; gap:6px; margin:12px 2px 0; }
 .gt-steps i { height:4px; flex:1; border-radius:99px; background:rgba(255,255,255,.28); }
 .gt-steps i[data-done] { background:rgba(255,255,255,.62); }
@@ -863,50 +896,51 @@ const CSS = `
   font-size:13.5px; font-weight:700; color:var(--brand); cursor:pointer; }
 
 /* ── people ─────────────────────────────────────────────── */
-.gt-people { display:flex; flex-direction:column; gap:11px; }
+/* ── the name list ──────────────────────────────────────────
+   Daksh, Nov 2026: "that page where all names show to choose from,
+   that[s] too much — make it minimal."
+   It was six fat cards with a shadow, a 46px tile and a masked phone
+   number apiece, which is a lot of furniture for "tap your name".
+   Now: one quiet row per person, the initial, the name, a chevron. */
+.gt-people { display:flex; flex-direction:column; gap:2px; }
 .gt-person {
-  display:flex; align-items:center; gap:13px; width:100%; text-align:left;
-  padding:14px; border-radius:18px; cursor:pointer; font:inherit;
-  background:var(--card); border:1.5px solid var(--line);
-  box-shadow:0 2px 10px rgba(20,20,30,.05);
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  padding:11px 12px; border-radius:13px; cursor:pointer; font:inherit;
+  background:transparent; border:none; color:var(--ink);
 }
-.gt-person:active { transform:scale(.99); }
-.gt-person:disabled { opacity:.55; }
+.gt-person + .gt-person { box-shadow:inset 0 1px 0 var(--line); }
+.gt-person:active { background:rgba(79,70,229,.07); }
+.gt-person:disabled { opacity:.5; }
 .gt-pface {
-  width:46px; height:46px; flex:0 0 auto; border-radius:15px; color:#fff;
-  display:grid; place-items:center; font-size:16px; font-weight:800;
-  background:var(--who); box-shadow:0 4px 12px color-mix(in srgb, var(--who) 40%, transparent);
+  width:34px; height:34px; flex:0 0 auto; border-radius:11px; color:#fff;
+  display:grid; place-items:center; font-size:12.5px; font-weight:800;
+  background:var(--who);
 }
-.gt-pbody { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
-.gt-pbody strong { font-size:16.5px; font-weight:800; }
-.gt-pbody span { font-size:12.5px; color:var(--dim); }
-.gt-pgo { font-size:18px; color:var(--who); font-weight:800; }
+.gt-pname {
+  flex:1; min-width:0; font-size:16px; font-weight:700; letter-spacing:-.01em;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-pgo { font-size:19px; color:#c9c6bf; font-weight:400; }
 
 /* Company by company. The heading is quiet; the names are the UI. */
-.gt-pgroup { display:flex; flex-direction:column; gap:11px; }
+.gt-pgroup { display:flex; flex-direction:column; }
+/* A company with no heading still gets a breath before it. */
+.gt-pgroup + .gt-pgroup:not(:has(.gt-pco)) { margin-top:2px; }
 .gt-pco {
-  font-size:10.5px; font-weight:800; letter-spacing:.1em; text-transform:uppercase;
-  color:var(--dim); padding:10px 2px 0;
+  font-size:10px; font-weight:800; letter-spacing:.11em; text-transform:uppercase;
+  color:#a3a3a3; padding:16px 12px 5px;
 }
-.gt-pgroup:first-child .gt-pco { padding-top:0; }
-/* A man under a vendor sits in from the edge and reads one size down,
-   so the shape of the list says who works for whom before you read it. */
-.gt-person[data-under] {
-  margin-left:16px; padding:11px 13px; border-radius:15px;
-  border-style:dashed; box-shadow:none;
-}
-.gt-person[data-under] .gt-pface { width:38px; height:38px; border-radius:12px; font-size:13.5px; }
-.gt-person[data-under] .gt-pbody strong { font-size:15px; }
+.gt-pgroup:first-child .gt-pco { padding-top:2px; }
+/* A man under a vendor sits in from the edge, so the shape of the
+   list says who works for whom before you read a word of it. */
+.gt-person[data-under] { padding-left:30px; }
+.gt-person[data-under] .gt-pface { width:28px; height:28px; border-radius:9px; font-size:11px; }
+.gt-person[data-under] .gt-pname { font-size:14.5px; font-weight:600; color:var(--dim); }
 
 /* ── my men ─────────────────────────────────────────────── */
-.gt-team { margin-top:22px; }
-.gt-team-toggle {
-  display:flex; align-items:center; gap:10px; width:100%; font:inherit; cursor:pointer;
-  padding:13px 15px; border-radius:16px; text-align:left;
-  background:var(--card); border:1.5px dashed var(--line); color:var(--ink);
-}
-.gt-team-label { flex:1; font-size:14.5px; font-weight:800; }
-.gt-team-caret { font-size:12px; color:var(--dim); }
+/* The toggle moved into the header (.gt-men); this is just the panel
+   it opens, now sitting under the header rather than under the shelf. */
+.gt-team-panel { margin:14px 16px 0; }
 .gt-team-body {
   margin-top:10px; padding:15px; border-radius:16px;
   background:var(--card); border:1.5px solid var(--line);
