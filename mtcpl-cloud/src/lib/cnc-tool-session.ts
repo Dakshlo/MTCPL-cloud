@@ -27,7 +27,7 @@ import { cookies } from "next/headers";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { allActiveOperators, maskTail } from "@/lib/cnc-tool-operators";
-import { canEnrolForAnyVendor, canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
+import { canEnrolForAnyVendor, canSignInAtCupboard, canUseCncTools } from "@/lib/cnc-tool-permissions";
 
 /** One shift. Long enough that a man is not re-typing a code all
  *  morning, short enough that a forgotten phone stops working today. */
@@ -69,6 +69,11 @@ export type ToolSession = {
   vendorName: string | null;
   /** May this session add somebody to a team? */
   canEnrol: boolean;
+  /** May this person fill the shelf from the cupboard itself — add a
+   *  tool, add stock, fix a count? The office three, and nobody else.
+   *  Daksh, Nov 2026: "so i can directly maintain or add stock from
+   *  phone only." */
+  canKeep: boolean;
   /** WHOSE team. A vendor principal manages his own and only his own;
    *  the developer (Daksh, Nov 2026: "as a developer in my number when
    *  i login through qr i can also enroll operator under these 3
@@ -302,6 +307,8 @@ export async function currentToolSession(
     // and picks the company each time. An operator can never grow a
     // team of his own: that is the one thing the two kinds of signer
     // genuinely differ on.
+    canKeep:
+      !!row.profile_id && !!prof && canUseCncTools(prof as Parameters<typeof canUseCncTools>[0]),
     canEnrol:
       !!row.profile_id &&
       (!!row.vendor_id || (!!prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0]))),

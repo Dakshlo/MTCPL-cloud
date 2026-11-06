@@ -2873,8 +2873,20 @@ body.vendor-cockpit-fullscreen .page-card {
     line-height: 1.5;
   }
   /* Lock body scroll under the overlay so background content
-   * doesn't peek through if the overlay is briefly translucent. */
-  body { overflow: hidden; }
+   * doesn't peek through if the overlay is briefly translucent.
+   *
+   * ONLY where the overlay is actually up. Daksh, Nov 2026: "in phone
+   * there is scroll issue in vertical, it dont scroll, i need to
+   * rotate the phone and use in landscape then its scrollable." This
+   * lock was unconditional, so a page that had opted OUT of the rotate
+   * prompt — the tool store, the cupboard QR, Settings on the
+   * developer's phone — hid the overlay and then sat there unable to
+   * scroll, with nothing on screen to explain why. Turning the phone
+   * sideways stopped the media query matching, which is exactly the
+   * workaround he found. */
+  body:not(:has(.allow-portrait)):not(:has(.settings-portrait-ok)) {
+    overflow: hidden;
+  }
 }
 
 /* ── Settings: developer-only portrait escape hatch ──────────────

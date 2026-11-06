@@ -22,6 +22,9 @@ import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators
 import {
   enrolOperatorAction,
   guestTakeToolAction,
+  keeperAddStockAction,
+  keeperFixCountAction,
+  keeperNewToolAction,
   myTeamAction,
   removeOperatorAction,
   sendToolSignInCodeAction,
@@ -86,6 +89,18 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
 
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
+  // Everything on the shelf, empty ones included — an empty tool is
+  // exactly the one a keeper has come to refill, so it must be in the
+  // list he picks from even though nobody can take it.
+  const keeperTools = session?.canKeep
+    ? [...tools]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => ({
+          id: t.id, name: t.name, spec: t.spec, unit: t.unit,
+          stock: t.stock, imageUrl: t.imageUrl,
+        }))
+    : [];
+
   const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map((t) => ({
     id: t.id,
     name: t.name,
@@ -112,9 +127,11 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
               company: session.vendorName,
               canEnrol: session.canEnrol,
               enrolScope: session.enrolScope,
+              canKeep: session.canKeep,
             }
           : null
       }
+      keeperTools={keeperTools}
       team={team}
       vendorChoices={vendorChoices}
       sendCodeAction={sendToolSignInCodeAction}
@@ -124,6 +141,9 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       enrolAction={enrolOperatorAction}
       removeOperatorAction={removeOperatorAction}
       myTeamAction={myTeamAction}
+      addStockAction={keeperAddStockAction}
+      fixCountAction={keeperFixCountAction}
+      newToolAction={keeperNewToolAction}
     />
   );
 }

@@ -285,6 +285,24 @@ export const TOOLS_CSS = `
   background:var(--surface-alt); color:var(--muted); }
 
 /* ── register, company by company (mig 234) ────────────────── */
+/* ── the thumb-reach button (phone only) ───────────────────── */
+.tc-fab { display:none; }
+@media (max-width: 760px) {
+  .tc-fab {
+    position:fixed; left:50%; transform:translateX(-50%);
+    bottom:calc(16px + env(safe-area-inset-bottom)); z-index:45;
+    display:flex; align-items:center; gap:8px; cursor:pointer;
+    padding:15px 26px; border:none; border-radius:999px; font:inherit;
+    font-size:15.5px; font-weight:800; color:#fff; white-space:nowrap;
+    background:linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
+    box-shadow:0 10px 26px rgba(0,0,0,.28);
+  }
+  .tc-fab span { font-size:19px; line-height:1; }
+  .tc-fab:active { transform:translateX(-50%) scale(.97); }
+  /* Clearance so the last card is never under it. */
+  .tc-page { padding-bottom:110px !important; }
+}
+
 .tc-reggroups { display:flex; flex-direction:column; gap:14px; }
 .tc-reggroup { border:1px solid var(--border); border-radius:17px; overflow:hidden;
   background:var(--surface); }

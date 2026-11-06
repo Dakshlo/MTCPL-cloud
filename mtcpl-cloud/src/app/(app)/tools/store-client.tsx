@@ -344,6 +344,20 @@ export function StoreClient({
         }}
       />
 
+      {/* On a phone the hero's Add tool is a long scroll away by the
+          time you are looking at the shelf. Same action, put where the
+          thumb already is. Phone only — on a desktop the hero button
+          is right there and a floating one would just be in the way. */}
+      {canManage && (
+        <button
+          type="button"
+          className="tc-fab"
+          onClick={() => { setEditing(null); setAddOpen(true); }}
+        >
+          <span aria-hidden>＋</span> Add tool
+        </button>
+      )}
+
       {done && (
         <UndoToast
           done={done} movements={movements}

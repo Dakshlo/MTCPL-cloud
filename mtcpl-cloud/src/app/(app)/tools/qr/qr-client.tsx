@@ -107,11 +107,13 @@ export function QrManager({
         "@page{margin:12mm}" +
         "html,body{margin:0;padding:0;background:#fff;color:#000}" +
         "svg{display:block;margin:0 auto;width:100%;height:auto;max-width:150mm}" +
-        "p{margin:8mm 0 0;text-align:center;font-family:system-ui,-apple-system," +
-        "'Segoe UI','Nirmala UI','Noto Sans Devanagari',Arial,sans-serif;" +
-        "font-size:22pt;font-weight:700}" +
+        "body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;" +
+        "text-align:center}" +
+        ".a{margin:4mm 0 0;font-size:34pt;line-height:1;font-weight:400}" +
+        ".t{margin:1mm 0 0;font-size:24pt;font-weight:700;letter-spacing:-.01em}" +
         "</style></head><body>" + svg +
-        "<p>" + SCAN_LINE + "</p></body></html>",
+        '<p class="a">' + SCAN_ARROW + "</p>" +
+        '<p class="t">' + SCAN_LINE + "</p></body></html>",
     );
     doc.close();
 
@@ -181,6 +183,7 @@ export function QrManager({
               <div className="qr-sheet">
                 <div className="qr-sheet-head">TOOL STORE · {c.label.toUpperCase()}</div>
                 <div className="qr-code" dangerouslySetInnerHTML={{ __html: c.svg }} />
+                <div className="qr-sheet-arrow" aria-hidden>{SCAN_ARROW}</div>
                 <div className="qr-sheet-scan">{SCAN_LINE}</div>
               </div>
 
@@ -262,9 +265,15 @@ export function QrManager({
   );
 }
 
-/** The one line that goes under the printed square. Kept here so the
- *  preview on screen and the paper can never say different things. */
-const SCAN_LINE = "औज़ार के लिए यहाँ स्कैन करें";
+/** What goes under the printed square, and an arrow pointing back up
+ *  at it so there is no doubt what to scan. Kept here so the preview
+ *  on screen and the paper can never say different things.
+ *
+ *  Hinglish, not Devanagari — Daksh, Nov 2026: "instead use tool ke
+ *  liya scan kare, and use hinglish." His men read the roman spelling
+ *  faster than the script, and "tool" is the word they actually say. */
+const SCAN_ARROW = "↑";
+const SCAN_LINE = "Tool ke liye scan kare";
 
 const CSS = `
 .qr-note { padding:11px 14px; border-radius:10px; font-size:13px; font-weight:600;
@@ -295,7 +304,8 @@ const CSS = `
   color:#8a6a2f; margin-bottom:16px; }
 .qr-code { display:grid; place-items:center; }
 .qr-code svg { width:100%; height:auto; max-width:300px; display:block; }
-.qr-sheet-scan { margin-top:14px; font-size:19px; font-weight:700; color:#111; }
+.qr-sheet-arrow { margin-top:8px; font-size:30px; line-height:1; color:#111; }
+.qr-sheet-scan { margin-top:2px; font-size:19px; font-weight:700; color:#111; }
 
 .qr-meta { flex:1 1 300px; min-width:0; display:flex; flex-direction:column; gap:12px; }
 .qr-metarow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -326,7 +336,8 @@ const CSS = `
 @media print {
   .no-print, nav, header.topbar, aside,
   .tc-page > header, .qr-sheet-head { display:none !important; }
-  .qr-sheet-scan { font-size:22pt; margin-top:8mm; }
+  .qr-sheet-arrow { font-size:34pt; margin-top:4mm; }
+  .qr-sheet-scan { font-size:24pt; margin-top:1mm; }
   .qr-card { page-break-inside:avoid; display:block; }
   .qr-sheet { border:none; box-shadow:none; width:100%; max-width:none;
     padding:0; margin:0 auto; }

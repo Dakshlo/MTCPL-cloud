@@ -13,6 +13,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { prettyBytes, shrinkImage } from "@/lib/compress-image";
+
 import { DEFAULT_LOW_STOCK, type ToolRow } from "@/lib/cnc-tool-stock";
 import { Sheet } from "./sheet";
 
@@ -35,6 +37,8 @@ export function AddToolSheet({
   const [low, setLow] = useState("");
   const [opening, setOpening] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
+  /** "4.1 MB → 240 KB", once a photo has been through the shrinker. */
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
   /** What the thumbnail shows right now: the new file, the saved photo,
    *  or nothing. Kept separate from `photo` so "remove" can clear the
    *  picture without pretending a file was chosen. */
@@ -148,6 +152,7 @@ export function AddToolSheet({
               style={pill("var(--gold-dark)")}
             >
               {preview ? "Change photo" : "＋ Add photo"}
+              {photoNote && <em style={{ display: "block", fontStyle: "normal", fontSize: 10.5, opacity: 0.7 }}>{photoNote}</em>}
             </button>
             {preview && (
               <button
@@ -175,7 +180,18 @@ export function AddToolSheet({
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null;
-            if (f) setPhoto(f);
+            if (!f) return;
+            // Shrink before it goes anywhere. A phone camera hands over
+            // 4–12 MB for a picture this card shows at 120px.
+            setPhotoNote("Shrinking…");
+            void shrinkImage(f).then((out) => {
+              setPhoto(out.file);
+              setPhotoNote(
+                out.changed
+                  ? `${prettyBytes(out.beforeBytes)} → ${prettyBytes(out.afterBytes)}`
+                  : prettyBytes(out.afterBytes),
+              );
+            });
           }}
         />
       </div>

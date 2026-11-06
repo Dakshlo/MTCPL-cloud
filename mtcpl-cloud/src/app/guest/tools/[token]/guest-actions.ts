@@ -14,14 +14,18 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canEnrolForAnyVendor, canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
+import {
+  canEnrolForAnyVendor,
+  canSignInAtCupboard,
+  canUseCncTools,
+} from "@/lib/cnc-tool-permissions";
 import { issueActionOtp, verifyActionOtp } from "@/lib/action-otp";
 import {
   GUEST_MAX_QTY,
   resolveToolStoreLink,
   takesThroughLinkToday,
 } from "@/lib/cnc-tool-guest";
-import { moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
+import { TOOL_IMAGE_BUCKET, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
 import {
   SESSION_HOURS,
   TOOL_OTP_DIGITS,
@@ -69,6 +73,8 @@ type Signer = {
    *  row, so the screen never has to guess from what it can see. */
   canEnrol: boolean;
   enrolScope: "own" | "any" | null;
+  /** May he fill the shelf — add a tool, add stock, fix a count? */
+  canKeep: boolean;
 };
 
 async function resolveSigner(
@@ -107,9 +113,11 @@ async function resolveSigner(
         phone: o.phone,
         vendorId: o.vendor_id,
         vendorName: ov?.name ?? null,
-        // A man under a vendor cannot grow a team of his own.
+        // A man under a vendor cannot grow a team of his own, and
+        // cannot touch the shelf except by taking from it.
         canEnrol: false,
         enrolScope: null,
+        canKeep: false,
       },
     };
   }
@@ -154,6 +162,7 @@ async function resolveSigner(
       vendorName: pv?.name ?? null,
       canEnrol: !!p.vendor_id || anyVendor,
       enrolScope: p.vendor_id ? "own" : anyVendor ? "any" : null,
+      canKeep: canUseCncTools(p as Parameters<typeof canUseCncTools>[0]),
     },
   };
 }
@@ -198,6 +207,7 @@ export type VerifyCodeResult =
       company: string | null;
       canEnrol: boolean;
       enrolScope: "own" | "any" | null;
+      canKeep: boolean;
     }
   | { ok: false; error: string; attemptsLeft?: number };
 
@@ -257,6 +267,7 @@ export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCo
     company: signer.vendorName,
     canEnrol: signer.canEnrol,
     enrolScope: signer.enrolScope,
+    canKeep: signer.canKeep,
   };
 }
 
@@ -565,5 +576,181 @@ export async function removeOperatorAction(fd: FormData): Promise<TeamResult> {
     ok: true,
     team: await teamFor(who.scope, who.vendorId),
     message: gone ? `${gone} taken off the list.` : "Already off the list.",
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Keeping the shelf from the cupboard itself
+// ──────────────────────────────────────────────────────────────────
+// Daksh, Nov 2026: "add [an] add item button so i can directly
+// maintain or add stock from phone only... to both owner too add this
+// maintain and add stock thing."
+//
+// The office screen has always been able to do these three. The point
+// of putting them here is that the shelf is HERE: a box of bits
+// arrives, the man is standing at the open cupboard with his phone,
+// and the alternative is remembering to type it in later — which is
+// the paper register with extra steps.
+//
+// Nothing is loosened to allow it. The same OTP that signs a take
+// signs these, and canKeep is re-read from the profile on every call,
+// so it is the three office people and nobody else. Taking is still
+// the only thing a vendor or his man can do through this door.
+//
+// guest_link_id is deliberately NOT set on these rows: that column
+// means "taken at the cupboard QR", and mig 229 has a constraint
+// saying so. Stock arriving is not a take.
+
+export type KeeperResult =
+  | { ok: true; message: string }
+  | { ok: false; error: string };
+
+/** The signed-in person, if they may keep the store. */
+async function keeperAt(token: string) {
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false as const, error: "This QR is not working. Ask the office." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false as const, error: "Your sign-in has run out. Tap your name again." };
+  }
+  if (!session.canKeep || !session.profileId) {
+    return { ok: false as const, error: "Only the office can change the shelf." };
+  }
+  return { ok: true as const, profileId: session.profileId, name: session.name };
+}
+
+const qtyOf = (fd: FormData, k: string): number => {
+  const n = Number(String(fd.get(k) ?? "").trim());
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** A box of bits has arrived. */
+export async function keeperAddStockAction(fd: FormData): Promise<KeeperResult> {
+  const who = await keeperAt(String(fd.get("token") || "").trim());
+  if (!who.ok) return who;
+
+  const toolId = String(fd.get("tool_id") || "").trim();
+  const qty = qtyOf(fd, "qty");
+  if (!toolId) return { ok: false, error: "Which tool?" };
+  if (!Number.isInteger(qty) || qty < 1) return { ok: false, error: "How many came in?" };
+  if (qty > 10_000) return { ok: false, error: "That is a lot — add it on the office screen." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: raw, error } = await admin.rpc("cnc_tool_record_move", {
+    p_tool_id: toolId,
+    p_kind: "receive",
+    p_delta: qty,
+    p_note: `Added at the cupboard by ${who.name}`,
+    p_entered_by: who.profileId,
+  });
+  if (error) return { ok: false, error: error.message };
+  const res = (raw ?? {}) as MoveOutcome;
+  if (!res.ok) return { ok: false, error: moveRefusal(res) };
+
+  revalidatePath(`/guest/tools/${String(fd.get("token") || "").trim()}`);
+  revalidatePath("/tools");
+  return { ok: true, message: `${res.tool}: ${res.stock_after} ${res.unit} on the shelf.` };
+}
+
+/** The shelf says one thing and the register another. The shelf wins. */
+export async function keeperFixCountAction(fd: FormData): Promise<KeeperResult> {
+  const who = await keeperAt(String(fd.get("token") || "").trim());
+  if (!who.ok) return who;
+
+  const toolId = String(fd.get("tool_id") || "").trim();
+  const counted = qtyOf(fd, "counted");
+  if (!toolId) return { ok: false, error: "Which tool?" };
+  if (!Number.isInteger(counted) || counted < 0) {
+    return { ok: false, error: "What does the shelf say? A whole number, 0 or more." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  // An absolute count, so a take landing mid-count cannot bend it
+  // (mig 235). The delta is worked out inside the lock.
+  const { data: raw, error } = await admin.rpc("cnc_tool_record_move", {
+    p_tool_id: toolId,
+    p_kind: "adjust",
+    p_target: counted,
+    p_note: `Counted at the cupboard by ${who.name}`,
+    p_entered_by: who.profileId,
+  });
+  if (error) return { ok: false, error: error.message };
+  const res = (raw ?? {}) as MoveOutcome;
+  if (!res.ok) return { ok: false, error: moveRefusal(res) };
+  if (res.noop) return { ok: true, message: `${res.tool} was already ${counted}.` };
+
+  return (
+    revalidatePath(`/guest/tools/${String(fd.get("token") || "").trim()}`),
+    revalidatePath("/tools"),
+    { ok: true, message: `${res.tool} put right: ${res.stock_after} ${res.unit}.` }
+  );
+}
+
+/** Something on the shelf that the store has never heard of. */
+export async function keeperNewToolAction(fd: FormData): Promise<KeeperResult> {
+  const token = String(fd.get("token") || "").trim();
+  const who = await keeperAt(token);
+  if (!who.ok) return who;
+
+  const name = String(fd.get("name") || "").trim().replace(/\s+/g, " ");
+  const unit = String(fd.get("unit") || "").trim() || "pcs";
+  const opening = qtyOf(fd, "opening");
+
+  if (name.length < 2) return { ok: false, error: "Give the tool a name." };
+  if (name.length > 80) return { ok: false, error: "That name is too long." };
+  if (!Number.isInteger(opening) || opening < 0) {
+    return { ok: false, error: "How many are on the shelf right now? 0 is fine." };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: created, error } = await admin
+    .from("cnc_tools")
+    .insert({ name, unit, created_by: who.profileId, updated_by: who.profileId })
+    .select("id, name")
+    .maybeSingle();
+  if (error) {
+    if (error.code === "23505") return { ok: false, error: `"${name}" is already in the store.` };
+    return { ok: false, error: error.message };
+  }
+  if (!created) return { ok: false, error: "Could not add it. Try again." };
+  const tool = created as { id: string; name: string };
+
+  // The photo goes up after the row, under the tool's own id, so a
+  // failed upload costs a picture and never the tool.
+  const photo = fd.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    const mime = (photo.type || "").toLowerCase();
+    const ok = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(mime);
+    if (ok && photo.size <= 8 * 1024 * 1024) {
+      const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+      const path = `${tool.id}/${Date.now().toString(36)}.${ext}`;
+      const up = await admin.storage
+        .from(TOOL_IMAGE_BUCKET)
+        .upload(path, Buffer.from(await photo.arrayBuffer()), { contentType: mime, upsert: false });
+      if (!up.error) await admin.from("cnc_tools").update({ image_path: path }).eq("id", tool.id);
+    }
+  }
+
+  if (opening > 0) {
+    // A normal receive line, so the opening count shows WHERE it came
+    // from instead of appearing out of nowhere above an empty register.
+    await admin.rpc("cnc_tool_record_move", {
+      p_tool_id: tool.id,
+      p_kind: "receive",
+      p_delta: opening,
+      p_note: `Opening stock, added at the cupboard by ${who.name}`,
+      p_entered_by: who.profileId,
+    });
+  }
+
+  revalidatePath(`/guest/tools/${token}`);
+  revalidatePath("/tools");
+  return {
+    ok: true,
+    message: opening > 0
+      ? `${tool.name} added with ${opening} ${unit}.`
+      : `${tool.name} added. Put some stock in when it arrives.`,
   };
 }

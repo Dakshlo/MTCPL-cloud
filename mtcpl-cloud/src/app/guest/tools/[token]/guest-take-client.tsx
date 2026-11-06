@@ -26,8 +26,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { useLiveStock } from "@/lib/use-live-stock";
+import { KEEPER_CSS, KeeperSheet, type KeeperTool } from "./keeper-sheet";
 
 export type TakeTool = {
   id: string;
@@ -64,12 +66,15 @@ type Session = {
   canEnrol: boolean;
   /** "own" = a vendor's own men · "any" = the developer, who picks. */
   enrolScope: "own" | "any" | null;
+  /** The office three: may fill the shelf from the cupboard itself. */
+  canKeep: boolean;
 };
 
 type SendRes = { ok: true; sentTo: string } | { ok: false; error: string };
 type TeamRes =
   | { ok: true; team: TeamMate[]; message?: string }
   | { ok: false; error: string };
+type KeeperRes = { ok: true; message: string } | { ok: false; error: string };
 type VerifyRes =
   | {
       ok: true;
@@ -77,6 +82,7 @@ type VerifyRes =
       company: string | null;
       canEnrol: boolean;
       enrolScope: "own" | "any" | null;
+      canKeep: boolean;
     }
   | { ok: false; error: string; attemptsLeft?: number };
 type TakeRes =
@@ -110,6 +116,7 @@ export function GuestTakeClient({
   token, label, tools, stockSig, roster, session, team: initialTeam, vendorChoices,
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
   enrolAction, removeOperatorAction, myTeamAction,
+  keeperTools, addStockAction, fixCountAction, newToolAction,
 }: {
   token: string;
   label: string;
@@ -130,6 +137,11 @@ export function GuestTakeClient({
   enrolAction: (fd: FormData) => Promise<TeamRes>;
   removeOperatorAction: (fd: FormData) => Promise<TeamRes>;
   myTeamAction: (fd: FormData) => Promise<TeamRes>;
+  /** Every live tool, for the keeper's sheet. Empty for everyone else. */
+  keeperTools: KeeperTool[];
+  addStockAction: (fd: FormData) => Promise<KeeperRes>;
+  fixCountAction: (fd: FormData) => Promise<KeeperRes>;
+  newToolAction: (fd: FormData) => Promise<KeeperRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
   const [step, setStep] = useState<Step>(session ? "tool" : "who");
@@ -141,6 +153,7 @@ export function GuestTakeClient({
   const [q, setQ] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const [done, setDone] = useState<{ toolName: string; qty: number; left: number } | null>(null);
   const [tally, setTally] = useState<Array<{ toolName: string; qty: number }>>([]);
   const [taken, setTaken] = useState<Record<string, number>>({});
@@ -154,6 +167,9 @@ export function GuestTakeClient({
   const [newVendor, setNewVendor] = useState("");
   const [teamMsg, setTeamMsg] = useState<string | null>(null);
   const [dropping, setDropping] = useState<string | null>(null);
+  /** What the keeper's sheet just did. Its own line, because it is a
+   *  different kind of news from "you took two". */
+  const [kept, setKept] = useState<string | null>(null);
 
   // Only while somebody is actually looking at the shelf. On the name
   // and code steps there is no number on screen to go stale.
@@ -243,6 +259,7 @@ export function GuestTakeClient({
         company: r.company,
         canEnrol: r.canEnrol,
         enrolScope: r.enrolScope,
+        canKeep: r.canKeep,
       });
       setStep("tool");
 
@@ -325,6 +342,7 @@ export function GuestTakeClient({
   return (
     <main className="gt allow-portrait">
       <style>{CSS}</style>
+      <style>{KEEPER_CSS}</style>
 
       <header className="gt-head">
         <div className="gt-head-row">
@@ -355,6 +373,14 @@ export function GuestTakeClient({
           </div>
         )}
       </header>
+
+      {kept && (
+        <div className="gt-kept" role="status">
+          <span aria-hidden>✓</span>
+          <span>{kept}</span>
+          <button type="button" onClick={() => setKept(null)} aria-label="Close">✕</button>
+        </div>
+      )}
 
       {err && (
         <div className="gt-err" role="alert">
@@ -706,6 +732,26 @@ export function GuestTakeClient({
         </section>
       )}
 
+      {/* ── the office three can fill the shelf from here ──────
+          Tucked behind one button at the bottom of the screen, where
+          a thumb is, and only on the steps where a shelf is in view.
+          A man taking a tool never sees it. */}
+      {who?.canKeep && (step === "tool" || step === "done") && (
+        <KeeperSheet
+          token={token}
+          tools={keeperTools}
+          addStockAction={addStockAction}
+          fixCountAction={fixCountAction}
+          newToolAction={newToolAction}
+          onDone={(m) => {
+            setKept(m);
+            setErr(null);
+            // Pull the new numbers in rather than make him reload.
+            router.refresh();
+          }}
+        />
+      )}
+
       {/* ── 5. done ────────────────────────────────────────────── */}
       {step === "done" && done && (
         <section className="gt-body gt-donestep">
@@ -794,6 +840,18 @@ const CSS = `
 .gt-hint { font-size:14px; color:var(--dim); line-height:1.5; margin:0 0 18px; }
 .gt-blank { padding:26px 18px; text-align:center; font-size:14.5px; color:var(--dim);
   background:var(--card); border:1px dashed var(--line); border-radius:16px; }
+.gt-kept {
+  display:flex; align-items:center; gap:10px; margin:14px 16px 0;
+  padding:13px 15px; border-radius:15px; font-size:14px; font-weight:700;
+  background:var(--okbg); color:var(--ok); border:1px solid rgba(5,150,105,.3);
+}
+.gt-kept span:first-child { font-size:16px; }
+.gt-kept span:nth-child(2) { flex:1; min-width:0; }
+.gt-kept button {
+  border:none; background:none; color:inherit; font:inherit; cursor:pointer;
+  opacity:.65; font-size:13px; padding:2px 4px;
+}
+
 .gt-err {
   display:flex; align-items:center; gap:9px; margin:14px 16px 0; padding:12px 14px;
   background:var(--outbg); border:1px solid #fecaca; border-radius:14px;
@@ -933,6 +991,9 @@ const CSS = `
   font:inherit; font-size:15.5px; padding:14px 0; color:var(--ink); }
 .gt-search button { background:none; border:none; color:var(--dim); font-size:15px; cursor:pointer; }
 .gt-tools { display:flex; flex-direction:column; gap:11px; }
+/* Clearance for the keeper's floating button, so the last tool on the
+   shelf is never left sitting underneath it. Only when it is there. */
+.gt:has(.ks-fab) { padding-bottom:110px; }
 .gt-tool {
   display:flex; align-items:center; gap:12px; width:100%; text-align:left;
   padding:15px 15px 15px 18px; border-radius:18px; cursor:pointer; font:inherit;
@@ -966,11 +1027,21 @@ const CSS = `
 
 /* the photo (mig 233) — or the tool's initial in its level colour, so a
    tool without one still reads as a tool rather than a broken box */
-.gt-thumb { width:52px; height:52px; flex:0 0 auto; border-radius:15px; overflow:hidden;
+/* Daksh, Nov 2026: "in phone the image thumbnail should be more big."
+   He is right — the photo is there so a man holding the thing
+   recognises it without reading, and 52px was a stamp. These are the
+   biggest that still leave the name and the count room on one row. */
+.gt-thumb { width:74px; height:74px; flex:0 0 auto; border-radius:18px; overflow:hidden;
   display:grid; place-items:center; background:#f1f1ee; }
 .gt-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.gt-thumb i { font-style:normal; font-size:21px; font-weight:800; }
-.gt-thumb-lg { width:62px; height:62px; border-radius:17px; }
+.gt-thumb i { font-style:normal; font-size:28px; font-weight:800; }
+.gt-thumb-lg { width:104px; height:104px; border-radius:24px; }
+.gt-thumb-lg i { font-size:40px; }
+@media (max-width: 360px) {
+  /* The oldest phones in the shed. Still bigger than it was. */
+  .gt-thumb { width:62px; height:62px; border-radius:16px; }
+  .gt-thumb i { font-size:24px; }
+}
 .gt-tool[data-level="ok"]  .gt-thumb[data-empty] { background:var(--okbg);  color:var(--ok); }
 .gt-tool[data-level="low"] .gt-thumb[data-empty] { background:var(--lowbg); color:var(--low); }
 .gt-tool[data-level="out"] .gt-thumb[data-empty] { background:var(--outbg); color:var(--out); }
