@@ -54,7 +54,12 @@ export default async function ToolStorePage() {
   return (
     <StoreClient
       tools={tools}
-      movements={movements.slice(0, 300)}
+      // The register does month arithmetic now, so it needs more than
+      // the last page of lines. 2000 is roughly three years of a busy
+      // cupboard; past that the oldest are dropped and the register
+      // says so rather than quietly reporting a short month.
+      movements={movements.slice(0, 2000)}
+      movementsTruncated={movements.length > 2000}
       stockSig={stockSignature(tools)}
       vendorNames={vendorNames}
       operators={operators.map((o) => ({

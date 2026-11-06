@@ -61,10 +61,13 @@ export type OperatorRow = {
 const OFFICE_POLL_MS = 6000;
 
 export function StoreClient({
-  tools, movements, stockSig, vendorNames, operators, canManage,
+  tools, movements, movementsTruncated = false, stockSig, vendorNames, operators, canManage,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
+  /** True when the register is showing only the most recent slice, so
+   *  it can say so instead of quietly reporting a short month. */
+  movementsTruncated?: boolean;
   /** The shelf as the server last rendered it (mig 236). */
   stockSig: string;
   /** vendor id → company name, for the register's group headings. */
@@ -314,6 +317,7 @@ export function StoreClient({
           vendorNames={vendorNames}
           operators={operators}
           canManage={canManage}
+          truncated={movementsTruncated}
           onlyTool={onlyTool}
           onClearFilter={() => setOnlyTool(null)}
           onRemoveOperator={(id) => {
@@ -376,23 +380,33 @@ export function StoreClient({
 
 // ── The register ───────────────────────────────────────────────────
 //
-// Daksh, Nov 2026: "in register view we will see entry vendor wise."
+// Daksh, Nov 2026: "make register more useful, so it's usable — which
+// vendor took what tools, month wise, operator wise under vendor, and
+// all."
 //
-// So the page is no longer one long roll of every movement in date
-// order. It is a company at a time — MOHIT, and under him whichever of
-// his men actually stood at the cupboard — because that is the question
-// the office asks it: not "what happened on Tuesday" but "what is
-// Mohit's lot going through."
+// It was a roll of lines grouped by company. A line is the proof; it
+// is not the answer. The questions actually asked of this screen are
+//
+//     what did Mohit's lot go through in November
+//     which tool is it going on
+//     which of his men is taking it
+//
+// and all three are sums, not lines. So the register leads with the
+// sums and keeps the lines underneath, folded away, for the moment
+// somebody disputes one.
+//
+// A MONTH AT A TIME, because that is how the question is asked and how
+// the money is settled. Walk back with ‹ ›, or take the whole lot with
+// All time. A month with nothing in it says so and offers the way out
+// rather than looking broken.
 //
 // Three kinds of group, and the order is deliberate:
 //
-//   a vendor   takes belonging to a company, most recently active first
+//   a vendor   takes belonging to a company, biggest taker first
 //   Office     a take by someone with no company of their own
 //   The store  stock added, scrapped, counts fixed — nobody took these
-//
-// A group with nothing in it is not drawn. A company that has men but
-// has taken nothing still is: "MOHIT — 3 men, nothing taken yet" is
-// information, and an empty space is not.
+
+type Tally = { id: string; label: string; qty: number; lines: number };
 
 type RegGroup = {
   key: string;
@@ -401,16 +415,38 @@ type RegGroup = {
   vendorId: string | null;
   rows: ToolMovement[];
   team: OperatorRow[];
-  /** Units taken by this company, ignoring voided lines. */
+  /** Units taken by this company in the period, voided lines ignored. */
   taken: number;
+  byTool: Tally[];
+  byPerson: Tally[];
   lastAt: number;
 };
 
 const STORE_KEY = "__store";
 const OFFICE_KEY = "__office";
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** Which IST month a timestamp falls in. The cupboard is in Rajasthan;
+ *  a take at 1am on the 1st belongs to that month, not the last one,
+ *  and UTC would put it in the wrong one for five and a half hours
+ *  every night. */
+function istMonthOf(iso: string): { y: number; m: number } {
+  const d = new Date(new Date(iso).getTime() + 5.5 * 3_600_000);
+  return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+}
+
+function istNow(): { y: number; m: number } {
+  return istMonthOf(new Date().toISOString());
+}
+
+type Period = { kind: "month"; y: number; m: number } | { kind: "all" };
+
 function Register({
-  movements, tools, vendorNames, operators, canManage,
+  movements, tools, vendorNames, operators, canManage, truncated,
   onlyTool, onClearFilter, onRemoveOperator,
 }: {
   movements: ToolMovement[];
@@ -418,27 +454,63 @@ function Register({
   vendorNames: Record<string, string>;
   operators: OperatorRow[];
   canManage: boolean;
+  truncated: boolean;
   onlyTool: string | null;
   onClearFilter: () => void;
   onRemoveOperator: (operatorId: string) => void;
 }) {
   const toolName = useMemo(() => new Map(tools.map((t) => [t.id, t.name])), [tools]);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [period, setPeriod] = useState<Period>(() => ({ kind: "month", ...istNow() }));
+  const [openLines, setOpenLines] = useState<Record<string, boolean>>({});
   const [showTeam, setShowTeam] = useState<string | null>(null);
   const [dropping, setDropping] = useState<string | null>(null);
 
-  const rows = onlyTool ? movements.filter((m) => m.tool_id === onlyTool) : movements;
+  const scoped = onlyTool ? movements.filter((m) => m.tool_id === onlyTool) : movements;
+
+  const rows = useMemo(() => {
+    if (period.kind === "all") return scoped;
+    return scoped.filter((m) => {
+      const at = istMonthOf(m.created_at);
+      return at.y === period.y && at.m === period.m;
+    });
+  }, [scoped, period]);
+
+  /** Months that actually have something in them, newest first — so
+   *  "nothing here" can point at the nearest month that does. */
+  const monthsWithData = useMemo(() => {
+    const seen = new Map<string, { y: number; m: number }>();
+    for (const mv of scoped) {
+      const at = istMonthOf(mv.created_at);
+      seen.set(`${at.y}-${at.m}`, at);
+    }
+    return [...seen.values()].sort((a, b) => b.y - a.y || b.m - a.m);
+  }, [scoped]);
 
   const groups = useMemo<RegGroup[]>(() => {
     const byKey = new Map<string, RegGroup>();
+    const toolTally = new Map<string, Map<string, Tally>>();
+    const personTally = new Map<string, Map<string, Tally>>();
 
     const ensure = (key: string, title: string, vendorId: string | null) => {
       let g = byKey.get(key);
       if (!g) {
-        g = { key, title, vendorId, rows: [], team: [], taken: 0, lastAt: 0 };
+        g = { key, title, vendorId, rows: [], team: [], taken: 0, byTool: [], byPerson: [], lastAt: 0 };
         byKey.set(key, g);
+        toolTally.set(key, new Map());
+        personTally.set(key, new Map());
       }
       return g;
+    };
+
+    const bump = (
+      store: Map<string, Map<string, Tally>>,
+      key: string, id: string, label: string, qty: number,
+    ) => {
+      const m = store.get(key)!;
+      const t = m.get(id) ?? { id, label, qty: 0, lines: 0 };
+      t.qty += qty;
+      t.lines += 1;
+      m.set(id, t);
     };
 
     // Every company that has men gets a group even before it has taken
@@ -457,119 +529,258 @@ function Register({
           : "Office";
       const g = ensure(key, title, storeSide ? null : m.vendor_id);
       g.rows.push(m);
-      if (!m.undone_at && m.kind === "issue") g.taken += Math.abs(Number(m.delta));
       g.lastAt = Math.max(g.lastAt, new Date(m.created_at).getTime());
+
+      if (!m.undone_at && m.kind === "issue") {
+        const qty = Math.abs(Number(m.delta));
+        g.taken += qty;
+        bump(toolTally, key, m.tool_id, toolName.get(m.tool_id) ?? "—", qty);
+        // The man, not the company: "Shyam, under Mohit" is the whole
+        // point of asking operator-wise.
+        const who = (m.taken_by || "").trim() || "Unsigned";
+        bump(personTally, key, who.toLowerCase(), who, qty);
+      }
+    }
+
+    const sortTally = (m: Map<string, Tally> | undefined) =>
+      [...(m?.values() ?? [])].sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
+
+    for (const g of byKey.values()) {
+      g.byTool = sortTally(toolTally.get(g.key));
+      g.byPerson = sortTally(personTally.get(g.key));
     }
 
     const all = [...byKey.values()];
     const rank = (g: RegGroup) => (g.key === STORE_KEY ? 2 : g.key === OFFICE_KEY ? 1 : 0);
+    // Biggest taker first within the companies — the question is who is
+    // going through the most, and that should not depend on who
+    // happened to take something last.
     return all.sort(
-      (a, b) => rank(a) - rank(b) || b.lastAt - a.lastAt || a.title.localeCompare(b.title),
+      (a, b) =>
+        rank(a) - rank(b) ||
+        b.taken - a.taken ||
+        b.lastAt - a.lastAt ||
+        a.title.localeCompare(b.title),
     );
-  }, [rows, operators, vendorNames]);
+  }, [rows, operators, vendorNames, toolName]);
 
-  if (rows.length === 0 && operators.length === 0) {
-    return (
-      <>
-        {onlyTool && <OnlyToolChip name={toolName.get(onlyTool)} onClear={onClearFilter} />}
-        <div className="tc-empty-search">Nothing has moved yet.</div>
-      </>
-    );
+  const periodTaken = groups.reduce((s, g) => s + g.taken, 0);
+  const label =
+    period.kind === "all" ? "All time" : `${MONTHS[period.m]} ${period.y}`;
+
+  function stepMonth(by: number) {
+    setPeriod((p) => {
+      const base = p.kind === "month" ? p : { ...istNow() };
+      const n = base.m + by;
+      return { kind: "month", y: base.y + Math.floor(n / 12), m: ((n % 12) + 12) % 12 };
+    });
   }
+
+  const hasAnythingAtAll = scoped.length > 0;
 
   return (
     <>
       {onlyTool && <OnlyToolChip name={toolName.get(onlyTool)} onClear={onClearFilter} />}
 
-      <div className="tc-reggroups">
-        {groups.map((g) => {
-          const shut = collapsed[g.key] === true;
-          const teamOpen = showTeam === g.key;
-          return (
-            <section key={g.key} className="tc-reggroup" data-kind={g.vendorId ? "vendor" : g.key}>
-              <header className="tc-rg-head">
+      {/* ── which month ──────────────────────────────────────── */}
+      <div className="tc-period">
+        <div className="tc-period-nav">
+          <button
+            type="button"
+            onClick={() => stepMonth(-1)}
+            aria-label="Previous month"
+            disabled={period.kind === "all"}
+          >
+            ‹
+          </button>
+          <strong>{label}</strong>
+          <button
+            type="button"
+            onClick={() => stepMonth(1)}
+            aria-label="Next month"
+            disabled={period.kind === "all"}
+          >
+            ›
+          </button>
+        </div>
+
+        <div className="tc-period-right">
+          {periodTaken > 0 && (
+            <span className="tc-period-sum">
+              <b>{periodTaken}</b> taken
+            </span>
+          )}
+          <button
+            type="button"
+            className={`tc-period-all${period.kind === "all" ? " on" : ""}`}
+            onClick={() =>
+              setPeriod((p) => (p.kind === "all" ? { kind: "month", ...istNow() } : { kind: "all" }))
+            }
+          >
+            {period.kind === "all" ? "Back to this month" : "All time"}
+          </button>
+        </div>
+      </div>
+
+      {truncated && period.kind === "all" && (
+        <div className="tc-period-note">
+          Showing the most recent 2,000 lines. Older ones are in the database but
+          not on this screen.
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="tc-empty-search">
+          {!hasAnythingAtAll ? (
+            <>Nothing has moved yet.</>
+          ) : (
+            <>
+              Nothing in {label}.{" "}
+              {monthsWithData[0] && (
                 <button
                   type="button"
-                  className="tc-rg-title"
-                  onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !shut }))}
-                  aria-expanded={!shut}
+                  className="tc-period-jump"
+                  onClick={() => setPeriod({ kind: "month", ...monthsWithData[0] })}
                 >
-                  <span className="tc-rg-caret" aria-hidden>{shut ? "▸" : "▾"}</span>
-                  <span className="tc-rg-name">{g.title}</span>
+                  Jump to {MONTHS[monthsWithData[0].m]} {monthsWithData[0].y}
                 </button>
-
-                <div className="tc-rg-facts">
-                  {g.taken > 0 && <span className="tc-rg-took"><b>{g.taken}</b> taken</span>}
-                  {g.rows.length > 0 && (
-                    <span className="tc-rg-count">
-                      {g.rows.length} {g.rows.length === 1 ? "line" : "lines"}
-                    </span>
-                  )}
-                  {g.team.length > 0 && (
-                    <button
-                      type="button"
-                      className="tc-rg-team"
-                      onClick={() => { setShowTeam(teamOpen ? null : g.key); setDropping(null); }}
-                      aria-expanded={teamOpen}
-                    >
-                      👷 {g.team.length} {g.team.length === 1 ? "man" : "men"}
-                    </button>
-                  )}
-                </div>
-              </header>
-
-              {/* Who this vendor has enrolled. The office can see the
-                  whole list and take anybody off it — a man who has
-                  left should not still be able to open the cupboard
-                  because nobody told his boss to remove him. */}
-              {teamOpen && g.team.length > 0 && (
-                <div className="tc-rg-roster">
-                  {g.team.map((o) => (
-                    <div key={o.id} className="tc-rg-man">
-                      <span className="tc-rg-man-name">{o.name}</span>
-                      <span className="tc-rg-man-phone">{o.maskedPhone}</span>
-                      {canManage && (
-                        dropping === o.id ? (
-                          <span className="tc-rg-man-ask">
-                            <button type="button" className="tc-rg-man-yes" onClick={() => { setDropping(null); onRemoveOperator(o.id); }}>
-                              Remove
-                            </button>
-                            <button type="button" className="tc-rg-man-no" onClick={() => setDropping(null)}>
-                              Keep
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="tc-rg-man-x"
-                            onClick={() => setDropping(o.id)}
-                            aria-label={`Take ${o.name} off the list`}
-                          >
-                            ✕
-                          </button>
-                        )
-                      )}
-                    </div>
-                  ))}
-                </div>
               )}
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="tc-reggroups">
+          {groups.map((g) => {
+            const linesOpen = openLines[g.key] === true;
+            const teamOpen = showTeam === g.key;
+            return (
+              <section key={g.key} className="tc-reggroup" data-kind={g.vendorId ? "vendor" : g.key}>
+                <header className="tc-rg-head">
+                  <span className="tc-rg-title">
+                    <span className="tc-rg-name">{g.title}</span>
+                  </span>
 
-              {!shut && (
-                g.rows.length === 0 ? (
-                  <div className="tc-rg-nothing">Nothing taken yet.</div>
-                ) : (
-                  <div className="tc-reg">
-                    {g.rows.map((m) => (
-                      <RegisterRow key={m.id} m={m} toolName={toolName.get(m.tool_id)} />
+                  <div className="tc-rg-facts">
+                    {g.taken > 0 && <span className="tc-rg-took"><b>{g.taken}</b> taken</span>}
+                    {g.rows.length > 0 && (
+                      <span className="tc-rg-count">
+                        {g.rows.length} {g.rows.length === 1 ? "line" : "lines"}
+                      </span>
+                    )}
+                    {g.team.length > 0 && (
+                      <button
+                        type="button"
+                        className="tc-rg-team"
+                        onClick={() => { setShowTeam(teamOpen ? null : g.key); setDropping(null); }}
+                        aria-expanded={teamOpen}
+                      >
+                        👷 {g.team.length} {g.team.length === 1 ? "man" : "men"}
+                      </button>
+                    )}
+                  </div>
+                </header>
+
+                {/* Who this vendor has enrolled. The office can see the
+                    whole list and take anybody off it — a man who has
+                    left should not still be able to open the cupboard
+                    because nobody told his boss to remove him. */}
+                {teamOpen && g.team.length > 0 && (
+                  <div className="tc-rg-roster">
+                    {g.team.map((o) => (
+                      <div key={o.id} className="tc-rg-man">
+                        <span className="tc-rg-man-name">{o.name}</span>
+                        <span className="tc-rg-man-phone">{o.maskedPhone}</span>
+                        {canManage && (
+                          dropping === o.id ? (
+                            <span className="tc-rg-man-ask">
+                              <button type="button" className="tc-rg-man-yes" onClick={() => { setDropping(null); onRemoveOperator(o.id); }}>
+                                Remove
+                              </button>
+                              <button type="button" className="tc-rg-man-no" onClick={() => setDropping(null)}>
+                                Keep
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="tc-rg-man-x"
+                              onClick={() => setDropping(o.id)}
+                              aria-label={`Take ${o.name} off the list`}
+                            >
+                              ✕
+                            </button>
+                          )
+                        )}
+                      </div>
                     ))}
                   </div>
-                )
-              )}
-            </section>
-          );
-        })}
-      </div>
+                )}
+
+                {/* ── the answer ───────────────────────────────── */}
+                {g.taken > 0 ? (
+                  <div className="tc-rg-sums">
+                    <TallyColumn
+                      head={g.key === STORE_KEY ? "Tools" : "What they took"}
+                      rows={g.byTool}
+                      total={g.taken}
+                    />
+                    {g.key !== STORE_KEY && (
+                      <TallyColumn head="Who took it" rows={g.byPerson} total={g.taken} />
+                    )}
+                  </div>
+                ) : (
+                  <div className="tc-rg-nothing">
+                    {g.rows.length > 0 ? "No takes — stock movements only." : "Nothing taken."}
+                  </div>
+                )}
+
+                {/* ── the proof, folded away ───────────────────── */}
+                {g.rows.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="tc-rg-lines"
+                      onClick={() => setOpenLines((c) => ({ ...c, [g.key]: !linesOpen }))}
+                      aria-expanded={linesOpen}
+                    >
+                      {linesOpen ? "▾" : "▸"} every line ({g.rows.length})
+                    </button>
+                    {linesOpen && (
+                      <div className="tc-reg">
+                        {g.rows.map((m) => (
+                          <RegisterRow key={m.id} m={m} toolName={toolName.get(m.tool_id)} />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
     </>
+  );
+}
+
+/** One side of a group's summary: a name, a bar, a number. The bar is
+ *  against the group's own total, so it answers "how much of this
+ *  company's month was this tool / this man" at a glance. */
+function TallyColumn({ head, rows, total }: { head: string; rows: Tally[]; total: number }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="tc-tally">
+      <div className="tc-tally-head">{head}</div>
+      {rows.map((r) => (
+        <div key={r.id} className="tc-tally-row">
+          <span className="tc-tally-name" title={r.label}>{r.label}</span>
+          <span className="tc-tally-bar" aria-hidden>
+            <i style={{ width: `${total > 0 ? Math.max(3, (r.qty / total) * 100) : 0}%` }} />
+          </span>
+          <span className="tc-tally-qty">{r.qty}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

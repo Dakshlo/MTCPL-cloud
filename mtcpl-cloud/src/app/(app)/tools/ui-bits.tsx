@@ -303,6 +303,55 @@ export const TOOLS_CSS = `
   .tc-page { padding-bottom:110px !important; }
 }
 
+/* ── which month ───────────────────────────────────────────── */
+.tc-period { display:flex; align-items:center; justify-content:space-between;
+  gap:12px; flex-wrap:wrap; margin-bottom:14px; padding:10px 12px;
+  border-radius:14px; background:var(--surface); border:1px solid var(--border); }
+.tc-period-nav { display:flex; align-items:center; gap:4px; }
+.tc-period-nav strong { min-width:168px; text-align:center; font-size:15.5px;
+  font-weight:800; letter-spacing:-.01em; }
+.tc-period-nav button { width:32px; height:32px; border-radius:10px; cursor:pointer;
+  font:inherit; font-size:16px; line-height:1;
+  border:1px solid var(--border); background:var(--surface-alt); color:var(--text); }
+.tc-period-nav button:disabled { opacity:.35; cursor:not-allowed; }
+.tc-period-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.tc-period-sum { font-size:12.5px; color:var(--muted); font-weight:700; }
+.tc-period-sum b { font-size:17px; font-weight:800; color:var(--tc-out); margin-right:3px; }
+.tc-period-all { padding:7px 13px; border-radius:999px; cursor:pointer; font:inherit;
+  font-size:12px; font-weight:800; border:1px solid var(--border);
+  background:var(--surface-alt); color:var(--muted); }
+.tc-period-all.on { background:var(--tc-blue); border-color:var(--tc-blue); color:#fff; }
+.tc-period-note { margin:-6px 0 12px; font-size:11.5px; color:var(--muted); font-style:italic; }
+.tc-period-jump { border:none; background:none; padding:0; cursor:pointer; font:inherit;
+  font-size:inherit; font-weight:800; color:var(--tc-blue); text-decoration:underline; }
+
+/* ── the sums ──────────────────────────────────────────────── */
+.tc-rg-sums { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:13px 15px; }
+.tc-tally { min-width:0; display:flex; flex-direction:column; gap:6px; }
+.tc-tally-head { font-size:10px; font-weight:800; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:2px; }
+.tc-tally-row { display:grid; grid-template-columns:minmax(0,1fr) 64px 34px;
+  align-items:center; gap:9px; }
+.tc-tally-name { font-size:13px; font-weight:700; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tc-tally-bar { height:7px; border-radius:99px; background:var(--surface-alt);
+  overflow:hidden; }
+.tc-tally-bar i { display:block; height:100%; border-radius:99px; background:var(--tc-blue); }
+.tc-tally-qty { font-size:14px; font-weight:800; text-align:right;
+  font-variant-numeric:tabular-nums; color:var(--text); }
+.tc-reggroup[data-kind="__store"] .tc-tally-bar i { background:var(--tc-ok); }
+
+.tc-rg-lines { width:100%; text-align:left; cursor:pointer; font:inherit;
+  font-size:11.5px; font-weight:800; letter-spacing:.03em; color:var(--muted);
+  padding:9px 15px; border:none; border-top:1px solid var(--border);
+  background:var(--surface-alt); }
+.tc-rg-lines:hover { color:var(--text); }
+
+@media (max-width: 760px) {
+  .tc-rg-sums { grid-template-columns:1fr; gap:14px; }
+  .tc-period-nav strong { min-width:120px; font-size:14px; }
+}
+
 .tc-reggroups { display:flex; flex-direction:column; gap:14px; }
 .tc-reggroup { border:1px solid var(--border); border-radius:17px; overflow:hidden;
   background:var(--surface); }
