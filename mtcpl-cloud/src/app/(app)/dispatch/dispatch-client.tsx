@@ -27,6 +27,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DeliverModal } from "./deliver-modal";
 import { undoDispatchAction } from "./actions";
 import { IncharcesPanel } from "./incharces-panel";
+import { DispatchExportButton } from "./raw-export-button";
 import { timeAgoLabel } from "./time-ago";
 // Aug 2026 — the dispatch board + picker. Trialled on the developer account
 // first, now the only path: the June-2026 temple grid and TempleDispatchPeek
@@ -336,6 +337,8 @@ export function DispatchClient({
   initialTab,
   canApprove,
   canUndo,
+  canExportRaw = false,
+  exportTemples = [],
   carvingDispatchTransfer,
   toast,
   error,
@@ -366,6 +369,11 @@ export function DispatchClient({
   /** Undo (recall an approved truck) — owner / developer / senior_incharge
    *  only. carving_head + dispatch incharge get false → no Undo button. */
   canUndo: boolean;
+  /** The raw Excel sheet. Everyone who can open this page, the dispatch
+   *  incharge included — it carries no money (Nov 2026). */
+  canExportRaw?: boolean;
+  /** Temple names for the export's own filter. */
+  exportTemples?: string[];
   /** Carving→Dispatch lane (developer Settings). When true, a carving slab is
    *  greyed/non-selectable until it's been brought in to the station. */
   carvingDispatchTransfer: boolean;
@@ -413,6 +421,8 @@ export function DispatchClient({
           <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}>🚚 Dispatch Station</h1>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignSelf: "flex-start" }}>
+          {/* The raw sheet, same control as Carving's (Nov 2026). */}
+          {canExportRaw && <DispatchExportButton temples={exportTemples} />}
           <button
             type="button"
             onClick={() => setEditIncharge(true)}

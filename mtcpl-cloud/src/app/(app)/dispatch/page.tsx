@@ -12,6 +12,7 @@
  */
 
 import { requireAuth } from "@/lib/auth";
+import { canExportDispatchRaw } from "@/lib/cutting-permissions";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { fetchAllPaged, chunkIds } from "@/lib/paginate";
 import { getProfilesMap } from "@/lib/profiles";
@@ -667,6 +668,17 @@ export default async function DispatchPage({
       .filter((s): s is ReadySlab => s !== undefined);
   }
 
+  // Temple names for the export's filter — every temple that has ever
+  // had something dispatched, which is a shorter and more useful list
+  // than every temple on the books.
+  const exportTemples = [
+    ...new Set(
+      [...provisional, ...invoiceInProcess, ...outForDelivery, ...delivered]
+        .map((d) => (d as { temple?: string | null }).temple ?? "")
+        .filter(Boolean),
+    ),
+  ].sort();
+
   return (
     <DispatchClient
       readySummaries={readySummaries}
@@ -685,6 +697,8 @@ export default async function DispatchPage({
       initialTab={initialTab}
       canApprove={canApprove}
       canUndo={canUndo}
+      canExportRaw={canExportDispatchRaw(profile)}
+      exportTemples={exportTemples}
       carvingDispatchTransfer={slabTransferStages.carvingToDispatch}
       toast={toastParam ?? null}
       error={errorParam ?? null}

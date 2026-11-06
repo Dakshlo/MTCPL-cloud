@@ -210,6 +210,24 @@ export function canReadRequiredSizes(
  * the floor but has no business with the rate card, so they are out
  * here too.
  */
+/**
+ * May this person download the raw dispatch table?
+ *
+ * Daksh, Nov 2026: "that excel export we made for CNC, likewise we
+ * want excel export feature for dispatch module too."
+ *
+ * The same people who can open /dispatch, INCLUDING the dispatch
+ * incharge: unlike the CNC sheet this one carries no rates — it is
+ * what physically went out, on which truck, to which temple, and the
+ * man loading the trucks has every reason to pull his own month.
+ * Money stays on the invoice.
+ */
+export function canExportDispatchRaw(profile: Pick<Profile, "role">): boolean {
+  return ["developer", "owner", "carving_head", "senior_incharge", "dispatch"].includes(
+    profile.role,
+  );
+}
+
 export function canExportCarvingRaw(profile: Pick<Profile, "role">): boolean {
   if (profile.role === "developer") return true;
   if (profile.role === "owner") return true;
