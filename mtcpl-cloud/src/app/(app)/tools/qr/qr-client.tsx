@@ -3,10 +3,10 @@
 /**
  * Sticker manager: create one, print it, switch it off.
  *
- * The print layout is the point — what comes out of the printer should be
- * ready to tape to a cupboard with no trimming and no explaining, so the
- * printed sheet carries the QR, the words a worker needs, and nothing
- * else from the app.
+ * What comes out of the printer is one QR square and nothing else —
+ * Daksh Nov 2026, "when we print the qr it should only print qr, remove
+ * all fonts and irrelevant info." See printQr() for how that is kept
+ * true no matter what the page around it grows into.
  */
 
 import { useState, useTransition } from "react";
@@ -68,6 +68,60 @@ export function QrManager({
     });
   }
 
+  /**
+   * Send one QR to the printer, and only the QR.
+   *
+   * window.print() prints the page it is called from — the heading, the
+   * prose, the link, every other sticker on the screen — and holding that
+   * back with print stylesheets means chasing every wrapper the app
+   * layout ever grows. So the square is handed to a blank throwaway frame
+   * of its own, and that is what the printer sees: one QR, one page.
+   */
+  function printQr(svg: string) {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("tabindex", "-1");
+    frame.style.cssText =
+      "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;";
+    document.body.appendChild(frame);
+
+    const doc = frame.contentDocument;
+    if (!doc) {
+      frame.remove();
+      setErr("Could not open the printer — use the browser's own Print instead.");
+      return;
+    }
+
+    // The QR is drawn on the server by the qrcode package; it is our own
+    // markup, not anything a user typed.
+    doc.open();
+    // Empty <title> on purpose: if the browser's own "Headers and
+    // footers" box is ticked, the title is what it prints across the top.
+    doc.write(
+      '<!doctype html><html><head><meta charset="utf-8"><title></title><style>' +
+        "@page{margin:12mm}" +
+        "html,body{margin:0;padding:0;background:#fff}" +
+        "svg{display:block;margin:0 auto;width:100%;height:auto;max-width:150mm}" +
+        "</style></head><body>" + svg + "</body></html>",
+    );
+    doc.close();
+
+    let gone = false;
+    const drop = () => {
+      if (gone) return;
+      gone = true;
+      frame.remove();
+    };
+    // Chrome blocks inside print(); Safari returns straight away, so the
+    // frame has to outlive the dialog — afterprint takes it down, and the
+    // timer is only there in case that event never arrives.
+    frame.contentWindow?.addEventListener("afterprint", () => window.setTimeout(drop, 400));
+    window.setTimeout(drop, 60_000);
+
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+  }
+
   async function copy(url: string, id: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -112,15 +166,12 @@ export function QrManager({
         <article key={c.id} className={`qr-card${c.active ? "" : " is-dead"}`}>
           {c.active && c.svg ? (
             <>
-              {/* ── What gets printed ───────────────────────────── */}
+              {/* ── The sticker. The heading names the door so two
+                   cards can be told apart on screen; the printer gets
+                   the square on its own. ─────────────────────────── */}
               <div className="qr-sheet">
                 <div className="qr-sheet-head">TOOL STORE · {c.label.toUpperCase()}</div>
                 <div className="qr-code" dangerouslySetInnerHTML={{ __html: c.svg }} />
-                <div className="qr-sheet-line1">Taking a tool? Scan this first.</div>
-                <div className="qr-sheet-line2">कोई भी औज़ार ले रहे हैं? पहले इसे स्कैन करें।</div>
-                <div className="qr-sheet-foot">
-                  Say your name, pick the tool, done. No login needed.
-                </div>
               </div>
 
               {/* ── Office-side detail, never printed ───────────── */}
@@ -140,8 +191,12 @@ export function QrManager({
                   </span>
                 </div>
                 <div className="qr-actions">
-                  <button type="button" className="qr-print" onClick={() => window.print()}>
-                    🖨 Print the sticker
+                  <button
+                    type="button"
+                    className="qr-print"
+                    onClick={() => c.svg && printQr(c.svg)}
+                  >
+                    🖨 Print the QR
                   </button>
                   {confirmRevoke === c.id ? (
                     <>
@@ -220,15 +275,12 @@ const CSS = `
 .qr-card.is-dead { opacity:.75; }
 
 .qr-sheet { background:#fff; color:#111; border:1px solid var(--border);
-  border-radius:16px; padding:26px 24px 22px; width:min(380px, 100%);
+  border-radius:16px; padding:22px 24px; width:min(380px, 100%);
   text-align:center; box-shadow:0 2px 10px rgba(15,23,42,.06); }
 .qr-sheet-head { font-size:11px; font-weight:800; letter-spacing:.14em;
   color:#8a6a2f; margin-bottom:16px; }
 .qr-code { display:grid; place-items:center; }
 .qr-code svg { width:100%; height:auto; max-width:300px; display:block; }
-.qr-sheet-line1 { font-size:19px; font-weight:800; margin-top:16px; letter-spacing:-.01em; }
-.qr-sheet-line2 { font-size:16px; font-weight:700; margin-top:6px; color:#333; }
-.qr-sheet-foot { font-size:12.5px; color:#666; margin-top:12px; line-height:1.5; }
 
 .qr-meta { flex:1 1 300px; min-width:0; display:flex; flex-direction:column; gap:12px; }
 .qr-metarow { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -254,14 +306,14 @@ const CSS = `
   border-radius:12px; font-size:13px; }
 .qr-dead span { color:var(--muted); line-height:1.5; }
 
+/* The button prints through a frame of its own (printQr), so this block
+   only has to keep a stray Ctrl+P honest: the squares, nothing else. */
 @media print {
-  .no-print, nav, header.topbar, aside { display:none !important; }
+  .no-print, nav, header.topbar, aside,
+  .tc-page > header, .qr-sheet-head { display:none !important; }
   .qr-card { page-break-inside:avoid; display:block; }
   .qr-sheet { border:none; box-shadow:none; width:100%; max-width:none;
     padding:0; margin:0 auto; }
-  .qr-code svg { max-width:420px; }
-  .qr-sheet-line1 { font-size:26px; }
-  .qr-sheet-line2 { font-size:21px; }
-  .qr-sheet-foot { font-size:14px; }
+  .qr-code svg { width:100%; height:auto; max-width:150mm; }
 }
 `;
