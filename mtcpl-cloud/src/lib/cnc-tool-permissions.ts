@@ -37,6 +37,35 @@ export function canUseCncTools(p: ToolProfile): boolean {
   return p.can_keep_tool_store === true;
 }
 
+/**
+ * May this person tap their name at the cupboard QR?
+ *
+ * The CNC vendors, obviously — it is their cupboard. Plus whoever keeps
+ * the store, because Daksh, Nikhil and Vinay take a tool out of it like
+ * anyone else, and because a keeper standing at the cupboard is the
+ * person best placed to add a vendor's new man on the spot.
+ *
+ * Daksh, Nov 2026: "in that qr login i dont see vinay and nikhil."
+ * They were being left off because the roster asked for a ROLE, and
+ * their role is owner — which is exactly the mistake the keeper flag
+ * exists to avoid.
+ *
+ * Their operators come from mig 234 and are checked separately; this is
+ * only about people with a profile.
+ */
+export function canSignInAtCupboard(p: ToolProfile): boolean {
+  return p.role === "vendor" || canUseCncTools(p);
+}
+
+/**
+ * May this person enrol a man under ANY vendor, rather than only their
+ * own? The office side: no company of their own, so they pick each
+ * time. A vendor is pinned to his own firm and an operator to nothing.
+ */
+export function canEnrolForAnyVendor(p: ToolProfile): boolean {
+  return canUseCncTools(p);
+}
+
 /** May this person change the catalogue (add a tool, set its warn line,
  *  delete an empty one) and record a count correction?
  *

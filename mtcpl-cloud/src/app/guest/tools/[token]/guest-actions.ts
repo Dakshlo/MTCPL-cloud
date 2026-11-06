@@ -14,6 +14,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
 import { issueActionOtp, verifyActionOtp } from "@/lib/action-otp";
 import {
   GUEST_MAX_QTY,
@@ -101,13 +102,20 @@ async function resolveSigner(
 
   const { data } = await admin
     .from("profiles")
-    .select("id, full_name, phone, role, is_active, vendor_id")
+    .select("id, full_name, phone, role, is_active, vendor_id, can_keep_tool_store")
     .eq("id", id)
     .maybeSingle();
   const p = data as
-    | { id: string; full_name: string | null; phone: string | null; role: string; is_active: boolean; vendor_id: string | null }
+    | {
+        id: string; full_name: string | null; phone: string | null; role: string;
+        is_active: boolean; vendor_id: string | null; can_keep_tool_store: boolean | null;
+      }
     | null;
-  if (!p || !p.is_active || !["vendor", "developer"].includes(p.role)) return gone;
+  // The same rule the roster was drawn with, applied again against the
+  // database — the list is HTML and HTML can be edited.
+  if (!p || !p.is_active || !canSignInAtCupboard(p as Parameters<typeof canSignInAtCupboard>[0])) {
+    return gone;
+  }
 
   return {
     ok: true,

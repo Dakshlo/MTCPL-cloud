@@ -27,6 +27,7 @@ import { cookies } from "next/headers";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { allActiveOperators, maskTail } from "@/lib/cnc-tool-operators";
+import { canEnrolForAnyVendor, canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
 
 /** One shift. Long enough that a man is not re-typing a code all
  *  morning, short enough that a forgotten phone stops working today. */
@@ -107,10 +108,13 @@ export async function enrollableVendors(): Promise<Array<{ id: string; name: str
  * The roster the QR screen shows.
  *
  * Daksh: "we will show all names mohit, manthan, vivek and in future i
- * will add also developer." That is exactly the two roles below, so
- * adding a vendor is giving them the role in Settings — no code change,
- * no list to maintain in two places. Their operators come from mig 234
- * and need no office involvement at all.
+ * will add also developer" — and then, Nov 2026, "in that qr login i
+ * dont see vinay and nikhil."
+ *
+ * So the list is: the CNC vendors, and whoever keeps the store. Not a
+ * list of roles, which is what left the two owners off — the rule is
+ * canSignInAtCupboard(), the same one the sign-in action re-checks.
+ * Their operators come from mig 234 and need no office involvement.
  *
  * Ordered company by company, each vendor at the head of his own men,
  * because that is how the man scanning thinks about it: he looks for
@@ -126,8 +130,11 @@ export async function toolRoster(): Promise<ToolPerson[]> {
   const [{ data: profileRows }, operators] = await Promise.all([
     admin
       .from("profiles")
-      .select("id, full_name, role, phone, is_active, vendor_id, vendors(name)")
-      .in("role", ["vendor", "developer"])
+      .select("id, full_name, role, phone, is_active, vendor_id, can_keep_tool_store, vendors(name)")
+      // Vendors by role, keepers by flag. Narrowed here so the query
+      // does not drag the whole staff list back; the real gate is the
+      // filter below, which is the same function the action uses.
+      .or("role.eq.vendor,role.eq.developer,can_keep_tool_store.is.true")
       .eq("is_active", true)
       .order("full_name"),
     allActiveOperators(),
@@ -139,10 +146,12 @@ export async function toolRoster(): Promise<ToolPerson[]> {
     role: string;
     phone: string | null;
     vendor_id: string | null;
+    can_keep_tool_store: boolean | null;
     vendors: { name: string } | { name: string }[] | null;
   };
 
   const principals = ((profileRows ?? []) as Row[])
+    .filter((p) => canSignInAtCupboard(p as Parameters<typeof canSignInAtCupboard>[0]))
     .filter((p) => (p.phone ?? "").replace(/\D/g, "").length >= 10)
     .map((p) => {
       const v = Array.isArray(p.vendors) ? p.vendors[0] ?? null : p.vendors;
@@ -240,7 +249,7 @@ export async function currentToolSession(
   const admin = createAdminSupabaseClient();
   const { data } = await admin
     .from("cnc_tool_sessions")
-    .select("id, profile_id, operator_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name, is_active, vendor_id, role), cnc_tool_operators(name, is_active, vendor_id), vendors(name)")
+    .select("id, profile_id, operator_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name, is_active, vendor_id, role, can_keep_tool_store), cnc_tool_operators(name, is_active, vendor_id), vendors(name)")
     .eq("token", raw)
     .maybeSingle();
   if (!data) return null;
@@ -288,16 +297,20 @@ export async function currentToolSession(
     name,
     vendorId: row.vendor_id,
     vendorName: vend?.name ?? null,
-    // A vendor principal, or the developer. An operator can never grow
-    // a team of his own — that is the one thing the two kinds of
-    // signer genuinely differ on.
-    canEnrol: !!row.profile_id && (!!row.vendor_id || prof?.role === "developer"),
+    // A vendor principal manages his own men. Anyone who keeps the
+    // store — the developer, Nikhil, Vinay — manages all three teams
+    // and picks the company each time. An operator can never grow a
+    // team of his own: that is the one thing the two kinds of signer
+    // genuinely differ on.
+    canEnrol:
+      !!row.profile_id &&
+      (!!row.vendor_id || (!!prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0]))),
     enrolScope: !row.profile_id
       ? null
-      : prof?.role === "developer"
-        ? "any"
-        : row.vendor_id
-          ? "own"
+      : row.vendor_id
+        ? "own"
+        : prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0])
+          ? "any"
           : null,
     expiresAt: row.expires_at,
   };
@@ -308,6 +321,7 @@ type ProfileSide = {
   is_active: boolean;
   vendor_id: string | null;
   role: string;
+  can_keep_tool_store: boolean | null;
 };
 type OperatorSide = { name: string | null; is_active: boolean; vendor_id: string | null };
 
