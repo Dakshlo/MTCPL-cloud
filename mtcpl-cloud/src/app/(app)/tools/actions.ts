@@ -277,6 +277,146 @@ export async function updateToolAction(fd: FormData): Promise<ActionResult> {
   return { ok: true, message: "Saved." };
 }
 
+// ── Delete a tool ─────────────────────────────────────────────────
+
+/**
+ * Take a tool out of the store for good.
+ *
+ * Daksh, Nov 2026: "make it this way we can delete whole product / item
+ * if there is 0 in stock."
+ *
+ * The zero is the whole safety rule, and it is a good one: a tool with
+ * stock against it is a thing sitting in a cupboard, and software
+ * should not be able to make it disappear. So the count is re-read from
+ * the ledger here — never trusted from the page, which may be a minute
+ * old while somebody else is taking the last one at the QR.
+ *
+ * ── What "delete" means depends on the register ───────────────────
+ *
+ * A tool nobody ever touched is removed outright: the row goes, the
+ * photo goes, and the store looks as though the typo never happened.
+ *
+ * A tool with history is RETIRED instead — the row stays, flagged
+ * inactive, and disappears from the shelf and the QR. The register is
+ * the reason: a hard delete would have to take every line that mentions
+ * it with it, and "who took the 450mm bits in September" is exactly the
+ * question this module exists to answer. The database agrees — the
+ * movement rows point at the tool with ON DELETE RESTRICT, so a hard
+ * delete of a used tool would be refused anyway.
+ *
+ * The message says which of the two happened, in those words, so nobody
+ * is left wondering why a name they deleted still shows in the history.
+ */
+export async function deleteToolAction(fd: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const toolId = txt(fd, "tool_id");
+  if (!toolId) return { ok: false, error: "Which tool?" };
+
+  const admin = createAdminSupabaseClient();
+
+  const { data: row } = await admin
+    .from("cnc_tools")
+    .select("id, name, image_path, is_active")
+    .eq("id", toolId)
+    .maybeSingle();
+  const tool = row as { id: string; name: string; image_path: string | null; is_active: boolean } | null;
+  if (!tool) return { ok: false, error: "That tool is not in the store." };
+
+  // The gate, from the ledger and not from the screen.
+  const stock = await stockForTool(toolId);
+  if (stock > 0) {
+    return {
+      ok: false,
+      error: `${tool.name} still has ${stock} on the shelf. Empty it first — scrap or fix the count — then delete it.`,
+    };
+  }
+  if (stock < 0) {
+    return {
+      ok: false,
+      error: `${tool.name} is at ${stock}, which should not be possible. Fix the count first.`,
+    };
+  }
+
+  // Has it any history at all? One row is enough to make this a retire.
+  const { count } = await admin
+    .from("cnc_tool_movements")
+    .select("id", { count: "exact", head: true })
+    .eq("tool_id", toolId);
+  const touched = (count ?? 0) > 0;
+
+  if (!touched) {
+    const { error } = await admin.from("cnc_tools").delete().eq("id", toolId);
+    if (error) return { ok: false, error: error.message };
+    await dropToolPhoto(admin, tool.image_path);
+    await logAudit(profile.id, "cnc_tool_deleted", "cnc_tool", toolId, {
+      name: tool.name,
+      hard: true,
+    });
+    refresh();
+    return { ok: true, message: `${tool.name} deleted.` };
+  }
+
+  const { error } = await admin
+    .from("cnc_tools")
+    .update({ is_active: false, updated_by: profile.id })
+    .eq("id", toolId);
+  if (error) return { ok: false, error: error.message };
+
+  await logAudit(profile.id, "cnc_tool_deleted", "cnc_tool", toolId, {
+    name: tool.name,
+    hard: false,
+    movements: count ?? 0,
+  });
+  refresh();
+  return {
+    ok: true,
+    message: `${tool.name} removed from the store. Its old register lines stay, so you can still see who took what.`,
+  };
+}
+
+// ── Take one of a vendor's men off the list (mig 234) ─────────────
+
+/**
+ * The office's copy of the button a vendor has on his own phone.
+ *
+ * A vendor enrols his own men and normally removes them himself. This
+ * exists for the case he will not: somebody leaves the firm, nobody
+ * tells him, and the man can still walk up to the cupboard. The office
+ * must not have to ask permission to close that.
+ */
+export async function removeToolOperatorAction(fd: FormData): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const operatorId = txt(fd, "operator_id");
+  if (!operatorId) return { ok: false, error: "Which man?" };
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("cnc_tool_operators")
+    .update({
+      is_active: false,
+      removed_at: new Date().toISOString(),
+      removed_by: profile.id,
+    })
+    .eq("id", operatorId)
+    .eq("is_active", true)
+    .select("name, vendor_id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "He is already off the list." };
+
+  const gone = data as { name: string; vendor_id: string };
+  await logAudit(profile.id, "cnc_tool_operator_removed", "cnc_tool_operator", operatorId, {
+    name: gone.name,
+    vendor_id: gone.vendor_id,
+  });
+  refresh();
+  return { ok: true, message: `${gone.name} can no longer take anything from the cupboard.` };
+}
+
 // ── Record a movement ─────────────────────────────────────────────
 
 /**

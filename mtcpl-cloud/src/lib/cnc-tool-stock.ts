@@ -58,6 +58,10 @@ export type ToolMovement = {
   kind: ToolMovementKind;
   delta: number;
   taken_by: string | null;
+  /** Mig 230/234 — which of the two kinds of person signed for it.
+   *  Exactly one is ever set, and only on a take. */
+  taken_by_profile_id: string | null;
+  taken_by_operator_id: string | null;
   note: string | null;
   entered_by: string | null;
   /** Mig 229 — set when the take came through the wardrobe QR rather
@@ -138,7 +142,7 @@ export async function loadStore(): Promise<{ tools: ToolRow[]; movements: ToolMo
     fetchAllPaged((from, to) =>
       admin
         .from("cnc_tool_movements")
-        .select("id, tool_id, vendor_id, kind, delta, taken_by, note, entered_by, guest_link_id, created_at, undone_at")
+        .select("id, tool_id, vendor_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, note, entered_by, guest_link_id, created_at, undone_at")
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to),

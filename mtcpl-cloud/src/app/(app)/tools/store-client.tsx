@@ -33,16 +33,35 @@ import {
   type ToolMovement,
   type ToolRow,
 } from "@/lib/cnc-tool-stock";
-import { createToolAction, recordMovementAction, undoMovementAction, updateToolAction } from "./actions";
+import {
+  createToolAction,
+  deleteToolAction,
+  recordMovementAction,
+  removeToolOperatorAction,
+  undoMovementAction,
+  updateToolAction,
+} from "./actions";
 import { MoveSheet, type MoveIntent } from "./move-sheet";
 import { AddToolSheet } from "./add-tool-sheet";
 import { UndoToast, TOOLS_CSS, ago, type Done } from "./ui-bits";
 
+/** A man enrolled under a CNC vendor (mig 234). */
+export type OperatorRow = {
+  id: string;
+  name: string;
+  maskedPhone: string;
+  vendorId: string;
+  vendorName: string;
+};
+
 export function StoreClient({
-  tools, movements, canManage,
+  tools, movements, vendorNames, operators, canManage,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
+  /** vendor id → company name, for the register's group headings. */
+  vendorNames: Record<string, string>;
+  operators: OperatorRow[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -57,6 +76,10 @@ export function StoreClient({
   const [menuFor, setMenuFor] = useState<string | null>(null);
   /** Set by the History chip on a card — the register, one tool only. */
   const [onlyTool, setOnlyTool] = useState<string | null>(null);
+  /** The tool whose Delete has been pressed once. Deleting is rare and
+   *  permanent-looking, so it asks — but inside the menu, not behind a
+   *  browser confirm() the phone renders as a grey box. */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const [optimistic, applyOptimistic] = useOptimistic(
     tools,
@@ -107,6 +130,9 @@ export function StoreClient({
       if (!r.ok) { setErr(r.error); router.refresh(); return; }
       setDone({
         at: Date.now(),
+        // The one path that writes a movement, so the one path that
+        // may be taken back.
+        undoable: true,
         text: kind === "receive"
           ? `Added ${qty} × ${tool?.name ?? "tool"}`
           : `Count fixed · ${tool?.name ?? "tool"}`,
@@ -163,24 +189,12 @@ export function StoreClient({
         </div>
       </header>
 
-      {/* ── how it works ──────────────────────────────────────────
-          Two screens, two jobs. Written on the page because the keeper
-          and the takers are different people and neither sees the
-          other's side. */}
-      <div className="tc-how">
-        <div className="tc-how-step" data-n="1">
-          <strong>You keep it full</strong>
-          <span>Add a tool, add stock, fix a count — from this screen.</span>
-        </div>
-        <div className="tc-how-step" data-n="2">
-          <strong>They scan the cupboard</strong>
-          <span>The QR on the door, on their own phone. Name, then a code to that phone.</span>
-        </div>
-        <div className="tc-how-step" data-n="3">
-          <strong>The register writes itself</strong>
-          <span>Every take is signed by the person who took it. Nobody types it up.</span>
-        </div>
-      </div>
+      {/* The three "how it works" cards that used to sit here are gone
+          — Daksh, Nov 2026: "remove irrelevant info like that kpi card
+          for you keep it full, they scan the cupboard, and that
+          instruction, it's not needed." They were written for a screen
+          nobody had used yet; the people who open it now have been
+          running the cupboard for a month. */}
 
       {err && (
         <div className="tc-err" role="alert">
@@ -260,12 +274,22 @@ export function StoreClient({
                 <ToolCard
                   key={t.id} tool={t} canManage={canManage}
                   menuOpen={menuFor === t.id}
-                  onMenu={() => setMenuFor((m) => (m === t.id ? null : t.id))}
-                  onCloseMenu={() => setMenuFor(null)}
+                  confirmingDelete={confirmDelete === t.id}
+                  onMenu={() => { setMenuFor((m) => (m === t.id ? null : t.id)); setConfirmDelete(null); }}
+                  onCloseMenu={() => { setMenuFor(null); setConfirmDelete(null); }}
                   onAddStock={() => { setMenuFor(null); setIntent({ tool: t, kind: "receive" }); }}
                   onFixCount={() => { setMenuFor(null); setIntent({ tool: t, kind: "adjust" }); }}
                   onEdit={() => { setMenuFor(null); setEditing(t); setAddOpen(true); }}
                   onHistory={() => { setMenuFor(null); setOnlyTool(t.id); setTab("register"); }}
+                  onAskDelete={() => setConfirmDelete(t.id)}
+                  onCancelDelete={() => setConfirmDelete(null)}
+                  onDelete={() => {
+                    setMenuFor(null); setConfirmDelete(null);
+                    const fd = new FormData();
+                    fd.set("tool_id", t.id);
+                    run(() => deleteToolAction(fd),
+                        (msg) => setDone({ at: Date.now(), text: msg ?? "Deleted" }));
+                  }}
                 />
               ))}
             </div>
@@ -275,8 +299,17 @@ export function StoreClient({
         <Register
           movements={movements}
           tools={tools}
+          vendorNames={vendorNames}
+          operators={operators}
+          canManage={canManage}
           onlyTool={onlyTool}
           onClearFilter={() => setOnlyTool(null)}
+          onRemoveOperator={(id) => {
+            const fd = new FormData();
+            fd.set("operator_id", id);
+            run(() => removeToolOperatorAction(fd),
+                (msg) => setDone({ at: Date.now(), text: msg ?? "Removed" }));
+          }}
         />
       )}
 
@@ -316,67 +349,253 @@ export function StoreClient({
 }
 
 // ── The register ───────────────────────────────────────────────────
+//
+// Daksh, Nov 2026: "in register view we will see entry vendor wise."
+//
+// So the page is no longer one long roll of every movement in date
+// order. It is a company at a time — MOHIT, and under him whichever of
+// his men actually stood at the cupboard — because that is the question
+// the office asks it: not "what happened on Tuesday" but "what is
+// Mohit's lot going through."
+//
+// Three kinds of group, and the order is deliberate:
+//
+//   a vendor   takes belonging to a company, most recently active first
+//   Office     a take by someone with no company of their own
+//   The store  stock added, scrapped, counts fixed — nobody took these
+//
+// A group with nothing in it is not drawn. A company that has men but
+// has taken nothing still is: "MOHIT — 3 men, nothing taken yet" is
+// information, and an empty space is not.
+
+type RegGroup = {
+  key: string;
+  title: string;
+  /** Null for the Office and The store groups. */
+  vendorId: string | null;
+  rows: ToolMovement[];
+  team: OperatorRow[];
+  /** Units taken by this company, ignoring voided lines. */
+  taken: number;
+  lastAt: number;
+};
+
+const STORE_KEY = "__store";
+const OFFICE_KEY = "__office";
 
 function Register({
-  movements, tools, onlyTool, onClearFilter,
+  movements, tools, vendorNames, operators, canManage,
+  onlyTool, onClearFilter, onRemoveOperator,
 }: {
   movements: ToolMovement[];
   tools: ToolRow[];
+  vendorNames: Record<string, string>;
+  operators: OperatorRow[];
+  canManage: boolean;
   onlyTool: string | null;
   onClearFilter: () => void;
+  onRemoveOperator: (operatorId: string) => void;
 }) {
   const toolName = useMemo(() => new Map(tools.map((t) => [t.id, t.name])), [tools]);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [showTeam, setShowTeam] = useState<string | null>(null);
+  const [dropping, setDropping] = useState<string | null>(null);
+
   const rows = onlyTool ? movements.filter((m) => m.tool_id === onlyTool) : movements;
+
+  const groups = useMemo<RegGroup[]>(() => {
+    const byKey = new Map<string, RegGroup>();
+
+    const ensure = (key: string, title: string, vendorId: string | null) => {
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key, title, vendorId, rows: [], team: [], taken: 0, lastAt: 0 };
+        byKey.set(key, g);
+      }
+      return g;
+    };
+
+    // Every company that has men gets a group even before it has taken
+    // anything, so the office can see who is enrolled.
+    for (const o of operators) {
+      ensure(o.vendorId, vendorNames[o.vendorId] ?? o.vendorName, o.vendorId).team.push(o);
+    }
+
+    for (const m of rows) {
+      const storeSide = m.kind === "receive" || m.kind === "scrap" || m.kind === "adjust";
+      const key = storeSide ? STORE_KEY : m.vendor_id ?? OFFICE_KEY;
+      const title = storeSide
+        ? "The store"
+        : m.vendor_id
+          ? vendorNames[m.vendor_id] ?? "Unknown company"
+          : "Office";
+      const g = ensure(key, title, storeSide ? null : m.vendor_id);
+      g.rows.push(m);
+      if (!m.undone_at && m.kind === "issue") g.taken += Math.abs(Number(m.delta));
+      g.lastAt = Math.max(g.lastAt, new Date(m.created_at).getTime());
+    }
+
+    const all = [...byKey.values()];
+    const rank = (g: RegGroup) => (g.key === STORE_KEY ? 2 : g.key === OFFICE_KEY ? 1 : 0);
+    return all.sort(
+      (a, b) => rank(a) - rank(b) || b.lastAt - a.lastAt || a.title.localeCompare(b.title),
+    );
+  }, [rows, operators, vendorNames]);
+
+  if (rows.length === 0 && operators.length === 0) {
+    return (
+      <>
+        {onlyTool && <OnlyToolChip name={toolName.get(onlyTool)} onClear={onClearFilter} />}
+        <div className="tc-empty-search">Nothing has moved yet.</div>
+      </>
+    );
+  }
 
   return (
     <>
-      {onlyTool && (
-        <button type="button" className="tc-filter" onClick={onClearFilter}>
-          {toolName.get(onlyTool) ?? "This tool"} only · <span>show everything ✕</span>
-        </button>
-      )}
-      {rows.length === 0 ? (
-        <div className="tc-empty-search">Nothing has moved yet.</div>
-      ) : (
-        <div className="tc-reg">
-          {rows.map((m) => {
-            const voided = !!m.undone_at;
-            const positive = Number(m.delta) > 0;
-            return (
-              <div key={m.id} className="tc-reg-row" data-void={voided ? "1" : undefined}>
-                <div className="tc-reg-delta" data-up={positive ? "1" : undefined}>
-                  {positive ? "+" : ""}{m.delta}
+      {onlyTool && <OnlyToolChip name={toolName.get(onlyTool)} onClear={onClearFilter} />}
+
+      <div className="tc-reggroups">
+        {groups.map((g) => {
+          const shut = collapsed[g.key] === true;
+          const teamOpen = showTeam === g.key;
+          return (
+            <section key={g.key} className="tc-reggroup" data-kind={g.vendorId ? "vendor" : g.key}>
+              <header className="tc-rg-head">
+                <button
+                  type="button"
+                  className="tc-rg-title"
+                  onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !shut }))}
+                  aria-expanded={!shut}
+                >
+                  <span className="tc-rg-caret" aria-hidden>{shut ? "▸" : "▾"}</span>
+                  <span className="tc-rg-name">{g.title}</span>
+                </button>
+
+                <div className="tc-rg-facts">
+                  {g.taken > 0 && <span className="tc-rg-took"><b>{g.taken}</b> taken</span>}
+                  {g.rows.length > 0 && (
+                    <span className="tc-rg-count">
+                      {g.rows.length} {g.rows.length === 1 ? "line" : "lines"}
+                    </span>
+                  )}
+                  {g.team.length > 0 && (
+                    <button
+                      type="button"
+                      className="tc-rg-team"
+                      onClick={() => { setShowTeam(teamOpen ? null : g.key); setDropping(null); }}
+                      aria-expanded={teamOpen}
+                    >
+                      👷 {g.team.length} {g.team.length === 1 ? "man" : "men"}
+                    </button>
+                  )}
                 </div>
-                <div className="tc-reg-main">
-                  <div className="tc-reg-title">
-                    {toolName.get(m.tool_id) ?? "—"}
-                    <span className="tc-reg-kind" data-kind={m.kind}>{KIND_LABEL[m.kind]}</span>
-                  </div>
-                  <div className="tc-reg-sub">
-                    {m.taken_by ? <strong>{m.taken_by}</strong> : <>Store</>}
-                    {m.guest_link_id && <span className="tc-reg-qr" title="Taken at the cupboard QR">▦</span>}
-                    {" · "}{ago(m.created_at)}
-                    {m.note && <> · {m.note}</>}
-                    {voided && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
-                  </div>
+              </header>
+
+              {/* Who this vendor has enrolled. The office can see the
+                  whole list and take anybody off it — a man who has
+                  left should not still be able to open the cupboard
+                  because nobody told his boss to remove him. */}
+              {teamOpen && g.team.length > 0 && (
+                <div className="tc-rg-roster">
+                  {g.team.map((o) => (
+                    <div key={o.id} className="tc-rg-man">
+                      <span className="tc-rg-man-name">{o.name}</span>
+                      <span className="tc-rg-man-phone">{o.maskedPhone}</span>
+                      {canManage && (
+                        dropping === o.id ? (
+                          <span className="tc-rg-man-ask">
+                            <button type="button" className="tc-rg-man-yes" onClick={() => { setDropping(null); onRemoveOperator(o.id); }}>
+                              Remove
+                            </button>
+                            <button type="button" className="tc-rg-man-no" onClick={() => setDropping(null)}>
+                              Keep
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="tc-rg-man-x"
+                            onClick={() => setDropping(o.id)}
+                            aria-label={`Take ${o.name} off the list`}
+                          >
+                            ✕
+                          </button>
+                        )
+                      )}
+                    </div>
+                  ))}
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              )}
+
+              {!shut && (
+                g.rows.length === 0 ? (
+                  <div className="tc-rg-nothing">Nothing taken yet.</div>
+                ) : (
+                  <div className="tc-reg">
+                    {g.rows.map((m) => (
+                      <RegisterRow key={m.id} m={m} toolName={toolName.get(m.tool_id)} />
+                    ))}
+                  </div>
+                )
+              )}
+            </section>
+          );
+        })}
+      </div>
     </>
+  );
+}
+
+function OnlyToolChip({ name, onClear }: { name: string | undefined; onClear: () => void }) {
+  return (
+    <button type="button" className="tc-filter" onClick={onClear}>
+      {name ?? "This tool"} only · <span>show everything ✕</span>
+    </button>
+  );
+}
+
+function RegisterRow({ m, toolName }: { m: ToolMovement; toolName: string | undefined }) {
+  const voided = !!m.undone_at;
+  const positive = Number(m.delta) > 0;
+  // The company is already the heading above this row, so the row says
+  // the PERSON — which is the whole point of "Shyam, under Mohit".
+  const operator = !!m.taken_by_operator_id;
+
+  return (
+    <div className="tc-reg-row" data-void={voided ? "1" : undefined}>
+      <div className="tc-reg-delta" data-up={positive ? "1" : undefined}>
+        {positive ? "+" : ""}{m.delta}
+      </div>
+      <div className="tc-reg-main">
+        <div className="tc-reg-title">
+          {toolName ?? "—"}
+          <span className="tc-reg-kind" data-kind={m.kind}>{KIND_LABEL[m.kind]}</span>
+        </div>
+        <div className="tc-reg-sub">
+          {m.taken_by ? <strong>{m.taken_by}</strong> : <>Store</>}
+          {operator && <span className="tc-reg-op" title="Works under this vendor">his man</span>}
+          {m.guest_link_id && <span className="tc-reg-qr" title="Taken at the cupboard QR">▦</span>}
+          {" · "}{ago(m.created_at)}
+          {m.note && <> · {m.note}</>}
+          {voided && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
+        </div>
+      </div>
+    </div>
   );
 }
 
 // ── Tool card ──────────────────────────────────────────────────────
 
 function ToolCard({
-  tool, canManage, menuOpen, onMenu, onCloseMenu, onAddStock, onFixCount, onEdit, onHistory,
+  tool, canManage, menuOpen, confirmingDelete,
+  onMenu, onCloseMenu, onAddStock, onFixCount, onEdit, onHistory,
+  onAskDelete, onCancelDelete, onDelete,
 }: {
-  tool: ToolRow; canManage: boolean; menuOpen: boolean;
+  tool: ToolRow; canManage: boolean; menuOpen: boolean; confirmingDelete: boolean;
   onMenu: () => void; onCloseMenu: () => void;
   onAddStock: () => void; onFixCount: () => void; onEdit: () => void; onHistory: () => void;
+  onAskDelete: () => void; onCancelDelete: () => void; onDelete: () => void;
 }) {
   const level = tool.stock <= 0 ? "out" : tool.stock <= tool.lowLine ? "low" : "ok";
   // Stock against three times the warning line — a scale that means
@@ -414,6 +633,35 @@ function ToolCard({
                   <button type="button" onClick={onHistory}>📜 This tool&apos;s register</button>
                   <div className="tc-menu-sep" />
                   <button type="button" onClick={onEdit}>✎ Edit tool</button>
+
+                  {/* Delete only shows at zero. Not greyed out at other
+                      times — a disabled button people cannot press is a
+                      question they have to ask somebody. The rule is
+                      written where they can read it instead. */}
+                  <div className="tc-menu-sep" />
+                  {tool.stock <= 0 ? (
+                    confirmingDelete ? (
+                      <div className="tc-menu-ask">
+                        <span>Delete {tool.name} from the store?</span>
+                        <div>
+                          <button type="button" className="tc-menu-yes" onClick={onDelete}>
+                            Yes, delete
+                          </button>
+                          <button type="button" className="tc-menu-no" onClick={onCancelDelete}>
+                            Keep it
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button type="button" className="tc-menu-danger" onClick={onAskDelete}>
+                        🗑 Delete tool
+                      </button>
+                    )
+                  ) : (
+                    <div className="tc-menu-why">
+                      Empty it to delete it — {tool.stock} {tool.unit} still on the shelf.
+                    </div>
+                  )}
                 </div>
               </>
             )}

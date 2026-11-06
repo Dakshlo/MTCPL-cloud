@@ -130,6 +130,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // access to simply stops appearing.
   const quickPages = pagesFor(profile.role, null, {
     can_assign_carving: (profile as { can_assign_carving?: boolean | null }).can_assign_carving,
+    can_keep_tool_store: profile.can_keep_tool_store,
   });
   const quickHrefs = new Set(quickPages.map((p) => p.href));
   const quickPinned = (Array.isArray((profile as { quick_links?: unknown }).quick_links)
@@ -743,6 +744,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         themePreference={profile.theme_preference ?? null}
         activeDepartment={effectiveDepartment(profile.role, profile.active_department ?? null)}
         canAssignCarving={profile.can_assign_carving === true}
+        canKeepToolStore={profile.can_keep_tool_store === true}
         cancelledSlabAlert={templeCancelAlert}
         approvalCount={invoiceApprovalBadge ?? 0}
       />

@@ -27,10 +27,99 @@ import {
   sessionCookieName,
   startToolSession,
 } from "@/lib/cnc-tool-session";
+import {
+  operatorsForVendor,
+  phoneAlreadyTaken,
+  phoneDigits,
+  phoneProblem,
+  type ToolOperator,
+} from "@/lib/cnc-tool-operators";
 
 /** The action name the code is bound to, so a tool-store code can never
  *  be replayed against the bill-archive prompt or vice versa. */
 const OTP_ACTION = "cnc_tool_signin";
+
+/**
+ * Who does this id belong to, and may they sign in?
+ *
+ * The roster is HTML and HTML can be edited, so the rule that drew the
+ * list is applied again here against the database. The phone comes back
+ * with it, and only from the row — there is no way to ask for a code to
+ * be sent somewhere new.
+ */
+type Signer = {
+  kind: "profile" | "operator";
+  /** What the OTP is bound to. Namespaced, so an operator's code can
+   *  never be replayed against a profile that happens to share an id. */
+  subjectId: string;
+  /** action_otps.requested_by is NOT NULL and points at profiles; an
+   *  operator borrows the profile of the vendor who enrolled him. */
+  requestedBy: string;
+  profileId: string | null;
+  operatorId: string | null;
+  name: string;
+  phone: string;
+  vendorId: string | null;
+};
+
+async function resolveSigner(
+  kind: string,
+  id: string,
+): Promise<{ ok: true; signer: Signer } | { ok: false; error: string }> {
+  const gone = { ok: false as const, error: "That name is not on the list any more." };
+  if (!id) return { ok: false, error: "Tap your name first." };
+
+  const admin = createAdminSupabaseClient();
+
+  if (kind === "operator") {
+    const { data } = await admin
+      .from("cnc_tool_operators")
+      .select("id, name, phone, vendor_id, enrolled_by, is_active")
+      .eq("id", id)
+      .maybeSingle();
+    const o = data as
+      | { id: string; name: string; phone: string; vendor_id: string; enrolled_by: string; is_active: boolean }
+      | null;
+    if (!o || !o.is_active) return gone;
+    return {
+      ok: true,
+      signer: {
+        kind: "operator",
+        subjectId: `cnc_op:${o.id}`,
+        requestedBy: o.enrolled_by,
+        profileId: null,
+        operatorId: o.id,
+        name: (o.name || "Unnamed").trim(),
+        phone: o.phone,
+        vendorId: o.vendor_id,
+      },
+    };
+  }
+
+  const { data } = await admin
+    .from("profiles")
+    .select("id, full_name, phone, role, is_active, vendor_id")
+    .eq("id", id)
+    .maybeSingle();
+  const p = data as
+    | { id: string; full_name: string | null; phone: string | null; role: string; is_active: boolean; vendor_id: string | null }
+    | null;
+  if (!p || !p.is_active || !["vendor", "developer"].includes(p.role)) return gone;
+
+  return {
+    ok: true,
+    signer: {
+      kind: "profile",
+      subjectId: p.id,
+      requestedBy: p.id,
+      profileId: p.id,
+      operatorId: null,
+      name: (p.full_name || "Unnamed").trim(),
+      phone: p.phone ?? "",
+      vendorId: p.vendor_id,
+    },
+  };
+}
 
 export type SendCodeResult =
   | { ok: true; sentTo: string }
@@ -45,36 +134,22 @@ export type SendCodeResult =
  */
 export async function sendToolSignInCodeAction(fd: FormData): Promise<SendCodeResult> {
   const token = String(fd.get("token") || "").trim();
-  const profileId = String(fd.get("profile_id") || "").trim();
+  const kind = String(fd.get("person_kind") || "profile").trim();
+  const personId = String(fd.get("person_id") || fd.get("profile_id") || "").trim();
 
   const resolved = await resolveToolStoreLink(token);
   if ("problem" in resolved) {
     return { ok: false, error: "This QR is not working. Ask the office." };
   }
-  if (!profileId) return { ok: false, error: "Tap your name first." };
 
-  const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("profiles")
-    .select("id, full_name, phone, role, is_active")
-    .eq("id", profileId)
-    .maybeSingle();
-
-  const p = data as
-    | { id: string; full_name: string | null; phone: string | null; role: string; is_active: boolean }
-    | null;
-
-  // Re-check the roster rule here, not just in the page that drew the
-  // list — the list is HTML and HTML can be edited.
-  if (!p || !p.is_active || !["vendor", "developer"].includes(p.role)) {
-    return { ok: false, error: "That name is not on the list any more." };
-  }
+  const who = await resolveSigner(kind, personId);
+  if (!who.ok) return who;
 
   return issueActionOtp({
     action: OTP_ACTION,
-    subjectId: p.id,
-    requestedBy: p.id,
-    phone: p.phone ?? "",
+    subjectId: who.signer.subjectId,
+    requestedBy: who.signer.requestedBy,
+    phone: who.signer.phone,
     digits: TOOL_OTP_DIGITS,
   });
 }
@@ -87,38 +162,31 @@ export type VerifyCodeResult =
  *  session and drops it in an HttpOnly cookie scoped to this route. */
 export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCodeResult> {
   const token = String(fd.get("token") || "").trim();
-  const profileId = String(fd.get("profile_id") || "").trim();
+  const kind = String(fd.get("person_kind") || "profile").trim();
+  const personId = String(fd.get("person_id") || fd.get("profile_id") || "").trim();
   const code = String(fd.get("code") || "").trim();
 
   const resolved = await resolveToolStoreLink(token);
   if ("problem" in resolved) return { ok: false, error: "This QR is not working. Ask the office." };
   const link = resolved.link;
 
-  const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("profiles")
-    .select("id, full_name, role, is_active, vendor_id")
-    .eq("id", profileId)
-    .maybeSingle();
-  const p = data as
-    | { id: string; full_name: string | null; role: string; is_active: boolean; vendor_id: string | null }
-    | null;
-  if (!p || !p.is_active || !["vendor", "developer"].includes(p.role)) {
-    return { ok: false, error: "That name is not on the list any more." };
-  }
+  const who = await resolveSigner(kind, personId);
+  if (!who.ok) return { ok: false, error: who.error };
+  const signer = who.signer;
 
   const check = await verifyActionOtp({
     action: OTP_ACTION,
-    subjectId: p.id,
+    subjectId: signer.subjectId,
     code,
     digits: TOOL_OTP_DIGITS,
   });
   if (!check.ok) return { ok: false, error: check.error, attemptsLeft: check.attemptsLeft };
 
   const sessionToken = await startToolSession({
-    profileId: p.id,
+    profileId: signer.profileId,
+    operatorId: signer.operatorId,
     linkId: link.id,
-    vendorId: p.vendor_id,
+    vendorId: signer.vendorId,
   });
   if (!sessionToken) return { ok: false, error: "Could not start the session. Try again." };
 
@@ -131,11 +199,11 @@ export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCo
     maxAge: SESSION_HOURS * 3600,
   });
 
-  // The session still carries the person's own company when they have
-  // one — it costs nothing and keeps the older rows comparable. Nobody
-  // is ASKED for it any more (mig 232); the code to their phone is the
-  // signature, and the company adds nothing the person did not say.
-  return { ok: true, name: (p.full_name || "Unnamed").trim() };
+  // The session carries the person's company. Nobody is ASKED for it
+  // (mig 232) — the code to their phone is the signature — but it is
+  // what puts a take under MOHIT in the office register, and for an
+  // operator it is the only thing that says whose man he is.
+  return { ok: true, name: signer.name };
 }
 
 /** Sign out — one tap when you hand the phone back. */
@@ -237,14 +305,17 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
   // taken_by keeps the readable name every existing screen already
   // shows; taken_by_profile_id is the part that cannot be typed.
   const { error } = await admin.from("cnc_tool_movements").insert({
-    // Whatever company the person belongs to, if any — never asked for,
-    // never required (mig 232). taken_by_profile_id is the signature.
+    // The company this man belongs to — never asked for, taken from the
+    // session. It is what groups the office register: MOHIT, and under
+    // him whoever actually stood at the cupboard.
     vendor_id: session.vendorId,
     tool_id: toolId,
     kind: "issue",
     delta: -Math.abs(qty),
     taken_by: session.name,
+    // Exactly one of these two, which mig 234 also enforces.
     taken_by_profile_id: session.profileId,
+    taken_by_operator_id: session.operatorId,
     guest_link_id: link.id,
   });
   if (error) return { ok: false, error: error.message };
@@ -257,4 +328,139 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
   revalidatePath("/tools");
 
   return { ok: true, left: stock - qty, toolName, qty };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// A vendor's own men (mig 234)
+// ──────────────────────────────────────────────────────────────────
+// Daksh: "eg i am mohit, i scan the qr code, enter otp, i see place
+// where i can add operator eg shyam and his number."
+//
+// Three rules hold this door shut, and all three are checked here
+// rather than in the screen that draws the buttons:
+//
+//   1. you must hold a live OTP session at this sticker
+//   2. that session must be a VENDOR PRINCIPAL — the man whose company
+//      it is. An operator cannot grow a team of his own, and the
+//      developer has no company to grow one under.
+//   3. you may only ever touch your OWN company's men
+//
+// What this creates is NOT an app login. See mig 234 for why that line
+// matters more than it looks.
+
+export type TeamMember = { id: string; name: string; maskedPhone: string };
+
+export type TeamResult =
+  | { ok: true; team: TeamMember[]; message?: string }
+  | { ok: false; error: string };
+
+const asTeam = (rows: ToolOperator[]): TeamMember[] =>
+  rows.map((o) => ({ id: o.id, name: o.name, maskedPhone: o.maskedPhone }));
+
+/** The signed-in vendor, if they are allowed to manage a team. */
+async function enrollingVendor(token: string) {
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false as const, error: "This QR is not working. Ask the office." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false as const, error: "Your sign-in has run out. Tap your name again." };
+  }
+  if (!session.canEnrol || !session.vendorId || !session.profileId) {
+    return { ok: false as const, error: "Only the vendor can change their own team." };
+  }
+  return { ok: true as const, session, vendorId: session.vendorId, profileId: session.profileId };
+}
+
+/** Who is on my team right now. */
+export async function myTeamAction(fd: FormData): Promise<TeamResult> {
+  const who = await enrollingVendor(String(fd.get("token") || "").trim());
+  if (!who.ok) return who;
+  return { ok: true, team: asTeam(await operatorsForVendor(who.vendorId)) };
+}
+
+/** Add one of my men. Name and number, nothing else — anything more
+ *  and a vendor standing at a cupboard will not finish the form. */
+export async function enrolOperatorAction(fd: FormData): Promise<TeamResult> {
+  const who = await enrollingVendor(String(fd.get("token") || "").trim());
+  if (!who.ok) return who;
+
+  const name = String(fd.get("name") || "").trim().replace(/\s+/g, " ");
+  const phoneRaw = String(fd.get("phone") || "").trim();
+
+  if (name.length < 2) return { ok: false, error: "Write his name." };
+  if (name.length > 60) return { ok: false, error: "That name is too long." };
+
+  const bad = phoneProblem(phoneRaw);
+  if (bad) return { ok: false, error: bad };
+
+  const clash = await phoneAlreadyTaken(phoneRaw);
+  if (clash) return { ok: false, error: clash };
+
+  // Stored with the country code, the same shape the profiles carry, so
+  // the SMS gateway sees one format whoever it is sending to.
+  const phone = `91${phoneDigits(phoneRaw).slice(-10)}`;
+
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("cnc_tool_operators").insert({
+    vendor_id: who.vendorId,
+    enrolled_by: who.profileId,
+    name,
+    phone,
+  });
+  if (error) {
+    // 23505 = the one-live-operator-per-number index. Two phones racing
+    // the same enrolment land here rather than making two of him.
+    if (error.code === "23505") return { ok: false, error: "That number is already on a team." };
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath(`/guest/tools/${String(fd.get("token") || "").trim()}`);
+  revalidatePath("/tools");
+  return {
+    ok: true,
+    team: asTeam(await operatorsForVendor(who.vendorId)),
+    message: `${name} can now sign in at the cupboard.`,
+  };
+}
+
+/** Take one of my men off the list.
+ *
+ *  Not a delete: the row is switched off, so every tool he has already
+ *  taken keeps his name against it in the register. His live session
+ *  dies with it — currentToolSession re-reads is_active on every take. */
+export async function removeOperatorAction(fd: FormData): Promise<TeamResult> {
+  const token = String(fd.get("token") || "").trim();
+  const who = await enrollingVendor(token);
+  if (!who.ok) return who;
+
+  const operatorId = String(fd.get("operator_id") || "").trim();
+  if (!operatorId) return { ok: false, error: "Which man?" };
+
+  const admin = createAdminSupabaseClient();
+  // .eq on the vendor as well as the id: a tampered form cannot remove
+  // another company's man.
+  const { data, error } = await admin
+    .from("cnc_tool_operators")
+    .update({
+      is_active: false,
+      removed_at: new Date().toISOString(),
+      removed_by: who.profileId,
+    })
+    .eq("id", operatorId)
+    .eq("vendor_id", who.vendorId)
+    .eq("is_active", true)
+    .select("name")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/guest/tools/${token}`);
+  revalidatePath("/tools");
+  const gone = (data as { name: string } | null)?.name;
+  return {
+    ok: true,
+    team: asTeam(await operatorsForVendor(who.vendorId)),
+    message: gone ? `${gone} taken off the list.` : "Already off the list.",
+  };
 }

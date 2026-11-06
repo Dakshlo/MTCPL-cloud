@@ -14,7 +14,15 @@ import { useRef, useState } from "react";
 
 import { UNDO_WINDOW_MS, type ToolMovement } from "@/lib/cnc-tool-stock";
 
-export type Done = { text: string; at: number };
+export type Done = {
+  text: string;
+  at: number;
+  /** Did this action WRITE A MOVEMENT? Only then may the toast offer
+   *  Undo — see the note on `latest` below. Everything else (a tool
+   *  renamed, a tool deleted, a man taken off a list) gets a plain
+   *  confirmation with a close button. */
+  undoable?: boolean;
+};
 
 // ── Undo toast ─────────────────────────────────────────────────────
 
@@ -44,8 +52,15 @@ export function UndoToast({
 
   // The freshest live movement is the one just written; the server
   // refresh hands it back with its real id.
+  //
+  // Which is only true when the action wrote one. Daksh, Nov 2026 —
+  // caught while testing Delete: the toast after a delete offered
+  // Undo, and "the freshest live movement" was then a stock line from
+  // last month that had nothing to do with it. One press would have
+  // silently changed the count on a different tool. The same was true
+  // of the toast after an edit. So the caller now has to say.
   const latest = movements.find((m) => !m.undone_at) ?? null;
-  const canUndoNow = left > 0 && latest != null;
+  const canUndoNow = done.undoable === true && left > 0 && latest != null;
   const mm = Math.floor(left / 60000);
   const ss = Math.floor((left % 60000) / 1000);
 
@@ -118,18 +133,6 @@ export const TOOLS_CSS = `
 .tc-stat[data-tone="red"]   { background:rgba(127,29,29,.42); border-color:rgba(255,255,255,.4); }
 .tc-stat[data-tone="amber"] { background:rgba(180,83,9,.34); }
 .tc-stat[data-tone="grey"]  { background:rgba(255,255,255,.1); }
-
-/* ── how it works ──────────────────────────────────────────── */
-.tc-how { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
-.tc-how-step { position:relative; min-width:0; padding:13px 15px 13px 42px; border-radius:15px;
-  background:var(--surface); border:1px solid var(--border); }
-.tc-how-step::before { content:attr(data-n); position:absolute; left:13px; top:13px;
-  width:21px; height:21px; border-radius:50%; display:grid; place-items:center;
-  font-size:11px; font-weight:800; color:#fff; background:var(--tc-blue); }
-.tc-how-step:nth-child(2)::before { background:#0891b2; }
-.tc-how-step:nth-child(3)::before { background:var(--tc-ok); }
-.tc-how-step strong { display:block; font-size:13.5px; font-weight:800; color:var(--text); }
-.tc-how-step span { display:block; font-size:12px; color:var(--muted); line-height:1.5; margin-top:2px; }
 
 /* ── messages ──────────────────────────────────────────────── */
 .tc-err { display:flex; gap:12px; align-items:center; justify-content:space-between;
@@ -208,6 +211,17 @@ export const TOOLS_CSS = `
   border-radius:9px; cursor:pointer; }
 .tc-menu button:hover { background:var(--surface-alt); }
 .tc-menu-sep { height:1px; background:var(--border); margin:5px 2px; }
+.tc-menu button.tc-menu-danger { color:var(--tc-out); }
+.tc-menu button.tc-menu-danger:hover { background:var(--tc-out-bg); }
+.tc-menu-why { padding:8px 12px 6px; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.tc-menu-ask { padding:8px 12px 6px; }
+.tc-menu-ask > span { display:block; font-size:12px; font-weight:700; color:var(--text);
+  line-height:1.45; margin-bottom:8px; }
+.tc-menu-ask > div { display:flex; gap:6px; }
+.tc-menu button.tc-menu-yes { width:auto; padding:7px 11px; font-size:12px;
+  background:var(--tc-out); color:#fff; }
+.tc-menu button.tc-menu-no { width:auto; padding:7px 11px; font-size:12px;
+  background:var(--surface-alt); color:var(--muted); }
 
 .tc-stockline { display:flex; align-items:center; gap:10px; margin:14px 0 9px; }
 .tc-stock { display:flex; align-items:baseline; gap:5px; }
@@ -265,6 +279,56 @@ export const TOOLS_CSS = `
 .tc-reg-kind[data-kind="receive"] { background:var(--tc-ok-bg);  color:var(--tc-ok); }
 .tc-reg-sub { font-size:12px; color:var(--muted); margin-top:2px; }
 .tc-reg-qr { margin-left:5px; font-size:11px; color:var(--tc-blue); }
+/* "his man" — the taker works under the company in the heading above. */
+.tc-reg-op { margin-left:6px; font-size:9.5px; font-weight:800; letter-spacing:.05em;
+  text-transform:uppercase; padding:2px 6px; border-radius:999px;
+  background:var(--surface-alt); color:var(--muted); }
+
+/* ── register, company by company (mig 234) ────────────────── */
+.tc-reggroups { display:flex; flex-direction:column; gap:14px; }
+.tc-reggroup { border:1px solid var(--border); border-radius:17px; overflow:hidden;
+  background:var(--surface); }
+.tc-reggroup[data-kind="vendor"] { border-left:4px solid var(--tc-blue); }
+.tc-reggroup[data-kind="__store"] { border-left:4px solid var(--tc-ok); }
+.tc-reggroup[data-kind="__office"] { border-left:4px solid var(--muted); }
+.tc-rg-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:12px 15px; background:var(--surface-alt); border-bottom:1px solid var(--border); }
+.tc-rg-title { display:flex; align-items:center; gap:8px; min-width:0; flex:1;
+  padding:0; border:none; background:none; font:inherit; cursor:pointer; text-align:left; }
+.tc-rg-caret { font-size:11px; color:var(--muted); flex:0 0 auto; }
+.tc-rg-name { font-size:15px; font-weight:800; letter-spacing:-.01em; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tc-rg-facts { display:flex; align-items:center; gap:7px; flex-wrap:wrap; flex:0 0 auto; }
+.tc-rg-took { font-size:11.5px; font-weight:700; color:var(--muted); }
+.tc-rg-took b { font-size:14px; font-weight:800; color:var(--tc-out); }
+.tc-rg-count { font-size:11px; font-weight:700; color:var(--muted);
+  padding:3px 9px; border-radius:999px; background:var(--surface); border:1px solid var(--border); }
+.tc-rg-team { font-size:11px; font-weight:800; padding:4px 10px; border-radius:999px;
+  cursor:pointer; font-family:inherit;
+  background:var(--surface); border:1px solid var(--border); color:var(--text); }
+.tc-rg-team:hover { background:var(--tc-ok-bg); border-color:var(--tc-ok); color:var(--tc-ok); }
+.tc-rg-roster { display:flex; flex-direction:column; gap:1px; padding:10px 15px;
+  background:var(--surface-alt); border-bottom:1px solid var(--border); }
+.tc-rg-man { display:flex; align-items:center; gap:10px; padding:7px 0; }
+.tc-rg-man + .tc-rg-man { border-top:1px dashed var(--border); }
+.tc-rg-man-name { font-size:13px; font-weight:800; color:var(--text); }
+.tc-rg-man-phone { font-size:11.5px; color:var(--muted); flex:1; }
+.tc-rg-man-x { width:26px; height:26px; flex:0 0 auto; border-radius:8px; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:11px; }
+.tc-rg-man-ask { display:flex; gap:6px; }
+.tc-rg-man-yes { padding:5px 10px; border-radius:8px; border:none; cursor:pointer; font:inherit;
+  font-size:11.5px; font-weight:800; background:var(--tc-out); color:#fff; }
+.tc-rg-man-no { padding:5px 10px; border-radius:8px; cursor:pointer; font:inherit;
+  font-size:11.5px; font-weight:700; background:var(--surface); color:var(--muted);
+  border:1px solid var(--border); }
+.tc-rg-nothing { padding:16px 15px; font-size:12.5px; font-style:italic; color:var(--muted); }
+.tc-reggroup .tc-reg { padding:11px; gap:7px; }
+.tc-reggroup .tc-reg-row { border-color:var(--border-light, var(--border)); }
+
+@media (max-width: 640px) {
+  .tc-rg-head { gap:7px; }
+  .tc-rg-name { font-size:14px; }
+}
 
 /* ── sheets ────────────────────────────────────────────────── */
 .tc-seg { display:flex; gap:4px; padding:4px; border-radius:13px; margin-bottom:16px;
@@ -328,7 +392,6 @@ export const TOOLS_CSS = `
   .tc-stat { display:flex; align-items:baseline; gap:9px; }
   .tc-stat b { font-size:21px; }
   .tc-stat span { margin-top:0; }
-  .tc-how { grid-template-columns:1fr; }
   .tc-grid { grid-template-columns:1fr; }
 }
 `;

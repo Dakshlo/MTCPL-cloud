@@ -101,6 +101,10 @@ export type Profile = {
    *  always qualify in code regardless of the bit (the
    *  canApproveBills helper enforces that). */
   can_approve_bills?: boolean;
+  /** Migration 234 — may open and fill the CNC tool store (/tools)
+   *  without being a developer. TRUE on Daksh, Nikhil and Vinay.
+   *  Grants NOTHING else: it is the tool cupboard, not a role. */
+  can_keep_tool_store?: boolean;
   /** Migration 036 (+ 038 'invoicing', 102 'register', 110 'maintenance',
    *  189 'salary') — which "department" the user is currently in. Kept in
    *  sync with the CHECK constraint on profiles.active_department and with

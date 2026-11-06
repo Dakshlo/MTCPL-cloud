@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AppRole } from "@/lib/types";
-import { navEntries, type NavEntry, type NavItem, type NavDivider, type NavGroup } from "@/lib/nav-registry";
+import { navEntries, type NavEntry, type NavFlag, type NavItem, type NavDivider, type NavGroup } from "@/lib/nav-registry";
 import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import {
   DEPARTMENTS,
@@ -100,6 +100,7 @@ export function Sidebar({
   themePreference,
   activeDepartment,
   canAssignCarving = false,
+  canKeepToolStore = false,
   cancelledSlabAlert = false,
   approvalCount = 0,
 }: {
@@ -124,6 +125,9 @@ export function Sidebar({
    *  their role grants. Layout reads it from profile and passes
    *  through. */
   canAssignCarving?: boolean;
+  /** Migration 234 — same idea for the CNC tool store, which belongs
+   *  to three named people rather than to a role. */
+  canKeepToolStore?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -248,6 +252,11 @@ export function Sidebar({
   const allowedDepts = allowedDepartmentsForRole(role);
   const visibleDeptTiles = DEPARTMENTS.filter((d) => allowedDepts.includes(d.id));
 
+  const navFlags: Record<NavFlag, boolean> = {
+    can_assign_carving: canAssignCarving,
+    can_keep_tool_store: canKeepToolStore,
+  };
+
   // Step 1: role OR flag filter. Mig 074 — entries with a
   // `requiresFlag` ALSO match when the profile has that flag set,
   // even if the role isn't in the role list. Dividers + groups
@@ -257,9 +266,7 @@ export function Sidebar({
     if (entry.roles.includes(role)) return true;
     if (entry.type === "item" || entry.type === undefined) {
       const item = entry as NavItem;
-      if (item.requiresFlag === "can_assign_carving" && canAssignCarving) {
-        return true;
-      }
+      if (item.requiresFlag && navFlags[item.requiresFlag]) return true;
     }
     return false;
   });

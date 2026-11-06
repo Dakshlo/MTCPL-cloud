@@ -40,12 +40,21 @@ export type TakeTool = {
 };
 export type RosterPerson = {
   id: string;
+  kind: "profile" | "operator";
   name: string;
   maskedPhone: string;
+  /** The company he belongs to. Null for the developer. */
+  company: string | null;
+  /** The man whose company it is — he heads his own group. */
+  isPrincipal: boolean;
 };
-type Session = { name: string };
+export type TeamMate = { id: string; name: string; maskedPhone: string };
+type Session = { name: string; company: string | null; canEnrol: boolean };
 
 type SendRes = { ok: true; sentTo: string } | { ok: false; error: string };
+type TeamRes =
+  | { ok: true; team: TeamMate[]; message?: string }
+  | { ok: false; error: string };
 type VerifyRes =
   | { ok: true; name: string }
   | { ok: false; error: string; attemptsLeft?: number };
@@ -72,18 +81,23 @@ function initials(name: string): string {
 }
 
 export function GuestTakeClient({
-  token, label, tools, roster, session,
+  token, label, tools, roster, session, team: initialTeam,
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
+  enrolAction, removeOperatorAction,
 }: {
   token: string;
   label: string;
   tools: TakeTool[];
   roster: RosterPerson[];
   session: Session | null;
+  /** The signed-in vendor's own men, if he has any. */
+  team: TeamMate[];
   sendCodeAction: (fd: FormData) => Promise<SendRes>;
   verifyCodeAction: (fd: FormData) => Promise<VerifyRes>;
   signOutAction: (fd: FormData) => Promise<{ ok: boolean }>;
   takeAction: (fd: FormData) => Promise<TakeRes>;
+  enrolAction: (fd: FormData) => Promise<TeamRes>;
+  removeOperatorAction: (fd: FormData) => Promise<TeamRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
   const [step, setStep] = useState<Step>(session ? "tool" : "who");
@@ -100,6 +114,13 @@ export function GuestTakeClient({
   const [taken, setTaken] = useState<Record<string, number>>({});
   const [cooldown, setCooldown] = useState(0);
   const codeRef = useRef<HTMLInputElement | null>(null);
+  // ── the vendor's own men (mig 234) ──────────────────────────────
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [team, setTeam] = useState<TeamMate[]>(initialTeam);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [teamMsg, setTeamMsg] = useState<string | null>(null);
+  const [dropping, setDropping] = useState<string | null>(null);
 
   const stockOf = (t: TakeTool) => Math.max(0, t.stock - (taken[t.id] ?? 0));
 
@@ -134,7 +155,8 @@ export function GuestTakeClient({
     startTransition(async () => {
       const fd = new FormData();
       fd.set("token", token);
-      fd.set("profile_id", p.id);
+      fd.set("person_kind", p.kind);
+      fd.set("person_id", p.id);
       const r = await sendCodeAction(fd);
       if (!r.ok) { setErr(r.error); return; }
       setSentTo(r.sentTo);
@@ -149,7 +171,8 @@ export function GuestTakeClient({
     startTransition(async () => {
       const fd = new FormData();
       fd.set("token", token);
-      fd.set("profile_id", picked.id);
+      fd.set("person_kind", picked.kind);
+      fd.set("person_id", picked.id);
       fd.set("code", typed);
       const r = await verifyCodeAction(fd);
       if (!r.ok) {
@@ -160,7 +183,13 @@ export function GuestTakeClient({
         codeRef.current?.focus();
         return;
       }
-      setWho({ name: r.name });
+      setWho({
+        name: r.name,
+        company: picked.company,
+        // Only the man whose company it is. The server decides this
+        // again on every team call; this is just what to draw.
+        canEnrol: picked.kind === "profile" && picked.isPrincipal,
+      });
       setStep("tool");
     });
   }
@@ -193,7 +222,37 @@ export function GuestTakeClient({
       await signOutAction(fd);
       setWho(null); setPicked(null); setTally([]); setTaken({});
       setTool(null); setDone(null); setCode(""); setErr(null);
+      setTeamOpen(false); setTeam([]); setTeamMsg(null);
+      setNewName(""); setNewPhone(""); setDropping(null);
       setStep("who");
+    });
+  }
+
+  function addMate() {
+    setErr(null); setTeamMsg(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("name", newName);
+      fd.set("phone", newPhone);
+      const r = await enrolAction(fd);
+      if (!r.ok) { setErr(r.error); return; }
+      setTeam(r.team);
+      setNewName(""); setNewPhone("");
+      setTeamMsg(r.message ?? "Added.");
+    });
+  }
+
+  function dropMate(id: string) {
+    setErr(null); setTeamMsg(null); setDropping(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("operator_id", id);
+      const r = await removeOperatorAction(fd);
+      if (!r.ok) { setErr(r.error); return; }
+      setTeam(r.team);
+      setTeamMsg(r.message ?? "Removed.");
     });
   }
 
@@ -252,23 +311,35 @@ export function GuestTakeClient({
             </div>
           ) : (
             <div className="gt-people">
-              {roster.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className="gt-person"
-                  style={{ ["--who" as string]: colourFor(p.name) }}
-                  onClick={() => sendCode(p)}
-                  disabled={pending}
-                >
-                  <span className="gt-pface">{initials(p.name)}</span>
-                  <span className="gt-pbody">
-                    <strong>{p.name}</strong>
-                    <span>code to {p.maskedPhone}</span>
-                  </span>
-                  <span className="gt-pgo" aria-hidden>→</span>
-                </button>
-              ))}
+              {roster.map((p, i) => {
+                // A heading each time the company changes. The man
+                // scanning looks for his boss's name first, then for
+                // his own underneath it.
+                const prev = i > 0 ? roster[i - 1] : null;
+                const newGroup = !prev || prev.company !== p.company;
+                return (
+                  <div key={p.id} className="gt-pgroup">
+                    {newGroup && (
+                      <div className="gt-pco">{p.company ?? "Office"}</div>
+                    )}
+                    <button
+                      type="button"
+                      className="gt-person"
+                      data-under={p.kind === "operator" ? "1" : undefined}
+                      style={{ ["--who" as string]: colourFor(p.name) }}
+                      onClick={() => sendCode(p)}
+                      disabled={pending}
+                    >
+                      <span className="gt-pface">{initials(p.name)}</span>
+                      <span className="gt-pbody">
+                        <strong>{p.name}</strong>
+                        <span>code to {p.maskedPhone}</span>
+                      </span>
+                      <span className="gt-pgo" aria-hidden>→</span>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -390,6 +461,100 @@ export function GuestTakeClient({
                   {t.qty} × {t.toolName}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* ── my men (mig 234) ──────────────────────────────────
+              Only the vendor sees this, and only for his own company.
+              Tucked under the shelf because taking a tool is why he
+              opened the phone; adding a man is a once-a-month job. */}
+          {who?.canEnrol && (
+            <div className="gt-team">
+              <button
+                type="button"
+                className="gt-team-toggle"
+                onClick={() => { setTeamOpen((o) => !o); setTeamMsg(null); }}
+                aria-expanded={teamOpen}
+              >
+                <span aria-hidden>👷</span>
+                <span className="gt-team-label">
+                  My men{team.length > 0 ? ` · ${team.length}` : ""}
+                </span>
+                <span className="gt-team-caret" aria-hidden>{teamOpen ? "▴" : "▾"}</span>
+              </button>
+
+              {teamOpen && (
+                <div className="gt-team-body">
+                  <p className="gt-team-note">
+                    Anyone you add here can scan this cupboard and take tools on
+                    his own phone. It shows in the office register as his name,
+                    under {who.company ?? "you"}.
+                  </p>
+
+                  {team.length > 0 && (
+                    <div className="gt-mates">
+                      {team.map((m) => (
+                        <div key={m.id} className="gt-mate">
+                          <span className="gt-mate-face" style={{ background: colourFor(m.name) }}>
+                            {initials(m.name)}
+                          </span>
+                          <span className="gt-mate-body">
+                            <strong>{m.name}</strong>
+                            <span>{m.maskedPhone}</span>
+                          </span>
+                          {dropping === m.id ? (
+                            <span className="gt-mate-confirm">
+                              <button type="button" className="gt-mate-yes" onClick={() => dropMate(m.id)} disabled={pending}>
+                                Remove
+                              </button>
+                              <button type="button" className="gt-mate-no" onClick={() => setDropping(null)}>
+                                Keep
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="gt-mate-x"
+                              onClick={() => setDropping(m.id)}
+                              aria-label={`Take ${m.name} off the list`}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="gt-addmate">
+                    <input
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="His name"
+                      maxLength={60}
+                      aria-label="Name"
+                    />
+                    <input
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value.replace(/[^\d +]/g, ""))}
+                      placeholder="10-digit mobile"
+                      inputMode="tel"
+                      maxLength={15}
+                      aria-label="Mobile number"
+                    />
+                    <button
+                      type="button"
+                      className="gt-addmate-go"
+                      onClick={addMate}
+                      disabled={pending || newName.trim().length < 2 || newPhone.replace(/\D/g, "").length < 10}
+                    >
+                      {pending ? "Adding…" : "Add him"}
+                    </button>
+                  </div>
+
+                  {teamMsg && <div className="gt-team-ok">✓ {teamMsg}</div>}
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -564,6 +729,83 @@ const CSS = `
 .gt-pbody strong { font-size:16.5px; font-weight:800; }
 .gt-pbody span { font-size:12.5px; color:var(--dim); }
 .gt-pgo { font-size:18px; color:var(--who); font-weight:800; }
+
+/* Company by company. The heading is quiet; the names are the UI. */
+.gt-pgroup { display:flex; flex-direction:column; gap:11px; }
+.gt-pco {
+  font-size:10.5px; font-weight:800; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--dim); padding:10px 2px 0;
+}
+.gt-pgroup:first-child .gt-pco { padding-top:0; }
+/* A man under a vendor sits in from the edge and reads one size down,
+   so the shape of the list says who works for whom before you read it. */
+.gt-person[data-under] {
+  margin-left:16px; padding:11px 13px; border-radius:15px;
+  border-style:dashed; box-shadow:none;
+}
+.gt-person[data-under] .gt-pface { width:38px; height:38px; border-radius:12px; font-size:13.5px; }
+.gt-person[data-under] .gt-pbody strong { font-size:15px; }
+
+/* ── my men ─────────────────────────────────────────────── */
+.gt-team { margin-top:22px; }
+.gt-team-toggle {
+  display:flex; align-items:center; gap:10px; width:100%; font:inherit; cursor:pointer;
+  padding:13px 15px; border-radius:16px; text-align:left;
+  background:var(--card); border:1.5px dashed var(--line); color:var(--ink);
+}
+.gt-team-label { flex:1; font-size:14.5px; font-weight:800; }
+.gt-team-caret { font-size:12px; color:var(--dim); }
+.gt-team-body {
+  margin-top:10px; padding:15px; border-radius:16px;
+  background:var(--card); border:1.5px solid var(--line);
+  display:flex; flex-direction:column; gap:13px;
+}
+.gt-team-note { margin:0; font-size:12.5px; line-height:1.55; color:var(--dim); }
+.gt-mates { display:flex; flex-direction:column; gap:9px; }
+.gt-mate {
+  display:flex; align-items:center; gap:11px;
+  padding:9px 10px; border-radius:13px; background:#faf9f7; border:1px solid var(--line);
+}
+.gt-mate-face {
+  width:34px; height:34px; flex:0 0 auto; border-radius:11px; color:#fff;
+  display:grid; place-items:center; font-size:12.5px; font-weight:800;
+}
+.gt-mate-body { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1; }
+.gt-mate-body strong { font-size:14.5px; font-weight:800; }
+.gt-mate-body span { font-size:11.5px; color:var(--dim); }
+.gt-mate-x {
+  flex:0 0 auto; width:30px; height:30px; border-radius:10px; cursor:pointer;
+  border:1px solid var(--line); background:#fff; color:var(--dim); font-size:13px;
+}
+.gt-mate-confirm { display:flex; gap:6px; flex:0 0 auto; }
+.gt-mate-yes {
+  padding:7px 11px; border-radius:10px; border:none; cursor:pointer; font:inherit;
+  font-size:12.5px; font-weight:800; background:var(--out); color:#fff;
+}
+.gt-mate-no {
+  padding:7px 11px; border-radius:10px; cursor:pointer; font:inherit;
+  font-size:12.5px; font-weight:700; background:#fff; color:var(--dim);
+  border:1px solid var(--line);
+}
+.gt-addmate { display:flex; flex-direction:column; gap:9px; }
+.gt-addmate input {
+  /* 16px, not smaller: anything under it makes iOS zoom the page in
+     when the field takes focus. */
+  width:100%; padding:13px 14px; font:inherit; font-size:16px;
+  border-radius:13px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
+  outline:none;
+}
+.gt-addmate input:focus { border-color:var(--brand); }
+.gt-addmate-go {
+  padding:13px 16px; border-radius:13px; border:none; cursor:pointer; font:inherit;
+  font-size:15px; font-weight:800; color:#fff;
+  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
+}
+.gt-addmate-go:disabled { background:#d9d7d2; color:#8b8b8b; cursor:not-allowed; }
+.gt-team-ok {
+  font-size:13px; font-weight:700; color:var(--ok); background:var(--okbg);
+  border-radius:11px; padding:10px 12px;
+}
 
 /* ── otp ────────────────────────────────────────────────── */
 .gt-otp { position:relative; display:flex; gap:10px; justify-content:center; margin:6px 0 20px; }

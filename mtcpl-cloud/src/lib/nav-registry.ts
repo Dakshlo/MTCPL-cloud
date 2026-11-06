@@ -21,6 +21,13 @@ import { canViewCncCosts, canViewCutterCosts, canViewVariousCosting } from "@/li
 import { canSeeMarketNews } from "@/lib/market-news-access";
 import { canUseTender } from "@/app/(app)/reports/temple-pnl/tender-model";
 
+/** Profile booleans that can open a nav entry on their own. Adding one
+ *  here is the whole change — the sidebar and pagesFor() both read the
+ *  flag by name off the bag they are handed. */
+export type NavFlag = "can_assign_carving" | "can_keep_tool_store";
+
+export type NavFlags = Partial<Record<NavFlag, boolean | null>>;
+
 export type NavItem = {
   type?: "item";
   href: string;
@@ -34,8 +41,11 @@ export type NavItem = {
   department?: Department;
   /** Migration 074 — extra visibility via a profile flag. When set,
    *  the entry shows for any user whose profile has that flag set
-   *  to TRUE, in addition to the role-based gate above. */
-  requiresFlag?: "can_assign_carving";
+   *  to TRUE, in addition to the role-based gate above.
+   *
+   *  Mig 234 added the second one. Both work the same way: a page
+   *  that belongs to named people rather than to a job title. */
+  requiresFlag?: NavFlag;
 };
 
 export type NavDivider = {
@@ -671,13 +681,16 @@ export const navEntries: NavEntry[] = [
     // because it is stock, but it shares nothing with Scaffolding:
     // separate tables, separate pages, separate permissions.
     //
-    // DEVELOPER ONLY for now (Daksh, Oct 2026: "once done we will make
-    // it for all users which are relevant"). Widening this row and
-    // lib/cnc-tool-permissions.ts together is the whole of that change.
+    // Mig 234 — no longer developer-only. The three people who keep
+    // the cupboard (Daksh, Nikhil, Vinay) carry a flag on their
+    // profile rather than a role, so this row and
+    // lib/cnc-tool-permissions.ts agree without either naming an
+    // owner who has nothing to do with the tool store.
     href: "/tools",
     label: "CNC Tools",
     icon: "🧰",
     roles: ["developer"],
+    requiresFlag: "can_keep_tool_store",
     department: "inventory",
   },
 ];
@@ -735,12 +748,12 @@ const extraPages: ExtraPage[] = [
   { href: "/diary", label: "Work Diary", icon: "📒", department: "production", can: () => true },
 ];
 
-export function pagesFor(role: AppRole, dept: Department | null, flags?: { can_assign_carving?: boolean | null }): NavPage[] {
+export function pagesFor(role: AppRole, dept: Department | null, flags?: NavFlags): NavPage[] {
   const out: NavPage[] = [];
   const take = (it: NavItem) => {
     const allowed =
       it.roles.includes(role) ||
-      (it.requiresFlag === "can_assign_carving" && !!flags?.can_assign_carving);
+      (!!it.requiresFlag && !!flags?.[it.requiresFlag]);
     if (!allowed) return;
     out.push({ href: it.href, label: it.label, icon: it.icon, department: it.department ?? "production" });
   };

@@ -9,15 +9,20 @@
  * Mig 232 — and nothing else is asked. The company picker that used to
  * follow the code is gone: the person IS the account.
  *
- * It shows tool names and counts and nothing else. Taking is the only
- * write it can make, and the database enforces that, not just this page.
+ * Mig 234 — a vendor who signs in here also sees his own men, and can
+ * add one. That is the second and last write this door can make, and
+ * only for the man whose company it is; everything else on this screen
+ * is still take-only, enforced in the database and not just here.
  */
 
 import { loadStore, orderForTaking, type ToolRow } from "@/lib/cnc-tool-stock";
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
 import { currentToolSession, toolRoster } from "@/lib/cnc-tool-session";
+import { operatorsForVendor } from "@/lib/cnc-tool-operators";
 import {
+  enrolOperatorAction,
   guestTakeToolAction,
+  removeOperatorAction,
   sendToolSignInCodeAction,
   toolSignOutAction,
   verifyToolSignInCodeAction,
@@ -53,6 +58,14 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
     currentToolSession(token, link.id),
   ]);
 
+  // His own men, ready on first paint — a vendor opening the team
+  // panel should not watch a spinner to see three names.
+  const team = session?.canEnrol && session.vendorId
+    ? (await operatorsForVendor(session.vendorId)).map((o) => ({
+        id: o.id, name: o.name, maskedPhone: o.maskedPhone,
+      }))
+    : [];
+
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
   const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map((t) => ({
@@ -71,11 +84,22 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       label={link.label}
       tools={takeable}
       roster={roster}
-      session={session ? { name: session.name } : null}
+      session={
+        session
+          ? {
+              name: session.name,
+              company: session.vendorName,
+              canEnrol: session.canEnrol,
+            }
+          : null
+      }
+      team={team}
       sendCodeAction={sendToolSignInCodeAction}
       verifyCodeAction={verifyToolSignInCodeAction}
       signOutAction={toolSignOutAction}
       takeAction={guestTakeToolAction}
+      enrolAction={enrolOperatorAction}
+      removeOperatorAction={removeOperatorAction}
     />
   );
 }

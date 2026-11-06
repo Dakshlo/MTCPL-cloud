@@ -316,7 +316,9 @@ export function rolePermittedDepartments(role: AppRole): Department[] {
  */
 export function departmentLandingFor(
   dept: Department,
-  profile: Pick<{ role: AppRole }, "role"> | null | undefined,
+  // Mig 234 — the flag has to come through, or a keeper who is not a
+  // developer lands on scaffolding and never sees the cupboard.
+  profile: { role: AppRole; can_keep_tool_store?: boolean | null } | null | undefined,
 ): string {
   if (dept === "inventory" && profile && canUseCncTools(profile)) return "/tools";
   return DEPARTMENTS.find((d) => d.id === dept)?.landingHref ?? "/dashboard";

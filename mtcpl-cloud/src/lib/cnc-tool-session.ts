@@ -1,19 +1,32 @@
 // ──────────────────────────────────────────────────────────────────
-// Who is standing at the wardrobe (mig 230).
+// Who is standing at the wardrobe (migs 230 + 234).
 //
 // The QR used to take a typed name. Now it takes a person off a roster
-// and proves it with a code sent to the number already on their profile,
-// so the register is signed by something only they hold.
+// and proves it with a code sent to the number already on record, so
+// the register is signed by something only they hold.
 //
-// The session this mints is NOT an app login. It carries exactly one
-// right — record a take through this one sticker — and it is checked on
-// every single take, server-side, against the database.
+// Mig 234 — that roster is two kinds of person now:
+//
+//   a PROFILE   Mohit, Manthan, Vivek, and the developer. Real app
+//               accounts; the number comes off their profile row.
+//   an OPERATOR Shyam, working under Mohit. A tool-store-only identity
+//               the vendor enrolled himself. No app login, ever.
+//
+// Both sign the register the same way and both appear under the company
+// they belong to. The difference only matters in two places: an
+// operator cannot enrol anyone, and an operator cannot log in anywhere
+// else in the world.
+//
+// The session this mints is NOT an app login either. It carries exactly
+// one right — record a take through this one sticker — and it is
+// checked on every single take, server-side, against the database.
 // ──────────────────────────────────────────────────────────────────
 
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { allActiveOperators, maskTail } from "@/lib/cnc-tool-operators";
 
 /** One shift. Long enough that a man is not re-typing a code all
  *  morning, short enough that a forgotten phone stops working today. */
@@ -28,19 +41,34 @@ export const TOOL_OTP_DIGITS = 4;
  *  be replayed at another. */
 export const sessionCookieName = (token: string) => `tool_sess_${token.slice(0, 12)}`;
 
+export type PersonKind = "profile" | "operator";
+
 export type ToolPerson = {
   id: string;
+  kind: PersonKind;
   name: string;
   /** "•••••• 6785" — never the whole number. */
   maskedPhone: string;
+  /** The company. Null for the developer, who works for the plant. */
+  company: string | null;
+  /** True for the man whose company it is — he heads his own group on
+   *  the roster and he is the one who can enrol. */
+  isPrincipal: boolean;
 };
 
 export type ToolSession = {
   id: string;
-  profileId: string;
+  kind: PersonKind;
+  /** Exactly one of these two is set — mig 234 has the database
+   *  enforcing it, not just this type. */
+  profileId: string | null;
+  operatorId: string | null;
   name: string;
   vendorId: string | null;
   vendorName: string | null;
+  /** May this session add somebody to its own team? True only for a
+   *  vendor principal: the man whose company it is. */
+  canEnrol: boolean;
   expiresAt: string;
 };
 
@@ -49,45 +77,104 @@ export type ToolSession = {
  *
  * Daksh: "we will show all names mohit, manthan, vivek and in future i
  * will add also developer." That is exactly the two roles below, so
- * adding someone is giving them the role in Settings — no code change,
- * no list to maintain in two places.
+ * adding a vendor is giving them the role in Settings — no code change,
+ * no list to maintain in two places. Their operators come from mig 234
+ * and need no office involvement at all.
+ *
+ * Ordered company by company, each vendor at the head of his own men,
+ * because that is how the man scanning thinks about it: he looks for
+ * his boss's name and then for his own underneath it.
  *
  * Anyone without a usable phone is left out rather than shown as a dead
- * button: tapping a name that can never receive a code is worse than not
- * seeing the name.
- *
- * Mig 232 — the company a person belongs to is no longer part of this.
- * The roster is people, and a person is the whole signature.
+ * button: tapping a name that can never receive a code is worse than
+ * not seeing the name.
  */
 export async function toolRoster(): Promise<ToolPerson[]> {
   const admin = createAdminSupabaseClient();
-  const { data, error } = await admin
-    .from("profiles")
-    .select("id, full_name, role, phone, is_active")
-    .in("role", ["vendor", "developer"])
-    .eq("is_active", true)
-    .order("full_name");
-  if (error) return [];
 
-  type Row = { id: string; full_name: string | null; role: string; phone: string | null };
+  const [{ data: profileRows }, operators] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("id, full_name, role, phone, is_active, vendor_id, vendors(name)")
+      .in("role", ["vendor", "developer"])
+      .eq("is_active", true)
+      .order("full_name"),
+    allActiveOperators(),
+  ]);
 
-  return ((data ?? []) as Row[])
+  type Row = {
+    id: string;
+    full_name: string | null;
+    role: string;
+    phone: string | null;
+    vendor_id: string | null;
+    vendors: { name: string } | { name: string }[] | null;
+  };
+
+  const principals = ((profileRows ?? []) as Row[])
     .filter((p) => (p.phone ?? "").replace(/\D/g, "").length >= 10)
-    .map((p) => ({
-      id: p.id,
-      name: (p.full_name || "Unnamed").trim(),
-      maskedPhone: maskTail(p.phone ?? ""),
-    }));
+    .map((p) => {
+      const v = Array.isArray(p.vendors) ? p.vendors[0] ?? null : p.vendors;
+      return {
+        person: {
+          id: p.id,
+          kind: "profile" as const,
+          name: (p.full_name || "Unnamed").trim(),
+          maskedPhone: maskTail(p.phone ?? ""),
+          company: v?.name ?? null,
+          isPrincipal: !!p.vendor_id,
+        },
+        vendorId: p.vendor_id,
+      };
+    });
+
+  const out: ToolPerson[] = [];
+  const placed = new Set<string>();
+
+  // A company at a time: the vendor, then his men.
+  for (const { person, vendorId } of principals) {
+    if (!vendorId) continue; // the developer — he goes at the end
+    out.push(person);
+    for (const op of operators.filter((o) => o.vendorId === vendorId)) {
+      out.push({
+        id: op.id,
+        kind: "operator",
+        name: op.name,
+        maskedPhone: op.maskedPhone,
+        company: op.vendorName,
+        isPrincipal: false,
+      });
+      placed.add(op.id);
+    }
+  }
+
+  // An operator whose vendor has no account of their own would otherwise
+  // vanish off the list and be unable to sign in. Show them anyway.
+  for (const op of operators) {
+    if (placed.has(op.id)) continue;
+    out.push({
+      id: op.id,
+      kind: "operator",
+      name: op.name,
+      maskedPhone: op.maskedPhone,
+      company: op.vendorName,
+      isPrincipal: false,
+    });
+  }
+
+  // Then anyone with no company — the developer.
+  for (const { person, vendorId } of principals) {
+    if (!vendorId) out.push(person);
+  }
+
+  return out;
 }
 
-function maskTail(raw: string): string {
-  const d = raw.replace(/\D/g, "");
-  return d.length >= 4 ? `•••••• ${d.slice(-4)}` : "their number";
-}
-
-/** Mint a session after a code checks out. */
+/** Mint a session after a code checks out. Exactly one of profileId /
+ *  operatorId, which the database also insists on. */
 export async function startToolSession(opts: {
-  profileId: string;
+  profileId?: string | null;
+  operatorId?: string | null;
   linkId: string;
   vendorId: string | null;
 }): Promise<string | null> {
@@ -95,7 +182,8 @@ export async function startToolSession(opts: {
   const token = randomBytes(24).toString("base64url");
   const { error } = await admin.from("cnc_tool_sessions").insert({
     token,
-    profile_id: opts.profileId,
+    profile_id: opts.profileId ?? null,
+    operator_id: opts.operatorId ?? null,
     link_id: opts.linkId,
     vendor_id: opts.vendorId,
     expires_at: new Date(Date.now() + SESSION_HOURS * 3_600_000).toISOString(),
@@ -108,9 +196,12 @@ export async function startToolSession(opts: {
  *
  * Every field comes back from the database — the cookie holds only an
  * opaque token, so nothing the phone sends can change who it claims to
- * be or which company it takes for.
+ * be, which company it takes for, or whether it may enrol anybody.
  */
-export async function currentToolSession(linkToken: string, linkId: string): Promise<ToolSession | null> {
+export async function currentToolSession(
+  linkToken: string,
+  linkId: string,
+): Promise<ToolSession | null> {
   const jar = await cookies();
   const raw = jar.get(sessionCookieName(linkToken))?.value;
   if (!raw) return null;
@@ -118,15 +209,21 @@ export async function currentToolSession(linkToken: string, linkId: string): Pro
   const admin = createAdminSupabaseClient();
   const { data } = await admin
     .from("cnc_tool_sessions")
-    .select("id, profile_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name), vendors(name)")
+    .select("id, profile_id, operator_id, vendor_id, expires_at, revoked_at, link_id, profiles(full_name, is_active, vendor_id), cnc_tool_operators(name, is_active, vendor_id), vendors(name)")
     .eq("token", raw)
     .maybeSingle();
   if (!data) return null;
 
   const row = data as {
-    id: string; profile_id: string; vendor_id: string | null;
-    expires_at: string; revoked_at: string | null; link_id: string;
-    profiles: { full_name: string | null } | { full_name: string | null }[] | null;
+    id: string;
+    profile_id: string | null;
+    operator_id: string | null;
+    vendor_id: string | null;
+    expires_at: string;
+    revoked_at: string | null;
+    link_id: string;
+    profiles: ProfileSide | ProfileSide[] | null;
+    cnc_tool_operators: OperatorSide | OperatorSide[] | null;
     vendors: { name: string } | { name: string }[] | null;
   };
 
@@ -135,15 +232,41 @@ export async function currentToolSession(linkToken: string, linkId: string): Pro
   // A session belongs to the sticker it was created at.
   if (row.link_id !== linkId) return null;
 
-  const prof = Array.isArray(row.profiles) ? row.profiles[0] ?? null : row.profiles;
-  const vend = Array.isArray(row.vendors) ? row.vendors[0] ?? null : row.vendors;
+  const prof = one(row.profiles);
+  const op = one(row.cnc_tool_operators);
+  const vend = one(row.vendors);
+
+  // Switched off since sign-in? The session dies with the person. This
+  // is why removing an operator takes effect at once rather than at the
+  // end of his shift.
+  if (row.profile_id) {
+    if (!prof || prof.is_active === false) return null;
+  } else {
+    if (!op || op.is_active === false) return null;
+  }
+
+  const name = row.profile_id
+    ? (prof?.full_name || "Unnamed").trim()
+    : (op?.name || "Unnamed").trim();
 
   return {
     id: row.id,
+    kind: row.profile_id ? "profile" : "operator",
     profileId: row.profile_id,
-    name: (prof?.full_name || "Unnamed").trim(),
+    operatorId: row.operator_id,
+    name,
     vendorId: row.vendor_id,
     vendorName: vend?.name ?? null,
+    // Only the man whose company it is. An operator cannot grow a team
+    // of his own, and the developer has no company to grow one under.
+    canEnrol: !!row.profile_id && !!row.vendor_id,
     expiresAt: row.expires_at,
   };
+}
+
+type ProfileSide = { full_name: string | null; is_active: boolean; vendor_id: string | null };
+type OperatorSide = { name: string | null; is_active: boolean; vendor_id: string | null };
+
+function one<T>(v: T | T[] | null): T | null {
+  return Array.isArray(v) ? v[0] ?? null : v;
 }
