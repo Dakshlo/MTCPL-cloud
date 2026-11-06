@@ -78,6 +78,49 @@ const SETTINGS_ROLES = ["developer", "owner", "team_head", "senior_incharge", "c
 // logs out). Owner is included too — only developer is exempt so debug
 // sessions aren't interrupted.
 
+// ──────────────────────────────────────────────────────────────────
+// Badge cache (Daksh, Nov 2026).
+//
+// The nineteen sidebar badge counts are recomputed on every render of
+// this layout — and the layout renders on every navigation AND after
+// every server action, because a Hold amount / Settle re-renders the
+// page it was fired from. Measured in dev the block costs 250 ms to
+// 1.3 s, and the database is not the reason: four of these counts run
+// together in 3.3 ms. It is nineteen round trips, over and over.
+//
+// So hold the answer for a few seconds, per user. Flipping between
+// pages, and the re-render that follows an action, reuse it instead
+// of asking again. A count can be at most BADGE_TTL_MS stale, which
+// for "3 bills awaiting audit" nobody can perceive — and the window
+// is short enough that a badge still drops almost immediately after
+// you clear the thing it was counting.
+//
+// Per server instance, keyed by user. On a serverless host each
+// instance keeps its own, which is exactly the scope we want.
+// ──────────────────────────────────────────────────────────────────
+const BADGE_TTL_MS = 5_000;
+const badgeCache = new Map<string, { at: number; value: unknown }>();
+
+function readBadgeCache(key: string): unknown | null {
+  const hit = badgeCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at >= BADGE_TTL_MS) {
+    badgeCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writeBadgeCache(key: string, value: unknown) {
+  badgeCache.set(key, { at: Date.now(), value });
+  // Twenty-odd staff, so this stays tiny — but don't let an instance
+  // that has served many users hold their rows for ever.
+  if (badgeCache.size > 64) {
+    const cutoff = Date.now() - BADGE_TTL_MS;
+    for (const [k, v] of badgeCache) if (v.at < cutoff) badgeCache.delete(k);
+  }
+}
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireAuth();
   const displayName = profile.vendor_name || profile.full_name || profile.phone || "MTCPL User";
@@ -557,7 +600,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     templeCancelAlert,
     diaryBadge,
     templeCodeRowsRes,
-  ] = await Promise.all([
+  ] = await loadNavBadges();
+
+  // Named so its tuple type can be inferred for the cache; defined
+  // here because every fetcher closes over `profile` and `supabase`.
+  function loadBadgesFresh() {
+    return Promise.all([
     fetchApprovalsBadge(),
     fetchBillsAuditBadge(),
     fetchPayTodayBadge(),
@@ -585,7 +633,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     // AFTER nineteen parallel ones, so the layout waited for it on every
     // navigation for no reason.
     supabase.from("temples").select("code_prefix, name").eq("is_active", true),
-  ]);
+    ]);
+  }
+
+  type BadgeBundle = Awaited<ReturnType<typeof loadBadgesFresh>>;
+
+  async function loadNavBadges(): Promise<BadgeBundle> {
+    // Role and the two override flags decide which badges are fetched
+    // at all, so they belong in the key alongside the user.
+    const key = `${profile.id}|${profile.role}|${profile.can_approve_bills ? 1 : 0}|${profile.can_approve_cuts ? 1 : 0}`;
+    const cached = readBadgeCache(key) as BadgeBundle | null;
+    if (cached) return cached;
+    const fresh = await loadBadgesFresh();
+    writeBadgeCache(key, fresh);
+    return fresh;
+  }
+
   const templeCodeRows = templeCodeRowsRes.data;
   const tabletTempleCodes = [
     ...new Set(

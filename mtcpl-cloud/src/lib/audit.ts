@@ -1,15 +1,24 @@
+import { after } from "next/server";
+
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 /**
- * Append an audit-log row. Mirrors `notify()` — fire-and-forget,
- * never throws, never breaks the main flow.
+ * Write an audit row.
  *
- * Uses the ADMIN client (service role) so the insert bypasses RLS.
- * Before May 2026 this used the user-session client; after
- * migration 029 enabled RLS on every public table with only a
- * SELECT policy, the INSERT silently started failing and the audit
- * log stopped recording. Switching to admin client matches what
- * notify() already does and keeps the contract consistent.
+ * NOBODY WAITS FOR THIS. Daksh Nov 2026 — the function already
+ * swallowed its own errors ("audit logging should never break main
+ * flow"), yet 27 finance actions still `await` it, so every Hold
+ * amount / Settle / Approve made the user sit through an extra
+ * round trip to the audit table before the action could return.
+ *
+ * It is handed to Next's `after()` instead: the response goes out
+ * immediately and the platform keeps the function alive long enough
+ * to finish the insert. That is the important difference from a bare
+ * `void logAudit(...)`, which on a serverless host can be killed the
+ * moment the response is flushed — around thirty call sites were
+ * already doing that and quietly risking a lost audit row.
+ *
+ * Callers can keep `await`ing it; the await now costs nothing.
  */
 export async function logAudit(
   userId: string,
@@ -18,16 +27,26 @@ export async function logAudit(
   entityId: string,
   details?: Record<string, unknown>
 ) {
+  const write = async () => {
+    try {
+      const supabase = createAdminSupabaseClient();
+      await supabase.from("audit_logs").insert({
+        user_id: userId,
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        details: details ?? null,
+      });
+    } catch {
+      // Audit logging should never break main flow
+    }
+  };
+
   try {
-    const supabase = createAdminSupabaseClient();
-    await supabase.from("audit_logs").insert({
-      user_id: userId,
-      action,
-      entity_type: entityType,
-      entity_id: entityId,
-      details: details ?? null,
-    });
+    after(write);
   } catch {
-    // Audit logging should never break main flow
+    // Outside a request scope — a script, a test, a cron tick. There is
+    // no response to run after, so just do it inline.
+    await write();
   }
 }
