@@ -33,6 +33,8 @@ import { ReleaseHoldButton } from "./release-hold-button";
 import { SettlementForm, ReverseSettlementButton } from "./settlement-form";
 import { ArchiveBillPanel, ArchivedBillBanner } from "./archive-bill";
 import { ApplyAdvanceButton } from "./apply-advance-button";
+import { VendorCashDot, type VendorCash } from "./vendor-cash-dot";
+import { fetchAllPaged } from "@/lib/paginate";
 import {
   ACCOUNTS_TOKENS,
   BillStatusPill,
@@ -141,6 +143,39 @@ export default async function BillDetailPage({
   const vendorAdvanceBalance = balanceRaw
     ? Number((balanceRaw as { available_balance: number }).available_balance ?? 0)
     : 0;
+
+  // ── Where this vendor stands overall (Nov 2026) ─────────────────
+  //
+  // Daksh: "so we can easily see net cash of that bill vendor from any
+  // bill — no need to go to vendor account again and again."
+  //
+  // Computed the same way the vendor profile computes its headline
+  // KPIs, so the dot and that page can never disagree: outstanding is
+  // APPROVED bills only, paid is every bill, archived bills are out of
+  // both. Paged rather than limited — the busiest vendor is at 171
+  // bills and climbing, and a silently truncated total is worse than
+  // no total at all.
+  const vendorBillRows = await fetchAllPaged((from, to) =>
+    supabase
+      .from("bills")
+      .select("amount_paid, amount_outstanding, status")
+      .eq("bill_vendor_id", bill.bill_vendor_id)
+      .is("archived_at", null)
+      .range(from, to),
+  );
+  type VendorBillRow = { amount_paid: number | string; amount_outstanding: number | string; status: string };
+  const vendorBills = (vendorBillRows ?? []) as VendorBillRow[];
+  const vendorCash: VendorCash = {
+    outstanding: vendorBills
+      .filter((b) => b.status === "approved")
+      .reduce((s, b) => s + Number(b.amount_outstanding ?? 0), 0),
+    paid: vendorBills.reduce((s, b) => s + Number(b.amount_paid ?? 0), 0),
+    advance: vendorAdvanceBalance,
+    billCount: vendorBills.length,
+    openCount: vendorBills.filter(
+      (b) => b.status === "approved" && Number(b.amount_outstanding ?? 0) > 0,
+    ).length,
+  };
   // Open advances for this vendor — used by the "Apply more" modal.
   // Per-advance "remaining" = amount - sum(active applications on it
   // from ANY bill). We only surface ones with remaining > 0.
@@ -1750,8 +1785,23 @@ export default async function BillDetailPage({
                 boxShadow: ACCOUNTS_TOKENS.shadow,
               }}
             >
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
-                Vendor
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: 10,
+                }}
+              >
+                <span>Vendor</span>
+                {/* Hover (or tap) for what we owe them in total. */}
+                <VendorCashDot name={vendor.name} cash={vendorCash} />
               </div>
               <VendorIdentity
                 name={vendor.name}

@@ -175,8 +175,25 @@ export function CncExpensesClient({
 
       {/* Daksh May 2026 (mig 071) — plant-wide electricity panel.
           Pinned above the vendor cards because it covers ALL
-          vendors and only takes one entry per month. */}
+          vendors and only takes one entry per month.
+
+          KEYED BY MONTH, and that key is load-bearing. Daksh, Nov
+          2026: "we have already added electricity expense for October,
+          the expense is already uploaded... just when we change the
+          month and try, the field is empty."
+
+          Changing the month is a server navigation, but React keeps
+          this client component mounted and simply hands it new props —
+          and the panel seeds its inputs with useState, which only ever
+          reads its argument on the first render. So October's row
+          arrived while the boxes still held whatever November had
+          (nothing), and the panel still thought it was writing a new
+          entry. The key makes a month change a remount, which is the
+          React-sanctioned way to say "this is a different thing now"
+          and resets every piece of state at once rather than leaving
+          the next one to be found later. */}
       <PlantElectricityPanel
+        key={`plant-elec-${year}-${month}`}
         year={year}
         month={month}
         monthLabel={monthLabel}
