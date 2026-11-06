@@ -22,6 +22,7 @@ import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators
 import {
   enrolOperatorAction,
   guestTakeToolAction,
+  myTeamAction,
   removeOperatorAction,
   sendToolSignInCodeAction,
   toolSignOutAction,
@@ -74,7 +75,14 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
             id: o.id, name: o.name, maskedPhone: o.maskedPhone,
           }))
         : [];
-  const vendorChoices = anyVendor ? await enrollableVendors() : [];
+
+  // ALWAYS, not only when a session is already in hand. Somebody who
+  // signs in during this page's life needs the picker on the spot, and
+  // this page does not re-render for them — it was gated on the
+  // session and so the developer's panel came up with nothing to pick
+  // from. Three company names, already printed as the roster's own
+  // headings: nothing here to keep back.
+  const vendorChoices = await enrollableVendors();
 
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
@@ -115,6 +123,7 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       takeAction={guestTakeToolAction}
       enrolAction={enrolOperatorAction}
       removeOperatorAction={removeOperatorAction}
+      myTeamAction={myTeamAction}
     />
   );
 }

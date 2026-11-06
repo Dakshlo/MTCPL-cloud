@@ -71,7 +71,13 @@ type TeamRes =
   | { ok: true; team: TeamMate[]; message?: string }
   | { ok: false; error: string };
 type VerifyRes =
-  | { ok: true; name: string }
+  | {
+      ok: true;
+      name: string;
+      company: string | null;
+      canEnrol: boolean;
+      enrolScope: "own" | "any" | null;
+    }
   | { ok: false; error: string; attemptsLeft?: number };
 type TakeRes =
   | { ok: true; left: number; toolName: string; qty: number }
@@ -103,7 +109,7 @@ const QR_POLL_MS = 2500;
 export function GuestTakeClient({
   token, label, tools, stockSig, roster, session, team: initialTeam, vendorChoices,
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
-  enrolAction, removeOperatorAction,
+  enrolAction, removeOperatorAction, myTeamAction,
 }: {
   token: string;
   label: string;
@@ -123,6 +129,7 @@ export function GuestTakeClient({
   takeAction: (fd: FormData) => Promise<TakeRes>;
   enrolAction: (fd: FormData) => Promise<TeamRes>;
   removeOperatorAction: (fd: FormData) => Promise<TeamRes>;
+  myTeamAction: (fd: FormData) => Promise<TeamRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
   const [step, setStep] = useState<Step>(session ? "tool" : "who");
@@ -228,17 +235,25 @@ export function GuestTakeClient({
         codeRef.current?.focus();
         return;
       }
+      // Straight from the server. This used to be worked out here from
+      // the roster tile that was tapped, and got the developer wrong:
+      // his tile is not a principal, so the panel never appeared.
       setWho({
         name: r.name,
-        company: picked.company,
-        // The server decides this again on every team call; this is
-        // only what to draw. A vendor principal manages his own men;
-        // the developer (no company, so no principal flag) manages all
-        // three and is given a picker.
-        canEnrol: picked.kind === "profile" && (picked.isPrincipal || vendorChoices.length > 0),
-        enrolScope: picked.kind !== "profile" ? null : picked.isPrincipal ? "own" : "any",
+        company: r.company,
+        canEnrol: r.canEnrol,
+        enrolScope: r.enrolScope,
       });
       setStep("tool");
+
+      // The page was rendered before anyone was signed in, so it had no
+      // team to hand over. Fetch it now rather than make him reload.
+      if (r.canEnrol) {
+        const tf = new FormData();
+        tf.set("token", token);
+        const t = await myTeamAction(tf);
+        if (t.ok) setTeam(t.team);
+      }
     });
   }
 

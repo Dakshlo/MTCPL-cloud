@@ -14,7 +14,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
+import { canEnrolForAnyVendor, canSignInAtCupboard } from "@/lib/cnc-tool-permissions";
 import { issueActionOtp, verifyActionOtp } from "@/lib/action-otp";
 import {
   GUEST_MAX_QTY,
@@ -64,6 +64,11 @@ type Signer = {
   name: string;
   phone: string;
   vendorId: string | null;
+  vendorName: string | null;
+  /** May he add a man, and whose? Worked out HERE, from the profile
+   *  row, so the screen never has to guess from what it can see. */
+  canEnrol: boolean;
+  enrolScope: "own" | "any" | null;
 };
 
 async function resolveSigner(
@@ -78,13 +83,18 @@ async function resolveSigner(
   if (kind === "operator") {
     const { data } = await admin
       .from("cnc_tool_operators")
-      .select("id, name, phone, vendor_id, enrolled_by, is_active")
+      .select("id, name, phone, vendor_id, enrolled_by, is_active, vendors(name)")
       .eq("id", id)
       .maybeSingle();
     const o = data as
-      | { id: string; name: string; phone: string; vendor_id: string; enrolled_by: string; is_active: boolean }
+      | {
+          id: string; name: string; phone: string; vendor_id: string;
+          enrolled_by: string; is_active: boolean;
+          vendors: { name: string } | { name: string }[] | null;
+        }
       | null;
     if (!o || !o.is_active) return gone;
+    const ov = Array.isArray(o.vendors) ? o.vendors[0] ?? null : o.vendors;
     return {
       ok: true,
       signer: {
@@ -96,19 +106,24 @@ async function resolveSigner(
         name: (o.name || "Unnamed").trim(),
         phone: o.phone,
         vendorId: o.vendor_id,
+        vendorName: ov?.name ?? null,
+        // A man under a vendor cannot grow a team of his own.
+        canEnrol: false,
+        enrolScope: null,
       },
     };
   }
 
   const { data } = await admin
     .from("profiles")
-    .select("id, full_name, phone, role, is_active, vendor_id, can_keep_tool_store")
+    .select("id, full_name, phone, role, is_active, vendor_id, can_keep_tool_store, vendors(name)")
     .eq("id", id)
     .maybeSingle();
   const p = data as
     | {
         id: string; full_name: string | null; phone: string | null; role: string;
         is_active: boolean; vendor_id: string | null; can_keep_tool_store: boolean | null;
+        vendors: { name: string } | { name: string }[] | null;
       }
     | null;
   // The same rule the roster was drawn with, applied again against the
@@ -116,6 +131,9 @@ async function resolveSigner(
   if (!p || !p.is_active || !canSignInAtCupboard(p as Parameters<typeof canSignInAtCupboard>[0])) {
     return gone;
   }
+
+  const pv = Array.isArray(p.vendors) ? p.vendors[0] ?? null : p.vendors;
+  const anyVendor = canEnrolForAnyVendor(p as Parameters<typeof canEnrolForAnyVendor>[0]);
 
   return {
     ok: true,
@@ -127,7 +145,15 @@ async function resolveSigner(
       operatorId: null,
       name: (p.full_name || "Unnamed").trim(),
       phone: p.phone ?? "",
+      // NO COMPANY for the office. Daksh, Nikhil and Vinay have no
+      // vendor_id, so a tool they take is filed under Office and not
+      // under somebody's firm — "when owners do changes it should go
+      // under office". It falls out of the data rather than being a
+      // special case, which is why it is written down here.
       vendorId: p.vendor_id,
+      vendorName: pv?.name ?? null,
+      canEnrol: !!p.vendor_id || anyVendor,
+      enrolScope: p.vendor_id ? "own" : anyVendor ? "any" : null,
     },
   };
 }
@@ -166,7 +192,13 @@ export async function sendToolSignInCodeAction(fd: FormData): Promise<SendCodeRe
 }
 
 export type VerifyCodeResult =
-  | { ok: true; name: string }
+  | {
+      ok: true;
+      name: string;
+      company: string | null;
+      canEnrol: boolean;
+      enrolScope: "own" | "any" | null;
+    }
   | { ok: false; error: string; attemptsLeft?: number };
 
 /** Step 2 — the code they typed. On success this mints the take-only
@@ -214,7 +246,18 @@ export async function verifyToolSignInCodeAction(fd: FormData): Promise<VerifyCo
   // (mig 232) — the code to their phone is the signature — but it is
   // what puts a take under MOHIT in the office register, and for an
   // operator it is the only thing that says whose man he is.
-  return { ok: true, name: signer.name };
+  //
+  // canEnrol comes back with it. The screen used to work this out for
+  // itself from the roster tile that was tapped, and got it wrong for
+  // the developer: his tile is not a principal, so his team panel
+  // never appeared. The server knows; the screen should be told.
+  return {
+    ok: true,
+    name: signer.name,
+    company: signer.vendorName,
+    canEnrol: signer.canEnrol,
+    enrolScope: signer.enrolScope,
+  };
 }
 
 /** Sign out — one tap when you hand the phone back. */
