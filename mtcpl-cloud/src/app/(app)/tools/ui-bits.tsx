@@ -179,12 +179,24 @@ export const TOOLS_CSS = `
 
 /* ── tool cards ────────────────────────────────────────────── */
 .tc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(248px,1fr)); gap:14px; }
+/* NO overflow:hidden. Daksh, Nov 2026: "I am not able to delete any
+   item cause the delete button is hidden, and I am not able to scroll
+   the delete button down to use it."
+   The ⋯ menu is absolutely positioned inside this card, so clipping
+   the card clipped the menu — Delete sat exactly on the bottom edge
+   and there was nothing to scroll, because an absolute element adds
+   no height to the page. The band keeps the top corners rounded on
+   its own instead.
+   Note the hover transform below: it makes this card the containing
+   block for ANY fixed-position descendant, so moving the menu to
+   position:fixed would not have fixed it either. */
 .tc-card { position:relative; display:flex; flex-direction:column; padding:16px 16px 14px;
   border-radius:18px; background:var(--surface); border:1px solid var(--border);
-  box-shadow:0 2px 10px rgba(20,20,30,.05); overflow:hidden;
+  box-shadow:0 2px 10px rgba(20,20,30,.05);
   transition:transform .12s ease, box-shadow .12s ease; }
 .tc-card:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(20,20,30,.1); }
-.tc-card-band { position:absolute; inset:0 0 auto 0; height:5px; }
+.tc-card-band { position:absolute; inset:0 0 auto 0; height:5px;
+  border-radius:18px 18px 0 0; }
 .tc-card[data-level="ok"]  .tc-card-band { background:linear-gradient(90deg,#22c55e,#16a34a); }
 .tc-card[data-level="low"] .tc-card-band { background:linear-gradient(90deg,#fbbf24,#d97706); }
 .tc-card[data-level="out"] .tc-card-band { background:linear-gradient(90deg,#f87171,#dc2626); }
@@ -206,6 +218,9 @@ export const TOOLS_CSS = `
 .tc-menu { position:absolute; right:0; top:34px; z-index:41; min-width:198px; padding:6px;
   border-radius:13px; background:var(--surface); border:1px solid var(--border);
   box-shadow:0 14px 34px rgba(0,0,0,.2); }
+/* Opens upwards for a card near the bottom of the window, where
+   downwards would put Delete below the fold again. */
+.tc-menu[data-up] { top:auto; bottom:34px; }
 .tc-menu button { display:block; width:100%; text-align:left; padding:10px 12px; font:inherit;
   font-size:13px; font-weight:700; border:none; background:none; color:var(--text);
   border-radius:9px; cursor:pointer; }

@@ -22,7 +22,7 @@
  * thinks happened, which is the paper book we are replacing.
  */
 
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -834,6 +834,13 @@ function ToolCard({
   onAddStock: () => void; onFixCount: () => void; onEdit: () => void; onHistory: () => void;
   onAskDelete: () => void; onCancelDelete: () => void; onDelete: () => void;
 }) {
+  const dotsRef = useRef<HTMLButtonElement | null>(null);
+  /** Open the menu upwards when there is not room below it. Measured
+   *  on the click rather than in an effect: it has to be decided
+   *  before the menu paints, and useLayoutEffect warns on the server. */
+  const [up, setUp] = useState(false);
+  const MENU_H = 250;
+
   const level = tool.stock <= 0 ? "out" : tool.stock <= tool.lowLine ? "low" : "ok";
   // Stock against three times the warning line — a scale that means
   // something per tool, rather than a percentage of a maximum no tool
@@ -861,11 +868,23 @@ function ToolCard({
         </div>
         {canManage && (
           <div style={{ position: "relative", flex: "0 0 auto" }}>
-            <button type="button" className="tc-dots" onClick={onMenu} aria-label="More">⋯</button>
+            <button
+              ref={dotsRef}
+              type="button"
+              className="tc-dots"
+              aria-label="More"
+              onClick={() => {
+                const r = dotsRef.current?.getBoundingClientRect();
+                setUp(!!r && r.bottom + MENU_H > window.innerHeight);
+                onMenu();
+              }}
+            >
+              ⋯
+            </button>
             {menuOpen && (
               <>
                 <div className="tc-menu-scrim" onClick={onCloseMenu} />
-                <div className="tc-menu" role="menu">
+                <div className="tc-menu" role="menu" data-up={up ? "1" : undefined}>
                   <button type="button" onClick={onFixCount}>⚖ Fix count</button>
                   <button type="button" onClick={onHistory}>📜 This tool&apos;s register</button>
                   <div className="tc-menu-sep" />
