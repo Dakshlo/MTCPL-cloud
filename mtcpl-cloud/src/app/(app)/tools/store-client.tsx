@@ -42,8 +42,10 @@ import {
   undoMovementAction,
   updateToolAction,
 } from "./actions";
+import { postToolBillAction } from "./bill-actions";
 import { MoveSheet, type MoveIntent } from "./move-sheet";
 import { AddToolSheet } from "./add-tool-sheet";
+import { BillSheet } from "./bill-sheet";
 import { UndoToast, TOOLS_CSS, ago, type Done } from "./ui-bits";
 
 /** A man enrolled under a CNC vendor (mig 234). */
@@ -62,6 +64,7 @@ const OFFICE_POLL_MS = 6000;
 
 export function StoreClient({
   tools, movements, movementsTruncated = false, stockSig, vendorNames, operators, canManage,
+  canScanBills = false,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
@@ -74,6 +77,9 @@ export function StoreClient({
   vendorNames: Record<string, string>;
   operators: OperatorRow[];
   canManage: boolean;
+  /** May this person fill the shelf from a scanned supplier bill
+   *  (mig 237)? Narrower than canManage on purpose. */
+  canScanBills?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -85,6 +91,7 @@ export function StoreClient({
   const [q, setQ] = useState("");
   const [intent, setIntent] = useState<MoveIntent | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [billOpen, setBillOpen] = useState(false);
   const [editing, setEditing] = useState<ToolRow | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -128,6 +135,34 @@ export function StoreClient({
       const r = await fn();
       if (!r.ok) { setErr(r.error); return; }
       after?.(r.message);
+      router.refresh();
+    });
+  }
+
+  /**
+   * Post a reviewed supplier bill (mig 237).
+   *
+   * Its own submitter rather than `run`, for two reasons. A bill writes
+   * MANY movements, so the undo toast must not offer to take "it" back —
+   * there is no single it, and the register's per-line undo is the right
+   * tool. And a bill can half-succeed: eleven lines in, one refused.
+   * That is reported line by line instead of being flattened into one
+   * cheerful message, because a man who thinks twelve arrived will not
+   * go looking for the twelfth.
+   */
+  function submitBill(fd: FormData) {
+    setErr(null);
+    setBillOpen(false);
+    startTransition(async () => {
+      const r = await postToolBillAction(fd);
+      if (!r.ok) { setErr(r.error); return; }
+      if (r.failed.length > 0) {
+        setErr(
+          `${r.message}. These did NOT go in — add them by hand: ` +
+          r.failed.join(" · "),
+        );
+      }
+      setDone({ at: Date.now(), text: r.message });
       router.refresh();
     });
   }
@@ -177,6 +212,16 @@ export function StoreClient({
               <Link href="/tools/qr" className="tc-btn tc-btn-ghost">
                 <span aria-hidden>▦</span> Wardrobe QR
               </Link>
+              {canScanBills && (
+                <button
+                  type="button"
+                  className="tc-btn tc-btn-ghost"
+                  onClick={() => setBillOpen(true)}
+                  title="Read a supplier's bill and fill the shelf from it"
+                >
+                  <span aria-hidden>🧾</span> Scan bill
+                </button>
+              )}
               <button
                 type="button"
                 className="tc-btn tc-btn-solid"
@@ -346,6 +391,14 @@ export function StoreClient({
               (msg) => setDone({ at: Date.now(), text: msg ?? "Saved" }));
           setEditing(null);
         }}
+      />
+
+      <BillSheet
+        open={billOpen}
+        tools={optimistic}
+        busy={pending}
+        onClose={() => setBillOpen(false)}
+        onPost={submitBill}
       />
 
       {/* On a phone the hero's Add tool is a long scroll away by the

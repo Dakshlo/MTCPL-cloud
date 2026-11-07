@@ -103,3 +103,25 @@ export function canKeepAtCupboard(
 export function canManageCncToolStore(p: ToolProfile): boolean {
   return canUseCncTools(p);
 }
+
+/**
+ * May this person scan a supplier bill and post it to the shelf
+ * (mig 237)?
+ *
+ * DEVELOPER ONLY, on purpose, and only for now. Daksh, Nov 2026: "for
+ * now make that for my account, developer, in dashboard — not QR phone.
+ * After this works fine we will remove the add item from Mohit's phone
+ * QR."
+ *
+ * So this is the same shape the whole module started in: one pair of
+ * hands while the matcher learns what the suppliers actually print, and
+ * then it opens up. Widening it is one line here — canUseCncTools(p) —
+ * once a few real bills have gone through without a surprise.
+ *
+ * Kept deliberately narrower than canManageCncToolStore, because this
+ * is the one door that can create catalogue entries in bulk from a
+ * photograph. Everything else on the screen touches one tool at a time.
+ */
+export function canScanToolBills(p: ToolProfile): boolean {
+  return p.role === "developer";
+}

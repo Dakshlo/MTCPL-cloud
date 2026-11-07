@@ -24,7 +24,11 @@ import { redirect } from "next/navigation";
 
 import { requireAuth } from "@/lib/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { canManageCncToolStore, canUseCncTools } from "@/lib/cnc-tool-permissions";
+import {
+  canManageCncToolStore,
+  canScanToolBills,
+  canUseCncTools,
+} from "@/lib/cnc-tool-permissions";
 import { loadStore, stockSignature } from "@/lib/cnc-tool-stock";
 import { allActiveOperators } from "@/lib/cnc-tool-operators";
 
@@ -70,6 +74,9 @@ export default async function ToolStorePage() {
         vendorName: o.vendorName,
       }))}
       canManage={canManageCncToolStore(profile)}
+      // Mig 237. Developer only for now, while the matcher learns what
+      // the suppliers actually print on their bills.
+      canScanBills={canScanToolBills(profile)}
     />
   );
 }

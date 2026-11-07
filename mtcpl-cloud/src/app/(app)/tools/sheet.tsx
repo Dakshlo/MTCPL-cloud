@@ -25,6 +25,7 @@ export function Sheet({
   children,
   footer,
   tone = "gold",
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -33,6 +34,10 @@ export function Sheet({
   children: ReactNode;
   footer?: ReactNode;
   tone?: "gold" | "danger";
+  /** A reviewing surface rather than a form: wider on a desktop, so a
+   *  table of bill lines is not squeezed into a phone column. Still a
+   *  bottom sheet on a phone — nothing about the small screen changes. */
+  wide?: boolean;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -71,9 +76,9 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="tc-sheet"
+        className={wide ? "tc-sheet tc-sheet-wide" : "tc-sheet"}
         style={{
-          width: "100%", maxWidth: 480, maxHeight: "92vh",
+          width: "100%", maxWidth: wide ? 980 : 480, maxHeight: "92vh",
           background: "var(--surface)",
           border: "1px solid var(--border)",
           borderBottom: "none",
@@ -141,6 +146,7 @@ export function Sheet({
             max-height: 86vh !important;
           }
           .tc-sheet > div:first-child { display: none; }
+          .tc-sheet-wide { max-height: 92vh !important; }
         }
       `}</style>
     </div>,
