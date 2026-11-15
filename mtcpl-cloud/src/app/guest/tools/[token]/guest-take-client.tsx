@@ -31,6 +31,7 @@ import { useRouter } from "next/navigation";
 import { useLiveStock } from "@/lib/use-live-stock";
 import { KEEPER_CSS, KeeperSheet, type KeeperTool } from "./keeper-sheet";
 import { useLongPress } from "@/lib/use-long-press";
+import type { RegisterLine, RegisterResult } from "./guest-actions";
 
 export type TakeTool = {
   id: string;
@@ -90,7 +91,49 @@ type TakeRes =
   | { ok: true; left: number; toolName: string; qty: number }
   | { ok: false; error: string; signedOut?: boolean };
 
-type Step = "who" | "code" | "tool" | "qty" | "done";
+/* "done" is gone — a take drops you straight back on the shelf with a
+   popup over it, rather than parking on a screen whose only two
+   answers were "take something else" and "sign out".
+   "register" is the cupboard's own timeline: who took what, when. */
+type RegisterRes = RegisterResult;
+
+// ── The shed's day, not the browser's ─────────────────────────────
+//
+// A phone at the cupboard is on IST, but a register that silently
+// reads differently on a laptop in another timezone is a register
+// people stop trusting. Shift by +5:30 and read the UTC parts, which
+// is how the rest of this codebase buckets a day.
+const IST_MS = 5.5 * 60 * 60 * 1000;
+const istParts = (iso: string) => new Date(new Date(iso).getTime() + IST_MS);
+
+function istDay(iso: string): string {
+  return istParts(iso).toISOString().slice(0, 10);
+}
+
+function istTime(iso: string): string {
+  const d = istParts(iso);
+  let h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12 || 12;
+  return `${h}:${m}${ampm}`;
+}
+
+/** "Today" and "Yesterday" by the same IST day the lines are grouped
+ *  on, so the heading can never disagree with the group under it. */
+function dayLabel(iso: string): string {
+  const day = istDay(iso);
+  const today = istDay(new Date().toISOString());
+  const yest = istDay(new Date(Date.now() - 86400000).toISOString());
+  if (day === today) return "Today";
+  if (day === yest) return "Yesterday";
+  const d = istParts(iso);
+  return d.toLocaleDateString("en-IN", {
+    weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
+  });
+}
+
+type Step = "who" | "code" | "tool" | "qty" | "register";
 
 const DIGITS = 4;
 
@@ -122,7 +165,7 @@ const QR_POLL_MS = 2500;
 export function GuestTakeClient({
   token, label, tools, stockSig, roster, session, team: initialTeam, vendorChoices,
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
-  enrolAction, removeOperatorAction, myTeamAction,
+  enrolAction, removeOperatorAction, myTeamAction, registerAction,
   keeperTools, addStockAction, fixCountAction, newToolAction,
 }: {
   token: string;
@@ -144,6 +187,7 @@ export function GuestTakeClient({
   enrolAction: (fd: FormData) => Promise<TeamRes>;
   removeOperatorAction: (fd: FormData) => Promise<TeamRes>;
   myTeamAction: (fd: FormData) => Promise<TeamRes>;
+  registerAction: (fd: FormData) => Promise<RegisterRes>;
   /** Every live tool, for the keeper's sheet. Empty for everyone else. */
   keeperTools: KeeperTool[];
   addStockAction: (fd: FormData) => Promise<KeeperRes>;
@@ -156,6 +200,17 @@ export function GuestTakeClient({
   /** A tool held down in the list, handed to the keeper sheet so it
    *  opens on that tool instead of on a list of every tool. */
   const [jump, setJump] = useState<KeeperTool | null>(null);
+  /** The "3 × DSZ 10.4-40 taken" popup that replaced the done screen.
+   *  It sits over the shelf and takes itself away. */
+  const [flash, setFlash] = useState<
+    { toolName: string; qty: number; left: number; at: number } | null
+  >(null);
+  /** The cupboard's register. Loaded when it is opened, not before —
+   *  most visits are somebody taking one thing and leaving. */
+  const [reg, setReg] = useState<RegisterLine[] | null>(null);
+  const [regBusy, setRegBusy] = useState(false);
+  const [regMine, setRegMine] = useState(false);
+  const [regTrunc, setRegTrunc] = useState(false);
   const [sentTo, setSentTo] = useState("");
   const [code, setCode] = useState("");
   const [tool, setTool] = useState<TakeTool | null>(null);
@@ -164,7 +219,6 @@ export function GuestTakeClient({
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const [done, setDone] = useState<{ toolName: string; qty: number; left: number } | null>(null);
   const [tally, setTally] = useState<Array<{ toolName: string; qty: number }>>([]);
   const [taken, setTaken] = useState<Record<string, number>>({});
   const [cooldown, setCooldown] = useState(0);
@@ -284,6 +338,34 @@ export function GuestTakeClient({
     });
   }
 
+  // The popup clears itself. Long enough to read the number, short
+  // enough that it is gone before the next tool is chosen.
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2800);
+    return () => clearTimeout(t);
+  }, [flash]);
+
+  function openRegister() {
+    setStep("register");
+    setErr(null);
+    if (reg) return;
+    setRegBusy(true);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      const r = await registerAction(fd);
+      setRegBusy(false);
+      if (!r.ok) {
+        setErr(r.error);
+        if (r.signedOut) { setWho(null); setPicked(null); setStep("who"); }
+        return;
+      }
+      setReg(r.lines);
+      setRegTrunc(r.truncated);
+    });
+  }
+
   function submit() {
     if (!tool) return;
     setErr(null);
@@ -300,8 +382,19 @@ export function GuestTakeClient({
       }
       setTaken((p) => ({ ...p, [tool.id]: (p[tool.id] ?? 0) + r.qty }));
       setTally((p) => [{ toolName: r.toolName, qty: r.qty }, ...p]);
-      setDone({ toolName: r.toolName, qty: r.qty, left: r.left });
-      setStep("done");
+      // Daksh, Nov 2026: "if they take anything in phone it gives 2
+      // options, take something else and sign out — instead take back
+      // to home page, directly after pop up."
+      //
+      // The old screen was a dead end that asked a question nobody at a
+      // cupboard has. A man takes a bit, then he takes the next bit; he
+      // signs out when he walks away, and Sign out is in the header on
+      // every screen anyway. So the confirmation is a popup over the
+      // shelf, and he is already back where the next tool is.
+      setFlash({ toolName: r.toolName, qty: r.qty, left: r.left, at: Date.now() });
+      setTool(null);
+      setQ("");
+      setStep("tool");
     });
   }
 
@@ -311,7 +404,7 @@ export function GuestTakeClient({
       fd.set("token", token);
       await signOutAction(fd);
       setWho(null); setPicked(null); setTally([]); setTaken({});
-      setTool(null); setDone(null); setCode(""); setErr(null);
+      setTool(null); setFlash(null); setCode(""); setErr(null);
       setTeamOpen(false); setTeam([]); setTeamMsg(null);
       setNewName(""); setNewPhone(""); setNewVendor(""); setDropping(null);
       setStep("who");
@@ -388,6 +481,19 @@ export function GuestTakeClient({
           )}
 
           {who && (
+            <button
+              type="button"
+              className="gt-men"
+              data-on={step === "register" ? "1" : undefined}
+              onClick={() => (step === "register" ? setStep("tool") : openRegister())}
+              aria-label="The register"
+              title="Who took what, and when"
+            >
+              <span aria-hidden>🕑</span>
+            </button>
+          )}
+
+          {who && (
             <button type="button" className="gt-me" onClick={signOut} disabled={pending}>
               <span className="gt-me-dot" style={{ background: colourFor(who.name) }}>
                 {initials(who.name)}
@@ -400,7 +506,7 @@ export function GuestTakeClient({
 
         {/* Where you are, in three dots — so a man knows the screen is
             going somewhere and how far is left. */}
-        {who && step !== "done" && (
+        {who && step !== "register" && (
           <div className="gt-steps" aria-hidden>
             <i data-on={step === "tool" ? "1" : undefined} data-done={step !== "tool" ? "1" : undefined} />
             <i data-on={step === "qty" ? "1" : undefined} />
@@ -744,7 +850,7 @@ export function GuestTakeClient({
           Tucked behind one button at the bottom of the screen, where
           a thumb is, and only on the steps where a shelf is in view.
           A man taking a tool never sees it. */}
-      {who?.canKeep && (step === "tool" || step === "done") && (
+      {who?.canKeep && step === "tool" && (
         <KeeperSheet
           token={token}
           tools={keeperTools}
@@ -762,40 +868,114 @@ export function GuestTakeClient({
         />
       )}
 
-      {/* ── 5. done ────────────────────────────────────────────── */}
-      {step === "done" && done && (
-        <section className="gt-body gt-donestep">
-          <div className="gt-tick" aria-hidden>✓</div>
-          <h1 className="gt-donetitle">
-            {done.qty} × {done.toolName}
-          </h1>
-          <p className="gt-donesub">
-            Written in the register against <strong>{who?.name}</strong>.
-            <br />
-            {done.left} left on the shelf.
-          </p>
+      {/* ── the popup that replaced the done screen ───────────── */}
+      {flash && (
+        <div className="gt-flash" role="status">
+          <span className="gt-flash-tick" aria-hidden>✓</span>
+          <span className="gt-flash-main">
+            <strong>{flash.qty} × {flash.toolName}</strong>
+            <em>{flash.left} left on the shelf</em>
+          </span>
+        </div>
+      )}
 
-          <button
-            type="button"
-            className="gt-take"
-            onClick={() => { setTool(null); setDone(null); setQ(""); setStep("tool"); }}
-          >
-            Take something else
-          </button>
-          <button type="button" className="gt-ghost gt-wide" onClick={signOut} disabled={pending}>
-            That is all — sign out
-          </button>
+      {/* ── the register ──────────────────────────────────────── */}
+      {step === "register" && (
+        <section className="gt-body">
+          <div className="gt-reg-top">
+            <h1 className="gt-h1">The register</h1>
+            <p className="gt-sub">Who took what, and when. Everyone can read it.</p>
+          </div>
 
-          {tally.length > 1 && (
-            <div className="gt-tally">
-              <span className="gt-tally-head">This visit</span>
-              {tally.map((t, i) => (
-                <span key={i} className="gt-tally-chip">{t.qty} × {t.toolName}</span>
-              ))}
-            </div>
-          )}
+          <div className="gt-reg-seg" role="group" aria-label="Whose lines">
+            <button type="button" className={!regMine ? "on" : ""} onClick={() => setRegMine(false)}>
+              Everyone
+            </button>
+            <button type="button" className={regMine ? "on" : ""} onClick={() => setRegMine(true)}>
+              Just me
+            </button>
+          </div>
+
+          {regBusy && <div className="gt-reg-wait">Reading the register…</div>}
+
+          {!regBusy && reg && (() => {
+            const lines = regMine ? reg.filter((l) => l.mine) : reg;
+            if (lines.length === 0) {
+              return (
+                <div className="gt-blank">
+                  {regMine ? "You have not taken anything yet." : "Nothing in the last six weeks."}
+                </div>
+              );
+            }
+            // Grouped by IST day: the shed's day, not the browser's.
+            const days: Array<{ key: string; label: string; lines: RegisterLine[] }> = [];
+            for (const l of lines) {
+              const key = istDay(l.at);
+              const last = days[days.length - 1];
+              if (last && last.key === key) last.lines.push(l);
+              else days.push({ key, label: dayLabel(l.at), lines: [l] });
+            }
+            return (
+              <div className="gt-tl">
+                {days.map((d) => (
+                  <div key={d.key} className="gt-tl-day">
+                    <div className="gt-tl-date">
+                      <span>{d.label}</span>
+                      <i>{d.lines.length} line{d.lines.length === 1 ? "" : "s"}</i>
+                    </div>
+                    <div className="gt-tl-rail">
+                      {d.lines.map((l) => {
+                        const out = l.delta < 0;
+                        return (
+                          <div
+                            key={l.id}
+                            className="gt-tl-row"
+                            data-dir={out ? "out" : "in"}
+                            data-mine={l.mine ? "1" : undefined}
+                            data-void={l.undone ? "1" : undefined}
+                          >
+                            <span className="gt-tl-time">{istTime(l.at)}</span>
+                            <span className="gt-tl-dot" aria-hidden />
+                            <span className="gt-tl-body">
+                              <span className="gt-tl-what">
+                                <b>{out ? "−" : "+"}{Math.abs(l.delta)}</b>
+                                <span className="gt-tl-tool">{l.toolName}</span>
+                              </span>
+                              <span className="gt-tl-who">
+                                {l.personName
+                                  ? <>{l.mine ? "You" : l.personName}{l.company && !l.mine ? ` · ${l.company}` : ""}</>
+                                  // No name against it means the office did it from
+                                  // the shelf side. Say WHICH thing they did — a bare
+                                  // "Store" against a minus five is the one line in
+                                  // here somebody would come back and ask about.
+                                  : l.kind === "receive" ? <>Stock in</>
+                                    : l.kind === "adjust" ? <>Count corrected</>
+                                      : <>Store</>}
+                                {l.note && <> · {l.note}</>}
+                                {l.undone && <> · <b className="gt-tl-undone">undone</b></>}
+                              </span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {regTrunc && (
+                  <p className="gt-tl-more">
+                    Showing the most recent lines. The office screen has the whole book.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          <button type="button" className="gt-ghost gt-wide" onClick={() => setStep("tool")}>
+            Back to the shelf
+          </button>
         </section>
       )}
+
     </main>
   );
 }
@@ -1128,6 +1308,98 @@ const CSS = `
   background:var(--okbg); color:var(--ok); border:1px solid #a7f3d0; }
 
 @media (prefers-reduced-motion: reduce) { .gt-tick { animation:none; } }
+
+/* ── the popup that replaced the done screen ───────────── */
+/*
+   A take used to land on a screen of its own with two buttons on it.
+   Nobody at a cupboard wants to be asked a question after taking a
+   drill bit — they want the next one. So the confirmation floats over
+   the shelf, says the number, and takes itself away.
+*/
+.gt-flash {
+  position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(18px + env(safe-area-inset-bottom)); z-index:70;
+  display:flex; align-items:center; gap:11px; max-width:calc(100vw - 32px);
+  padding:12px 16px; border-radius:8px;
+  background:var(--brand); color:#fff;
+  box-shadow:0 8px 24px rgba(45,36,16,.3);
+  animation:gt-flash-in .18s ease-out;
+}
+@keyframes gt-flash-in { from { opacity:0; transform:translate(-50%, 10px); } }
+.gt-flash-tick {
+  width:24px; height:24px; flex:0 0 auto; border-radius:50%;
+  display:grid; place-items:center; font-size:13px; font-weight:700;
+  background:var(--ok); color:#fff;
+}
+.gt-flash-main { display:flex; flex-direction:column; min-width:0; }
+.gt-flash-main strong { font-size:14px; font-weight:700; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.gt-flash-main em { font-style:normal; font-size:11.5px; color:rgba(255,255,255,.72); }
+
+/* ── the register ──────────────────────────────────────── */
+.gt-reg-top { margin-bottom:12px; }
+.gt-reg-seg {
+  display:flex; gap:3px; padding:3px; border-radius:8px; margin-bottom:14px;
+  background:#eeece7; border:1px solid var(--line);
+}
+.gt-reg-seg button {
+  flex:1; padding:8px; font:inherit; font-size:13px; font-weight:600;
+  border:none; background:none; color:var(--dim); border-radius:6px; cursor:pointer;
+}
+.gt-reg-seg button.on { background:var(--card); color:var(--ink);
+  box-shadow:0 1px 2px rgba(45,36,16,.1); }
+.gt-reg-wait { padding:26px 0; text-align:center; font-size:13px; color:var(--dim); }
+
+.gt-tl { display:flex; flex-direction:column; gap:18px; }
+.gt-tl-date {
+  display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  margin-bottom:7px;
+}
+.gt-tl-date span { font-size:12px; font-weight:700; color:var(--ink); letter-spacing:.02em; }
+.gt-tl-date i { font-style:normal; font-size:11px; color:var(--dim); }
+
+/* One line down the page with a dot per entry, so a day reads as a
+   sequence rather than as a stack of cards. */
+.gt-tl-rail { position:relative; }
+.gt-tl-row {
+  position:relative; display:grid; grid-template-columns:52px 16px minmax(0,1fr);
+  align-items:start; gap:8px; padding:7px 0;
+}
+.gt-tl-row::before {
+  content:""; position:absolute; left:59px; top:0; bottom:0; width:1.5px;
+  background:var(--line);
+}
+.gt-tl-row:first-child::before { top:14px; }
+.gt-tl-row:last-child::before { bottom:calc(100% - 14px); }
+.gt-tl-time { font-size:11px; color:var(--dim); text-align:right; padding-top:2px;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.gt-tl-dot {
+  position:relative; z-index:1; width:9px; height:9px; margin:5px auto 0;
+  border-radius:50%; background:var(--dim); box-shadow:0 0 0 3px #f6f6f4;
+}
+.gt-tl-row[data-dir="out"] .gt-tl-dot { background:var(--low); }
+.gt-tl-row[data-dir="in"]  .gt-tl-dot { background:var(--ok); }
+/* Your own lines carry a gold ring, so "what did I take" is answerable
+   without leaving the Everyone view. */
+.gt-tl-row[data-mine] .gt-tl-dot { box-shadow:0 0 0 3px #f6f6f4, 0 0 0 5px var(--gold); }
+.gt-tl-row[data-void] { opacity:.45; }
+.gt-tl-row[data-void] .gt-tl-what { text-decoration:line-through; }
+
+.gt-tl-body { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.gt-tl-what { display:flex; align-items:baseline; gap:7px; min-width:0; }
+.gt-tl-what b { font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums;
+  flex:0 0 auto; }
+.gt-tl-row[data-dir="out"] .gt-tl-what b { color:var(--low); }
+.gt-tl-row[data-dir="in"]  .gt-tl-what b { color:var(--ok); }
+.gt-tl-tool {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12.5px; font-weight:600; color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-tl-who { font-size:11.5px; color:var(--dim); line-height:1.45; }
+.gt-tl-undone { color:var(--out); font-weight:700; }
+.gt-tl-more { margin:4px 0 0; font-size:11px; color:var(--dim); text-align:center; }
 `;
 
 /**

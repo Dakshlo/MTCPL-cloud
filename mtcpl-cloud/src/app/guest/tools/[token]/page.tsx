@@ -30,6 +30,7 @@ import {
   sendToolSignInCodeAction,
   toolSignOutAction,
   verifyToolSignInCodeAction,
+  guestRegisterAction,
 } from "./guest-actions";
 import { GuestTakeClient, type TakeTool } from "./guest-take-client";
 
@@ -141,6 +142,7 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       enrolAction={enrolOperatorAction}
       removeOperatorAction={removeOperatorAction}
       myTeamAction={myTeamAction}
+      registerAction={guestRegisterAction}
       addStockAction={keeperAddStockAction}
       fixCountAction={keeperFixCountAction}
       newToolAction={keeperNewToolAction}

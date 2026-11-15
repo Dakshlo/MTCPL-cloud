@@ -765,3 +765,137 @@ export async function keeperNewToolAction(fd: FormData): Promise<KeeperResult> {
       : `${tool.name} added. Put some stock in when it arrives.`,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────
+// The register, on the phone (Daksh, Nov 2026)
+//
+// "In phone also you need to give timeline — who take what and when.
+//  Maybe a new page where everything will be registered, that Mohit
+//  took this at that time, in a good visualisation view, timeline. So
+//  user can see what they took, or others."
+//
+// The office screen has had this since the module was built. The men
+// standing at the cupboard — the ones who actually take the tools —
+// could see only what they had taken in that one visit, which vanished
+// when they signed out. The paper register this replaces was nailed to
+// the wall and ANYONE could read back a month of it, which is most of
+// why a paper register works at all.
+//
+// So: everybody who can sign in at the cupboard can read it, their own
+// lines and everyone else's. That is deliberate. A shared cupboard with
+// a private register is how an argument about a missing box starts.
+//
+// Read-only, capped, and scoped to nothing but time — there is no
+// filtering by person on the server, because the point is that it
+// cannot be edited or narrowed by the person being asked about it.
+// ──────────────────────────────────────────────────────────────────
+
+/** One line of the cupboard's register, as a phone wants to read it. */
+export type RegisterLine = {
+  id: string;
+  /** ISO. Grouped into days and clock times on the client, in IST. */
+  at: string;
+  kind: string;
+  /** Signed: negative is a take, positive is stock arriving. */
+  delta: number;
+  toolName: string;
+  unit: string;
+  /** Who did it. Null means the store itself — a delivery with no
+   *  name against it. */
+  personName: string | null;
+  company: string | null;
+  /** Was this me? Decided on the server from the session, never from
+   *  a name typed on the page. */
+  mine: boolean;
+  note: string | null;
+  undone: boolean;
+};
+
+export type RegisterResult =
+  | { ok: true; lines: RegisterLine[]; truncated: boolean }
+  | { ok: false; error: string; signedOut?: boolean };
+
+/** How far back the phone reads. Six weeks is longer than any argument
+ *  about a missing box, and short enough to stay one quick query. */
+const REGISTER_DAYS = 42;
+const REGISTER_MAX = 300;
+
+export async function guestRegisterAction(fd: FormData): Promise<RegisterResult> {
+  const token = String(fd.get("token") || "").trim();
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false, error: "This QR is not valid. Ask the office for the new one." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const since = new Date(Date.now() - REGISTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: rows, error } = await admin
+    .from("cnc_tool_movements")
+    .select(
+      "id, tool_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, vendor_id, note, created_at, undone_at",
+    )
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(REGISTER_MAX + 1);
+  if (error) return { ok: false, error: error.message };
+
+  const all = (rows ?? []) as Array<{
+    id: string; tool_id: string; kind: string; delta: number | string;
+    taken_by: string | null; taken_by_profile_id: string | null;
+    taken_by_operator_id: string | null; vendor_id: string | null;
+    note: string | null; created_at: string; undone_at: string | null;
+  }>;
+  const truncated = all.length > REGISTER_MAX;
+  const lines = truncated ? all.slice(0, REGISTER_MAX) : all;
+
+  // Names, in two small lookups rather than a join per row.
+  const toolIds = [...new Set(lines.map((l) => l.tool_id))];
+  const vendorIds = [...new Set(lines.map((l) => l.vendor_id).filter(Boolean))] as string[];
+
+  const [{ data: toolRows }, { data: vendorRows }] = await Promise.all([
+    toolIds.length
+      ? admin.from("cnc_tools").select("id, name, unit").in("id", toolIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string; unit: string }> }),
+    vendorIds.length
+      ? admin.from("vendors").select("id, name").in("id", vendorIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
+  ]);
+
+  const tools = new Map(
+    ((toolRows ?? []) as Array<{ id: string; name: string; unit: string }>).map((t) => [t.id, t]),
+  );
+  const vendors = new Map(
+    ((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => [v.id, v.name]),
+  );
+
+  return {
+    ok: true,
+    truncated,
+    lines: lines.map((l) => {
+      const tool = tools.get(l.tool_id);
+      return {
+        id: l.id,
+        at: l.created_at,
+        kind: l.kind,
+        delta: Number(l.delta),
+        toolName: tool?.name ?? "a tool that has since been removed",
+        unit: tool?.unit ?? "pcs",
+        personName: l.taken_by,
+        company: l.vendor_id ? vendors.get(l.vendor_id) ?? null : null,
+        // Identity comes off the session, so nobody can make a line
+        // look like somebody else's by editing what is on the page.
+        mine:
+          (!!session.profileId && l.taken_by_profile_id === session.profileId) ||
+          (!!session.operatorId && l.taken_by_operator_id === session.operatorId),
+        note: l.note,
+        undone: !!l.undone_at,
+      };
+    }),
+  };
+}
