@@ -112,7 +112,13 @@ export function StoreClient({
   const short = useMemo(() => shortages(optimistic), [optimistic]);
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const base = orderForTaking(optimistic);
+    // orderForTaking puts the most-used first, which is right at the
+    // cupboard where somebody is looking for the thing they always
+    // take. This screen belongs to the person who REFILLS it, so what
+    // is empty or running low rises to the top instead — and that is
+    // why the separate "running low" strip above could go.
+    const rank = (t: ToolRow) => (t.stock <= 0 ? 0 : t.level !== "ok" ? 1 : 2);
+    const base = orderForTaking(optimistic).sort((x, y) => rank(x) - rank(y));
     if (!needle) return base;
     return base.filter(
       (t) => t.name.toLowerCase().includes(needle) || (t.spec ?? "").toLowerCase().includes(needle),
@@ -192,61 +198,54 @@ export function StoreClient({
   }
 
   const outCount = short.filter((t) => t.stock <= 0).length;
+  const lowCount = short.length - outCount;
 
   return (
     <section className="page-fluid tc-page allow-portrait" style={{ paddingBottom: 110 }}>
       <style>{TOOLS_CSS}</style>
 
-      {/* ── hero ──────────────────────────────────────────────── */}
-      <header className="tc-hero">
-        <div className="tc-hero-row">
-          <div className="tc-hero-id">
-            <span className="tc-hero-icon" aria-hidden>🧰</span>
-            <div style={{ minWidth: 0 }}>
-              <div className="tc-eyebrow">CNC tool store</div>
-              <h1 className="tc-title">The store</h1>
-            </div>
-          </div>
-          {canManage && (
-            <div className="tc-hero-actions">
-              <Link href="/tools/qr" className="tc-btn tc-btn-ghost">
-                <span aria-hidden>▦</span> Wardrobe QR
-              </Link>
-              {canScanBills && (
-                <button
-                  type="button"
-                  className="tc-btn tc-btn-ghost"
-                  onClick={() => setBillOpen(true)}
-                  title="Read a supplier's bill and fill the shelf from it"
-                >
-                  <span aria-hidden>🧾</span> Scan bill
-                </button>
-              )}
+      {/* ── page head ───────────────────────────────────────── */}
+      {/* Nov 2026 — the gradient banner, the emoji tile and the three
+          score tiles are gone. The men said the module felt like a game
+          next to the rest of the app, and the banner was most of why.
+          Two of the three tiles counted rows listed directly below them,
+          so they are now one sentence instead. */}
+      <header className="tc-head">
+        <div className="tc-head-id">
+          <h1 className="tc-title">Tool store</h1>
+          <p className="tc-sub">
+            <b>{optimistic.length}</b> tool{optimistic.length === 1 ? "" : "s"} on the shelf
+            {outCount > 0 && (
+              <> · <span className="tc-outw">{outCount} empty</span></>
+            )}
+            {lowCount > 0 && (
+              <> · <span className="tc-warn">{lowCount} running low</span></>
+            )}
+            {takenToday > 0 && <> · <b>{takenToday}</b> taken today</>}
+          </p>
+        </div>
+        {canManage && (
+          <div className="tc-hero-actions">
+            <Link href="/tools/qr" className="tc-btn">Wardrobe QR</Link>
+            {canScanBills && (
               <button
                 type="button"
-                className="tc-btn tc-btn-solid"
-                onClick={() => { setEditing(null); setAddOpen(true); }}
+                className="tc-btn"
+                onClick={() => setBillOpen(true)}
+                title="Read a supplier's bill and fill the shelf from it"
               >
-                <span aria-hidden>＋</span> Add tool
+                Scan bill
               </button>
-            </div>
-          )}
-        </div>
-
-        <div className="tc-stats">
-          <div className="tc-stat" data-tone="blue">
-            <b>{optimistic.length}</b>
-            <span>tool{optimistic.length === 1 ? "" : "s"} on the shelf</span>
+            )}
+            <button
+              type="button"
+              className="tc-btn tc-btn-solid"
+              onClick={() => { setEditing(null); setAddOpen(true); }}
+            >
+              Add tool
+            </button>
           </div>
-          <div className="tc-stat" data-tone="green">
-            <b>{takenToday}</b>
-            <span>taken today</span>
-          </div>
-          <div className="tc-stat" data-tone={outCount > 0 ? "red" : short.length > 0 ? "amber" : "grey"}>
-            <b>{short.length}</b>
-            <span>{outCount > 0 ? `running out · ${outCount} empty` : "running low"}</span>
-          </div>
-        </div>
+        )}
       </header>
 
       {/* The three "how it works" cards that used to sit here are gone
@@ -260,31 +259,6 @@ export function StoreClient({
         <div className="tc-err" role="alert">
           <span>⚠ {err}</span>
           <button type="button" onClick={() => setErr(null)} aria-label="Dismiss">✕</button>
-        </div>
-      )}
-
-      {short.length > 0 && (
-        <div className="tc-short">
-          <div className="tc-short-head">
-            <span className="tc-short-dot" />
-            {outCount > 0
-              ? `${outCount} finished${short.length > outCount ? `, ${short.length - outCount} running low` : ""}`
-              : `${short.length} tool${short.length === 1 ? "" : "s"} running low`}
-          </div>
-          <div className="tc-short-list">
-            {short.slice(0, 8).map((t) => (
-              <button
-                key={t.id} type="button" className="tc-short-pill"
-                data-out={t.stock <= 0 ? "1" : undefined}
-                onClick={() => canManage && setIntent({ tool: t, kind: "receive" })}
-                title={canManage ? "Add stock" : undefined}
-              >
-                <strong>{t.name}</strong>
-                <span>{t.stock <= 0 ? "empty" : `${t.stock} left`}</span>
-              </button>
-            ))}
-            {short.length > 8 && <span className="tc-short-more">+{short.length - 8} more</span>}
-          </div>
         </div>
       )}
 
@@ -305,7 +279,7 @@ export function StoreClient({
         <>
           {optimistic.length > 4 && (
             <div className="tc-search">
-              <span aria-hidden>🔍</span>
+              <span aria-hidden>⌕</span>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the store…" aria-label="Search tools" />
               {q && <button type="button" onClick={() => setQ("")} aria-label="Clear">✕</button>}
             </div>
@@ -313,8 +287,7 @@ export function StoreClient({
 
           {optimistic.length === 0 ? (
             <div className="tc-empty">
-              <div className="tc-empty-icon">🧰</div>
-              <h2>The store is empty</h2>
+                <h2>The store is empty</h2>
               <p>
                 There is no fixed list of tools — you build it. Add the first one the way the men
                 say it, like <strong>450mm tool</strong>, and put the stock you have in hand against
@@ -329,7 +302,7 @@ export function StoreClient({
           ) : visible.length === 0 ? (
             <div className="tc-empty-search">Nothing matches “{q}”.</div>
           ) : (
-            <div className="tc-grid">
+            <div className="tc-grid" data-photos={visible.some((t) => t.imageUrl) ? "1" : "0"}>
               {visible.map((t) => (
                 <ToolCard
                   key={t.id} tool={t} canManage={canManage}
@@ -895,32 +868,55 @@ function ToolCard({
   const MENU_H = 250;
 
   const level = tool.stock <= 0 ? "out" : tool.stock <= tool.lowLine ? "low" : "ok";
-  // Stock against three times the warning line — a scale that means
-  // something per tool, rather than a percentage of a maximum no tool
-  // actually has.
-  const full = Math.max(tool.lowLine * 3, tool.stock, 1);
-  const pct = Math.max(tool.stock > 0 ? 5 : 0, Math.min(100, (tool.stock / full) * 100));
+
+  // The progress bar that used to sit here is gone. Its denominator was
+  // max(warn line × 3, stock) — a maximum no tool actually has, so the
+  // bar was decoration drawn in the shape of data. The number and the
+  // badge say the same thing honestly.
+  const last = tool.lastMovement
+    ? `${tool.lastMovement.taken_by
+        ? `${tool.lastMovement.taken_by} took ${Math.abs(Number(tool.lastMovement.delta))}`
+        : KIND_LABEL[tool.lastMovement.kind]} · ${ago(tool.lastMovement.created_at)}`
+    : "nothing taken yet";
 
   return (
     <article className="tc-card" data-level={level}>
-      <div className="tc-card-band" aria-hidden />
+      {/* Mig 233 — the photo. A tool WITHOUT one now shows a quiet empty
+          frame rather than its first letter in a colour: six of the
+          seven codes on this shelf begin with D, so the letter taught
+          nobody anything and only added colour. */}
+      <div className="tc-thumb" data-empty={tool.imageUrl ? undefined : "1"}>
+        {tool.imageUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={tool.imageUrl} alt="" loading="lazy" />
+          : null}
+      </div>
 
-      <div className="tc-card-top">
-        {/* Mig 233 — the photo, or the tool's initial in the level colour.
-            Never an empty grey square: a missing photo should still read
-            as a tool, not as a broken card. */}
-        <div className="tc-thumb" data-empty={tool.imageUrl ? undefined : "1"}>
-          {tool.imageUrl
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={tool.imageUrl} alt="" loading="lazy" />
-            : <span aria-hidden>{tool.name.trim().charAt(0).toUpperCase() || "?"}</span>}
+      <div style={{ minWidth: 0 }}>
+        <h2 className="tc-name" title={tool.name}>{tool.name}</h2>
+        <div className="tc-spec">
+          {tool.spec ? `${tool.spec} · ` : ""}{last}
         </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h2 className="tc-name" title={tool.name}>{tool.name}</h2>
-          <div className="tc-spec">{tool.spec ? tool.spec : `Counted in ${tool.unit}`}</div>
+      </div>
+
+      <div className="tc-stockline">
+        <div className="tc-stock">
+          <span className="tc-stock-n">{tool.stock}</span>
+          <span className="tc-stock-u">{tool.unit}</span>
         </div>
+      </div>
+
+      <span className="tc-chip">
+        {level === "out" ? "Empty" : level === "low" ? `Low · warns at ${tool.lowLine}` : "In stock"}
+      </span>
+
+      <div className="tc-rowacts">
         {canManage && (
-          <div style={{ position: "relative", flex: "0 0 auto" }}>
+          <>
+            <button type="button" className="tc-addstock" onClick={onAddStock}>
+              Add stock
+            </button>
+            <div style={{ position: "relative", flex: "0 0 auto" }}>
             <button
               ref={dotsRef}
               type="button"
@@ -938,10 +934,10 @@ function ToolCard({
               <>
                 <div className="tc-menu-scrim" onClick={onCloseMenu} />
                 <div className="tc-menu" role="menu" data-up={up ? "1" : undefined}>
-                  <button type="button" onClick={onFixCount}>⚖ Fix count</button>
-                  <button type="button" onClick={onHistory}>📜 This tool&apos;s register</button>
+                  <button type="button" onClick={onFixCount}>Fix count</button>
+                  <button type="button" onClick={onHistory}>This tool&apos;s register</button>
                   <div className="tc-menu-sep" />
-                  <button type="button" onClick={onEdit}>✎ Edit tool</button>
+                  <button type="button" onClick={onEdit}>Edit tool</button>
 
                   {/* Delete only shows at zero. Not greyed out at other
                       times — a disabled button people cannot press is a
@@ -974,33 +970,10 @@ function ToolCard({
                 </div>
               </>
             )}
-          </div>
+            </div>
+          </>
         )}
       </div>
-
-      <div className="tc-stockline">
-        <div className="tc-stock">
-          <span className="tc-stock-n">{tool.stock}</span>
-          <span className="tc-stock-u">{tool.unit}</span>
-        </div>
-        <span className="tc-chip">
-          {level === "out" ? "Empty" : level === "low" ? `Low · warns at ${tool.lowLine}` : "In stock"}
-        </span>
-      </div>
-
-      <div className="tc-bar" aria-hidden><i style={{ width: `${pct}%` }} /></div>
-
-      <div className="tc-last">
-        {tool.lastMovement
-          ? <>{tool.lastMovement.taken_by ? `${tool.lastMovement.taken_by} took ${Math.abs(Number(tool.lastMovement.delta))}` : KIND_LABEL[tool.lastMovement.kind]} · {ago(tool.lastMovement.created_at)}</>
-          : <>Nothing taken yet</>}
-      </div>
-
-      {canManage && (
-        <button type="button" className="tc-addstock" onClick={onAddStock}>
-          ＋ Add stock
-        </button>
-      )}
     </article>
   );
 }

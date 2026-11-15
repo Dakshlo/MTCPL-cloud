@@ -625,7 +625,7 @@ const BILL_CSS = `
   border-left:3px solid var(--border);
 }
 .tb-row[data-tone="green"] { border-left-color:#22c55e; }
-.tb-row[data-tone="amber"] { border-left-color:#f59e0b; background:#fffdf5; }
+.tb-row[data-tone="amber"] { border-left-color:var(--warning); background:var(--warning-bg); }
 .tb-row[data-tone="grey"]  { border-left-color:var(--border); }
 .tb-row[data-skip] { opacity:.6; }
 
@@ -659,7 +659,7 @@ const BILL_CSS = `
 .tb-new { display:flex; flex-wrap:wrap; gap:7px; align-items:center; flex:1 1 auto; min-width:0; }
 .tb-tick { display:inline-flex; align-items:center; gap:6px; font-size:12px;
   font-weight:700; color:#92400e; cursor:pointer; white-space:nowrap; }
-.tb-tick input { width:17px; height:17px; accent-color:#f59e0b; cursor:pointer; }
+.tb-tick input { width:17px; height:17px; accent-color:var(--warning); cursor:pointer; }
 .tb-row[data-tone="green"] .tb-tick { color:#166534; }
 
 .tb-row-skip { font-size:12px; color:var(--muted); }

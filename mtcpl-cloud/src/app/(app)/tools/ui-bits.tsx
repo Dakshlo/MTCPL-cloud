@@ -99,203 +99,259 @@ export const TOOLS_CSS = `
   --tc-ok:#16a34a; --tc-ok-bg:rgba(22,163,74,.10);
   --tc-low:#d97706; --tc-low-bg:rgba(217,119,6,.12);
   --tc-out:#dc2626; --tc-out-bg:rgba(220,38,38,.10);
-  --tc-blue:#4f46e5;
+  /* Was #4f46e5. An indigo belonging to no palette in this app — it
+     ran the tally bars, the QR mark and the vendor group's edge, and
+     it was a good part of why the module read as a toy next to the
+     warm paper and gold everywhere else. */
+  --tc-blue:var(--gold-dark);
 }
 
-/* ── hero ──────────────────────────────────────────────────── */
-.tc-hero {
-  background:linear-gradient(135deg,#f59e0b 0%,#ea580c 55%,#db2777 100%);
-  border-radius:22px; padding:20px 22px 18px; margin-bottom:16px; color:#fff;
-  box-shadow:0 10px 30px rgba(234,88,12,.26);
-}
-.tc-hero-row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-.tc-hero-id { display:flex; align-items:center; gap:13px; min-width:0; }
-.tc-hero-icon { width:48px; height:48px; flex:0 0 auto; border-radius:16px; font-size:24px;
-  display:grid; place-items:center; background:rgba(255,255,255,.2); }
-.tc-eyebrow { font-size:11px; font-weight:800; letter-spacing:.1em;
-  text-transform:uppercase; color:rgba(255,255,255,.78); }
-.tc-title { font-size:28px; font-weight:800; letter-spacing:-.025em; margin:1px 0 0; color:#fff; }
-.tc-hero-actions { margin-left:auto; display:flex; gap:9px; flex-wrap:wrap; }
-.tc-btn { display:inline-flex; align-items:center; gap:7px; padding:11px 17px; font-size:13.5px;
-  font-weight:800; border-radius:13px; text-decoration:none; white-space:nowrap; cursor:pointer;
-  border:none; font-family:inherit; }
-.tc-btn-ghost { background:rgba(255,255,255,.18); color:#fff; }
-.tc-btn-ghost:hover { background:rgba(255,255,255,.28); }
-.tc-btn-solid { background:#fff; color:#c2410c; box-shadow:0 4px 14px rgba(0,0,0,.14); }
-.tc-btn-solid:hover { transform:translateY(-1px); }
+/* ── page head ─────────────────────────────────────────────── */
+/*
+   Nov 2026 — this module used to open on a saturated orange-to-pink
+   gradient banner carrying a 28px white title, an emoji tile and three
+   translucent score tiles. The men using it said it felt like a game
+   rather than a tool. They were right: nothing else in this app looks
+   like that. The house style is a 20px heading on paper, an 8px radius
+   and a gold accent, and the store now obeys it.
 
-.tc-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:16px; }
-.tc-stat { border-radius:15px; padding:12px 14px; background:rgba(255,255,255,.16);
-  border:1px solid rgba(255,255,255,.22); }
-.tc-stat b { display:block; font-size:26px; font-weight:800; line-height:1.05; }
-.tc-stat span { display:block; font-size:11px; font-weight:700; letter-spacing:.04em;
-  text-transform:uppercase; color:rgba(255,255,255,.82); margin-top:3px; }
-.tc-stat[data-tone="red"]   { background:rgba(127,29,29,.42); border-color:rgba(255,255,255,.4); }
-.tc-stat[data-tone="amber"] { background:rgba(180,83,9,.34); }
-.tc-stat[data-tone="grey"]  { background:rgba(255,255,255,.1); }
+   The three score tiles are gone rather than restyled. Two of them
+   counted rows that were listed directly underneath, and a number you
+   can reach by counting what is already on screen is decoration. What
+   is left of them is one sentence under the heading.
+*/
+.tc-head {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:16px; flex-wrap:wrap; margin-bottom:16px;
+  padding-bottom:14px; border-bottom:1px solid var(--border);
+}
+.tc-head-id { min-width:0; }
+.tc-title { font-size:20px; font-weight:700; letter-spacing:-.01em; margin:0; color:var(--text); }
+.tc-sub { font-size:13px; color:var(--muted); margin-top:4px; line-height:1.5; }
+.tc-sub b { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+.tc-sub .tc-warn { color:var(--warning); font-weight:700; }
+.tc-sub .tc-outw { color:var(--danger); font-weight:700; }
+.tc-sub button { border:none; background:none; padding:0; font:inherit; color:inherit;
+  cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+
+.tc-hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.tc-btn {
+  display:inline-flex; align-items:center; gap:7px; padding:8px 14px; font-size:13px;
+  font-weight:600; border-radius:var(--radius); text-decoration:none; white-space:nowrap;
+  cursor:pointer; font-family:inherit; border:1px solid var(--border);
+  background:var(--surface); color:var(--text);
+  transition:background .12s ease, border-color .12s ease;
+}
+.tc-btn:hover { background:var(--surface-alt); border-color:var(--muted-light); }
+.tc-btn-ghost { /* same as the default now — kept so markup need not change */ }
+.tc-btn-solid { background:var(--gold); border-color:var(--gold); color:#fff; }
+.tc-btn-solid:hover { background:var(--gold-dark); border-color:var(--gold-dark); }
 
 /* ── messages ──────────────────────────────────────────────── */
 .tc-err { display:flex; gap:12px; align-items:center; justify-content:space-between;
-  padding:12px 16px; border-radius:12px; margin-bottom:14px; font-size:13.5px; font-weight:700;
-  background:var(--tc-out-bg); color:var(--tc-out); border:1px solid rgba(220,38,38,.3); }
+  padding:10px 14px; border-radius:var(--radius); margin-bottom:14px; font-size:13px;
+  font-weight:600; background:var(--danger-bg); color:var(--danger);
+  border:1px solid rgba(220,38,38,.25); }
 .tc-err button { border:none; background:none; color:inherit; cursor:pointer; font-size:14px; }
 
-.tc-short { border:1px solid rgba(217,119,6,.35); border-left:5px solid var(--tc-low);
-  border-radius:15px; background:var(--tc-low-bg); padding:13px 16px; margin-bottom:16px; }
-.tc-short-head { display:flex; align-items:center; gap:9px; font-size:13.5px; font-weight:800;
-  color:var(--tc-low); }
-.tc-short-dot { width:9px; height:9px; border-radius:50%; background:var(--tc-low);
-  box-shadow:0 0 0 4px rgba(217,119,6,.2); }
-.tc-short-list { display:flex; gap:8px; flex-wrap:wrap; margin-top:11px; align-items:center; }
-.tc-short-pill { display:inline-flex; align-items:baseline; gap:7px; padding:7px 13px;
-  border-radius:999px; cursor:pointer; font:inherit; background:var(--surface);
-  border:1.5px solid rgba(217,119,6,.45); color:var(--text); }
-.tc-short-pill strong { font-size:12.5px; font-weight:800; }
-.tc-short-pill span { font-size:11px; font-weight:700; color:var(--tc-low); }
-.tc-short-pill[data-out] { border-color:var(--tc-out); }
-.tc-short-pill[data-out] span { color:var(--tc-out); }
-.tc-short-more { font-size:12px; font-weight:700; color:var(--muted); }
-
 /* ── tabs + search ─────────────────────────────────────────── */
-.tc-tabs { display:inline-flex; gap:4px; padding:4px; border-radius:14px;
+.tc-tabs { display:inline-flex; gap:2px; padding:3px; border-radius:var(--radius);
   background:var(--surface-alt); border:1px solid var(--border); margin-bottom:14px; }
-.tc-tabs button { padding:9px 18px; font-size:13.5px; font-weight:800; border-radius:11px;
-  border:none; background:none; color:var(--muted); cursor:pointer; font-family:inherit; }
-.tc-tabs button.on { background:linear-gradient(135deg,#f59e0b,#ea580c); color:#fff;
-  box-shadow:0 3px 10px rgba(234,88,12,.3); }
-.tc-tabs i { font-style:normal; font-size:11px; font-weight:800; margin-left:6px; opacity:.85; }
+.tc-tabs button { padding:7px 16px; font-size:13px; font-weight:600;
+  border-radius:var(--radius-sm); border:none; background:none; color:var(--muted);
+  cursor:pointer; font-family:inherit; }
+.tc-tabs button:hover { color:var(--text); }
+.tc-tabs button.on { background:var(--surface); color:var(--text);
+  box-shadow:0 1px 2px rgba(45,36,16,.09); }
+.tc-tabs i { font-style:normal; font-size:11px; font-weight:600; margin-left:6px;
+  opacity:.7; font-variant-numeric:tabular-nums; }
 
-.tc-search { display:flex; align-items:center; gap:10px; padding:0 15px; margin-bottom:15px;
-  background:var(--surface); border:1.5px solid var(--border); border-radius:14px; }
+.tc-search { display:flex; align-items:center; gap:9px; padding:0 12px; margin-bottom:12px;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); }
 .tc-search input { flex:1; min-width:0; border:none; outline:none; background:none;
-  font:inherit; font-size:14.5px; padding:13px 0; color:var(--text); }
-.tc-search button { background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; }
+  font:inherit; font-size:13.5px; padding:9px 0; color:var(--text); }
+.tc-search > span { color:var(--muted-light); font-size:12px; }
+.tc-search button { background:none; border:none; color:var(--muted); cursor:pointer;
+  font-size:13px; }
 
 .tc-filter { display:inline-flex; gap:6px; align-items:center; margin-bottom:12px;
-  padding:8px 14px; border-radius:999px; font:inherit; font-size:12.5px; font-weight:800;
+  padding:6px 12px; border-radius:999px; font:inherit; font-size:12.5px; font-weight:600;
   cursor:pointer; background:var(--gold-subtle); color:var(--gold-dark);
-  border:1.5px solid var(--gold); }
-.tc-filter span { font-weight:700; opacity:.8; }
+  border:1px solid var(--gold-border); }
 
-/* ── tool cards ────────────────────────────────────────────── */
-.tc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(248px,1fr)); gap:14px; }
-/* NO overflow:hidden. Daksh, Nov 2026: "I am not able to delete any
-   item cause the delete button is hidden, and I am not able to scroll
-   the delete button down to use it."
-   The ⋯ menu is absolutely positioned inside this card, so clipping
-   the card clipped the menu — Delete sat exactly on the bottom edge
-   and there was nothing to scroll, because an absolute element adds
-   no height to the page. The band keeps the top corners rounded on
-   its own instead.
-   Note the hover transform below: it makes this card the containing
-   block for ANY fixed-position descendant, so moving the menu to
-   position:fixed would not have fixed it either. */
-.tc-card { position:relative; display:flex; flex-direction:column; padding:16px 16px 14px;
-  border-radius:18px; background:var(--surface); border:1px solid var(--border);
-  box-shadow:0 2px 10px rgba(20,20,30,.05);
-  transition:transform .12s ease, box-shadow .12s ease; }
-.tc-card:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(20,20,30,.1); }
-.tc-card-band { position:absolute; inset:0 0 auto 0; height:5px;
-  border-radius:18px 18px 0 0; }
-.tc-card[data-level="ok"]  .tc-card-band { background:linear-gradient(90deg,#22c55e,#16a34a); }
-.tc-card[data-level="low"] .tc-card-band { background:linear-gradient(90deg,#fbbf24,#d97706); }
-.tc-card[data-level="out"] .tc-card-band { background:linear-gradient(90deg,#f87171,#dc2626); }
-.tc-card-top { display:flex; gap:11px; align-items:center; margin-top:4px; }
-.tc-thumb { width:52px; height:52px; flex:0 0 auto; border-radius:14px; overflow:hidden;
-  background:var(--surface-alt); border:1px solid var(--border);
+/* ── the shelf, as a list ──────────────────────────────────── */
+/*
+   Cards became rows in Nov 2026, and the reason is in the names. The
+   shelf holds DSZ 10.4.50-160, DSZ 12.4.60-180, DSZ 12.6.120-180 — part
+   codes that differ only in their digits. A grid of big cards set those
+   far apart, in a proportional font, each behind a coloured circle
+   showing the same letter D. Nobody can tell those apart at a glance,
+   and telling them apart is the only thing anybody does on this screen.
+
+   A list in a monospaced, tabular font stacks the digits in a column
+   where the eye compares them for free. The quantities line up in their
+   own column for the same reason.
+
+   One status device, not five. The old card carried a coloured top
+   band, a coloured avatar, a coloured 38px number, a coloured chip AND
+   a progress bar — all saying the same thing. The bar is gone
+   altogether: its denominator was max(warn line × 3, stock), an
+   invented maximum no tool actually has, so it was decoration drawn in
+   the shape of data. What is left is a thin left edge and a quiet
+   badge.
+
+   Note there is no hover transform any more. That is a bonus: a
+   transform makes an element the containing block for fixed-position
+   descendants, which is what made the ⋯ menu awkward to place.
+*/
+.tc-grid { display:flex; flex-direction:column;
+  border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--surface); box-shadow:var(--shadow); }
+
+.tc-card {
+  position:relative; display:grid; align-items:center; gap:12px;
+  grid-template-columns:auto minmax(0,1fr) auto auto auto;
+  padding:10px 14px; background:var(--surface);
+  border-bottom:1px solid var(--border-light);
+  border-left:3px solid transparent;
+  border-radius:0;
+}
+.tc-card:first-child { border-top-left-radius:var(--radius); border-top-right-radius:var(--radius); }
+.tc-card:last-child  { border-bottom:none;
+  border-bottom-left-radius:var(--radius); border-bottom-right-radius:var(--radius); }
+.tc-card:hover { background:var(--surface-alt); }
+.tc-card[data-level="low"] { border-left-color:var(--warning); }
+.tc-card[data-level="out"] { border-left-color:var(--danger); }
+
+.tc-thumb { width:38px; height:38px; flex:0 0 auto; border-radius:var(--radius-sm);
+  overflow:hidden; background:var(--surface-alt); border:1px solid var(--border);
   display:grid; place-items:center; }
 .tc-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.tc-thumb[data-empty] span { font-size:21px; font-weight:800; }
-.tc-card[data-level="ok"]  .tc-thumb[data-empty] { background:var(--tc-ok-bg);  color:var(--tc-ok); }
-.tc-card[data-level="low"] .tc-thumb[data-empty] { background:var(--tc-low-bg); color:var(--tc-low); }
-.tc-card[data-level="out"] .tc-thumb[data-empty] { background:var(--tc-out-bg); color:var(--tc-out); }
-.tc-name { font-size:16.5px; font-weight:800; margin:0; color:var(--text);
+/* No photo: a quiet empty frame, not a big coloured letter — six of
+   the seven codes on this shelf begin with D, so the letter was colour
+   and nothing else.
+
+   And when NOTHING in the list has a picture, which is the shelf as it
+   actually stands today, the column goes entirely. A row of identical
+   empty frames is worse than no column: it costs width, draws the eye
+   first, and says nothing. It comes back by itself the day somebody
+   photographs a tool. */
+.tc-thumb[data-empty] { background:var(--bg); border-style:dashed; }
+.tc-grid[data-photos="0"] .tc-thumb { display:none; }
+.tc-grid[data-photos="0"] .tc-card { grid-template-columns:minmax(0,1fr) auto auto auto; }
+@media (max-width: 720px) {
+  .tc-grid[data-photos="0"] .tc-card { grid-template-columns:minmax(0,1fr) auto; }
+  .tc-grid[data-photos="0"] .tc-chip { grid-column:1 / 2; }
+  .tc-grid[data-photos="0"] .tc-rowacts { grid-column:2 / 3; }
+}
+
+.tc-name { font-size:13.5px; font-weight:600; margin:0; color:var(--text);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums; letter-spacing:-.01em;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tc-spec { font-size:12px; color:var(--muted); margin-top:2px; }
-.tc-dots { width:30px; height:30px; border-radius:9px; border:1px solid var(--border);
-  background:var(--surface); color:var(--muted); cursor:pointer; font-size:15px; line-height:1; }
+.tc-spec { font-size:11.5px; color:var(--muted); margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.tc-stockline { display:flex; align-items:baseline; gap:4px; justify-content:flex-end; }
+.tc-stock { display:flex; align-items:baseline; gap:4px; }
+.tc-stock-n { font-size:17px; font-weight:700; line-height:1.1; color:var(--text);
+  font-variant-numeric:tabular-nums; min-width:2.5ch; text-align:right; }
+.tc-stock-u { font-size:11px; font-weight:500; color:var(--muted); }
+.tc-card[data-level="low"] .tc-stock-n { color:var(--warning); }
+.tc-card[data-level="out"] .tc-stock-n { color:var(--danger); }
+
+.tc-chip { font-size:10.5px; font-weight:600; padding:3px 8px; border-radius:999px;
+  white-space:nowrap; background:var(--bg); color:var(--muted);
+  border:1px solid var(--border); }
+.tc-card[data-level="ok"]  .tc-chip { background:rgba(22,163,74,.08); color:#16A34A;
+  border-color:rgba(22,163,74,.22); }
+.tc-card[data-level="low"] .tc-chip { background:rgba(217,119,6,.08); color:#B45309;
+  border-color:rgba(217,119,6,.26); }
+.tc-card[data-level="out"] .tc-chip { background:rgba(220,38,38,.08); color:#DC2626;
+  border-color:rgba(220,38,38,.24); }
+
+.tc-last { font-size:11.5px; color:var(--muted); white-space:nowrap; }
+
+.tc-rowacts { display:flex; align-items:center; gap:6px; }
+.tc-addstock { padding:6px 11px; border-radius:var(--radius); font:inherit; font-size:12.5px;
+  font-weight:600; cursor:pointer; color:var(--gold-dark); background:var(--gold-subtle);
+  border:1px solid var(--gold-border); white-space:nowrap; }
+.tc-addstock:hover { background:var(--gold); border-color:var(--gold); color:#fff; }
+
+.tc-dots { width:28px; height:28px; border-radius:var(--radius-sm);
+  border:1px solid var(--border); background:var(--surface); color:var(--muted);
+  cursor:pointer; font-size:14px; line-height:1; flex:0 0 auto; }
+.tc-dots:hover { background:var(--surface-alt); color:var(--text); }
 .tc-menu-scrim { position:fixed; inset:0; z-index:40; }
-.tc-menu { position:absolute; right:0; top:34px; z-index:41; min-width:198px; padding:6px;
-  border-radius:13px; background:var(--surface); border:1px solid var(--border);
-  box-shadow:0 14px 34px rgba(0,0,0,.2); }
-/* Opens upwards for a card near the bottom of the window, where
-   downwards would put Delete below the fold again. */
-.tc-menu[data-up] { top:auto; bottom:34px; }
-.tc-menu button { display:block; width:100%; text-align:left; padding:10px 12px; font:inherit;
-  font-size:13px; font-weight:700; border:none; background:none; color:var(--text);
-  border-radius:9px; cursor:pointer; }
+.tc-menu { position:absolute; right:0; top:32px; z-index:41; min-width:206px; padding:5px;
+  border-radius:var(--radius); background:var(--surface); border:1px solid var(--border);
+  box-shadow:var(--shadow-md, 0 12px 28px rgba(45,36,16,.16)); }
+/* Opens upwards for a row near the bottom of the window. */
+.tc-menu[data-up] { top:auto; bottom:32px; }
+.tc-menu button { display:block; width:100%; text-align:left; padding:8px 11px; font:inherit;
+  font-size:13px; font-weight:500; border:none; background:none; color:var(--text);
+  border-radius:var(--radius-sm); cursor:pointer; }
 .tc-menu button:hover { background:var(--surface-alt); }
-.tc-menu-sep { height:1px; background:var(--border); margin:5px 2px; }
-.tc-menu button.tc-menu-danger { color:var(--tc-out); }
-.tc-menu button.tc-menu-danger:hover { background:var(--tc-out-bg); }
-.tc-menu-why { padding:8px 12px 6px; font-size:11.5px; line-height:1.45; color:var(--muted); }
-.tc-menu-ask { padding:8px 12px 6px; }
-.tc-menu-ask > span { display:block; font-size:12px; font-weight:700; color:var(--text);
+.tc-menu-sep { height:1px; background:var(--border); margin:4px 2px; }
+.tc-menu button.tc-menu-danger { color:var(--danger); }
+.tc-menu button.tc-menu-danger:hover { background:var(--danger-bg); }
+.tc-menu-why { padding:7px 11px 5px; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.tc-menu-ask { padding:7px 11px 5px; }
+.tc-menu-ask > span { display:block; font-size:12px; font-weight:600; color:var(--text);
   line-height:1.45; margin-bottom:8px; }
 .tc-menu-ask > div { display:flex; gap:6px; }
-.tc-menu button.tc-menu-yes { width:auto; padding:7px 11px; font-size:12px;
-  background:var(--tc-out); color:#fff; }
-.tc-menu button.tc-menu-no { width:auto; padding:7px 11px; font-size:12px;
-  background:var(--surface-alt); color:var(--muted); }
+.tc-menu button.tc-menu-yes { width:auto; padding:6px 10px; font-size:12px;
+  background:var(--danger); color:#fff; font-weight:600; }
+.tc-menu button.tc-menu-no { width:auto; padding:6px 10px; font-size:12px;
+  background:var(--surface-alt); color:var(--muted); font-weight:600; }
 
-.tc-stockline { display:flex; align-items:center; gap:10px; margin:14px 0 9px; }
-.tc-stock { display:flex; align-items:baseline; gap:5px; }
-.tc-stock-n { font-size:38px; font-weight:800; line-height:1; letter-spacing:-.03em; }
-.tc-stock-u { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;
-  letter-spacing:.06em; }
-.tc-card[data-level="ok"]  .tc-stock-n { color:var(--tc-ok); }
-.tc-card[data-level="low"] .tc-stock-n { color:var(--tc-low); }
-.tc-card[data-level="out"] .tc-stock-n { color:var(--tc-out); }
-.tc-chip { margin-left:auto; font-size:10.5px; font-weight:800; letter-spacing:.04em;
-  text-transform:uppercase; padding:5px 10px; border-radius:999px; }
-.tc-card[data-level="ok"]  .tc-chip { background:var(--tc-ok-bg);  color:var(--tc-ok); }
-.tc-card[data-level="low"] .tc-chip { background:var(--tc-low-bg); color:var(--tc-low); }
-.tc-card[data-level="out"] .tc-chip { background:var(--tc-out-bg); color:var(--tc-out); }
-
-.tc-bar { height:7px; border-radius:99px; background:var(--surface-alt); overflow:hidden; }
-.tc-bar i { display:block; height:100%; border-radius:99px; }
-.tc-card[data-level="ok"]  .tc-bar i { background:linear-gradient(90deg,#4ade80,#16a34a); }
-.tc-card[data-level="low"] .tc-bar i { background:linear-gradient(90deg,#fcd34d,#d97706); }
-.tc-card[data-level="out"] .tc-bar i { background:var(--tc-out); }
-.tc-last { font-size:11.5px; color:var(--muted); margin-top:9px; min-height:16px; }
-.tc-addstock { margin-top:12px; width:100%; padding:11px; border-radius:12px; border:none;
-  font:inherit; font-size:13.5px; font-weight:800; cursor:pointer; color:#fff;
-  background:linear-gradient(135deg,#f59e0b,#ea580c); box-shadow:0 4px 12px rgba(234,88,12,.26); }
-.tc-addstock:hover { transform:translateY(-1px); }
+/* A phone has no room for five columns. The thing you came to read —
+   the code and how many are left — keeps the first line; the badge and
+   the buttons drop to a second. The thumbnail grows rather than
+   shrinks, because on a phone the picture is how the tool is
+   recognised. */
+@media (max-width: 720px) {
+  .tc-card { grid-template-columns:auto minmax(0,1fr) auto; padding:11px 12px; row-gap:9px; }
+  .tc-thumb { width:46px; height:46px; }
+  .tc-chip { grid-column:2 / 3; justify-self:start; }
+  .tc-rowacts { grid-column:3 / 4; justify-self:end; }
+  .tc-spec { white-space:normal; }
+}
 
 /* ── empties ───────────────────────────────────────────────── */
-.tc-empty { text-align:center; padding:46px 22px; border-radius:20px;
-  background:var(--surface); border:2px dashed var(--border); }
-.tc-empty-icon { font-size:48px; margin-bottom:12px; }
-.tc-empty h2 { font-size:19px; font-weight:800; margin:0 0 8px; }
-.tc-empty p { font-size:13.5px; color:var(--muted); line-height:1.65; max-width:50ch;
+.tc-empty { text-align:center; padding:40px 22px; border-radius:var(--radius);
+  background:var(--surface); border:1px dashed var(--border); }
+.tc-empty-icon { display:none; }
+.tc-empty h2 { font-size:17px; font-weight:700; margin:0 0 8px; color:var(--text); }
+.tc-empty p { font-size:13.5px; color:var(--muted); line-height:1.65; max-width:52ch;
   margin:0 auto 18px; }
-.tc-empty button { padding:13px 24px; font-size:14px; font-weight:800; border-radius:13px;
-  border:none; color:#fff; cursor:pointer;
-  background:linear-gradient(135deg,#f59e0b,#ea580c); }
-.tc-empty-search { padding:34px 18px; text-align:center; font-size:13.5px; color:var(--muted);
-  border:1px dashed var(--border); border-radius:15px; }
+.tc-empty button { padding:9px 18px; font-size:13px; font-weight:600;
+  border-radius:var(--radius); border:1px solid var(--gold); color:#fff; cursor:pointer;
+  background:var(--gold); font-family:inherit; }
+.tc-empty button:hover { background:var(--gold-dark); border-color:var(--gold-dark); }
+.tc-empty-search { padding:30px 18px; text-align:center; font-size:13.5px; color:var(--muted);
+  border:1px dashed var(--border); border-radius:var(--radius); }
 
 /* ── register ──────────────────────────────────────────────── */
 .tc-reg { display:flex; flex-direction:column; gap:8px; }
-.tc-reg-row { display:flex; align-items:center; gap:13px; padding:12px 15px; border-radius:14px;
+.tc-reg-row { display:flex; align-items:center; gap:13px; padding:12px 15px; border-radius:8px;
   background:var(--surface); border:1px solid var(--border); }
 .tc-reg-row[data-void] { opacity:.5; text-decoration:line-through; }
 .tc-reg-delta { flex:0 0 auto; min-width:52px; text-align:center; padding:7px 10px;
-  border-radius:11px; font-size:15px; font-weight:800;
+  border-radius:6px; font-size:15px; font-weight:700;
   background:var(--tc-out-bg); color:var(--tc-out); }
 .tc-reg-delta[data-up] { background:var(--tc-ok-bg); color:var(--tc-ok); }
 .tc-reg-main { min-width:0; flex:1; }
-.tc-reg-title { font-size:14px; font-weight:800; color:var(--text); display:flex;
+.tc-reg-title { font-size:14px; font-weight:700; color:var(--text); display:flex;
   align-items:center; gap:8px; flex-wrap:wrap; }
-.tc-reg-kind { font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;
+.tc-reg-kind { font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
   padding:3px 8px; border-radius:999px; background:var(--surface-alt); color:var(--muted); }
 .tc-reg-kind[data-kind="issue"]   { background:var(--tc-out-bg); color:var(--tc-out); }
 .tc-reg-kind[data-kind="receive"] { background:var(--tc-ok-bg);  color:var(--tc-ok); }
 .tc-reg-sub { font-size:12px; color:var(--muted); margin-top:2px; }
 .tc-reg-qr { margin-left:5px; font-size:11px; color:var(--tc-blue); }
 /* "his man" — the taker works under the company in the heading above. */
-.tc-reg-op { margin-left:6px; font-size:9.5px; font-weight:800; letter-spacing:.05em;
+.tc-reg-op { margin-left:6px; font-size:9.5px; font-weight:700; letter-spacing:.05em;
   text-transform:uppercase; padding:2px 6px; border-radius:999px;
   background:var(--surface-alt); color:var(--muted); }
 
@@ -307,57 +363,67 @@ export const TOOLS_CSS = `
     position:fixed; left:50%; transform:translateX(-50%);
     bottom:calc(16px + env(safe-area-inset-bottom)); z-index:45;
     display:flex; align-items:center; gap:8px; cursor:pointer;
-    padding:15px 26px; border:none; border-radius:999px; font:inherit;
-    font-size:15.5px; font-weight:800; color:#fff; white-space:nowrap;
-    background:linear-gradient(135deg, var(--gold) 0%, var(--gold-dark) 100%);
-    box-shadow:0 10px 26px rgba(0,0,0,.28);
+    /* Smaller and quieter than it was. Daksh asked for a bottom-centre
+       button and it stays, but it was a 15px-tall gold lozenge floating
+       over the list — the single most app-like thing left on the page
+       once the banner went. It only has to be reachable, not loud. */
+    padding:10px 18px; border:1px solid var(--gold-dark); border-radius:999px;
+    font:inherit; font-size:13.5px; font-weight:600; color:#fff; white-space:nowrap;
+    background:var(--gold);
+    box-shadow:0 3px 10px rgba(45,36,16,.18);
   }
-  .tc-fab span { font-size:19px; line-height:1; }
+  .tc-fab span { font-size:15px; line-height:1; }
   .tc-fab:active { transform:translateX(-50%) scale(.97); }
   /* Clearance so the last card is never under it. */
-  .tc-page { padding-bottom:110px !important; }
+  .tc-page { padding-bottom:84px !important; }
 }
 
 /* ── which month ───────────────────────────────────────────── */
 .tc-period { display:flex; align-items:center; justify-content:space-between;
   gap:12px; flex-wrap:wrap; margin-bottom:14px; padding:10px 12px;
-  border-radius:14px; background:var(--surface); border:1px solid var(--border); }
+  border-radius:8px; background:var(--surface); border:1px solid var(--border); }
 .tc-period-nav { display:flex; align-items:center; gap:4px; }
 .tc-period-nav strong { min-width:168px; text-align:center; font-size:15.5px;
-  font-weight:800; letter-spacing:-.01em; }
-.tc-period-nav button { width:32px; height:32px; border-radius:10px; cursor:pointer;
+  font-weight:700; letter-spacing:-.01em; }
+.tc-period-nav button { width:32px; height:32px; border-radius:6px; cursor:pointer;
   font:inherit; font-size:16px; line-height:1;
   border:1px solid var(--border); background:var(--surface-alt); color:var(--text); }
 .tc-period-nav button:disabled { opacity:.35; cursor:not-allowed; }
 .tc-period-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .tc-period-sum { font-size:12.5px; color:var(--muted); font-weight:700; }
-.tc-period-sum b { font-size:17px; font-weight:800; color:var(--tc-out); margin-right:3px; }
+.tc-period-sum b { font-size:17px; font-weight:700; color:var(--text);
+  font-variant-numeric:tabular-nums; margin-right:3px; }
 .tc-period-all { padding:7px 13px; border-radius:999px; cursor:pointer; font:inherit;
-  font-size:12px; font-weight:800; border:1px solid var(--border);
+  font-size:12px; font-weight:700; border:1px solid var(--border);
   background:var(--surface-alt); color:var(--muted); }
 .tc-period-all.on { background:var(--tc-blue); border-color:var(--tc-blue); color:#fff; }
 .tc-period-note { margin:-6px 0 12px; font-size:11.5px; color:var(--muted); font-style:italic; }
 .tc-period-jump { border:none; background:none; padding:0; cursor:pointer; font:inherit;
-  font-size:inherit; font-weight:800; color:var(--tc-blue); text-decoration:underline; }
+  font-size:inherit; font-weight:700; color:var(--tc-blue); text-decoration:underline; }
 
 /* ── the sums ──────────────────────────────────────────────── */
 .tc-rg-sums { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:13px 15px; }
 .tc-tally { min-width:0; display:flex; flex-direction:column; gap:6px; }
-.tc-tally-head { font-size:10px; font-weight:800; letter-spacing:.08em;
+.tc-tally-head { font-size:10px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; color:var(--muted); margin-bottom:2px; }
 .tc-tally-row { display:grid; grid-template-columns:minmax(0,1fr) 64px 34px;
   align-items:center; gap:9px; }
-.tc-tally-name { font-size:13px; font-weight:700; color:var(--text);
+/* The same part codes as the shelf, so the same treatment: monospaced
+   and tabular, because the only hard part is telling 12.4.60 from
+   12.6.120 at a glance. */
+.tc-tally-name { font-size:12.5px; font-weight:600; color:var(--text);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-variant-numeric:tabular-nums; letter-spacing:-.01em;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tc-tally-bar { height:7px; border-radius:99px; background:var(--surface-alt);
+.tc-tally-bar { height:7px; border-radius:8px; background:var(--surface-alt);
   overflow:hidden; }
-.tc-tally-bar i { display:block; height:100%; border-radius:99px; background:var(--tc-blue); }
-.tc-tally-qty { font-size:14px; font-weight:800; text-align:right;
+.tc-tally-bar i { display:block; height:100%; border-radius:8px; background:var(--tc-blue); }
+.tc-tally-qty { font-size:14px; font-weight:700; text-align:right;
   font-variant-numeric:tabular-nums; color:var(--text); }
 .tc-reggroup[data-kind="__store"] .tc-tally-bar i { background:var(--tc-ok); }
 
 .tc-rg-lines { width:100%; text-align:left; cursor:pointer; font:inherit;
-  font-size:11.5px; font-weight:800; letter-spacing:.03em; color:var(--muted);
+  font-size:11.5px; font-weight:700; letter-spacing:.03em; color:var(--muted);
   padding:9px 15px; border:none; border-top:1px solid var(--border);
   background:var(--surface-alt); }
 .tc-rg-lines:hover { color:var(--text); }
@@ -368,24 +434,29 @@ export const TOOLS_CSS = `
 }
 
 .tc-reggroups { display:flex; flex-direction:column; gap:14px; }
-.tc-reggroup { border:1px solid var(--border); border-radius:17px; overflow:hidden;
+.tc-reggroup { border:1px solid var(--border); border-radius:8px; overflow:hidden;
   background:var(--surface); }
-.tc-reggroup[data-kind="vendor"] { border-left:4px solid var(--tc-blue); }
-.tc-reggroup[data-kind="__store"] { border-left:4px solid var(--tc-ok); }
-.tc-reggroup[data-kind="__office"] { border-left:4px solid var(--muted); }
+/* These used to carry a coloured left edge each — indigo for a vendor,
+   green for the store, grey for the office. Colour there implied a
+   status that does not exist: a company is not good or bad, it is just
+   whose men took the tools. The heading already names it. */
+.tc-reggroup[data-kind="vendor"],
+.tc-reggroup[data-kind="__store"],
+.tc-reggroup[data-kind="__office"] { border-left:1px solid var(--border); }
 .tc-rg-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   padding:12px 15px; background:var(--surface-alt); border-bottom:1px solid var(--border); }
 .tc-rg-title { display:flex; align-items:center; gap:8px; min-width:0; flex:1;
   padding:0; border:none; background:none; font:inherit; cursor:pointer; text-align:left; }
 .tc-rg-caret { font-size:11px; color:var(--muted); flex:0 0 auto; }
-.tc-rg-name { font-size:15px; font-weight:800; letter-spacing:-.01em; color:var(--text);
+.tc-rg-name { font-size:15px; font-weight:700; letter-spacing:-.01em; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tc-rg-facts { display:flex; align-items:center; gap:7px; flex-wrap:wrap; flex:0 0 auto; }
 .tc-rg-took { font-size:11.5px; font-weight:700; color:var(--muted); }
-.tc-rg-took b { font-size:14px; font-weight:800; color:var(--tc-out); }
+.tc-rg-took b { font-size:14px; font-weight:700; color:var(--text);
+  font-variant-numeric:tabular-nums; }
 .tc-rg-count { font-size:11px; font-weight:700; color:var(--muted);
   padding:3px 9px; border-radius:999px; background:var(--surface); border:1px solid var(--border); }
-.tc-rg-team { font-size:11px; font-weight:800; padding:4px 10px; border-radius:999px;
+.tc-rg-team { font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
   cursor:pointer; font-family:inherit;
   background:var(--surface); border:1px solid var(--border); color:var(--text); }
 .tc-rg-team:hover { background:var(--tc-ok-bg); border-color:var(--tc-ok); color:var(--tc-ok); }
@@ -393,14 +464,14 @@ export const TOOLS_CSS = `
   background:var(--surface-alt); border-bottom:1px solid var(--border); }
 .tc-rg-man { display:flex; align-items:center; gap:10px; padding:7px 0; }
 .tc-rg-man + .tc-rg-man { border-top:1px dashed var(--border); }
-.tc-rg-man-name { font-size:13px; font-weight:800; color:var(--text); }
+.tc-rg-man-name { font-size:13px; font-weight:700; color:var(--text); }
 .tc-rg-man-phone { font-size:11.5px; color:var(--muted); flex:1; }
-.tc-rg-man-x { width:26px; height:26px; flex:0 0 auto; border-radius:8px; cursor:pointer;
+.tc-rg-man-x { width:26px; height:26px; flex:0 0 auto; border-radius:6px; cursor:pointer;
   border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:11px; }
 .tc-rg-man-ask { display:flex; gap:6px; }
-.tc-rg-man-yes { padding:5px 10px; border-radius:8px; border:none; cursor:pointer; font:inherit;
-  font-size:11.5px; font-weight:800; background:var(--tc-out); color:#fff; }
-.tc-rg-man-no { padding:5px 10px; border-radius:8px; cursor:pointer; font:inherit;
+.tc-rg-man-yes { padding:5px 10px; border-radius:6px; border:none; cursor:pointer; font:inherit;
+  font-size:11.5px; font-weight:700; background:var(--tc-out); color:#fff; }
+.tc-rg-man-no { padding:5px 10px; border-radius:6px; cursor:pointer; font:inherit;
   font-size:11.5px; font-weight:700; background:var(--surface); color:var(--muted);
   border:1px solid var(--border); }
 .tc-rg-nothing { padding:16px 15px; font-size:12.5px; font-style:italic; color:var(--muted); }
@@ -413,60 +484,62 @@ export const TOOLS_CSS = `
 }
 
 /* ── sheets ────────────────────────────────────────────────── */
-.tc-seg { display:flex; gap:4px; padding:4px; border-radius:13px; margin-bottom:16px;
+.tc-seg { display:flex; gap:4px; padding:4px; border-radius:8px; margin-bottom:16px;
   background:var(--surface-alt); border:1px solid var(--border); }
-.tc-seg button { flex:1; padding:10px 8px; font:inherit; font-size:12.5px; font-weight:800;
-  border:none; background:none; color:var(--muted); border-radius:10px; cursor:pointer; }
+.tc-seg button { flex:1; padding:10px 8px; font:inherit; font-size:12.5px; font-weight:700;
+  border:none; background:none; color:var(--muted); border-radius:6px; cursor:pointer; }
 .tc-seg button.on { background:var(--surface); color:var(--text);
   box-shadow:0 2px 8px rgba(0,0,0,.1); }
 
 .tc-steps { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-.tc-steps button { width:62px; height:62px; flex:0 0 auto; border-radius:19px; font-size:28px;
-  font-weight:700; cursor:pointer; line-height:1; color:#ea580c;
+.tc-steps button { width:62px; height:62px; flex:0 0 auto; border-radius:8px; font-size:20px;
+  font-weight:700; cursor:pointer; line-height:1; color:var(--gold-dark);
   background:var(--surface); border:2px solid var(--border); }
 .tc-steps button:disabled { opacity:.35; cursor:not-allowed; }
 .tc-steps-n { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:10px; border-radius:19px; color:#fff;
-  background:linear-gradient(135deg,#f59e0b,#ea580c); box-shadow:0 8px 20px rgba(234,88,12,.3); }
-.tc-steps-n b { font-size:36px; font-weight:800; line-height:1; }
+  padding:10px; border-radius:8px; color:#fff;
+  background:var(--gold); }
+.tc-steps-n b { font-size:26px; font-weight:700; line-height:1; }
 .tc-steps-n i { font-style:normal; font-size:10.5px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; opacity:.9; margin-top:3px; }
 .tc-quick { display:flex; gap:7px; margin-bottom:16px; }
-.tc-quick button { flex:1; padding:9px 0; font:inherit; font-size:13px; font-weight:800;
-  border-radius:11px; cursor:pointer; background:var(--surface);
+.tc-quick button { flex:1; padding:9px 0; font:inherit; font-size:13px; font-weight:700;
+  border-radius:6px; cursor:pointer; background:var(--surface);
   border:1.5px solid var(--border); color:var(--text); }
-.tc-quick button.on { border-color:#ea580c; background:rgba(234,88,12,.1); color:#c2410c; }
+.tc-quick button.on { border-color:var(--gold); background:var(--gold-subtle);
+  color:var(--gold-dark); }
 
 .tc-field { display:block; margin-bottom:14px; }
-.tc-field span { display:block; font-size:10.5px; font-weight:800; letter-spacing:.07em;
+.tc-field span { display:block; font-size:10.5px; font-weight:700; letter-spacing:.07em;
   text-transform:uppercase; color:var(--muted); margin-bottom:5px; }
 .tc-field input { width:100%; box-sizing:border-box; min-height:46px; padding:0 13px;
-  font:inherit; font-size:14.5px; border-radius:12px; background:var(--surface);
+  font:inherit; font-size:14.5px; border-radius:8px; background:var(--surface);
   border:1.5px solid var(--border); color:var(--text); outline:none; }
-.tc-field input:focus { border-color:#ea580c; box-shadow:0 0 0 3px rgba(234,88,12,.14); }
-.tc-sheet-go { width:100%; padding:15px; border-radius:15px; border:none; font:inherit;
-  font-size:15.5px; font-weight:800; color:#fff; cursor:pointer;
-  background:linear-gradient(135deg,#f59e0b,#ea580c); box-shadow:0 8px 20px rgba(234,88,12,.3); }
+.tc-field input:focus { border-color:var(--gold);
+  box-shadow:0 0 0 3px var(--gold-subtle); }
+.tc-sheet-go { width:100%; padding:15px; border-radius:8px; border:none; font:inherit;
+  font-size:14.5px; font-weight:600; color:#fff; cursor:pointer;
+  background:var(--gold); }
 .tc-sheet-go:disabled { background:var(--border); color:var(--muted); box-shadow:none;
   cursor:not-allowed; }
 .tc-sheet-fine { font-size:11.5px; color:var(--muted); line-height:1.55; margin:4px 0 0; }
 
 /* ── undo toast ────────────────────────────────────────────── */
 .tc-toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:60;
-  display:flex; align-items:center; gap:12px; padding:12px 16px; border-radius:15px;
+  display:flex; align-items:center; gap:12px; padding:12px 16px; border-radius:8px;
   background:#15181d; color:#fff; box-shadow:0 14px 36px rgba(0,0,0,.34);
   font-size:13.5px; font-weight:700; max-width:calc(100vw - 32px); }
 .tc-toast-tick { width:24px; height:24px; flex:0 0 auto; border-radius:50%; display:grid;
   place-items:center; font-size:13px; background:#16a34a; }
 .tc-toast-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tc-toast-undo { border:none; border-radius:10px; padding:8px 13px; font:inherit; font-size:12.5px;
-  font-weight:800; cursor:pointer; background:rgba(255,255,255,.16); color:#fff; white-space:nowrap; }
+.tc-toast-undo { border:none; border-radius:6px; padding:8px 13px; font:inherit; font-size:12.5px;
+  font-weight:700; cursor:pointer; background:rgba(255,255,255,.16); color:#fff; white-space:nowrap; }
 .tc-toast-undo span { opacity:.7; margin-left:5px; font-variant-numeric:tabular-nums; }
 .tc-toast-close { border:none; background:none; color:rgba(255,255,255,.6); font-size:14px;
   cursor:pointer; }
 
 @media (max-width:760px) {
-  .tc-hero { padding:17px 17px 15px; border-radius:18px; }
+  .tc-hero { padding:17px 17px 15px; border-radius:8px; }
   .tc-title { font-size:23px; }
   .tc-hero-actions { margin-left:0; width:100%; }
   .tc-btn { flex:1; justify-content:center; }
