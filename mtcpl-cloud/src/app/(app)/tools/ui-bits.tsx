@@ -219,7 +219,11 @@ export const TOOLS_CSS = `
 .tc-card:first-child { border-top-left-radius:var(--radius); border-top-right-radius:var(--radius); }
 .tc-card:last-child  { border-bottom:none;
   border-bottom-left-radius:var(--radius); border-bottom-right-radius:var(--radius); }
+.tc-card { cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .tc-card:hover { background:var(--surface-alt); }
+/* Something has to happen the instant a thumb lands, or the hold feels
+   like a dead screen for half a second. */
+.tc-card:active { background:var(--bg); }
 .tc-card[data-level="low"] { border-left-color:var(--warning); }
 .tc-card[data-level="out"] { border-left-color:var(--danger); }
 
@@ -311,11 +315,29 @@ export const TOOLS_CSS = `
    shrinks, because on a phone the picture is how the tool is
    recognised. */
 @media (max-width: 720px) {
-  .tc-card { grid-template-columns:auto minmax(0,1fr) auto; padding:11px 12px; row-gap:9px; }
+  /* The row's buttons are GONE on a phone. A 12px "Add stock" beside a
+     28px "⋯" in a 44px row put two of the most-used controls in the
+     module below the 44px both Apple and Google ask for, and they were
+     being pressed with a glove on. Press the row instead: everything
+     for that tool opens in a sheet with 56px targets.
+
+     On a desktop they stay — a mouse hits a 28px button every time and
+     one click beats two. */
+  .tc-rowacts { display:none; }
+  .tc-card { grid-template-columns:auto minmax(0,1fr) auto; padding:13px 12px; row-gap:7px;
+    min-height:62px; }
   .tc-thumb { width:46px; height:46px; }
   .tc-chip { grid-column:2 / 3; justify-self:start; }
-  .tc-rowacts { grid-column:3 / 4; justify-self:end; }
   .tc-spec { white-space:normal; }
+}
+
+/* How to work the list, said once, where it is needed. A gesture
+   nobody can see is a feature only its author uses. */
+.tc-howto { display:none; }
+@media (max-width: 720px) {
+  .tc-howto { display:block; margin:0 0 10px; font-size:11.5px; line-height:1.5;
+    color:var(--muted); }
+  .tc-howto b { font-weight:600; color:var(--text); }
 }
 
 /* ── empties ───────────────────────────────────────────────── */
@@ -491,17 +513,33 @@ export const TOOLS_CSS = `
 .tc-seg button.on { background:var(--surface); color:var(--text);
   box-shadow:0 2px 8px rgba(0,0,0,.1); }
 
-.tc-steps { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-.tc-steps button { width:62px; height:62px; flex:0 0 auto; border-radius:8px; font-size:20px;
-  font-weight:700; cursor:pointer; line-height:1; color:var(--gold-dark);
-  background:var(--surface); border:2px solid var(--border); }
+/* ── how many ──────────────────────────────────────────────── */
+/*
+   This used to be a 62px minus, a 62px plus and a solid gold slab
+   holding a figure you could not type into. It was the most game-like
+   thing in the module and the slowest: a bill says 24, and 24 was
+   reachable only by pressing 25 and then minus.
+
+   It is a number field now, with the keypad on a phone, and the − and +
+   left in at a sane size for nudging by one. The quick chips stay —
+   they are genuinely the fastest way to a round box count.
+*/
+.tc-steps { display:flex; align-items:stretch; gap:8px; margin-bottom:10px; }
+.tc-steps button { width:52px; flex:0 0 auto; border-radius:var(--radius); font-size:20px;
+  font-weight:600; cursor:pointer; line-height:1; color:var(--gold-dark);
+  background:var(--surface); border:1px solid var(--border); }
+.tc-steps button:hover:not(:disabled) { background:var(--surface-alt); border-color:var(--gold); }
 .tc-steps button:disabled { opacity:.35; cursor:not-allowed; }
-.tc-steps-n { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:10px; border-radius:8px; color:#fff;
-  background:var(--gold); }
-.tc-steps-n b { font-size:26px; font-weight:700; line-height:1; }
-.tc-steps-n i { font-style:normal; font-size:10.5px; font-weight:700; letter-spacing:.08em;
-  text-transform:uppercase; opacity:.9; margin-top:3px; }
+.tc-steps-n { flex:1; display:flex; align-items:baseline; justify-content:center; gap:7px;
+  padding:10px 12px; border-radius:var(--radius); cursor:text;
+  background:var(--surface); border:1px solid var(--border); }
+.tc-steps-n:focus-within { border-color:var(--gold); box-shadow:0 0 0 3px var(--gold-subtle); }
+.tc-steps-n input { width:100%; min-width:0; border:none; outline:none; background:none;
+  font:inherit; font-size:26px; font-weight:700; line-height:1.15; text-align:right;
+  color:var(--text); font-variant-numeric:tabular-nums; padding:0; }
+.tc-steps-n i { font-style:normal; font-size:12px; font-weight:600; color:var(--muted);
+  flex:0 0 auto; }
+
 .tc-quick { display:flex; gap:7px; margin-bottom:16px; }
 .tc-quick button { flex:1; padding:9px 0; font:inherit; font-size:13px; font-weight:700;
   border-radius:6px; cursor:pointer; background:var(--surface);

@@ -31,13 +31,20 @@ export function MoveSheet({
 }) {
   const tool = intent?.tool ?? null;
   const kind = intent?.kind ?? "receive";
-  const [qty, setQty] = useState(1);
+  // Held as TEXT, not a number. A bill says 24 and the keeper should be
+  // able to type 24 — the old control was a − and a + around a read-only
+  // figure, so reaching 24 meant pressing 25 and then minus, or holding
+  // plus twenty-three times. Text also lets the box be empty for the
+  // moment between clearing it and typing the next digit, which a
+  // number state cannot represent without snapping back to 0.
+  const [qtyStr, setQtyStr] = useState("1");
+  const qty = Math.max(0, Math.floor(Number(qtyStr) || 0));
   const [down, setDown] = useState(false);
   const [note, setNote] = useState("");
 
   useEffect(() => {
     if (!intent) return;
-    setQty(1);
+    setQtyStr("1");
     setDown(false);
     setNote("");
   }, [intent]);
@@ -102,17 +109,35 @@ export function MoveSheet({
       )}
 
       <div className="tc-steps">
-        <button type="button" onClick={() => setQty((n) => Math.max(1, n - 1))} disabled={qty <= 1} aria-label="One less">−</button>
-        <div className="tc-steps-n">
-          <b>{qty}</b>
+        <button
+          type="button"
+          onClick={() => setQtyStr(String(Math.max(1, qty - 1)))}
+          disabled={qty <= 1}
+          aria-label="One less"
+        >
+          −
+        </button>
+        <label className="tc-steps-n">
+          <input
+            // A phone keypad, not a full keyboard, and not type="number"
+            // — that brings spinner arrows on a desktop and silently
+            // accepts "1e5".
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={qtyStr}
+            maxLength={6}
+            onChange={(e) => setQtyStr(e.target.value.replace(/[^\d]/g, ""))}
+            onFocus={(e) => e.currentTarget.select()}
+            aria-label={`How many ${tool.unit}`}
+          />
           <i>{tool.unit}</i>
-        </div>
-        <button type="button" onClick={() => setQty((n) => n + 1)} aria-label="One more">+</button>
+        </label>
+        <button type="button" onClick={() => setQtyStr(String(qty + 1))} aria-label="One more">+</button>
       </div>
 
       <div className="tc-quick">
         {[5, 10, 25, 50].map((n) => (
-          <button key={n} type="button" onClick={() => setQty(n)} className={qty === n ? "on" : ""}>
+          <button key={n} type="button" onClick={() => setQtyStr(String(n))} className={qty === n ? "on" : ""}>
             {n}
           </button>
         ))}

@@ -30,6 +30,7 @@ import { useRouter } from "next/navigation";
 
 import { useLiveStock } from "@/lib/use-live-stock";
 import { KEEPER_CSS, KeeperSheet, type KeeperTool } from "./keeper-sheet";
+import { useLongPress } from "@/lib/use-long-press";
 
 export type TakeTool = {
   id: string;
@@ -95,7 +96,13 @@ const DIGITS = 4;
 
 /** One colour per person, picked from their name so it is the same every
  *  morning — the men recognise their own tile before they read it. */
-const PERSON_COLOURS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6"];
+// Was six rainbow colours picked off a hash of the name — indigo, sky,
+// emerald, amber, pink, violet. Daksh, Nov 2026: the module reads as
+// childish on a phone, and a screen of candy-coloured circles is most
+// of why. The names are the information; the circle only has to look
+// like a person. One company tone, one office tone, and the list is
+// already grouped under its headings.
+const PERSON_COLOURS = ["#2D2410"];
 function colourFor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
@@ -146,6 +153,9 @@ export function GuestTakeClient({
   const [who, setWho] = useState<Session | null>(session);
   const [step, setStep] = useState<Step>(session ? "tool" : "who");
   const [picked, setPicked] = useState<RosterPerson | null>(null);
+  /** A tool held down in the list, handed to the keeper sheet so it
+   *  opens on that tool instead of on a list of every tool. */
+  const [jump, setJump] = useState<KeeperTool | null>(null);
   const [sentTo, setSentTo] = useState("");
   const [code, setCode] = useState("");
   const [tool, setTool] = useState<TakeTool | null>(null);
@@ -647,35 +657,20 @@ export function GuestTakeClient({
             </div>
           ) : (
             <div className="gt-tools">
-              {shown.map((t) => {
-                const left = stockOf(t);
-                const lvl = left <= 0 ? "out" : t.level === "ok" ? "ok" : "low";
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className="gt-tool"
-                    data-level={lvl}
-                    onClick={() => { setTool(t); setQty(1); setStep("qty"); }}
-                    disabled={pending}
-                  >
-                    <span className="gt-thumb" data-empty={t.imageUrl ? undefined : "1"}>
-                      {t.imageUrl
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img src={t.imageUrl} alt="" loading="lazy" />
-                        : <i>{t.name.trim().charAt(0).toUpperCase() || "?"}</i>}
-                    </span>
-                    <span className="gt-tool-main">
-                      <strong>{t.name}</strong>
-                      <span className="gt-tool-spec">{t.spec ? t.spec : `counted in ${t.unit}`}</span>
-                    </span>
-                    <span className="gt-tool-left">
-                      <b>{left}</b>
-                      <i>{t.unit}</i>
-                    </span>
-                  </button>
-                );
-              })}
+              {shown.map((t) => (
+                <ToolButton
+                  key={t.id}
+                  tool={t}
+                  left={stockOf(t)}
+                  disabled={pending}
+                  // Only the office three and the vendor principals can
+                  // keep the shelf. For everyone else a hold does
+                  // nothing, because there is nothing it could do.
+                  canKeep={!!who?.canKeep}
+                  onTake={() => { setTool(t); setQty(1); setStep("qty"); }}
+                  onHold={() => setJump(keeperTools.find((k) => k.id === t.id) ?? null)}
+                />
+              ))}
             </div>
           )}
 
@@ -753,6 +748,8 @@ export function GuestTakeClient({
         <KeeperSheet
           token={token}
           tools={keeperTools}
+          jump={jump}
+          onJumpHandled={() => setJump(null)}
           addStockAction={addStockAction}
           fixCountAction={fixCountAction}
           newToolAction={newToolAction}
@@ -806,7 +803,11 @@ export function GuestTakeClient({
 const CSS = `
 .gt {
   --ink:#15181d; --dim:#6b7280; --line:#e6e4df; --card:#ffffff;
-  --brand:#4f46e5; --brand2:#7c3aed;
+  /* The app is warm paper, dark brown and gold. This screen was indigo
+     into violet with a purple glow under it — a different product
+     entirely, and the one people actually hold in their hand. */
+  --brand:#2D2410; --brand2:#3A2F16;
+  --gold:#C9973A; --gold-dark:#A67B28; --gold-light:#E8C572;
   --ok:#059669; --okbg:#ecfdf5; --low:#d97706; --lowbg:#fffbeb;
   --out:#dc2626; --outbg:#fef2f2;
   min-height:100dvh; background:#f6f6f4; color:var(--ink);
@@ -817,18 +818,18 @@ const CSS = `
 
 /* ── header ─────────────────────────────────────────────── */
 .gt-head {
-  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
-  color:#fff; padding:16px 16px 14px; border-radius:0 0 22px 22px;
-  box-shadow:0 10px 28px rgba(79,70,229,.26);
+  background:var(--brand);
+  color:#fff; padding:16px 16px 14px; border-radius:0 0 14px 14px;
+  box-shadow:0 4px 16px rgba(45,36,16,.18);
 }
 .gt-head-row { display:flex; align-items:center; gap:12px; }
 .gt-brand { display:flex; align-items:center; gap:10px; min-width:0; flex:1; }
 .gt-brand > div { min-width:0; }
 .gt-logo {
-  width:40px; height:40px; flex:0 0 auto; border-radius:13px; font-size:20px;
-  display:grid; place-items:center; background:rgba(255,255,255,.18);
+  width:40px; height:40px; flex:0 0 auto; border-radius:6px; font-size:20px;
+  display:grid; place-items:center; background:rgba(201,151,58,.22);
 }
-.gt-brand-label { font-size:16px; font-weight:800; letter-spacing:-.2px;
+.gt-brand-label { font-size:16px; font-weight:700; letter-spacing:-.2px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .gt-brand-sub {
   /* Sentence case and no tracking: "OFFICE WARDROBE" in caps with
@@ -843,7 +844,7 @@ const CSS = `
   background:rgba(255,255,255,.17); color:#fff; font:inherit;
 }
 .gt-me-dot { width:26px; height:26px; flex:0 0 auto; border-radius:50%;
-  display:grid; place-items:center; font-size:11px; font-weight:800; color:#fff;
+  display:grid; place-items:center; font-size:11px; font-weight:700; color:#fff;
   box-shadow:0 0 0 2px rgba(255,255,255,.45); }
 .gt-me-name { font-size:12.5px; font-weight:700; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
@@ -856,26 +857,26 @@ const CSS = `
 .gt-men[data-on] { background:#fff; }
 .gt-men i {
   position:absolute; top:-3px; right:-3px; min-width:17px; height:17px; padding:0 4px;
-  border-radius:99px; background:#fff; color:var(--brand);
-  font-style:normal; font-size:10.5px; font-weight:800; line-height:17px;
+  border-radius:8px; background:#fff; color:var(--brand);
+  font-style:normal; font-size:10.5px; font-weight:700; line-height:17px;
 }
 /* With the men button present, the signed-in pill no longer needs to
    push itself to the right — the button does. */
 .gt-men + .gt-me { margin-left:8px; }
 .gt-steps { display:flex; gap:6px; margin:12px 2px 0; }
-.gt-steps i { height:4px; flex:1; border-radius:99px; background:rgba(255,255,255,.28); }
+.gt-steps i { height:4px; flex:1; border-radius:8px; background:rgba(255,255,255,.28); }
 .gt-steps i[data-done] { background:rgba(255,255,255,.62); }
 .gt-steps i[data-on] { background:#fff; }
 
 /* ── shared body ────────────────────────────────────────── */
 .gt-body { padding:20px 16px 0; max-width:560px; margin:0 auto; }
-.gt-q { font-size:23px; font-weight:800; letter-spacing:-.4px; margin:0 0 6px; }
+.gt-q { font-size:23px; font-weight:700; letter-spacing:-.4px; margin:0 0 6px; }
 .gt-hint { font-size:14px; color:var(--dim); line-height:1.5; margin:0 0 18px; }
 .gt-blank { padding:26px 18px; text-align:center; font-size:14.5px; color:var(--dim);
-  background:var(--card); border:1px dashed var(--line); border-radius:16px; }
+  background:var(--card); border:1px dashed var(--line); border-radius:8px; }
 .gt-kept {
   display:flex; align-items:center; gap:10px; margin:14px 16px 0;
-  padding:13px 15px; border-radius:15px; font-size:14px; font-weight:700;
+  padding:13px 15px; border-radius:8px; font-size:14px; font-weight:700;
   background:var(--okbg); color:var(--ok); border:1px solid rgba(5,150,105,.3);
 }
 .gt-kept span:first-child { font-size:16px; }
@@ -887,7 +888,7 @@ const CSS = `
 
 .gt-err {
   display:flex; align-items:center; gap:9px; margin:14px 16px 0; padding:12px 14px;
-  background:var(--outbg); border:1px solid #fecaca; border-radius:14px;
+  background:var(--outbg); border:1px solid #fecaca; border-radius:8px;
   color:#991b1b; font-size:13.5px; font-weight:600; line-height:1.4;
 }
 .gt-err button { margin-left:auto; background:none; border:none; color:inherit;
@@ -905,15 +906,15 @@ const CSS = `
 .gt-people { display:flex; flex-direction:column; gap:2px; }
 .gt-person {
   display:flex; align-items:center; gap:12px; width:100%; text-align:left;
-  padding:11px 12px; border-radius:13px; cursor:pointer; font:inherit;
+  padding:11px 12px; border-radius:8px; cursor:pointer; font:inherit;
   background:transparent; border:none; color:var(--ink);
 }
 .gt-person + .gt-person { box-shadow:inset 0 1px 0 var(--line); }
-.gt-person:active { background:rgba(79,70,229,.07); }
+.gt-person:active { background:rgba(201,151,58,.10); }
 .gt-person:disabled { opacity:.5; }
 .gt-pface {
-  width:34px; height:34px; flex:0 0 auto; border-radius:11px; color:#fff;
-  display:grid; place-items:center; font-size:12.5px; font-weight:800;
+  width:34px; height:34px; flex:0 0 auto; border-radius:6px; color:#fff;
+  display:grid; place-items:center; font-size:12.5px; font-weight:700;
   background:var(--who);
 }
 .gt-pname {
@@ -927,14 +928,15 @@ const CSS = `
 /* A company with no heading still gets a breath before it. */
 .gt-pgroup + .gt-pgroup:not(:has(.gt-pco)) { margin-top:2px; }
 .gt-pco {
-  font-size:10px; font-weight:800; letter-spacing:.11em; text-transform:uppercase;
+  font-size:10px; font-weight:700; letter-spacing:.11em; text-transform:uppercase;
   color:#a3a3a3; padding:16px 12px 5px;
 }
 .gt-pgroup:first-child .gt-pco { padding-top:2px; }
 /* A man under a vendor sits in from the edge, so the shape of the
    list says who works for whom before you read a word of it. */
 .gt-person[data-under] { padding-left:30px; }
-.gt-person[data-under] .gt-pface { width:28px; height:28px; border-radius:9px; font-size:11px; }
+.gt-person[data-under] .gt-pface { width:28px; height:28px; border-radius:6px; font-size:11px;
+  background:var(--gold-dark); }
 .gt-person[data-under] .gt-pname { font-size:14.5px; font-weight:600; color:var(--dim); }
 
 /* ── my men ─────────────────────────────────────────────── */
@@ -942,7 +944,7 @@ const CSS = `
    it opens, now sitting under the header rather than under the shelf. */
 .gt-team-panel { margin:14px 16px 0; }
 .gt-team-body {
-  margin-top:10px; padding:15px; border-radius:16px;
+  margin-top:10px; padding:15px; border-radius:8px;
   background:var(--card); border:1.5px solid var(--line);
   display:flex; flex-direction:column; gap:13px;
 }
@@ -950,26 +952,26 @@ const CSS = `
 .gt-mates { display:flex; flex-direction:column; gap:9px; }
 .gt-mate {
   display:flex; align-items:center; gap:11px;
-  padding:9px 10px; border-radius:13px; background:#faf9f7; border:1px solid var(--line);
+  padding:9px 10px; border-radius:8px; background:#faf9f7; border:1px solid var(--line);
 }
 .gt-mate-face {
-  width:34px; height:34px; flex:0 0 auto; border-radius:11px; color:#fff;
-  display:grid; place-items:center; font-size:12.5px; font-weight:800;
+  width:34px; height:34px; flex:0 0 auto; border-radius:6px; color:#fff;
+  display:grid; place-items:center; font-size:12.5px; font-weight:700;
 }
 .gt-mate-body { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1; }
-.gt-mate-body strong { font-size:14.5px; font-weight:800; }
+.gt-mate-body strong { font-size:14.5px; font-weight:700; }
 .gt-mate-body span { font-size:11.5px; color:var(--dim); }
 .gt-mate-x {
-  flex:0 0 auto; width:30px; height:30px; border-radius:10px; cursor:pointer;
+  flex:0 0 auto; width:30px; height:30px; border-radius:6px; cursor:pointer;
   border:1px solid var(--line); background:#fff; color:var(--dim); font-size:13px;
 }
 .gt-mate-confirm { display:flex; gap:6px; flex:0 0 auto; }
 .gt-mate-yes {
-  padding:7px 11px; border-radius:10px; border:none; cursor:pointer; font:inherit;
-  font-size:12.5px; font-weight:800; background:var(--out); color:#fff;
+  padding:7px 11px; border-radius:6px; border:none; cursor:pointer; font:inherit;
+  font-size:12.5px; font-weight:700; background:var(--out); color:#fff;
 }
 .gt-mate-no {
-  padding:7px 11px; border-radius:10px; cursor:pointer; font:inherit;
+  padding:7px 11px; border-radius:6px; cursor:pointer; font:inherit;
   font-size:12.5px; font-weight:700; background:#fff; color:var(--dim);
   border:1px solid var(--line);
 }
@@ -978,31 +980,31 @@ const CSS = `
   /* 16px, not smaller: anything under it makes iOS zoom the page in
      when the field takes focus. */
   width:100%; padding:13px 14px; font:inherit; font-size:16px;
-  border-radius:13px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
+  border-radius:8px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
   outline:none;
 }
 .gt-addmate select {
   width:100%; padding:13px 14px; font:inherit; font-size:16px;
-  border-radius:13px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
+  border-radius:8px; border:1.5px solid var(--line); background:#fff; color:var(--ink);
   outline:none; appearance:none;
 }
 .gt-addmate input:focus, .gt-addmate select:focus { border-color:var(--brand); }
 .gt-addmate-go {
-  padding:13px 16px; border-radius:13px; border:none; cursor:pointer; font:inherit;
-  font-size:15px; font-weight:800; color:#fff;
-  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%);
+  padding:13px 16px; border-radius:8px; border:none; cursor:pointer; font:inherit;
+  font-size:15px; font-weight:700; color:#fff;
+  background:var(--brand);
 }
 .gt-addmate-go:disabled { background:#d9d7d2; color:#8b8b8b; cursor:not-allowed; }
 .gt-team-ok {
   font-size:13px; font-weight:700; color:var(--ok); background:var(--okbg);
-  border-radius:11px; padding:10px 12px;
+  border-radius:6px; padding:10px 12px;
 }
 
 /* ── otp ────────────────────────────────────────────────── */
 .gt-otp { position:relative; display:flex; gap:10px; justify-content:center; margin:6px 0 20px; }
 .gt-otp-box {
-  width:60px; height:72px; border-radius:16px; display:grid; place-items:center;
-  font-size:30px; font-weight:800; background:var(--card);
+  width:60px; height:72px; border-radius:8px; display:grid; place-items:center;
+  font-size:30px; font-weight:700; background:var(--card);
   border:2px solid var(--line); color:var(--ink);
 }
 .gt-otp-box[data-filled] { border-color:var(--brand); background:#eef2ff; }
@@ -1010,7 +1012,7 @@ const CSS = `
 .gt-otp-input { position:absolute; inset:0; width:100%; height:100%;
   opacity:0; border:none; background:transparent; font-size:30px; }
 .gt-code-actions { display:flex; gap:10px; justify-content:space-between; }
-.gt-ghost { padding:12px 14px; border-radius:13px; font:inherit; font-size:13.5px;
+.gt-ghost { padding:12px 14px; border-radius:8px; font:inherit; font-size:13.5px;
   font-weight:700; cursor:pointer; background:var(--card);
   border:1.5px solid var(--line); color:var(--ink); }
 .gt-ghost:disabled { opacity:.5; }
@@ -1019,7 +1021,7 @@ const CSS = `
 /* ── tools ──────────────────────────────────────────────── */
 .gt-search {
   display:flex; align-items:center; gap:9px; padding:0 14px; margin-bottom:14px;
-  background:var(--card); border:1.5px solid var(--line); border-radius:15px;
+  background:var(--card); border:1.5px solid var(--line); border-radius:8px;
 }
 .gt-search input { flex:1; min-width:0; border:none; outline:none; background:none;
   font:inherit; font-size:15.5px; padding:14px 0; color:var(--ink); }
@@ -1030,7 +1032,7 @@ const CSS = `
 .gt:has(.ks-fab) { padding-bottom:110px; }
 .gt-tool {
   display:flex; align-items:center; gap:12px; width:100%; text-align:left;
-  padding:15px 15px 15px 18px; border-radius:18px; cursor:pointer; font:inherit;
+  padding:15px 15px 15px 18px; border-radius:8px; cursor:pointer; font:inherit;
   background:var(--card); border:1.5px solid var(--line); position:relative;
   overflow:hidden; box-shadow:0 2px 10px rgba(20,20,30,.05);
 }
@@ -1040,11 +1042,11 @@ const CSS = `
 .gt-tool[data-level="out"]::before { background:var(--out); }
 .gt-tool:active { transform:scale(.99); }
 .gt-tool-main { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
-.gt-tool-main strong { font-size:16.5px; font-weight:800; }
+.gt-tool-main strong { font-size:16.5px; font-weight:700; }
 .gt-tool-spec { font-size:12.5px; color:var(--dim); }
 .gt-tool-left { flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
-  min-width:58px; padding:7px 10px; border-radius:13px; }
-.gt-tool-left b { font-size:21px; font-weight:800; line-height:1; }
+  min-width:58px; padding:7px 10px; border-radius:8px; }
+.gt-tool-left b { font-size:21px; font-weight:700; line-height:1; }
 .gt-tool-left i { font-style:normal; font-size:10px; font-weight:700;
   letter-spacing:.06em; text-transform:uppercase; opacity:.75; }
 .gt-tool[data-level="ok"]  .gt-tool-left { background:var(--okbg);  color:var(--ok); }
@@ -1052,10 +1054,10 @@ const CSS = `
 .gt-tool[data-level="out"] .gt-tool-left { background:var(--outbg); color:var(--out); }
 
 /* ── quantity ───────────────────────────────────────────── */
-.gt-chosen { background:var(--card); border:1.5px solid var(--line); border-radius:18px;
+.gt-chosen { background:var(--card); border:1.5px solid var(--line); border-radius:8px;
   padding:14px 16px; margin-bottom:18px; display:flex; align-items:center; gap:13px; }
 .gt-chosen-text { display:flex; flex-direction:column; gap:3px; min-width:0; }
-.gt-chosen strong { font-size:18px; font-weight:800; }
+.gt-chosen strong { font-size:18px; font-weight:700; }
 .gt-chosen-text span { font-size:13px; color:var(--dim); }
 .gt-chosen em { font-style:normal; font-size:12.5px; font-weight:700; color:var(--ok); margin-top:4px; }
 
@@ -1065,15 +1067,15 @@ const CSS = `
    He is right — the photo is there so a man holding the thing
    recognises it without reading, and 52px was a stamp. These are the
    biggest that still leave the name and the count room on one row. */
-.gt-thumb { width:74px; height:74px; flex:0 0 auto; border-radius:18px; overflow:hidden;
+.gt-thumb { width:74px; height:74px; flex:0 0 auto; border-radius:8px; overflow:hidden;
   display:grid; place-items:center; background:#f1f1ee; }
 .gt-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.gt-thumb i { font-style:normal; font-size:28px; font-weight:800; }
-.gt-thumb-lg { width:104px; height:104px; border-radius:24px; }
+.gt-thumb i { font-style:normal; font-size:28px; font-weight:700; }
+.gt-thumb-lg { width:104px; height:104px; border-radius:8px; }
 .gt-thumb-lg i { font-size:40px; }
 @media (max-width: 360px) {
   /* The oldest phones in the shed. Still bigger than it was. */
-  .gt-thumb { width:62px; height:62px; border-radius:16px; }
+  .gt-thumb { width:62px; height:62px; border-radius:8px; }
   .gt-thumb i { font-size:24px; }
 }
 .gt-tool[data-level="ok"]  .gt-thumb[data-empty] { background:var(--okbg);  color:var(--ok); }
@@ -1082,22 +1084,22 @@ const CSS = `
 .gt-chosen .gt-thumb[data-empty] { background:var(--okbg); color:var(--ok); }
 .gt-stepper { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
 .gt-stepper button {
-  width:74px; height:74px; flex:0 0 auto; border-radius:24px; font-size:34px;
+  width:74px; height:74px; flex:0 0 auto; border-radius:8px; font-size:34px;
   font-weight:700; cursor:pointer; background:var(--card); color:var(--brand);
   border:2px solid var(--line); line-height:1;
 }
 .gt-stepper button:disabled { opacity:.35; }
 .gt-stepper button:active:not(:disabled) { background:#eef2ff; }
 .gt-qty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  background:linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%); color:#fff;
-  border-radius:24px; padding:12px 8px; box-shadow:0 8px 22px rgba(79,70,229,.3); }
-.gt-qty b { font-size:42px; font-weight:800; line-height:1; }
+  background:var(--gold); color:#fff;
+  border-radius:8px; padding:12px 8px; box-shadow:0 8px 22px rgba(79,70,229,.3); }
+.gt-qty b { font-size:42px; font-weight:700; line-height:1; }
 .gt-qty i { font-style:normal; font-size:11px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; opacity:.85; margin-top:3px; }
 .gt-take {
-  display:block; width:100%; padding:19px; border-radius:20px; border:none;
-  font:inherit; font-size:17.5px; font-weight:800; color:#fff; cursor:pointer;
-  background:linear-gradient(135deg, #059669 0%, #047857 100%);
+  display:block; width:100%; padding:19px; border-radius:8px; border:none;
+  font:inherit; font-size:17.5px; font-weight:700; color:#fff; cursor:pointer;
+  background:var(--ok);
   box-shadow:0 10px 24px rgba(5,150,105,.34);
 }
 .gt-take:disabled { opacity:.6; }
@@ -1108,19 +1110,86 @@ const CSS = `
 .gt-donestep { text-align:center; padding-top:34px; }
 .gt-tick { width:88px; height:88px; margin:0 auto 18px; border-radius:50%;
   display:grid; place-items:center; font-size:44px; color:#fff;
-  background:linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background:var(--ok);
   box-shadow:0 12px 30px rgba(16,185,129,.4); animation:gtPop .32s cubic-bezier(.2,1.3,.4,1) both; }
 @keyframes gtPop { from { transform:scale(.6); opacity:0; } to { transform:scale(1); opacity:1; } }
-.gt-donetitle { font-size:25px; font-weight:800; letter-spacing:-.4px; margin:0 0 8px; }
+.gt-donetitle { font-size:25px; font-weight:700; letter-spacing:-.4px; margin:0 0 8px; }
 .gt-donesub { font-size:14.5px; color:var(--dim); line-height:1.6; margin:0 0 24px; }
 
 /* ── tally ──────────────────────────────────────────────── */
 .gt-tally { display:flex; flex-wrap:wrap; gap:7px; align-items:center;
   margin-top:22px; padding-top:16px; border-top:1px dashed var(--line); }
-.gt-tally-head { width:100%; font-size:10.5px; font-weight:800; letter-spacing:.08em;
+.gt-tally-head { width:100%; font-size:10.5px; font-weight:700; letter-spacing:.08em;
   text-transform:uppercase; color:var(--dim); margin-bottom:2px; }
 .gt-tally-chip { font-size:12.5px; font-weight:700; padding:6px 11px; border-radius:999px;
   background:var(--okbg); color:var(--ok); border:1px solid #a7f3d0; }
 
 @media (prefers-reduced-motion: reduce) { .gt-tick { animation:none; } }
 `;
+
+/**
+ * One tool in the cupboard list.
+ *
+ * TAP takes it — that is what everybody standing at the cupboard is
+ * here to do, and it must stay the cheapest gesture on the screen.
+ *
+ * HOLD is for the few who keep the shelf, and opens that tool's jobs
+ * straight away. Daksh, Nov 2026: "to add stock and fix count you have
+ * to press fix count and choose which tool — instead maybe we can long
+ * press." The tool was already under his thumb; the old route made him
+ * let go of it, press a button, pick a verb, then find it again in a
+ * list of part codes that differ by one digit.
+ *
+ * A component of its own because a hook cannot be called inside a map,
+ * and at module scope because a component declared inside another one
+ * is a new type on every render — which remounts it, and a remounting
+ * list loses the press halfway through.
+ */
+function ToolButton({
+  tool, left, disabled, canKeep, onTake, onHold,
+}: {
+  tool: TakeTool;
+  left: number;
+  disabled: boolean;
+  canKeep: boolean;
+  onTake: () => void;
+  onHold: () => void;
+}) {
+  const press = useLongPress(onHold, { disabled: !canKeep });
+  const lvl = left <= 0 ? "out" : tool.level === "ok" ? "ok" : "low";
+
+  return (
+    <button
+      type="button"
+      className="gt-tool"
+      data-level={lvl}
+      disabled={disabled}
+      onPointerDown={press.onPointerDown}
+      onPointerMove={press.onPointerMove}
+      onPointerUp={press.onPointerUp}
+      onPointerCancel={press.onPointerCancel}
+      onContextMenu={press.onContextMenu}
+      onClick={(e) => {
+        // Swallows the click a completed hold leaves behind, so holding
+        // a tool opens the keeper sheet instead of ALSO taking one.
+        press.onClick(e);
+        if (!e.defaultPrevented) onTake();
+      }}
+    >
+      <span className="gt-thumb" data-empty={tool.imageUrl ? undefined : "1"}>
+        {tool.imageUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={tool.imageUrl} alt="" loading="lazy" />
+          : <i>{tool.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+      </span>
+      <span className="gt-tool-main">
+        <strong>{tool.name}</strong>
+        <span className="gt-tool-spec">{tool.spec ? tool.spec : `counted in ${tool.unit}`}</span>
+      </span>
+      <span className="gt-tool-left">
+        <b>{left}</b>
+        <i>{tool.unit}</i>
+      </span>
+    </button>
+  );
+}

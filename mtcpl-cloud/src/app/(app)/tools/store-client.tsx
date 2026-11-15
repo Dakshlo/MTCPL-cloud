@@ -34,6 +34,7 @@ import {
   type ToolRow,
 } from "@/lib/cnc-tool-stock";
 import { useLiveStock } from "@/lib/use-live-stock";
+import { useLongPress } from "@/lib/use-long-press";
 import {
   createToolAction,
   deleteToolAction,
@@ -46,6 +47,7 @@ import { postToolBillAction } from "./bill-actions";
 import { MoveSheet, type MoveIntent } from "./move-sheet";
 import { AddToolSheet } from "./add-tool-sheet";
 import { BillSheet } from "./bill-sheet";
+import { ToolSheet } from "./tool-sheet";
 import { UndoToast, TOOLS_CSS, ago, type Done } from "./ui-bits";
 
 /** A man enrolled under a CNC vendor (mig 234). */
@@ -92,6 +94,9 @@ export function StoreClient({
   const [intent, setIntent] = useState<MoveIntent | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
+  /** The tool whose own sheet is open — reached by pressing its row
+   *  rather than by picking a verb and then hunting for the tool. */
+  const [sheetTool, setSheetTool] = useState<ToolRow | null>(null);
   const [editing, setEditing] = useState<ToolRow | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -285,6 +290,12 @@ export function StoreClient({
             </div>
           )}
 
+          {optimistic.length > 0 && canManage && (
+            <p className="tc-howto">
+              <b>Press a tool</b> to add stock, fix its count or read its register.
+            </p>
+          )}
+
           {optimistic.length === 0 ? (
             <div className="tc-empty">
                 <h2>The store is empty</h2>
@@ -314,6 +325,7 @@ export function StoreClient({
                   onFixCount={() => { setMenuFor(null); setIntent({ tool: t, kind: "adjust" }); }}
                   onEdit={() => { setMenuFor(null); setEditing(t); setAddOpen(true); }}
                   onHistory={() => { setMenuFor(null); setOnlyTool(t.id); setTab("register"); }}
+                  onOpen={() => { setConfirmDelete(null); setSheetTool(t); }}
                   onAskDelete={() => setConfirmDelete(t.id)}
                   onCancelDelete={() => setConfirmDelete(null)}
                   onDelete={() => {
@@ -363,6 +375,27 @@ export function StoreClient({
           run(() => (mode === "edit" ? updateToolAction(fd) : createToolAction(fd)),
               (msg) => setDone({ at: Date.now(), text: msg ?? "Saved" }));
           setEditing(null);
+        }}
+      />
+
+      <ToolSheet
+        tool={sheetTool}
+        canManage={canManage}
+        confirmingDelete={confirmDelete === sheetTool?.id}
+        onClose={() => { setSheetTool(null); setConfirmDelete(null); }}
+        onAddStock={() => { const t = sheetTool; setSheetTool(null); if (t) setIntent({ tool: t, kind: "receive" }); }}
+        onFixCount={() => { const t = sheetTool; setSheetTool(null); if (t) setIntent({ tool: t, kind: "adjust" }); }}
+        onHistory={() => { const t = sheetTool; setSheetTool(null); if (t) { setOnlyTool(t.id); setTab("register"); } }}
+        onEdit={() => { const t = sheetTool; setSheetTool(null); if (t) { setEditing(t); setAddOpen(true); } }}
+        onAskDelete={() => sheetTool && setConfirmDelete(sheetTool.id)}
+        onCancelDelete={() => setConfirmDelete(null)}
+        onDelete={() => {
+          const t = sheetTool;
+          setSheetTool(null); setConfirmDelete(null);
+          if (!t) return;
+          const fd = new FormData();
+          fd.set("tool_id", t.id);
+          run(() => deleteToolAction(fd), (msg) => setDone({ at: Date.now(), text: msg ?? "Deleted" }));
         }}
       />
 
@@ -853,13 +886,20 @@ function RegisterRow({ m, toolName }: { m: ToolMovement; toolName: string | unde
 function ToolCard({
   tool, canManage, menuOpen, confirmingDelete,
   onMenu, onCloseMenu, onAddStock, onFixCount, onEdit, onHistory,
-  onAskDelete, onCancelDelete, onDelete,
+  onOpen, onAskDelete, onCancelDelete, onDelete,
 }: {
   tool: ToolRow; canManage: boolean; menuOpen: boolean; confirmingDelete: boolean;
   onMenu: () => void; onCloseMenu: () => void;
   onAddStock: () => void; onFixCount: () => void; onEdit: () => void; onHistory: () => void;
+  onOpen: () => void;
   onAskDelete: () => void; onCancelDelete: () => void; onDelete: () => void;
 }) {
+  // Press the tool to get at everything that can happen to it. A hold
+  // works, which is what Daksh asked for and what the cupboard QR needs
+  // (a tap there already means "I am taking this one"). Here a plain
+  // tap does it too: nothing else on this screen uses the tap, and a
+  // gesture nobody can see is a feature only its author uses.
+  const press = useLongPress(onOpen, { onClick: onOpen });
   const dotsRef = useRef<HTMLButtonElement | null>(null);
   /** Open the menu upwards when there is not room below it. Measured
    *  on the click rather than in an effect: it has to be decided
@@ -880,7 +920,7 @@ function ToolCard({
     : "nothing taken yet";
 
   return (
-    <article className="tc-card" data-level={level}>
+    <article className="tc-card" data-level={level} {...press}>
       {/* Mig 233 — the photo. A tool WITHOUT one now shows a quiet empty
           frame rather than its first letter in a colour: six of the
           seven codes on this shelf begin with D, so the letter taught
@@ -910,7 +950,14 @@ function ToolCard({
         {level === "out" ? "Empty" : level === "low" ? `Low · warns at ${tool.lowLine}` : "In stock"}
       </span>
 
-      <div className="tc-rowacts">
+      {/* The row owns the press gesture, so anything inside it that is
+          pressable has to keep its own events to itself — otherwise
+          holding "Add stock" would open the sheet behind it. */}
+      <div
+        className="tc-rowacts"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         {canManage && (
           <>
             <button type="button" className="tc-addstock" onClick={onAddStock}>

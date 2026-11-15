@@ -24,7 +24,7 @@
  * call — this component drawing is not what makes it allowed.
  */
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { prettyBytes, shrinkImage } from "@/lib/compress-image";
 
@@ -42,10 +42,23 @@ type Res = { ok: true; message: string } | { ok: false; error: string };
 type Job = "menu" | "stock" | "count" | "new";
 
 export function KeeperSheet({
-  token, tools, onDone,
+  token, tools, onDone, jump, onJumpHandled,
   addStockAction, fixCountAction, newToolAction,
 }: {
   token: string;
+  /**
+   * A tool the keeper pressed and held in the list behind this sheet.
+   *
+   * Daksh, Nov 2026: "to add stock and fix count you have to press fix
+   * count and choose which tool — instead maybe we can long press."
+   *
+   * He is right that the order was backwards. Picking the verb first
+   * meant scrolling a list of near-identical part codes to find the
+   * tool that was already under his thumb. Arriving this way, the tool
+   * is already chosen and only the verb is left to say.
+   */
+  jump?: KeeperTool | null;
+  onJumpHandled?: () => void;
   /** Every live tool, empty ones included — an empty shelf is exactly
    *  what you have come to refill. */
   tools: KeeperTool[];
@@ -59,6 +72,9 @@ export function KeeperSheet({
   const [open, setOpen] = useState(false);
   const [job, setJob] = useState<Job>("menu");
   const [picked, setPicked] = useState<KeeperTool | null>(null);
+  /** Opened by holding a tool, so the picker is skipped and Back goes
+   *  to that tool's two jobs rather than to a list of everything. */
+  const [scoped, setScoped] = useState(false);
   const [n, setN] = useState(1);
   const [q, setQ] = useState("");
   /** Daksh, Nov 2026 — the same note box the office screen has. The
@@ -87,7 +103,7 @@ export function KeeperSheet({
   }, [tools, q]);
 
   function reset() {
-    setJob("menu"); setPicked(null); setN(1); setQ(""); setErr(null);
+    setJob("menu"); setPicked(null); setScoped(false); setN(1); setQ(""); setErr(null);
     setStockNote("");
     setName(""); setUnit("pcs"); setOpening(0);
     setPhoto(null); setPhotoNote(null);
@@ -121,8 +137,19 @@ export function KeeperSheet({
     );
   }
 
+  useEffect(() => {
+    if (!jump) return;
+    setPicked(jump);
+    setScoped(true);
+    setJob("menu");
+    setErr(null);
+    setOpen(true);
+    onJumpHandled?.();
+  }, [jump, onJumpHandled]);
+
   const title =
-    job === "stock" ? (picked ? "How many came in?" : "Add stock to…")
+    job === "menu" && scoped && picked ? picked.name
+      : job === "stock" ? (picked ? "How many came in?" : "Add stock to…")
       : job === "count" ? (picked ? "What does the shelf say?" : "Fix the count of…")
         : job === "new" ? "New tool"
           : "Keep the shelf";
@@ -149,7 +176,13 @@ export function KeeperSheet({
                 <button
                   type="button"
                   className="ks-back"
-                  onClick={() => (picked ? setPicked(null) : reset())}
+                  onClick={() => {
+                    // Held a tool to get here: Back belongs to that
+                    // tool's two jobs, not to a list of every tool.
+                    if (scoped) setJob("menu");
+                    else if (picked) setPicked(null);
+                    else reset();
+                  }}
                   aria-label="Back"
                 >
                   ‹
@@ -162,7 +195,25 @@ export function KeeperSheet({
             {err && <div className="ks-err" role="alert">⚠ {err}</div>}
 
             {/* ── the three jobs ─────────────────────────────── */}
-            {job === "menu" && (
+            {job === "menu" && scoped && picked && (
+              <div className="ks-menu">
+                <p className="ks-scope">
+                  <strong>{picked.stock} {picked.unit}</strong> on the shelf now
+                </p>
+                <button type="button" onClick={() => setJob("stock")}>
+                  <span className="ks-ic" data-t="in" aria-hidden>📦</span>
+                  <span><strong>Add stock</strong><em>A box has arrived</em></span>
+                  <span className="ks-go" aria-hidden>›</span>
+                </button>
+                <button type="button" onClick={() => setJob("count")}>
+                  <span className="ks-ic" data-t="fix" aria-hidden>⚖</span>
+                  <span><strong>Fix count</strong><em>The shelf and the register disagree</em></span>
+                  <span className="ks-go" aria-hidden>›</span>
+                </button>
+              </div>
+            )}
+
+            {job === "menu" && !scoped && (
               <div className="ks-menu">
                 <button type="button" onClick={() => setJob("stock")}>
                   <span className="ks-ic" data-t="in" aria-hidden>📦</span>
@@ -430,8 +481,8 @@ export const KEEPER_CSS = `
   bottom:calc(16px + env(safe-area-inset-bottom)); z-index:60;
   display:flex; align-items:center; gap:8px; cursor:pointer;
   padding:15px 26px; border:none; border-radius:999px; font:inherit;
-  font-size:15.5px; font-weight:800; color:#fff; white-space:nowrap;
-  background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);
+  font-size:15.5px; font-weight:700; color:#fff; white-space:nowrap;
+  background:#C9973A;
   box-shadow:0 10px 26px rgba(79,70,229,.42), 0 2px 6px rgba(0,0,0,.18);
 }
 .ks-fab:active { transform:translateX(-50%) scale(.97); }
@@ -448,31 +499,32 @@ export const KEEPER_CSS = `
   animation:ks-up .22s cubic-bezier(.2,.8,.3,1);
 }
 @keyframes ks-up { from { transform:translateY(14%); opacity:.6; } to { transform:none; opacity:1; } }
-.ks-grab { width:40px; height:4px; border-radius:99px; background:#d9d7d2; margin:2px auto 10px; }
+.ks-grab { width:40px; height:4px; border-radius:8px; background:#d9d7d2; margin:2px auto 10px; }
 .ks-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
-.ks-head h2 { flex:1; margin:0; font-size:19px; font-weight:800; letter-spacing:-.02em; }
+.ks-head h2 { flex:1; margin:0; font-size:19px; font-weight:700; letter-spacing:-.02em; }
 .ks-back, .ks-x {
-  width:34px; height:34px; flex:0 0 auto; border-radius:11px; cursor:pointer;
+  width:34px; height:34px; flex:0 0 auto; border-radius:6px; cursor:pointer;
   border:1px solid #e6e4df; background:#faf9f7; color:#6b7280; font-size:15px; line-height:1;
 }
 .ks-back { font-size:22px; }
 .ks-err {
-  margin-bottom:12px; padding:11px 13px; border-radius:12px; font-size:13.5px; font-weight:600;
+  margin-bottom:12px; padding:11px 13px; border-radius:8px; font-size:13.5px; font-weight:600;
   background:#fef2f2; color:#b91c1c; border:1px solid rgba(185,28,28,.3);
 }
 
 /* ── the three jobs ─────────────────────────────────────── */
+.ks-scope { margin:0 0 10px; font-size:12.5px; color:var(--ks-muted, #7A6A52); }
 .ks-menu { display:flex; flex-direction:column; gap:10px; }
 .ks-menu button {
   display:flex; align-items:center; gap:13px; width:100%; text-align:left; cursor:pointer;
-  padding:15px; border-radius:17px; font:inherit; color:inherit;
+  padding:15px; border-radius:8px; font:inherit; color:inherit;
   background:#faf9f7; border:1.5px solid #e6e4df;
 }
 .ks-menu button:active { transform:scale(.99); }
-.ks-menu strong { display:block; font-size:16px; font-weight:800; }
+.ks-menu strong { display:block; font-size:16px; font-weight:700; }
 .ks-menu em { display:block; font-style:normal; font-size:12.5px; color:#6b7280; margin-top:1px; }
 .ks-ic {
-  width:46px; height:46px; flex:0 0 auto; border-radius:15px; font-size:21px;
+  width:46px; height:46px; flex:0 0 auto; border-radius:8px; font-size:21px;
   display:grid; place-items:center;
 }
 .ks-ic[data-t="in"]  { background:#ecfdf5; }
@@ -483,7 +535,7 @@ export const KEEPER_CSS = `
 /* ── pick a tool ────────────────────────────────────────── */
 .ks-search {
   display:flex; align-items:center; gap:9px; margin-bottom:10px;
-  padding:0 13px; border-radius:13px; background:#faf9f7; border:1.5px solid #e6e4df;
+  padding:0 13px; border-radius:8px; background:#faf9f7; border:1.5px solid #e6e4df;
 }
 .ks-search input {
   flex:1; min-width:0; border:none; background:none; outline:none;
@@ -492,43 +544,43 @@ export const KEEPER_CSS = `
 .ks-list { display:flex; flex-direction:column; gap:8px; }
 .ks-row {
   display:flex; align-items:center; gap:12px; width:100%; text-align:left; cursor:pointer;
-  padding:10px 12px; border-radius:15px; font:inherit; color:inherit;
+  padding:10px 12px; border-radius:8px; font:inherit; color:inherit;
   background:#fff; border:1.5px solid #e6e4df;
 }
 .ks-row:active { transform:scale(.99); }
 .ks-row-main { flex:1; min-width:0; }
-.ks-row-main strong { display:block; font-size:15.5px; font-weight:800; }
+.ks-row-main strong { display:block; font-size:15.5px; font-weight:700; }
 .ks-row-main em { display:block; font-style:normal; font-size:12px; color:#6b7280; }
-.ks-row-n { font-size:19px; font-weight:800; color:#059669; }
+.ks-row-n { font-size:19px; font-weight:700; color:#059669; }
 .ks-row-n[data-out] { color:#dc2626; }
 .ks-blank { padding:22px; text-align:center; color:#6b7280; font-size:14px; }
 
 /* ── the number ─────────────────────────────────────────── */
 .ks-num { display:flex; flex-direction:column; gap:14px; }
 .ks-chosen { display:flex; align-items:center; gap:12px; }
-.ks-chosen strong { display:block; font-size:17px; font-weight:800; }
+.ks-chosen strong { display:block; font-size:17px; font-weight:700; }
 .ks-chosen em { display:block; font-style:normal; font-size:12.5px; color:#6b7280; margin-top:2px; }
 .ks-stepper { display:flex; align-items:center; gap:12px; }
 .ks-stepper button {
-  width:60px; height:60px; flex:0 0 auto; border-radius:19px; cursor:pointer;
+  width:60px; height:60px; flex:0 0 auto; border-radius:8px; cursor:pointer;
   font:inherit; font-size:27px; font-weight:700;
   background:#f2f1ee; border:1.5px solid #e6e4df; color:#15181d;
 }
 .ks-stepper button:disabled { opacity:.4; }
 .ks-bignum {
-  flex:1; min-width:0; text-align:center; font:inherit; font-size:40px; font-weight:800;
-  letter-spacing:-.03em; padding:8px 4px; border-radius:17px; color:#15181d;
+  flex:1; min-width:0; text-align:center; font:inherit; font-size:40px; font-weight:700;
+  letter-spacing:-.03em; padding:8px 4px; border-radius:8px; color:#15181d;
   border:1.5px solid #e6e4df; background:#fff; outline:none;
 }
 .ks-quick { display:flex; gap:7px; }
 .ks-quick button {
-  flex:1; padding:10px 0; border-radius:12px; cursor:pointer; font:inherit;
+  flex:1; padding:10px 0; border-radius:8px; cursor:pointer; font:inherit;
   font-size:13.5px; font-weight:700; background:#faf9f7; border:1.5px solid #e6e4df; color:#4b5563;
 }
 .ks-go-btn {
-  width:100%; padding:17px; border:none; border-radius:17px; cursor:pointer; font:inherit;
-  font-size:16.5px; font-weight:800; color:#fff;
-  background:linear-gradient(135deg,#059669 0%,#047857 100%);
+  width:100%; padding:17px; border:none; border-radius:8px; cursor:pointer; font:inherit;
+  font-size:16.5px; font-weight:700; color:#fff;
+  background:#16A34A;
   box-shadow:0 8px 20px rgba(5,150,105,.3);
 }
 .ks-go-btn:disabled { background:#d9d7d2; color:#8b8b8b; box-shadow:none; }
@@ -537,32 +589,32 @@ export const KEEPER_CSS = `
 /* ── a new tool ─────────────────────────────────────────── */
 .ks-new { display:flex; flex-direction:column; gap:12px; }
 .ks-field { display:flex; flex-direction:column; gap:5px; }
-.ks-field > span { font-size:11px; font-weight:800; letter-spacing:.07em;
+.ks-field > span { font-size:11px; font-weight:700; letter-spacing:.07em;
   text-transform:uppercase; color:#6b7280; }
 .ks-field input {
-  width:100%; padding:14px; font:inherit; font-size:16px; border-radius:13px;
+  width:100%; padding:14px; font:inherit; font-size:16px; border-radius:8px;
   border:1.5px solid #e6e4df; background:#fff; color:#15181d; outline:none;
 }
 .ks-field input:focus { border-color:#4f46e5; }
 .ks-two { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .ks-photo {
   display:flex; align-items:center; gap:13px; width:100%; text-align:left; cursor:pointer;
-  padding:11px 13px; border-radius:15px; font:inherit; color:inherit;
+  padding:11px 13px; border-radius:8px; font:inherit; color:inherit;
   background:#faf9f7; border:1.5px dashed #d9d7d2;
 }
-.ks-photo img { width:52px; height:52px; flex:0 0 auto; border-radius:13px; object-fit:cover; }
+.ks-photo img { width:52px; height:52px; flex:0 0 auto; border-radius:8px; object-fit:cover; }
 .ks-photo-ic {
-  width:52px; height:52px; flex:0 0 auto; border-radius:13px; font-size:23px;
+  width:52px; height:52px; flex:0 0 auto; border-radius:8px; font-size:23px;
   display:grid; place-items:center; background:#eef2ff;
 }
-.ks-photo strong { display:block; font-size:14.5px; font-weight:800; }
+.ks-photo strong { display:block; font-size:14.5px; font-weight:700; }
 .ks-photo em { display:block; font-style:normal; font-size:12px; color:#6b7280; margin-top:1px; }
 
 /* ── shared thumbnail ───────────────────────────────────── */
 .ks-thumb {
-  width:54px; height:54px; flex:0 0 auto; border-radius:15px; overflow:hidden;
+  width:54px; height:54px; flex:0 0 auto; border-radius:8px; overflow:hidden;
   display:grid; place-items:center; background:#f2f1ee;
 }
 .ks-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-.ks-thumb i { font-style:normal; font-size:19px; font-weight:800; color:#8b8b8b; }
+.ks-thumb i { font-style:normal; font-size:19px; font-weight:700; color:#8b8b8b; }
 `;
