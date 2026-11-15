@@ -133,7 +133,7 @@ function dayLabel(iso: string): string {
   });
 }
 
-type Step = "who" | "code" | "tool" | "qty" | "register";
+type Step = "who" | "code" | "tool" | "qty" | "register" | "team";
 
 const DIGITS = 4;
 
@@ -224,7 +224,6 @@ export function GuestTakeClient({
   const [cooldown, setCooldown] = useState(0);
   const codeRef = useRef<HTMLInputElement | null>(null);
   // ── the vendor's own men (mig 234) ──────────────────────────────
-  const [teamOpen, setTeamOpen] = useState(false);
   const [team, setTeam] = useState<TeamMate[]>(initialTeam);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
@@ -346,6 +345,31 @@ export function GuestTakeClient({
     return () => clearTimeout(t);
   }, [flash]);
 
+  /**
+   * The men, on a page of their own.
+   *
+   * Daksh, Nov 2026: "that add operator inside vendor, it opens on the
+   * same page — instead it should have a separate page, and already
+   * added operator."
+   *
+   * It used to drop a panel in above the shelf, so the form and the
+   * tools were on screen together and "What are you taking?" sat
+   * underneath a half-filled form. It also showed whatever list had
+   * been loaded at sign-in, which on a cupboard somebody else has been
+   * using all morning is the wrong list. This refetches on the way in.
+   */
+  function openTeam() {
+    setStep("team");
+    setErr(null);
+    setTeamMsg(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      const t = await myTeamAction(fd);
+      if (t.ok) setTeam(t.team);
+    });
+  }
+
   function openRegister() {
     setStep("register");
     setErr(null);
@@ -405,7 +429,7 @@ export function GuestTakeClient({
       await signOutAction(fd);
       setWho(null); setPicked(null); setTally([]); setTaken({});
       setTool(null); setFlash(null); setCode(""); setErr(null);
-      setTeamOpen(false); setTeam([]); setTeamMsg(null);
+      setTeam([]); setTeamMsg(null);
       setNewName(""); setNewPhone(""); setNewVendor(""); setDropping(null);
       setStep("who");
     });
@@ -455,7 +479,12 @@ export function GuestTakeClient({
               be there because a second shed gets its own sticker. */}
           <div className="gt-brand">
             <span className="gt-logo" aria-hidden>🧰</span>
-            <div>
+            {/* Once signed in the words go and the tile carries it alone.
+                The header now holds a name, Sign out, the men and the
+                register, and on a 375px phone "Tool store" was being
+                squeezed to "T…" — which tells nobody anything. Whoever
+                is reading it scanned the sticker a minute ago. */}
+            <div className={who ? "gt-brand-text gt-brand-gone" : "gt-brand-text"}>
               <div className="gt-brand-label">Tool store</div>
               {/* The door name only before you are signed in. Once you
                   are, you scanned the sticker thirty seconds ago and
@@ -470,9 +499,8 @@ export function GuestTakeClient({
             <button
               type="button"
               className="gt-men"
-              data-on={teamOpen ? "1" : undefined}
-              onClick={() => { setTeamOpen((o) => !o); setTeamMsg(null); }}
-              aria-expanded={teamOpen}
+              data-on={step === "team" ? "1" : undefined}
+              onClick={() => (step === "team" ? setStep("tool") : openTeam())}
               aria-label={who.enrolScope === "any" ? "The men" : "My men"}
             >
               <span aria-hidden>👷</span>
@@ -506,7 +534,7 @@ export function GuestTakeClient({
 
         {/* Where you are, in three dots — so a man knows the screen is
             going somewhere and how far is left. */}
-        {who && step !== "register" && (
+        {who && step !== "register" && step !== "team" && (
           <div className="gt-steps" aria-hidden>
             <i data-on={step === "tool" ? "1" : undefined} data-done={step !== "tool" ? "1" : undefined} />
             <i data-on={step === "qty" ? "1" : undefined} />
@@ -527,8 +555,16 @@ export function GuestTakeClient({
           Nov 2026: "put that next to sign out button." It belongs
           there: that corner of the screen is already about WHO, and
           under the shelf it was competing with the tools. */}
-      {who?.canEnrol && teamOpen && (
-        <div className="gt-team-body gt-team-panel">
+      {who?.canEnrol && step === "team" && (
+        <section className="gt-body">
+          <h1 className="gt-h1">{who.enrolScope === "any" ? "The men" : "My men"}</h1>
+          <p className="gt-sub">
+            {team.length === 0
+              ? "Nobody added yet."
+              : `${team.length} ${team.length === 1 ? "man" : "men"} can scan this cupboard.`}
+          </p>
+
+          <div className="gt-team-body">
           <p className="gt-team-note">
             {who.enrolScope === "any" ? (
               <>
@@ -626,7 +662,12 @@ export function GuestTakeClient({
           </div>
 
           {teamMsg && <div className="gt-team-ok">✓ {teamMsg}</div>}
-        </div>
+          </div>
+
+          <button type="button" className="gt-ghost gt-wide" onClick={() => setStep("tool")}>
+            Back to the shelf
+          </button>
+        </section>
       )}
 
       {err && (
@@ -989,6 +1030,15 @@ const CSS = `
   --brand:#2D2410; --brand2:#3A2F16;
   --gold:#C9973A; --gold-dark:#A67B28; --gold-light:#E8C572;
   --ok:#059669; --okbg:#ecfdf5; --low:#d97706; --lowbg:#fffbeb;
+  /* Daksh, Nov 2026: "change that green colour on items to black so it
+     will look more minimal."
+     The green was marking the NORMAL state — a tool that is simply in
+     stock, which is nearly every row. Colouring the ordinary case
+     leaves nothing for the unusual one to stand out against, so a
+     shelf of healthy stock arrived as a wall of green and the two rows
+     that actually needed attention were just more colour.
+     In stock is now ink on paper. Amber and red keep their jobs. */
+  --rest:#2D2410; --restbg:#F1EFEA;
   --out:#dc2626; --outbg:#fef2f2;
   /* The whole screen, not just the pressable rows.
      Blocking selection on a row only stops the selection ANCHORING
@@ -1017,7 +1067,8 @@ const CSS = `
 }
 .gt-head-row { display:flex; align-items:center; gap:12px; }
 .gt-brand { display:flex; align-items:center; gap:10px; min-width:0; flex:1; }
-.gt-brand > div { min-width:0; }
+.gt-brand-text { min-width:0; }
+.gt-brand-gone { display:none; }
 .gt-logo {
   width:40px; height:40px; flex:0 0 auto; border-radius:6px; font-size:20px;
   display:grid; place-items:center; background:rgba(201,151,58,.22);
@@ -1064,6 +1115,10 @@ const CSS = `
 /* ── shared body ────────────────────────────────────────── */
 .gt-body { padding:20px 16px 0; max-width:560px; margin:0 auto; }
 .gt-q { font-size:23px; font-weight:700; letter-spacing:-.4px; margin:0 0 6px; }
+/* The same heading as a question step, for the two pages that are not
+   a question: the register and the men. */
+.gt-h1 { font-size:23px; font-weight:700; letter-spacing:-.4px; margin:0 0 5px; }
+.gt-sub { font-size:13.5px; color:var(--dim); line-height:1.5; margin:0 0 16px; }
 .gt-hint { font-size:14px; color:var(--dim); line-height:1.5; margin:0 0 18px; }
 .gt-blank { padding:26px 18px; text-align:center; font-size:14.5px; color:var(--dim);
   background:var(--card); border:1px dashed var(--line); border-radius:8px; }
@@ -1135,7 +1190,10 @@ const CSS = `
 /* ── my men ─────────────────────────────────────────────── */
 /* The toggle moved into the header (.gt-men); this is just the panel
    it opens, now sitting under the header rather than under the shelf. */
+/* Was a panel dropped in above the shelf; it is a page of its own
+   now, so it keeps the section's own margins. */
 .gt-team-panel { margin:14px 16px 0; }
+.gt-body > .gt-team-body { margin-top:0; }
 .gt-team-body {
   margin-top:10px; padding:15px; border-radius:8px;
   background:var(--card); border:1.5px solid var(--line);
@@ -1233,7 +1291,7 @@ const CSS = `
   overflow:hidden; box-shadow:0 2px 10px rgba(20,20,30,.05);
 }
 .gt-tool::before { content:""; position:absolute; left:0; top:0; bottom:0; width:6px; }
-.gt-tool[data-level="ok"]::before  { background:var(--ok); }
+.gt-tool[data-level="ok"]::before  { background:var(--rest); }
 .gt-tool[data-level="low"]::before { background:var(--low); }
 .gt-tool[data-level="out"]::before { background:var(--out); }
 .gt-tool:active { transform:scale(.99); }
@@ -1245,7 +1303,7 @@ const CSS = `
 .gt-tool-left b { font-size:21px; font-weight:700; line-height:1; }
 .gt-tool-left i { font-style:normal; font-size:10px; font-weight:700;
   letter-spacing:.06em; text-transform:uppercase; opacity:.75; }
-.gt-tool[data-level="ok"]  .gt-tool-left { background:var(--okbg);  color:var(--ok); }
+.gt-tool[data-level="ok"]  .gt-tool-left { background:var(--restbg); color:var(--rest); }
 .gt-tool[data-level="low"] .gt-tool-left { background:var(--lowbg); color:var(--low); }
 .gt-tool[data-level="out"] .gt-tool-left { background:var(--outbg); color:var(--out); }
 
@@ -1274,10 +1332,10 @@ const CSS = `
   .gt-thumb { width:62px; height:62px; border-radius:8px; }
   .gt-thumb i { font-size:24px; }
 }
-.gt-tool[data-level="ok"]  .gt-thumb[data-empty] { background:var(--okbg);  color:var(--ok); }
+.gt-tool[data-level="ok"]  .gt-thumb[data-empty] { background:var(--restbg); color:var(--rest); }
 .gt-tool[data-level="low"] .gt-thumb[data-empty] { background:var(--lowbg); color:var(--low); }
 .gt-tool[data-level="out"] .gt-thumb[data-empty] { background:var(--outbg); color:var(--out); }
-.gt-chosen .gt-thumb[data-empty] { background:var(--okbg); color:var(--ok); }
+.gt-chosen .gt-thumb[data-empty] { background:var(--restbg); color:var(--rest); }
 .gt-stepper { display:flex; align-items:center; gap:14px; margin-bottom:20px; }
 .gt-stepper button {
   width:74px; height:74px; flex:0 0 auto; border-radius:8px; font-size:34px;
