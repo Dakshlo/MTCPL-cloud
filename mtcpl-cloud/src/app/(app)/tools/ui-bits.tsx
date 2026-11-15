@@ -557,12 +557,14 @@ export const TOOLS_CSS = `
 .tc-steps button { width:52px; flex:0 0 auto; border-radius:var(--radius); font-size:20px;
   font-weight:600; cursor:pointer; line-height:1; color:var(--gold-dark);
   background:var(--surface); border:1px solid var(--border); }
-.tc-steps button:hover:not(:disabled) { background:var(--surface-alt); border-color:var(--gold); }
+.tc-steps button:hover:not(:disabled) { background:var(--surface-alt);
+  border-color:var(--sheet-accent, var(--gold)); }
 .tc-steps button:disabled { opacity:.35; cursor:not-allowed; }
 .tc-steps-n { flex:1; display:flex; align-items:baseline; justify-content:center; gap:7px;
   padding:10px 12px; border-radius:var(--radius); cursor:text;
   background:var(--surface); border:1px solid var(--border); }
-.tc-steps-n:focus-within { border-color:var(--gold); box-shadow:0 0 0 3px var(--gold-subtle); }
+.tc-steps-n:focus-within { border-color:var(--sheet-accent, var(--gold));
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--sheet-accent, var(--gold)) 22%, transparent); }
 .tc-steps-n input { width:100%; min-width:0; border:none; outline:none; background:none;
   font:inherit; font-size:26px; font-weight:700; line-height:1.15; text-align:right;
   color:var(--text); font-variant-numeric:tabular-nums; padding:0; }
@@ -573,8 +575,9 @@ export const TOOLS_CSS = `
 .tc-quick button { flex:1; padding:9px 0; font:inherit; font-size:13px; font-weight:700;
   border-radius:6px; cursor:pointer; background:var(--surface);
   border:1.5px solid var(--border); color:var(--text); }
-.tc-quick button.on { border-color:var(--gold); background:var(--gold-subtle);
-  color:var(--gold-dark); }
+.tc-quick button.on { border-color:var(--sheet-accent, var(--gold));
+  background:color-mix(in srgb, var(--sheet-accent, var(--gold)) 12%, transparent);
+  color:var(--sheet-accent, var(--gold-dark)); }
 
 .tc-field { display:block; margin-bottom:14px; }
 .tc-field span { display:block; font-size:10.5px; font-weight:700; letter-spacing:.07em;
@@ -584,11 +587,33 @@ export const TOOLS_CSS = `
   border:1.5px solid var(--border); color:var(--text); outline:none; }
 .tc-field input:focus { border-color:var(--gold);
   box-shadow:0 0 0 3px var(--gold-subtle); }
+/* Takes the colour of whatever job this sheet is: green for stock
+   coming in, amber for a correction. Falls back to gold for the
+   sheets that are not a mode at all. */
 .tc-sheet-go { width:100%; padding:15px; border-radius:8px; border:none; font:inherit;
   font-size:14.5px; font-weight:600; color:#fff; cursor:pointer;
-  background:var(--gold); }
+  background:var(--sheet-accent, var(--gold)); }
 .tc-sheet-go:disabled { background:var(--border); color:var(--muted); box-shadow:none;
   cursor:not-allowed; }
+/* ── which job am I in ─────────────────────────────────────── */
+.tc-mode {
+  display:flex; align-items:flex-start; gap:11px; margin-bottom:14px;
+  padding:11px 13px; border-radius:8px; border:1px solid;
+}
+.tc-mode-ic {
+  width:26px; height:26px; flex:0 0 auto; border-radius:6px; color:#fff;
+  display:grid; place-items:center; font-size:14px; line-height:1;
+}
+.tc-mode b { display:block; font-size:13.5px; font-weight:700; }
+.tc-mode em { display:block; font-style:normal; font-size:11.5px; line-height:1.5;
+  margin-top:2px; opacity:.85; }
+.tc-mode[data-mode="receive"] { background:rgba(22,163,74,.08);
+  border-color:rgba(22,163,74,.25); color:#166534; }
+.tc-mode[data-mode="receive"] .tc-mode-ic { background:var(--success); }
+.tc-mode[data-mode="adjust"] { background:rgba(217,119,6,.08);
+  border-color:rgba(217,119,6,.28); color:#92400E; }
+.tc-mode[data-mode="adjust"] .tc-mode-ic { background:var(--warning); }
+
 .tc-sheet-fine { font-size:11.5px; color:var(--muted); line-height:1.55; margin:4px 0 0; }
 
 /* ── undo toast ────────────────────────────────────────────── */

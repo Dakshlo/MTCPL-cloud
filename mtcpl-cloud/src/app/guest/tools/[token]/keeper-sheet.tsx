@@ -169,7 +169,12 @@ export function KeeperSheet({
       {open && (
         <div className="ks-wrap" role="dialog" aria-modal="true" aria-label="Keep the shelf">
           <div className="ks-scrim" onClick={close} />
-          <div className="ks-sheet">
+          {/* Daksh, Nov 2026: "so the user will not confuse what mode
+              they are in." Add stock and Fix count were the same sheet
+              with a different heading, and a man at a cupboard does not
+              read headings. The whole sheet now takes the colour of the
+              job: green for stock arriving, amber for a correction. */}
+          <div className="ks-sheet" data-job={job}>
             <div className="ks-grab" aria-hidden />
             <header className="ks-head">
               {job !== "menu" && (
@@ -193,6 +198,20 @@ export function KeeperSheet({
             </header>
 
             {err && <div className="ks-err" role="alert">⚠ {err}</div>}
+
+            {(job === "stock" || job === "count") && (
+              <div className="ks-mode" data-job={job}>
+                <span className="ks-mode-ic" aria-hidden>{job === "stock" ? "📦" : "⚖"}</span>
+                <span>
+                  <strong>{job === "stock" ? "Adding stock" : "Fixing the count"}</strong>
+                  <em>
+                    {job === "stock"
+                      ? "A box has arrived — the shelf goes up."
+                      : "This takes nothing off the shelf. It makes the register match what is really there."}
+                  </em>
+                </span>
+              </div>
+            )}
 
             {/* ── the three jobs ─────────────────────────────── */}
             {job === "menu" && scoped && picked && (
@@ -580,9 +599,28 @@ export const KEEPER_CSS = `
 .ks-go-btn {
   width:100%; padding:17px; border:none; border-radius:8px; cursor:pointer; font:inherit;
   font-size:16.5px; font-weight:700; color:#fff;
-  background:#16A34A;
-  box-shadow:0 8px 20px rgba(5,150,105,.3);
+  background:var(--ks-job, #16A34A);
 }
+
+/* One variable, set on the sheet, so the strip, the banner and the
+   button you press can never end up saying different things. */
+.ks-sheet[data-job="stock"] { --ks-job:#16A34A; }
+.ks-sheet[data-job="count"] { --ks-job:#D97706; }
+.ks-sheet[data-job="stock"], .ks-sheet[data-job="count"] { border-top:3px solid var(--ks-job); }
+
+.ks-mode {
+  display:flex; align-items:flex-start; gap:11px; margin-bottom:14px;
+  padding:12px 13px; border-radius:8px; border:1px solid;
+}
+.ks-mode-ic { width:28px; height:28px; flex:0 0 auto; border-radius:6px;
+  display:grid; place-items:center; font-size:15px; line-height:1; background:#fff; }
+.ks-mode strong { display:block; font-size:14px; font-weight:700; }
+.ks-mode em { display:block; font-style:normal; font-size:12px; line-height:1.5;
+  margin-top:2px; opacity:.85; }
+.ks-mode[data-job="stock"] { background:rgba(22,163,74,.09);
+  border-color:rgba(22,163,74,.26); color:#166534; }
+.ks-mode[data-job="count"] { background:rgba(217,119,6,.09);
+  border-color:rgba(217,119,6,.3); color:#92400E; }
 .ks-go-btn:disabled { background:#d9d7d2; color:#8b8b8b; box-shadow:none; }
 .ks-fine { margin:0; font-size:12px; line-height:1.5; color:#6b7280; text-align:center; }
 

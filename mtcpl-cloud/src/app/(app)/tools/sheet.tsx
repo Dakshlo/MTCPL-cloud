@@ -33,7 +33,18 @@ export function Sheet({
   subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
-  tone?: "gold" | "danger";
+  /**
+   * What colour this sheet is about.
+   *
+   * Daksh, Nov 2026: "make a slight change in colour or UI in both add
+   * stock and fix count, so a user will not confuse what mode they are
+   * in." The two sheets were identical but for their title, and the
+   * title is the one thing a man holding a box does not read.
+   *
+   *   stock   green  — something arriving, the count goes up
+   *   count   amber  — a correction, and the one that can hide a loss
+   */
+  tone?: "gold" | "danger" | "stock" | "count";
   /** A reviewing surface rather than a form: wider on a desktop, so a
    *  table of bill lines is not squeezed into a phone column. Still a
    *  bottom sheet on a phone — nothing about the small screen changes. */
@@ -59,7 +70,11 @@ export function Sheet({
 
   if (!mounted || !open) return null;
 
-  const accent = tone === "danger" ? "var(--danger)" : "var(--gold)";
+  const accent =
+    tone === "danger" ? "var(--danger)"
+      : tone === "stock" ? "var(--success)"
+        : tone === "count" ? "var(--warning)"
+          : "var(--gold)";
 
   return createPortal(
     <div
@@ -78,6 +93,9 @@ export function Sheet({
         aria-label={title}
         className={wide ? "tc-sheet tc-sheet-wide" : "tc-sheet"}
         style={{
+          // Footer and body both read this, so the strip under the
+          // title and the button you press can never disagree.
+          ["--sheet-accent" as string]: accent,
           width: "100%", maxWidth: wide ? 980 : 480, maxHeight: "92vh",
           background: "var(--surface)",
           border: "1px solid var(--border)",

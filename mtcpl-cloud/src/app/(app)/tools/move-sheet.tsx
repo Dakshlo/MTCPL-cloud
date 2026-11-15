@@ -61,6 +61,7 @@ export function MoveSheet({
     <Sheet
       open={!!intent}
       onClose={onClose}
+      tone={kind === "receive" ? "stock" : "count"}
       title={kind === "receive" ? `Add stock · ${tool.name}` : `Fix count · ${tool.name}`}
       subtitle={
         kind === "receive"
@@ -97,6 +98,22 @@ export function MoveSheet({
         </button>
       }
     >
+      {/* Daksh, Nov 2026: "so the user will not confuse what mode they
+          are in." The two sheets differed only in their title, and a
+          title is what you skip. This is the same sentence the menu
+          offered, repeated where the consequence is. */}
+      <div className="tc-mode" data-mode={kind}>
+        <span className="tc-mode-ic" aria-hidden>{kind === "receive" ? "＋" : "⚖"}</span>
+        <span>
+          <b>{kind === "receive" ? "Adding stock" : "Fixing the count"}</b>
+          <em>
+            {kind === "receive"
+              ? "A box has arrived — the shelf goes up."
+              : "The shelf and the register disagree. This does not take anything; it makes the register tell the truth."}
+          </em>
+        </span>
+      </div>
+
       {kind === "adjust" && (
         <div className="tc-seg" role="group" aria-label="Direction">
           <button type="button" className={!down ? "on" : ""} onClick={() => setDown(false)}>
