@@ -65,6 +65,7 @@ export type LongPressHandlers = {
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
   onPointerCancel: () => void;
+  onLostPointerCapture: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: (e: React.MouseEvent) => void;
 };
@@ -84,9 +85,34 @@ export function useLongPress(
   const start = useRef<{ x: number; y: number } | null>(null);
   const fired = useRef(false);
 
+  /**
+   * Blocks the browser from STARTING a selection while a press is in
+   * progress, and is torn down the moment the press ends.
+   *
+   * CSS on the row alone was not enough. Making the pressed element
+   * unselectable only stops the selection anchoring INSIDE it — the
+   * phone then anchors on the nearest selectable thing instead and
+   * drags out from there, which is why Daksh saw the whole screen go
+   * blue with the Copy bar over it.
+   *
+   * Listening on the document, in the capture phase, is what actually
+   * stops it: it does not matter where the browser decided to start,
+   * the selection never begins at all.
+   */
+  const noSelect = useRef<(() => void) | null>(null);
+
+  const armSelectionGuard = useCallback(() => {
+    if (noSelect.current) return;
+    const block = (e: Event) => e.preventDefault();
+    document.addEventListener("selectstart", block, true);
+    noSelect.current = () => document.removeEventListener("selectstart", block, true);
+  }, []);
+
   const clear = useCallback(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     start.current = null;
+    noSelect.current?.();
+    noSelect.current = null;
   }, []);
 
   // A list that fires while it is moving is worse than no gesture.
@@ -108,12 +134,16 @@ export function useLongPress(
       if (disabled || e.button === 2) return;
       fired.current = false;
       start.current = { x: e.clientX, y: e.clientY };
+      armSelectionGuard();
       timer.current = setTimeout(() => {
         fired.current = true;
         timer.current = null;
         // Where the phone can buzz, it buzzes: the only honest way to
         // say "that worked" before the sheet has drawn.
         try { navigator.vibrate?.(18); } catch { /* not every device */ }
+        // Anything the browser managed to select before the guard bit
+        // goes now — otherwise the Copy bar stays up over the sheet.
+        try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
         onLongPress();
       }, ms);
     },
@@ -124,6 +154,9 @@ export function useLongPress(
     },
     onPointerUp: () => clear(),
     onPointerCancel: () => clear(),
+    // A press that ends anywhere must release the guard, or the
+    // page stays unselectable for good.
+    onLostPointerCapture: () => clear(),
     // Holding on a phone pops the browser's own menu over ours.
     onContextMenu: (e) => { if (!disabled) e.preventDefault(); },
     onClick: (e) => {

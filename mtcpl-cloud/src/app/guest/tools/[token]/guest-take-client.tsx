@@ -990,11 +990,24 @@ const CSS = `
   --gold:#C9973A; --gold-dark:#A67B28; --gold-light:#E8C572;
   --ok:#059669; --okbg:#ecfdf5; --low:#d97706; --lowbg:#fffbeb;
   --out:#dc2626; --outbg:#fef2f2;
+  /* The whole screen, not just the pressable rows.
+     Blocking selection on a row only stops the selection ANCHORING
+     inside it; the phone then anchors on the nearest selectable thing
+     and drags out from there, which is how a long press ended up
+     selecting the entire page with the Copy bar over it.
+     This is a cupboard screen — a name, a number and a button. Nothing
+     on it was ever meant to be copied, so nothing on it is selectable,
+     and the fields below get it back explicitly. */
+  -webkit-touch-callout:none; -webkit-user-select:none; user-select:none;
   min-height:100dvh; background:#f6f6f4; color:var(--ink);
   font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
   padding-bottom:40px; -webkit-text-size-adjust:100%;
 }
 .gt *, .gt *::before, .gt *::after { box-sizing:border-box; }
+/* Typing still needs a caret, a double-tap and a paste. */
+.gt input, .gt textarea, .gt [contenteditable] {
+  -webkit-user-select:text; user-select:text; -webkit-touch-callout:default;
+}
 
 /* ── header ─────────────────────────────────────────────── */
 .gt-head {
@@ -1443,6 +1456,7 @@ function ToolButton({
       onPointerMove={press.onPointerMove}
       onPointerUp={press.onPointerUp}
       onPointerCancel={press.onPointerCancel}
+      onLostPointerCapture={press.onLostPointerCapture}
       onContextMenu={press.onContextMenu}
       onClick={(e) => {
         // Swallows the click a completed hold leaves behind, so holding

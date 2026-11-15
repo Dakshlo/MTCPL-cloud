@@ -349,6 +349,17 @@ export const TOOLS_CSS = `
   .tc-spec { white-space:normal; }
 }
 
+/* Same reason as the cupboard: a press that cannot select the row
+   selects the page around it instead. On a touch screen the whole
+   module stops being selectable; a desktop keeps selection, because
+   there a drag IS a selection and nobody is holding anything. */
+@media (hover: none) and (pointer: coarse) {
+  .tc-page { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  .tc-page input, .tc-page textarea, .tc-page select, .tc-page [contenteditable] {
+    -webkit-user-select:text; user-select:text; -webkit-touch-callout:default;
+  }
+}
+
 /* How to work the list, said once, where it is needed. A gesture
    nobody can see is a feature only its author uses. */
 .tc-howto { display:none; }
