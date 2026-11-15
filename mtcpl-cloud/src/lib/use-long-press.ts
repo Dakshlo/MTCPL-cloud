@@ -31,6 +31,24 @@
 //   · the hold fires on a timer rather than on release, so there is a
 //     moment to feel — with a buzz where the device has one — instead
 //     of a gesture you only discover you have made
+//
+// ── The element you attach this to NEEDS CSS ──────────────────────
+//
+//     -webkit-touch-callout: none;
+//     -webkit-user-select: none;
+//     user-select: none;
+//
+// This is not optional and it is not styling. A long press is ALSO the
+// phone's own gesture for selecting text, so without those three the
+// hold selects whatever is under the thumb and raises the magnifier and
+// the Copy / Share bar at the same instant your sheet opens — two
+// things happening at once, one of them the browser's. Preventing
+// contextmenu, which this hook does, stops the menu on a desktop and
+// does nothing about either of those.
+//
+// They are three rules rather than one because they are three different
+// mechanisms: the callout is iOS only, and user-select needs the
+// -webkit- prefix to reach older WebKit as well as the standard name.
 // ──────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef } from "react";

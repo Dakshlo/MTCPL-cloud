@@ -219,7 +219,25 @@ export const TOOLS_CSS = `
 .tc-card:first-child { border-top-left-radius:var(--radius); border-top-right-radius:var(--radius); }
 .tc-card:last-child  { border-bottom:none;
   border-bottom-left-radius:var(--radius); border-bottom-right-radius:var(--radius); }
-.tc-card { cursor:pointer; -webkit-tap-highlight-color:transparent; }
+/* Holding a row must not also hand the phone's own text selection a
+   reason to wake up. Without these, a long press selects the part code,
+   throws up the magnifier and the Copy / Share bar, and the sheet opens
+   underneath it — both at once, which is what Daksh hit.
+
+   -webkit-touch-callout stops iOS's callout; user-select stops the
+   selection itself on everything else. Both are needed: they are
+   different mechanisms, and only the second one exists on Android.
+
+   The cost is that the code in the row can no longer be selected to
+   copy. It still can in the sheet the press opens, which is where
+   somebody reading a code out would be looking anyway. */
+.tc-card {
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
 .tc-card:hover { background:var(--surface-alt); }
 /* Something has to happen the instant a thumb lands, or the hold feels
    like a dead screen for half a second. */

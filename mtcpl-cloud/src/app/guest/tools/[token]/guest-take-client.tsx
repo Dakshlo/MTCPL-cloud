@@ -1031,6 +1031,9 @@ const CSS = `
    shelf is never left sitting underneath it. Only when it is there. */
 .gt:has(.ks-fab) { padding-bottom:110px; }
 .gt-tool {
+  /* The hold here is the keeper's only way in, so the phone's text
+     selection and Copy bar must stay out of it entirely. */
+  -webkit-touch-callout:none; -webkit-user-select:none; user-select:none;
   display:flex; align-items:center; gap:12px; width:100%; text-align:left;
   padding:15px 15px 15px 18px; border-radius:8px; cursor:pointer; font:inherit;
   background:var(--card); border:1.5px solid var(--line); position:relative;
