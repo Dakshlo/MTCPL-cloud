@@ -19,7 +19,7 @@ import { loadStore, orderForTaking, stockSignature, type ToolRow } from "@/lib/c
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
 import { currentToolSession, enrollableVendors, toolRoster } from "@/lib/cnc-tool-session";
 import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators";
-import { holdingsForPerson, machinesForVendor } from "@/lib/cnc-tool-usage";
+import { holdingsForPerson, machinesForVendor, menUnder } from "@/lib/cnc-tool-usage";
 import {
   enrolOperatorAction,
   guestTakeToolAction,
@@ -106,16 +106,20 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
         }))
     : [];
 
-  // Mig 238 — his account and his machines, on the server, so the strip
-  // over the shelf is right on first paint and the machine grid is
-  // already there when he taps through to it. Both are small and both
-  // are useless to anyone not signed in, so neither is fetched then.
-  const [held, machines] = session
+  // Mig 238 — his account, his machines, and (for a vendor) what each of
+  // his men is holding, all on the server, so the strip over the shelf
+  // is right on first paint and the machine grid is already there when
+  // he taps through to it. All three are small and all three are
+  // useless to anyone not signed in, so none is fetched then.
+  // `menUnder` scopes itself from the session, so a vendor's list can
+  // only ever be his own firm's men.
+  const [held, machines, men] = session
     ? await Promise.all([
         holdingsForPerson(session.profileId, session.operatorId),
         machinesForVendor(session.vendorId),
+        menUnder(session),
       ])
-    : [[], []];
+    : [[], [], []];
 
   const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map((t) => ({
     id: t.id,
@@ -151,6 +155,7 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       team={team}
       vendorChoices={vendorChoices}
       held={held}
+      men={men}
       machines={machines.map((m) => ({
         id: m.id,
         code: m.code,

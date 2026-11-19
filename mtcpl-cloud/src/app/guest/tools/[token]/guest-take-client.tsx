@@ -76,6 +76,25 @@ export type HeldLite = {
   imageUrl: string | null;
 };
 
+/**
+ * One of a vendor's men, with his own account on him (mig 238).
+ *
+ * Daksh, Nov 2026: "in mohit it should show all his down vendor so
+ * mohit can know what there vendor has taken."
+ *
+ * Read-only on this screen, and that is the point: Mohit can SEE what
+ * Shyam is carrying, and cannot file a usage or a return against it.
+ * That write is signed by the OTP of the man who is holding the tool.
+ */
+export type ManLite = {
+  id: string;
+  name: string;
+  /** Only on the office's view, where one list covers all three firms. */
+  company: string | null;
+  items: HeldLite[];
+  total: number;
+};
+
 /** Mig 238 — a CNC he may spend a tool on. His own company's only; the
  *  office sees all of them. The database checks it again. */
 export type MachineLite = {
@@ -116,7 +135,7 @@ type TakeRes =
   | { ok: true; left: number; toolName: string; qty: number }
   | { ok: false; error: string; signedOut?: boolean };
 type MyToolsRes =
-  | { ok: true; items: HeldLite[] }
+  | { ok: true; items: HeldLite[]; men: ManLite[] }
   | { ok: false; error: string; signedOut?: boolean };
 /** Both answers to "what happened to it" come back the same shape, and
  *  both carry his whole account afterwards — so the number on screen is
@@ -213,7 +232,7 @@ export function GuestTakeClient({
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
   enrolAction, removeOperatorAction, myTeamAction, registerAction,
   keeperTools, addStockAction, fixCountAction, newToolAction,
-  held: initialHeld, machines, myToolsAction, settleAction, undoUsageAction,
+  held: initialHeld, men: initialMen, machines, myToolsAction, settleAction, undoUsageAction,
 }: {
   token: string;
   label: string;
@@ -244,6 +263,10 @@ export function GuestTakeClient({
    *  shelf is right on first paint. A man who is holding four things
    *  should not have to wait for a fetch to be told so. */
   held: HeldLite[];
+  /** A vendor's men and what each is carrying. Empty for everybody
+   *  else — an operator has no men under him. Scoped on the server
+   *  from his session, so it can only ever be his own firm's. */
+  men: ManLite[];
   /** The CNCs he may file against. Empty for nobody — everyone who can
    *  sign in here belongs to a company or to the office. */
   machines: MachineLite[];
@@ -311,6 +334,11 @@ export function GuestTakeClient({
   const [useMode, setUseMode] = useState<"used" | "returned">("used");
   const [machine, setMachine] = useState<MachineLite | null>(null);
   const [mineBusy, setMineBusy] = useState(false);
+  /** His men's accounts, and the one he has opened up. Collapsed by
+   *  default: the names and the totals are the answer to "has anybody
+   *  got my tools", and the tool lines are the follow-up question. */
+  const [men, setMen] = useState<ManLite[]>(initialMen);
+  const [openMan, setOpenMan] = useState<string | null>(null);
   /** The usage he just filed, while it can still be taken back. Not the
    *  flash: the flash clears itself in under three seconds and a wrong
    *  machine number deserves longer than that, because it is going
@@ -419,7 +447,7 @@ export function GuestTakeClient({
           const mf = new FormData();
           mf.set("token", token);
           const mine = await myToolsAction(mf);
-          if (mine.ok) setHeld(mine.items);
+          if (mine.ok) { setHeld(mine.items); setMen(mine.men); }
         } catch {
           // A dropped network here must not take the screen down with
           // it: he is signed in, and an empty list he can refresh beats
@@ -519,6 +547,10 @@ export function GuestTakeClient({
         return;
       }
       setHeld(r.items);
+      // His men move while he is standing here — one of them is at the
+      // cupboard on his own phone. The list is re-read on every way in
+      // for the same reason his own is.
+      setMen(r.men);
     });
   }
 
@@ -682,6 +714,7 @@ export function GuestTakeClient({
       const r = await enrolAction(fd);
       if (!r.ok) { setErr(r.error); return; }
       setTeam(r.team);
+      syncMen(r.team);
       setNewName(""); setNewPhone("");
       setTeamMsg(r.message ?? "Added.");
     });
@@ -696,8 +729,33 @@ export function GuestTakeClient({
       const r = await removeOperatorAction(fd);
       if (!r.ok) { setErr(r.error); return; }
       setTeam(r.team);
+      syncMen(r.team);
       setTeamMsg(r.message ?? "Removed.");
     });
+  }
+
+  /**
+   * The dashboard's list, after the team itself has changed.
+   *
+   * The team answer carries each man's TOTAL but not his tools, which
+   * is all it needs to: a man just added is holding nothing, and a man
+   * just removed should leave the list rather than sit there with a
+   * stale number. Anything already on screen keeps its tool lines.
+   */
+  function syncMen(next: TeamMate[]) {
+    setMen((prev) => {
+      const known = new Map(prev.map((m) => [m.id, m]));
+      return next.map((t) => {
+        const had = known.get(t.id);
+        const total = t.held ?? 0;
+        // Only trust the lines we have if they still add up to what the
+        // server just said; otherwise show the number and no breakdown
+        // rather than a breakdown that disagrees with it.
+        const items = had && had.total === total ? had.items : [];
+        return { id: t.id, name: t.name, company: t.company ?? null, items, total };
+      });
+    });
+    setOpenMan(null);
   }
 
   const max = tool ? stockOf(tool) : 1;
@@ -706,6 +764,9 @@ export function GuestTakeClient({
    *  waiting on the other. */
   const heldTotal = held.reduce((a, h) => a + h.qty, 0);
   const shelfCount = tools.filter((t) => stockOf(t) > 0).length;
+  /** Everything his men are carrying between them — the one number a
+   *  vendor wants before he reads any name. */
+  const menTotal = men.reduce((a, m) => a + m.total, 0);
 
   return (
     <main className="gt allow-portrait">
@@ -1275,6 +1336,110 @@ export function GuestTakeClient({
             </span>
             <span className="gt-hand-go" aria-hidden>›</span>
           </button>
+
+          {/* ── his men's accounts ─────────────────────────────
+              Daksh, Nov 2026: "in mohit it should show all his down
+              vendor so mohit can know what there vendor has taken."
+
+              Under the shelf card and not above it, because a man who
+              came here to fetch a tool must not have to scroll past
+              his whole team to reach the store. This is the oversight
+              half of the page: HIS firm's tools, on other men's
+              phones, which he is answerable for and cannot settle.
+              Tapping a name opens what that man is carrying — a count
+              alone answers "is anything out", not "what is out". */}
+          {who?.canEnrol && men.length > 0 && (
+            <section className="gt-crew">
+              <div className="gt-crew-head">
+                <strong>{who.enrolScope === "any" ? "All the men" : "Your men"}</strong>
+                <em>
+                  {menTotal === 0
+                    ? "nothing out"
+                    : `${menTotal} ${menTotal === 1 ? "pc" : "pcs"} out`}
+                </em>
+              </div>
+
+              <div className="gt-crew-list">
+                {men.map((m) => {
+                  const open = openMan === m.id;
+                  return (
+                    <div key={m.id} className="gt-man" data-open={open ? "1" : undefined}>
+                      <button
+                        type="button"
+                        className="gt-man-row"
+                        onClick={() => setOpenMan(open ? null : m.id)}
+                        /* Nothing to open on a man holding nothing. The
+                           row stays in the list and stays readable —
+                           "Shyam has nothing out" is the answer Mohit
+                           came for, and a name that disappears at zero
+                           reads as a man who has left the firm. */
+                        disabled={m.total === 0}
+                        aria-expanded={m.total === 0 ? undefined : open}
+                      >
+                        <span className="gt-man-face" style={{ background: colourFor(m.name) }}>
+                          {initials(m.name)}
+                        </span>
+                        <span className="gt-man-text">
+                          <strong>{m.name}</strong>
+                          <span>
+                            {m.company ? `${m.company} · ` : ""}
+                            {m.total === 0
+                              ? "nothing in hand"
+                              : m.items.map((i) => i.name).join(", ")}
+                          </span>
+                        </span>
+                        {m.total === 0 ? (
+                          <span className="gt-man-nil" aria-hidden>—</span>
+                        ) : (
+                          <>
+                            <span className="gt-man-n">
+                              <b>{m.total}</b>
+                              <i>pcs</i>
+                            </span>
+                            <span className="gt-man-caret" aria-hidden>
+                              {open ? "⌃" : "⌄"}
+                            </span>
+                          </>
+                        )}
+                      </button>
+
+                      {open && m.items.length > 0 && (
+                        <div className="gt-man-items">
+                          {m.items.map((i) => (
+                            <div key={i.toolId} className="gt-man-item">
+                              <span
+                                className="gt-man-pic"
+                                data-empty={i.imageUrl ? undefined : "1"}
+                              >
+                                {i.imageUrl
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  ? <img src={i.imageUrl} alt="" />
+                                  : <i>{i.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+                              </span>
+                              <span className="gt-man-item-text">
+                                <strong>{i.name}</strong>
+                                {i.spec && <span>{i.spec}</span>}
+                              </span>
+                              <span className="gt-man-item-n">
+                                <b>{i.qty}</b>
+                                <i>{i.unit}</i>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* The one thing a vendor could read wrong off this list:
+                  that seeing it means he can settle it. He cannot. */}
+              <p className="gt-crew-foot">
+                Each man accounts for his own tools from his own phone.
+              </p>
+            </section>
+          )}
         </section>
       )}
 
@@ -2176,6 +2341,95 @@ const CSS = `
 }
 .gt-mine-qty b { font-size:19px; font-weight:800; }
 .gt-mine-qty i { font-style:normal; font-size:10.5px; color:var(--dim); }
+
+/* ── his men's accounts, under his own ──────────────────────────
+   Quieter than his own tools on purpose: these are not his to settle,
+   and a row that looks like .gt-mine-row looks tappable-to-act. No
+   card, no shadow — a ruled list under a small heading. */
+.gt-crew { margin:22px 0 0; }
+.gt-crew-head {
+  display:flex; align-items:baseline; gap:8px; margin:0 0 9px;
+  padding-bottom:7px; border-bottom:1px solid var(--line);
+}
+.gt-crew-head strong {
+  font-size:11.5px; font-weight:800; color:var(--dim);
+  text-transform:uppercase; letter-spacing:.07em;
+}
+.gt-crew-head em {
+  margin-left:auto; font-style:normal; font-size:11.5px; font-weight:700;
+  color:var(--brand); font-variant-numeric:tabular-nums;
+}
+.gt-crew-list { display:flex; flex-direction:column; gap:7px; }
+.gt-man {
+  background:var(--card); border:1px solid var(--line); border-radius:10px;
+  overflow:hidden;
+}
+.gt-man[data-open] { border-color:#d8d2c4; }
+.gt-man-row {
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  /* Shorter than .gt-mine-row (60px): this one is not an action he
+     takes with a glove on, it is a line he reads. */
+  min-height:52px; padding:8px 11px; font:inherit; color:var(--ink);
+  background:none; border:none; cursor:pointer;
+}
+.gt-man-row:active { background:#faf9f6; }
+/* A man with nothing out has nothing to open — but he must still read
+   as clearly as the others, so this is NOT the usual dimmed disabled. */
+.gt-man-row:disabled { cursor:default; }
+.gt-man-face {
+  flex:none; width:32px; height:32px; border-radius:50%;
+  display:grid; place-items:center; color:#fff;
+  font-size:12px; font-weight:800;
+}
+.gt-man-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; }
+.gt-man-text strong {
+  font-size:14px; font-weight:700;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-man-text span {
+  font-size:11px; color:var(--dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-man-n {
+  flex:none; display:flex; align-items:baseline; gap:3px;
+  font-variant-numeric:tabular-nums;
+}
+.gt-man-n b { font-size:17px; font-weight:800; }
+.gt-man-n i { font-style:normal; font-size:10px; color:var(--dim); }
+.gt-man-nil { flex:none; font-size:15px; color:#c6c0b2; }
+.gt-man-caret { flex:none; font-size:13px; color:#b9b4a8; width:12px; text-align:center; }
+
+.gt-man-items {
+  display:flex; flex-direction:column;
+  border-top:1px solid var(--line); background:#faf9f6;
+}
+.gt-man-item {
+  display:flex; align-items:center; gap:9px; padding:7px 11px 7px 14px;
+}
+.gt-man-item + .gt-man-item { border-top:1px solid #efece3; }
+.gt-man-pic {
+  flex:none; width:34px; height:34px; border-radius:7px; overflow:hidden;
+  display:grid; place-items:center; background:#f1f1ee;
+}
+.gt-man-pic img { width:100%; height:100%; object-fit:cover; display:block; }
+.gt-man-pic i { font-style:normal; font-size:14px; font-weight:700; color:var(--dim); }
+.gt-man-item-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; }
+.gt-man-item-text strong {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px; font-weight:600;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-man-item-text span { font-size:10.5px; color:var(--dim); }
+.gt-man-item-n {
+  flex:none; display:flex; align-items:baseline; gap:3px;
+  font-variant-numeric:tabular-nums;
+}
+.gt-man-item-n b { font-size:15px; font-weight:800; }
+.gt-man-item-n i { font-style:normal; font-size:10px; color:var(--dim); }
+
+.gt-crew-foot {
+  margin:9px 2px 0; font-size:11px; line-height:1.5; color:var(--dim);
+}
 
 /* The ten-minute take-back. Deliberately plainer than the green flash:
    it is not news, it is a last chance. */

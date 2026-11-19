@@ -22,6 +22,7 @@
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { fetchAllPaged } from "@/lib/paginate";
 import { TOOL_IMAGE_BUCKET, UNDO_WINDOW_MS } from "@/lib/cnc-tool-stock";
+import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators";
 
 /** A wrong machine number lands straight in a costing report, so it is
  *  takeable back for the same ten minutes as everything else in this
@@ -216,36 +217,136 @@ export async function holdingsForPerson(
 }
 
 /**
- * How much each of these men is carrying, in one query.
+ * What each of these men is carrying, named tool by named tool.
  *
- * For a vendor's "my men" page. Daksh, Nov 2026: "if Mohit's added
- * operator tries to take the tool from store to custody — his separate
- * dashboard will work, or Mohit's?"
+ * For a vendor's own screen. Daksh, Nov 2026: "if Mohit's additional
+ * added operator tries to take the tool from store to custody, how
+ * things will work — his separate dashboard will work or Mohit's?"
  *
  * His own. Custody is keyed on the PERSON, so Shyam's take sits in
  * Shyam's hands and Mohit's own page is unaffected — the man who signed
  * for it is the man who must account for it, which is the one rule this
- * whole module has. But Mohit vouched for him and is answerable for his
- * firm's tools, so he can see the total each of his men is holding.
+ * whole module has.
+ *
+ * And then: "make it this way in mohit it should show all his down
+ * vendor so mohit can know what there vendor has taken." So Mohit sees
+ * his men's accounts beside his own — the tools, not only a number.
+ * Seeing is not the same as answering for it: he cannot file a usage or
+ * a return on another man's holding, here or anywhere, because that
+ * write is signed by the OTP of the man who is holding it.
+ *
+ * One query for the whole team and one for the tool names, whatever the
+ * size of the team.
  */
-export async function heldByOperators(operatorIds: string[]): Promise<Map<string, number>> {
+export async function holdingsForOperators(
+  operatorIds: string[],
+): Promise<Map<string, HeldItem[]>> {
   const want = [...new Set(operatorIds)].filter(Boolean);
   if (want.length === 0) return new Map();
 
   const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("cnc_tool_holdings")
-    .select("operator_id, qty")
-    .in("operator_id", want)
-    .gt("qty", 0);
+  const rows = await fetchAllPaged<HoldingRow>((from, to) =>
+    admin
+      .from("cnc_tool_holdings")
+      .select("tool_id, profile_id, operator_id, qty")
+      .in("operator_id", want)
+      .gt("qty", 0)
+      .order("tool_id")
+      .range(from, to),
+  );
+  if (rows.length === 0) return new Map();
 
-  const out = new Map<string, number>();
-  for (const r of (data ?? []) as Array<{ operator_id: string | null; qty: number | string }>) {
+  const tools = await toolLookup(admin, rows.map((r) => r.tool_id));
+
+  const out = new Map<string, HeldItem[]>();
+  for (const r of rows) {
     if (!r.operator_id) continue;
-    out.set(r.operator_id, (out.get(r.operator_id) ?? 0) + Number(r.qty));
+    const t = tools.get(r.tool_id);
+    if (!t) continue; // archived out from under us
+    const list = out.get(r.operator_id) ?? [];
+    list.push({ ...t, qty: Number(r.qty) });
+    out.set(r.operator_id, list);
+  }
+  for (const list of out.values()) {
+    list.sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
   }
   return out;
 }
+
+/**
+ * The same thing added up — the badge on the team list.
+ *
+ * Derived from the detail on purpose. These two numbers are shown on
+ * the same screen, so a tool that has gone missing from `cnc_tools`
+ * must drop out of BOTH or the badge says 6 over a list of 4.
+ */
+export async function heldByOperators(operatorIds: string[]): Promise<Map<string, number>> {
+  const detail = await holdingsForOperators(operatorIds);
+  const out = new Map<string, number>();
+  for (const [id, items] of detail) {
+    out.set(id, items.reduce((a, i) => a + i.qty, 0));
+  }
+  return out;
+}
+
+/**
+ * A vendor's men, each with his own account on him.
+ *
+ * Daksh, Nov 2026: "in mohit it should show all his down vendor so
+ * mohit can know what there vendor has taken."
+ *
+ * The same scope rule as the team list it sits beside, and for the same
+ * reason — a vendor sees HIS firm's men and no other firm's, and the
+ * office three, who have no firm, see everybody. A man with nothing in
+ * his hands is still in the list: "Shyam has nothing out" is a fact
+ * Mohit came here for, and a name that vanishes when it reaches zero
+ * reads as a man who has left.
+ */
+export async function menUnder(session: {
+  canEnrol: boolean;
+  enrolScope: "own" | "any" | null;
+  vendorId: string | null;
+}): Promise<ManHolding[]> {
+  if (!session.canEnrol) return [];
+
+  const all = session.enrolScope === "any";
+  if (!all && !session.vendorId) return [];
+
+  const men = all ? await allActiveOperators() : await operatorsForVendor(session.vendorId!);
+  if (men.length === 0) return [];
+
+  const held = await holdingsForOperators(men.map((m) => m.id));
+
+  return men
+    .map((m) => {
+      const items = held.get(m.id) ?? [];
+      return {
+        id: m.id,
+        name: m.name,
+        // Only where one list covers all three companies. On a vendor's
+        // own page every name is his, and printing his firm against
+        // each of them says nothing.
+        company: all ? m.vendorName : null,
+        items,
+        total: items.reduce((a, i) => a + i.qty, 0),
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.company ?? "").localeCompare(b.company ?? "") ||
+        b.total - a.total ||
+        a.name.localeCompare(b.name),
+    );
+}
+
+export type ManHolding = {
+  /** The operator id — not a profile. An operator is not an app login. */
+  id: string;
+  name: string;
+  company: string | null;
+  items: HeldItem[];
+  total: number;
+};
 
 type ToolBits = Omit<HeldItem, "qty">;
 

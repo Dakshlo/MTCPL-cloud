@@ -32,9 +32,11 @@ import {
   canUndoUsage,
   heldByOperators,
   holdingsForPerson,
+  menUnder,
   settleRefusal,
   usageLinesSince,
   type HeldItem,
+  type ManHolding,
   type SettleOutcome,
 } from "@/lib/cnc-tool-usage";
 import {
@@ -977,10 +979,18 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
 // in TypeScript.
 
 export type MyToolsResult =
-  | { ok: true; items: HeldItem[] }
+  | {
+      ok: true;
+      items: HeldItem[];
+      /** His men's accounts, for a vendor. Empty for everybody else —
+       *  an operator has no men, and the list is scoped on the server
+       *  from his session, never from the form. */
+      men: ManHolding[];
+    }
   | { ok: false; error: string; signedOut?: boolean };
 
-/** His account: what he took and has not yet spent or given back. */
+/** His account: what he took and has not yet spent or given back —
+ *  plus, if he is a vendor, the same for each of his men. */
 export async function guestMyToolsAction(fd: FormData): Promise<MyToolsResult> {
   const token = String(fd.get("token") || "").trim();
 
@@ -993,7 +1003,11 @@ export async function guestMyToolsAction(fd: FormData): Promise<MyToolsResult> {
     return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
   }
 
-  return { ok: true, items: await holdingsForPerson(session.profileId, session.operatorId) };
+  const [items, men] = await Promise.all([
+    holdingsForPerson(session.profileId, session.operatorId),
+    menUnder(session),
+  ]);
+  return { ok: true, items, men };
 }
 
 export type SettleResult =
