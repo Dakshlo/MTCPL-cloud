@@ -249,7 +249,15 @@ export function GuestTakeClient({
   undoUsageAction: (fd: FormData) => Promise<SettleRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
-  const [step, setStep] = useState<Step>(session ? "tool" : "who");
+  // Signed in lands on HIS TOOLS, not on the shelf. Daksh, Nov 2026:
+  // "when they login they go to their dashboard — means what tools they
+  // have. And if they want they can go to store to get new tools."
+  //
+  // The shelf was the home page because taking was the only thing this
+  // door could do. It is not any more: most visits now are a man saying
+  // what he did with something he already has, and making him walk past
+  // a shelf full of things he is not taking to get to it was backwards.
+  const [step, setStep] = useState<Step>(session ? "mine" : "who");
   const [picked, setPicked] = useState<RosterPerson | null>(null);
   /** A tool held down in the list, handed to the keeper sheet so it
    *  opens on that tool instead of on a list of every tool. */
@@ -398,7 +406,18 @@ export function GuestTakeClient({
         enrolScope: r.enrolScope,
         canKeep: r.canKeep,
       });
-      setStep("tool");
+      // Onto his own tools. The page was rendered before anyone was
+      // signed in, so it had no account to hand over — fetch it here
+      // rather than drop him on an empty dashboard.
+      setStep("mine");
+      setMineBusy(true);
+      void (async () => {
+        const mf = new FormData();
+        mf.set("token", token);
+        const mine = await myToolsAction(mf);
+        setMineBusy(false);
+        if (mine.ok) setHeld(mine.items);
+      })();
 
       // The page was rendered before anyone was signed in, so it had no
       // team to hand over. Fetch it now rather than make him reload.
@@ -491,6 +510,16 @@ export function GuestTakeClient({
       }
       setHeld(r.items);
     });
+  }
+
+  /** Through to the shelf. Clears the search the last visit left
+   *  behind, so it never opens filtered to something he has forgotten
+   *  he typed. */
+  function openStore() {
+    setQ("");
+    setTool(null);
+    setErr(null);
+    setStep("tool");
   }
 
   function openUse(h: HeldLite) {
@@ -662,6 +691,11 @@ export function GuestTakeClient({
   }
 
   const max = tool ? stockOf(tool) : 1;
+  /** Everything in his hands, and what the shelf still has to offer —
+   *  both shown on the other page's way-in, so each side says what is
+   *  waiting on the other. */
+  const heldTotal = held.reduce((a, h) => a + h.qty, 0);
+  const shelfCount = tools.filter((t) => stockOf(t) > 0).length;
 
   return (
     <main className="gt allow-portrait">
@@ -996,32 +1030,15 @@ export function GuestTakeClient({
       {/* ── 3. tool ────────────────────────────────────────────── */}
       {step === "tool" && (
         <section className="gt-body">
-          <h1 className="gt-q">What are you taking?</h1>
+          {/* The shelf is a place he went TO now, so it needs a way
+              back. The count rides on it so a take visibly lands in
+              his hands without him leaving the shelf to check. */}
+          <button type="button" className="gt-back" onClick={openMine}>
+            ← In your hands
+            {heldTotal > 0 && <i className="gt-back-n">{heldTotal}</i>}
+          </button>
 
-          {/* ── his account, over the shelf (mig 238) ─────────────
-              A strip and not a header icon. The header already holds
-              four things and is squeezed at 375px — and this one is
-              only worth screen space when there IS something in his
-              hands, which an icon cannot say. It also answers the
-              question the shelf raises: he took five yesterday, so
-              where are they. */}
-          {held.length > 0 && (
-            <button type="button" className="gt-hand" onClick={openMine}>
-              <span className="gt-hand-n">{held.reduce((a, h) => a + h.qty, 0)}</span>
-              <span className="gt-hand-text">
-                <strong>In your hands</strong>
-                {/* Kept short enough to survive a 375px screen without
-                    an ellipsis — the line that explains the tap is the
-                    worst one to cut off halfway. */}
-                <em>
-                  {held.length === 1
-                    ? held[0].name
-                    : `${held.length} tools · use or give back`}
-                </em>
-              </span>
-              <span className="gt-hand-go" aria-hidden>›</span>
-            </button>
-          )}
+          <h1 className="gt-q">What are you taking?</h1>
 
           {tools.length > 6 && (
             <div className="gt-search">
@@ -1128,15 +1145,7 @@ export function GuestTakeClient({
       {/* ── 5. his account (mig 238) ───────────────────────────── */}
       {step === "mine" && (
         <section className="gt-body">
-          <button type="button" className="gt-back" onClick={() => setStep("tool")}>
-            ← Back to the shelf
-          </button>
-
           <h1 className="gt-h1">In your hands</h1>
-          <p className="gt-sub">
-            What you took and have not accounted for yet. Tap one to say it went
-            into a machine, or to give it back.
-          </p>
 
           {/* The usage just filed, while it can still be taken back. A
               wrong machine number is the easy mistake on this screen. */}
@@ -1157,9 +1166,7 @@ export function GuestTakeClient({
           {mineBusy && <div className="gt-reg-wait">Reading your account…</div>}
 
           {!mineBusy && held.length === 0 ? (
-            <div className="gt-blank">
-              Nothing in your hands. Everything you took is accounted for.
-            </div>
+            <div className="gt-blank">Nothing in your hands right now.</div>
           ) : (
             <div className="gt-mine">
               {held.map((h) => (
@@ -1189,6 +1196,24 @@ export function GuestTakeClient({
               ))}
             </div>
           )}
+
+          {/* ── the way to the shelf ───────────────────────────
+              The store is a SECOND place now, not the page he landed
+              on. Daksh: "if they want they can go to store to get new
+              tools in their dashboard." So it is one card, below his
+              own tools, which is the order he described them in. */}
+          <button type="button" className="gt-store-go" onClick={openStore}>
+            <span className="gt-store-ico" aria-hidden>🧰</span>
+            <span className="gt-store-text">
+              <strong>Take from the store</strong>
+              <em>
+                {shelfCount === 0
+                  ? "The shelf is empty"
+                  : `${shelfCount} ${shelfCount === 1 ? "tool" : "tools"} on the shelf`}
+              </em>
+            </span>
+            <span className="gt-hand-go" aria-hidden>›</span>
+          </button>
         </section>
       )}
 
@@ -1980,27 +2005,35 @@ const CSS = `
 
 /* ── his account, and what leaves it (mig 238) ───────────────────── */
 
-/* The strip over the shelf. Reads as one object — a number, what it is,
-   and somewhere to go — because it is one tap. */
-.gt-hand {
-  display:flex; align-items:center; gap:11px; width:100%; text-align:left;
-  margin:0 0 12px; padding:10px 12px; min-height:60px;
-  background:var(--card); border:1px solid var(--line); border-left:3px solid var(--gold);
-  border-radius:12px; cursor:pointer; font:inherit; color:var(--ink);
-}
-.gt-hand:active { background:#faf9f6; }
-.gt-hand-n {
-  flex:none; min-width:38px; height:38px; padding:0 8px; border-radius:10px;
-  background:var(--brand); color:#fff; display:grid; place-items:center;
-  font-size:17px; font-weight:800; font-variant-numeric:tabular-nums;
-}
-.gt-hand-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
-.gt-hand-text strong { font-size:13.5px; font-weight:700; }
-.gt-hand-text em {
-  font-style:normal; font-size:11.5px; color:var(--dim); line-height:1.4;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
 .gt-hand-go { margin-left:auto; flex:none; font-size:20px; color:#b9b4a8; }
+
+/* The count riding on the way back to his own tools. */
+.gt-back-n {
+  font-style:normal; font-size:11px; font-weight:800; margin-left:7px;
+  padding:1px 7px; border-radius:999px; background:var(--brand); color:#fff;
+  font-variant-numeric:tabular-nums;
+}
+
+/* ── the way through to the shelf ───────────────────────────────
+   Below his own tools, because the shelf is the second place now and
+   not the page he landed on. Gold-filled rather than outlined: it is
+   the only thing on the dashboard that goes somewhere new, and on an
+   empty dashboard it is the only thing to do at all. */
+.gt-store-go {
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  margin:16px 0 0; padding:13px 14px; min-height:64px;
+  background:var(--gold); border:1px solid var(--gold-dark); border-radius:12px;
+  cursor:pointer; font:inherit; color:#fff;
+}
+.gt-store-go:active { background:var(--gold-dark); }
+.gt-store-ico {
+  flex:none; width:38px; height:38px; border-radius:10px;
+  background:rgba(255,255,255,.22); display:grid; place-items:center; font-size:19px;
+}
+.gt-store-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.gt-store-text strong { font-size:14.5px; font-weight:700; }
+.gt-store-text em { font-style:normal; font-size:11.5px; color:rgba(255,255,255,.85); }
+.gt-store-go .gt-hand-go { color:rgba(255,255,255,.7); }
 
 .gt-mine { display:flex; flex-direction:column; gap:8px; }
 .gt-mine-row {
