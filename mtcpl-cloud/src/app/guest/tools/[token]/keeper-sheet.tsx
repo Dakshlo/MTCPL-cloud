@@ -42,7 +42,7 @@ type Res = { ok: true; message: string } | { ok: false; error: string };
 type Job = "menu" | "stock" | "count" | "new";
 
 export function KeeperSheet({
-  token, tools, onDone, jump, onJumpHandled,
+  token, tools, onDone, jump, onJumpHandled, newTool, onNewToolHandled,
   addStockAction, fixCountAction, newToolAction,
 }: {
   token: string;
@@ -59,6 +59,19 @@ export function KeeperSheet({
    */
   jump?: KeeperTool | null;
   onJumpHandled?: () => void;
+  /**
+   * Open straight on New tool, from the header.
+   *
+   * Daksh, Nov 2026: "that add stock button has 3 options — remove it,
+   * because 2 of the 3 are already on long hold on the item. New tool
+   * goes next to the men and the timeline."
+   *
+   * He is right, and the menu had become the only way to reach a verb
+   * you can now reach by holding the thing it applies to. What was left
+   * of it was one real entry — New tool — behind two taps and a list.
+   */
+  newTool?: boolean;
+  onNewToolHandled?: () => void;
   /** Every live tool, empty ones included — an empty shelf is exactly
    *  what you have come to refill. */
   tools: KeeperTool[];
@@ -138,6 +151,16 @@ export function KeeperSheet({
   }
 
   useEffect(() => {
+    if (!newTool) return;
+    setScoped(false);
+    setPicked(null);
+    setJob("new");
+    setErr(null);
+    setOpen(true);
+    onNewToolHandled?.();
+  }, [newTool, onNewToolHandled]);
+
+  useEffect(() => {
     if (!jump) return;
     setPicked(jump);
     setScoped(true);
@@ -151,21 +174,16 @@ export function KeeperSheet({
     job === "menu" && scoped && picked ? picked.name
       : job === "stock" ? (picked ? "How many came in?" : "Add stock to…")
       : job === "count" ? (picked ? "What does the shelf say?" : "Fix the count of…")
-        : job === "new" ? "New tool"
-          : "Keep the shelf";
+        : "New tool";
 
   return (
     <>
-      {/* The button. Bottom centre, where the thumb already is.
-          Gone while the sheet is up: it would otherwise sit behind the
-          scrim, dimmed but still legible, looking like something you
-          could press. */}
-      {!open && (
-        <button type="button" className="ks-fab" onClick={() => setOpen(true)}>
-          <span aria-hidden>＋</span> Add stock
-        </button>
-      )}
-
+      {/* The bottom-centre "＋ Add stock" button is gone. It opened a
+          menu of three, and two of those three — add stock, fix count —
+          are now reached by holding the tool they apply to, which is
+          both fewer taps and unambiguous about WHICH tool. The third,
+          New tool, moved up beside the men and the register, where the
+          other things-you-can-open already live. */}
       {open && (
         <div className="ks-wrap" role="dialog" aria-modal="true" aria-label="Keep the shelf">
           <div className="ks-scrim" onClick={close} />
@@ -184,9 +202,12 @@ export function KeeperSheet({
                   onClick={() => {
                     // Held a tool to get here: Back belongs to that
                     // tool's two jobs, not to a list of every tool.
+                    // Scoped = arrived by holding a tool, so Back is
+                    // that tool's two jobs. Otherwise the only way in
+                    // is New tool from the header, and back from there
+                    // is out.
                     if (scoped) setJob("menu");
-                    else if (picked) setPicked(null);
-                    else reset();
+                    else close();
                   }}
                   aria-label="Back"
                 >
@@ -222,30 +243,6 @@ export function KeeperSheet({
                 <button type="button" onClick={() => setJob("stock")}>
                   <span className="ks-ic" data-t="in" aria-hidden>📦</span>
                   <span><strong>Add stock</strong><em>A box has arrived</em></span>
-                  <span className="ks-go" aria-hidden>›</span>
-                </button>
-                <button type="button" onClick={() => setJob("count")}>
-                  <span className="ks-ic" data-t="fix" aria-hidden>⚖</span>
-                  <span><strong>Fix count</strong><em>The shelf and the register disagree</em></span>
-                  <span className="ks-go" aria-hidden>›</span>
-                </button>
-              </div>
-            )}
-
-            {job === "menu" && !scoped && (
-              <div className="ks-menu">
-                <button type="button" onClick={() => setJob("stock")}>
-                  <span className="ks-ic" data-t="in" aria-hidden>📦</span>
-                  <span><strong>Add stock</strong><em>A box has arrived</em></span>
-                  <span className="ks-go" aria-hidden>›</span>
-                </button>
-                {/* Order asked for, Nov 2026, and it is the right one:
-                    most days to least, with the one that can hide a
-                    loss at the bottom where it is not reached by
-                    accident. */}
-                <button type="button" onClick={() => setJob("new")}>
-                  <span className="ks-ic" data-t="new" aria-hidden>✚</span>
-                  <span><strong>New tool</strong><em>Something the store has never had</em></span>
                   <span className="ks-go" aria-hidden>›</span>
                 </button>
                 <button type="button" onClick={() => setJob("count")}>
@@ -495,17 +492,7 @@ export function KeeperSheet({
 
 export const KEEPER_CSS = `
 /* ── the button ─────────────────────────────────────────── */
-.ks-fab {
-  position:fixed; left:50%; transform:translateX(-50%);
-  bottom:calc(16px + env(safe-area-inset-bottom)); z-index:60;
-  display:flex; align-items:center; gap:8px; cursor:pointer;
-  padding:15px 26px; border:none; border-radius:999px; font:inherit;
-  font-size:15.5px; font-weight:700; color:#fff; white-space:nowrap;
-  background:#C9973A;
-  box-shadow:0 10px 26px rgba(79,70,229,.42), 0 2px 6px rgba(0,0,0,.18);
-}
-.ks-fab:active { transform:translateX(-50%) scale(.97); }
-.ks-fab span { font-size:19px; line-height:1; }
+/* .ks-fab and its rules are gone with the button itself. */
 
 /* ── the sheet ──────────────────────────────────────────── */
 .ks-wrap { position:fixed; inset:0; z-index:70; display:flex; align-items:flex-end; }

@@ -200,6 +200,8 @@ export function GuestTakeClient({
   /** A tool held down in the list, handed to the keeper sheet so it
    *  opens on that tool instead of on a list of every tool. */
   const [jump, setJump] = useState<KeeperTool | null>(null);
+  /** Opens the keeper sheet straight on New tool, from the header. */
+  const [wantNew, setWantNew] = useState(false);
   /** The "3 × DSZ 10.4-40 taken" popup that replaced the done screen.
    *  It sits over the shelf and takes itself away. */
   const [flash, setFlash] = useState<
@@ -505,6 +507,22 @@ export function GuestTakeClient({
             >
               <span aria-hidden>👷</span>
               {team.length > 0 && <i>{team.length}</i>}
+            </button>
+          )}
+
+          {/* New tool. The only survivor of the bottom-centre menu —
+              add stock and fix count are on a long hold now, so this is
+              all that was left of it, and it belongs up here with the
+              other things you open rather than behind two taps. */}
+          {who?.canKeep && step === "tool" && (
+            <button
+              type="button"
+              className="gt-men"
+              onClick={() => setWantNew(true)}
+              aria-label="New tool"
+              title="Something the store has never had"
+            >
+              <span aria-hidden>＋</span>
             </button>
           )}
 
@@ -897,6 +915,8 @@ export function GuestTakeClient({
           tools={keeperTools}
           jump={jump}
           onJumpHandled={() => setJump(null)}
+          newTool={wantNew}
+          onNewToolHandled={() => setWantNew(false)}
           addStockAction={addStockAction}
           fixCountAction={fixCountAction}
           newToolAction={newToolAction}
@@ -966,32 +986,55 @@ export function GuestTakeClient({
                     </div>
                     <div className="gt-tl-rail">
                       {d.lines.map((l) => {
-                        const out = l.delta < 0;
+                        // Daksh, Nov 2026: "the timeline is still
+                        // confusing — what is minus, what is plus. The
+                        // difference between count corrected, stock in
+                        // and someone issued should be obvious."
+                        //
+                        // It was keyed on the SIGN, so a take and a
+                        // downward count correction were both an amber
+                        // minus and looked identical — even though one
+                        // is a man walking off with four bits and the
+                        // other is nothing leaving the cupboard at all.
+                        //
+                        // Keyed on the ACTION now. Three of them, three
+                        // colours, three glyphs, and the word written
+                        // out. The sign is still there but it is no
+                        // longer carrying the meaning on its own.
+                        const act: "in" | "out" | "fix" =
+                          l.kind === "receive" ? "in" : l.kind === "adjust" ? "fix" : "out";
+                        const qty = Math.abs(l.delta);
+                        const word = act === "in" ? "Stock in" : act === "out" ? "Taken" : "Count fixed";
+                        const glyph = act === "in" ? "↓" : act === "out" ? "↑" : "=";
+                        const sign = act === "in" ? "+" : act === "out" ? "−" : l.delta < 0 ? "−" : "+";
+                        // A correction moves no goods, so it says what it
+                        // did to the BOOK rather than naming a person who
+                        // carried something away.
+                        const who = l.personName
+                          ? `${l.mine ? "You" : l.personName}${l.company && !l.mine ? ` · ${l.company}` : ""}`
+                          : act === "fix"
+                            ? `Register ${l.delta < 0 ? "lowered" : "raised"} by ${qty} · nothing was taken`
+                            : act === "in"
+                              ? "Onto the shelf"
+                              : "Store";
                         return (
                           <div
                             key={l.id}
                             className="gt-tl-row"
-                            data-dir={out ? "out" : "in"}
+                            data-act={act}
                             data-mine={l.mine ? "1" : undefined}
                             data-void={l.undone ? "1" : undefined}
                           >
                             <span className="gt-tl-time">{istTime(l.at)}</span>
-                            <span className="gt-tl-dot" aria-hidden />
+                            <span className="gt-tl-dot" aria-hidden>{glyph}</span>
                             <span className="gt-tl-body">
-                              <span className="gt-tl-what">
-                                <b>{out ? "−" : "+"}{Math.abs(l.delta)}</b>
-                                <span className="gt-tl-tool">{l.toolName}</span>
+                              <span className="gt-tl-head">
+                                <span className="gt-tl-badge">{word}</span>
+                                <b className="gt-tl-qty">{sign}{qty}</b>
                               </span>
+                              <span className="gt-tl-tool">{l.toolName}</span>
                               <span className="gt-tl-who">
-                                {l.personName
-                                  ? <>{l.mine ? "You" : l.personName}{l.company && !l.mine ? ` · ${l.company}` : ""}</>
-                                  // No name against it means the office did it from
-                                  // the shelf side. Say WHICH thing they did — a bare
-                                  // "Store" against a minus five is the one line in
-                                  // here somebody would come back and ask about.
-                                  : l.kind === "receive" ? <>Stock in</>
-                                    : l.kind === "adjust" ? <>Count corrected</>
-                                      : <>Store</>}
+                                {who}
                                 {l.note && <> · {l.note}</>}
                                 {l.undone && <> · <b className="gt-tl-undone">undone</b></>}
                               </span>
@@ -1433,38 +1476,57 @@ const CSS = `
    sequence rather than as a stack of cards. */
 .gt-tl-rail { position:relative; }
 .gt-tl-row {
-  position:relative; display:grid; grid-template-columns:52px 16px minmax(0,1fr);
-  align-items:start; gap:8px; padding:7px 0;
+  position:relative; display:grid; grid-template-columns:52px 24px minmax(0,1fr);
+  align-items:start; gap:9px; padding:9px 0;
 }
 .gt-tl-row::before {
-  content:""; position:absolute; left:59px; top:0; bottom:0; width:1.5px;
+  content:""; position:absolute; left:63px; top:0; bottom:0; width:1.5px;
   background:var(--line);
 }
-.gt-tl-row:first-child::before { top:14px; }
-.gt-tl-row:last-child::before { bottom:calc(100% - 14px); }
-.gt-tl-time { font-size:11px; color:var(--dim); text-align:right; padding-top:2px;
+.gt-tl-row:first-child::before { top:16px; }
+.gt-tl-row:last-child::before { bottom:calc(100% - 16px); }
+.gt-tl-time { font-size:11px; color:var(--dim); text-align:right; padding-top:4px;
   font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* The dot carries the action's own glyph, so the three kinds are told
+   apart by SHAPE before any colour or word is read — which is the only
+   part of this that survives a cracked screen in bad light. */
 .gt-tl-dot {
-  position:relative; z-index:1; width:9px; height:9px; margin:5px auto 0;
-  border-radius:50%; background:var(--dim); box-shadow:0 0 0 3px #f6f6f4;
+  position:relative; z-index:1; width:22px; height:22px; margin:1px auto 0;
+  border-radius:50%; display:grid; place-items:center;
+  font-size:12px; font-weight:700; line-height:1;
+  color:#fff; box-shadow:0 0 0 3px #f6f6f4;
 }
-.gt-tl-row[data-dir="out"] .gt-tl-dot { background:var(--low); }
-.gt-tl-row[data-dir="in"]  .gt-tl-dot { background:var(--ok); }
-/* Your own lines carry a gold ring, so "what did I take" is answerable
-   without leaving the Everyone view. */
+.gt-tl-row[data-act="out"] .gt-tl-dot { background:var(--low); }
+.gt-tl-row[data-act="in"]  .gt-tl-dot { background:var(--ok); }
+/* A correction is bookkeeping, not goods moving — hollow on purpose,
+   so it never reads as a thing that left the cupboard. */
+.gt-tl-row[data-act="fix"] .gt-tl-dot {
+  background:#fff; color:#6b7280; border:1.5px solid #c9c6bf;
+}
+/* Your own lines keep the gold ring. */
 .gt-tl-row[data-mine] .gt-tl-dot { box-shadow:0 0 0 3px #f6f6f4, 0 0 0 5px var(--gold); }
 .gt-tl-row[data-void] { opacity:.45; }
-.gt-tl-row[data-void] .gt-tl-what { text-decoration:line-through; }
+.gt-tl-row[data-void] .gt-tl-tool { text-decoration:line-through; }
 
 .gt-tl-body { min-width:0; display:flex; flex-direction:column; gap:2px; }
-.gt-tl-what { display:flex; align-items:baseline; gap:7px; min-width:0; }
-.gt-tl-what b { font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums;
-  flex:0 0 auto; }
-.gt-tl-row[data-dir="out"] .gt-tl-what b { color:var(--low); }
-.gt-tl-row[data-dir="in"]  .gt-tl-what b { color:var(--ok); }
+.gt-tl-head { display:flex; align-items:baseline; gap:8px; }
+.gt-tl-badge {
+  font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  padding:2px 7px; border-radius:999px; white-space:nowrap;
+}
+.gt-tl-qty { margin-left:auto; font-size:15px; font-weight:700; line-height:1.2;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.gt-tl-row[data-act="out"] .gt-tl-badge { background:var(--lowbg); color:var(--low); }
+.gt-tl-row[data-act="out"] .gt-tl-qty   { color:var(--low); }
+.gt-tl-row[data-act="in"]  .gt-tl-badge { background:var(--okbg);  color:var(--ok); }
+.gt-tl-row[data-act="in"]  .gt-tl-qty   { color:var(--ok); }
+.gt-tl-row[data-act="fix"] .gt-tl-badge { background:#eeece7; color:#5b5750; }
+.gt-tl-row[data-act="fix"] .gt-tl-qty   { color:#5b5750; font-weight:600; }
+
 .gt-tl-tool {
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:12.5px; font-weight:600; color:var(--ink);
+  font-size:13px; font-weight:600; color:var(--ink);
   font-variant-numeric:tabular-nums;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
