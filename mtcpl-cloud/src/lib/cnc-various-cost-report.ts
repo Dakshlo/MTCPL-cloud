@@ -64,6 +64,26 @@ export type CncVendorRow = {
   perMachinePerDay: number;
   /** Operational expenses for this vendor in the period (prorated). */
   operationalCost: number;
+  /**
+   * Just the TOOLS slice of that operational cost (prorated), and what
+   * it works out to per unit of carved output.
+   *
+   * Daksh's dad, Nov 2026: "CNC tool costing, and how much it costs to
+   * make one CFT, tools only — total and vendor wise."
+   *
+   * It was already being collected: cnc_vendor_expenses has carried a
+   * `tools` category per vendor per month since the table was built,
+   * and this report has been folding it into operationalCost all
+   * along. Nothing new is measured here — the slice is simply kept
+   * instead of being added away.
+   *
+   * NOT from the cupboard tool store (migs 227+). That knows who took
+   * which bit, which is the better number, but it holds six weeks of
+   * mostly test takes — two real ones. When it has a year of real
+   * takes behind it, it becomes the honest source for this and the
+   * month-level figure becomes the cross-check.
+   */
+  toolCost: number;
   /** Depreciation for this vendor's machines, prorated to the period. */
   depreciationCost: number;
   /** Operational + depreciation. */
@@ -74,6 +94,16 @@ export type CncVendorRow = {
   costPerCft: number;
   /** totalCost / combined. NaN when no production. */
   costPerCombined: number;
+  /** toolCost / cft — "what does one CFT cost in tools alone". NaN with
+   *  no CFT output. Divided the same way as costPerCft above: against
+   *  CFT alone, not against combined output, so the two columns answer
+   *  the same question about the same denominator. */
+  toolPerCft: number;
+  /** toolCost / sft. NaN when no SFT output. */
+  toolPerSft: number;
+  /** toolCost / combined — the blended one, for when a vendor carves
+   *  both thin and thick in the same period. */
+  toolPerCombined: number;
 };
 
 export type CncExpenseBreakdownRow = {
@@ -124,6 +154,13 @@ export type CncVariousCostReport = {
   costPerSft: number;
   /** totalCostForPeriod / totalCft. NaN when no production. */
   costPerCft: number;
+  /** The plant's whole tool spend for the period (prorated), and what
+   *  one unit of output cost in tools alone. The "total also" half of
+   *  the same question. */
+  toolCostForPeriod: number;
+  toolPerCft: number;
+  toolPerSft: number;
+  toolPerCombined: number;
   /** Effective days in the window (clamped to "today" for current/future
    *  periods) — powers the per-day / per-machine-per-day columns. */
   daysInWindow: number;
@@ -775,6 +812,9 @@ export async function buildCncVariousCostReport(
           ? plantElectricForPeriod / allVendorIds.size
           : 0;
     const operationalCost = (exp?.cost ?? 0) + electricShare;
+    // Already accumulated per vendor per category above — this only
+    // stops throwing the tools slice away.
+    const toolCost = exp?.byCategory.tools ?? 0;
     const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
     const totalCost = operationalCost + depreciationCost;
     const combined = sft + cft;
@@ -790,11 +830,15 @@ export async function buildCncVariousCostReport(
       perDay: combined / daysInWindow,
       perMachinePerDay: machineCount > 0 ? combined / machineCount / daysInWindow : NaN,
       operationalCost,
+      toolCost,
       depreciationCost,
       totalCost,
       costPerSft: sft > 0 ? totalCost / sft : NaN,
       costPerCft: cft > 0 ? totalCost / cft : NaN,
       costPerCombined: combined > 0 ? totalCost / combined : NaN,
+      toolPerCft: cft > 0 ? toolCost / cft : NaN,
+      toolPerSft: sft > 0 ? toolCost / sft : NaN,
+      toolPerCombined: combined > 0 ? toolCost / combined : NaN,
     };
   });
   // Sort by total cost desc — biggest contributors at the top.
@@ -815,6 +859,8 @@ export async function buildCncVariousCostReport(
   }));
 
   const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
+  const toolCostForPeriod = aggregateByCategory.byCategory.tools || 0;
+  const totalCombinedForPeriod = totalSft + totalCft;
 
   return {
     period,
@@ -826,6 +872,11 @@ export async function buildCncVariousCostReport(
     totalCostForPeriod,
     costPerSft: totalSft > 0 ? totalCostForPeriod / totalSft : NaN,
     costPerCft: totalCft > 0 ? totalCostForPeriod / totalCft : NaN,
+    toolCostForPeriod,
+    toolPerCft: totalCft > 0 ? toolCostForPeriod / totalCft : NaN,
+    toolPerSft: totalSft > 0 ? toolCostForPeriod / totalSft : NaN,
+    toolPerCombined:
+      totalCombinedForPeriod > 0 ? toolCostForPeriod / totalCombinedForPeriod : NaN,
     daysInWindow,
     expenseBreakdown,
     perVendor,

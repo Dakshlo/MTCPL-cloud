@@ -335,6 +335,26 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           hint={`Op ${fmtINR(report.operationalForPeriod)} + Dep ${fmtINR(report.depreciationForPeriod)}`}
           tone="warning"
         />
+        {/* Daksh's dad, Nov 2026: "how much does it cost to make one CFT,
+            tools only." Tools are the one input he buys per piece and
+            can argue about with a supplier, so the blended cost-per-unit
+            above buries exactly the number he wanted. Same denominator
+            as the ₹/CFT column beside it, so the two agree. */}
+        <DualKpiTile
+          label="Tool Cost"
+          primary={
+            Number.isFinite(report.toolPerCft)
+              ? `${fmtINR(report.toolPerCft)} / CFT`
+              : "—"
+          }
+          secondary={`${fmtINR(report.toolCostForPeriod)} on tools`}
+          hint={
+            report.toolCostForPeriod > 0
+              ? "Tools only — no labour, power or machine"
+              : "No tool spend entered for this period"
+          }
+          tone="success"
+        />
         {dailyAvg && (
           <DualKpiTile
             label="Daily Average"
@@ -357,7 +377,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           </div>
         ) : (
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-          <table style={{ width: "100%", minWidth: 880, borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", minWidth: 1010, borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                 <th style={th()}>Vendor</th>
@@ -369,11 +389,23 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
                 <th style={{ ...th(), textAlign: "right" }}>Slabs</th>
                 <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
+                <th
+                  style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
+                  title="The tools slice of this vendor's operational cost, prorated to this period"
+                >
+                  Tools
+                </th>
                 <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
                 <th style={{ ...th(), textAlign: "right" }}>Total</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / CFT</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Total cost ÷ combined output">₹ / unit</th>
+                <th
+                  style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
+                  title="Tool spend ÷ CFT carved — what one CFT costs in tools alone"
+                >
+                  ₹ / CFT · tools
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -404,6 +436,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtINR(v.operationalCost)}
                   </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>
+                    {v.toolCost > 0 ? fmtINR(v.toolCost) : "—"}
+                  </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
                     {fmtINR(v.depreciationCost)}
                   </td>
@@ -418,6 +453,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
                     {fmtINR(v.costPerCombined)}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
+                    {Number.isFinite(v.toolPerCft) ? fmtINR(v.toolPerCft) : "—"}
                   </td>
                 </tr>
               ))}
@@ -454,6 +492,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.operationalForPeriod)}
                 </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
+                  {report.toolCostForPeriod > 0 ? fmtINR(report.toolCostForPeriod) : "—"}
+                </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--muted)" }}>
                   {fmtINR(report.depreciationForPeriod)}
                 </td>
@@ -468,6 +509,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(costPerCombined)}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
+                  {Number.isFinite(report.toolPerCft) ? fmtINR(report.toolPerCft) : "—"}
                 </td>
               </tr>
                 );
