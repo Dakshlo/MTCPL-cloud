@@ -94,16 +94,44 @@ export type CncVendorRow = {
   costPerCft: number;
   /** totalCost / combined. NaN when no production. */
   costPerCombined: number;
-  /** toolCost / cft — "what does one CFT cost in tools alone". NaN with
-   *  no CFT output. Divided the same way as costPerCft above: against
-   *  CFT alone, not against combined output, so the two columns answer
-   *  the same question about the same denominator. */
+  /** toolCost / cft — what one CFT costs in tools alone, ignoring
+   *  everything carved in SFT. Kept, but no longer what the screens
+   *  show: see toolPerCombined. */
   toolPerCft: number;
   /** toolCost / sft. NaN when no SFT output. */
   toolPerSft: number;
-  /** toolCost / combined — the blended one, for when a vendor carves
-   *  both thin and thick in the same period. */
+  /**
+   * toolCost / (cft + sft) — THE tool rate, and what the tile and the
+   * table now read.
+   *
+   * Daksh, Nov 2026: "that rupee/per cft tool — in that formula it
+   * counts cft but it should count cft with sft too."
+   *
+   * He is right, and the first version was wrong in a way that got
+   * worse the thinner a vendor's work was. The tool bill is one bill:
+   * the same bits cut the thin slabs and the thick ones, and nothing
+   * in cnc_vendor_expenses says which share went where. Dividing all
+   * of it by CFT alone charged every rupee of it to the thick work and
+   * handed the thin work its tools for free — so a vendor who carved
+   * mostly thin showed a ₹/CFT far above a vendor who carved mostly
+   * thick, on the same shelf of tools and the same spend.
+   *
+   * Over the whole combined output the bill lands on everything it
+   * actually cut. NaN when nothing was carved at all.
+   */
   toolPerCombined: number;
+  /**
+   * The maintenance slice of the same operational cost, prorated the
+   * same way, and what it comes to per unit of output.
+   *
+   * Daksh, Nov 2026: "also add new rupee/maintenance." The second
+   * thing a CNC costs you per piece after the bits themselves, and the
+   * one that tells you a machine is wearing out while its output still
+   * looks fine.
+   */
+  maintenanceCost: number;
+  /** maintenanceCost / (cft + sft). NaN when nothing was carved. */
+  maintenancePerCombined: number;
 };
 
 export type CncExpenseBreakdownRow = {
@@ -161,6 +189,10 @@ export type CncVariousCostReport = {
   toolPerCft: number;
   toolPerSft: number;
   toolPerCombined: number;
+  /** The plant's maintenance spend for the period (prorated), and what
+   *  it comes to per unit of combined output. */
+  maintenanceForPeriod: number;
+  maintenancePerCombined: number;
   /** Effective days in the window (clamped to "today" for current/future
    *  periods) — powers the per-day / per-machine-per-day columns. */
   daysInWindow: number;
@@ -815,6 +847,7 @@ export async function buildCncVariousCostReport(
     // Already accumulated per vendor per category above — this only
     // stops throwing the tools slice away.
     const toolCost = exp?.byCategory.tools ?? 0;
+    const maintenanceCost = exp?.byCategory.maintenance ?? 0;
     const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
     const totalCost = operationalCost + depreciationCost;
     const combined = sft + cft;
@@ -839,6 +872,8 @@ export async function buildCncVariousCostReport(
       toolPerCft: cft > 0 ? toolCost / cft : NaN,
       toolPerSft: sft > 0 ? toolCost / sft : NaN,
       toolPerCombined: combined > 0 ? toolCost / combined : NaN,
+      maintenanceCost,
+      maintenancePerCombined: combined > 0 ? maintenanceCost / combined : NaN,
     };
   });
   // Sort by total cost desc — biggest contributors at the top.
@@ -860,6 +895,7 @@ export async function buildCncVariousCostReport(
 
   const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
   const toolCostForPeriod = aggregateByCategory.byCategory.tools || 0;
+  const maintenanceForPeriod = aggregateByCategory.byCategory.maintenance || 0;
   const totalCombinedForPeriod = totalSft + totalCft;
 
   return {
@@ -877,6 +913,9 @@ export async function buildCncVariousCostReport(
     toolPerSft: totalSft > 0 ? toolCostForPeriod / totalSft : NaN,
     toolPerCombined:
       totalCombinedForPeriod > 0 ? toolCostForPeriod / totalCombinedForPeriod : NaN,
+    maintenanceForPeriod,
+    maintenancePerCombined:
+      totalCombinedForPeriod > 0 ? maintenanceForPeriod / totalCombinedForPeriod : NaN,
     daysInWindow,
     expenseBreakdown,
     perVendor,

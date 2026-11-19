@@ -338,22 +338,44 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
         {/* Daksh's dad, Nov 2026: "how much does it cost to make one CFT,
             tools only." Tools are the one input he buys per piece and
             can argue about with a supplier, so the blended cost-per-unit
-            above buries exactly the number he wanted. Same denominator
-            as the ₹/CFT column beside it, so the two agree. */}
+            above buries exactly the number he wanted.
+
+            Over SFT + CFT, not CFT alone. Daksh, Nov 2026: "in that
+            formula it counts cft but it should count cft with sft too."
+            One tool bill cuts both; charging all of it to the thick work
+            flattered the thin and punished the thick. */}
         <DualKpiTile
           label="Tool Cost"
           primary={
-            Number.isFinite(report.toolPerCft)
-              ? `${fmtINR(report.toolPerCft)} / CFT`
+            report.toolCostForPeriod > 0 && Number.isFinite(report.toolPerCombined)
+              ? `${fmtINR(report.toolPerCombined)} / unit`
               : "—"
           }
           secondary={`${fmtINR(report.toolCostForPeriod)} on tools`}
           hint={
             report.toolCostForPeriod > 0
-              ? "Tools only — no labour, power or machine"
+              ? "Tools only, over SFT + CFT — no labour, power or machine"
               : "No tool spend entered for this period"
           }
           tone="success"
+        />
+        {/* Daksh, Nov 2026: "also add new rupee/maintenance." What the
+            machines cost to keep running, per unit carved — the number
+            that moves first when one of them is on its way out. */}
+        <DualKpiTile
+          label="Maintenance"
+          primary={
+            report.maintenanceForPeriod > 0 && Number.isFinite(report.maintenancePerCombined)
+              ? `${fmtINR(report.maintenancePerCombined)} / unit`
+              : "—"
+          }
+          secondary={`${fmtINR(report.maintenanceForPeriod)} on maintenance`}
+          hint={
+            report.maintenanceForPeriod > 0
+              ? "Repairs and servicing, over SFT + CFT"
+              : "No maintenance entered for this period"
+          }
+          tone="warning"
         />
         {dailyAvg && (
           <DualKpiTile
@@ -386,25 +408,38 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={{ ...th(), textAlign: "right" }} title="SFT + CFT combined output">Total (S+C)</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ days in this period">Per day</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ machines ÷ days">Per mach/day</th>
-                <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
-                <th style={{ ...th(), textAlign: "right" }}>Slabs</th>
-                <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
+                {/* The two rates ride beside the machine's own output.
+                    Daksh, Nov 2026: "that rupee/cft+sft tools next to
+                    per machine/day. Also add new rupee/maintenance."
+                    What a machine makes in a day and what it costs to
+                    feed it, read together. */}
                 <th
                   style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
-                  title="The tools slice of this vendor's operational cost, prorated to this period"
+                  title="Tool spend ÷ (SFT + CFT) carved — what one unit costs in tools alone"
                 >
-                  Tools
+                  ₹ / unit · tools
                 </th>
+                <th
+                  style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
+                  title="Maintenance spend ÷ (SFT + CFT) carved — repairs and servicing per unit"
+                >
+                  ₹ / unit · maint.
+                </th>
+                <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
+                <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
                 <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
                 <th style={{ ...th(), textAlign: "right" }}>Total</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / CFT</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Total cost ÷ combined output">₹ / unit</th>
+                {/* Last, and on purpose: it is a dead amount next to the
+                    rates, kept because somebody will want to see the
+                    bill the rate came off. */}
                 <th
                   style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
-                  title="Tool spend ÷ CFT carved — what one CFT costs in tools alone"
+                  title="The tools slice of this vendor's operational cost, prorated to this period"
                 >
-                  ₹ / CFT · tools
+                  Tools ₹
                 </th>
               </tr>
             </thead>
@@ -427,17 +462,25 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {Number.isFinite(v.perMachinePerDay) ? fmtNum(v.perMachinePerDay) : "—"}
                   </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
+                    {/* ₹0 would read as "his tools are free". Nothing
+                        was entered — which is a different fact, and the
+                        one the dash already means in the Tools ₹ column
+                        at the end of this row. */}
+                    {v.toolCost > 0 && Number.isFinite(v.toolPerCombined)
+                      ? fmtINR(v.toolPerCombined)
+                      : "—"}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
+                    {v.maintenanceCost > 0 && Number.isFinite(v.maintenancePerCombined)
+                      ? fmtINR(v.maintenancePerCombined)
+                      : "—"}
+                  </td>
                   <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
                     {v.machineCount}
                   </td>
-                  <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
-                    {v.slabsCount}
-                  </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtINR(v.operationalCost)}
-                  </td>
-                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>
-                    {v.toolCost > 0 ? fmtINR(v.toolCost) : "—"}
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--muted)" }}>
                     {fmtINR(v.depreciationCost)}
@@ -454,8 +497,8 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
                     {fmtINR(v.costPerCombined)}
                   </td>
-                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
-                    {Number.isFinite(v.toolPerCft) ? fmtINR(v.toolPerCft) : "—"}
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>
+                    {v.toolCost > 0 ? fmtINR(v.toolCost) : "—"}
                   </td>
                 </tr>
               ))}
@@ -483,17 +526,21 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {Number.isFinite(totalPerMachDay) ? fmtNum(totalPerMachDay) : "—"}
                 </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
+                  {report.toolCostForPeriod > 0 && Number.isFinite(report.toolPerCombined)
+                    ? fmtINR(report.toolPerCombined)
+                    : "—"}
+                </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
+                  {report.maintenanceForPeriod > 0 && Number.isFinite(report.maintenancePerCombined)
+                    ? fmtINR(report.maintenancePerCombined)
+                    : "—"}
+                </td>
                 <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 800 }}>
                   {totalMachines}
                 </td>
-                <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 700 }}>
-                  {report.slabsCount}
-                </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.operationalForPeriod)}
-                </td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
-                  {report.toolCostForPeriod > 0 ? fmtINR(report.toolCostForPeriod) : "—"}
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--muted)" }}>
                   {fmtINR(report.depreciationForPeriod)}
@@ -511,7 +558,7 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   {fmtINR(costPerCombined)}
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
-                  {Number.isFinite(report.toolPerCft) ? fmtINR(report.toolPerCft) : "—"}
+                  {report.toolCostForPeriod > 0 ? fmtINR(report.toolCostForPeriod) : "—"}
                 </td>
               </tr>
                 );
