@@ -71,6 +71,30 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-pathname", request.nextUrl.pathname);
 
+  // ── The cupboard QR has no app login — don't go looking for one ──
+  //
+  // Daksh, Nov 2026, for the second time: "it's kicking me again and
+  // again from the phone inventory, that this page couldn't load."
+  //
+  // Everything below this point exists to find out WHICH STAFF MEMBER
+  // is making the request. `supabase.auth.getUser()` is not a cookie
+  // read — it is a round trip to the Supabase Auth server, on every
+  // request. 15,321 of them in the last 24 hours, every one a 200.
+  //
+  // A man at the cupboard has no app login at all. He is identified by
+  // an OTP session of our own (mig 232), read from a cookie by the page
+  // itself. So for /guest the auth hop finds nothing, and all it can do
+  // is add a network call — and a second place for the request to hang
+  // — to every page load, every background refresh and every button he
+  // presses on a phone on shed wifi.
+  //
+  // The blackout above still covers him: it is checked BEFORE this and
+  // deliberately has no bypass for anybody. This only skips the lookup
+  // of a user who cannot exist on this route.
+  if (request.nextUrl.pathname.startsWith("/guest/")) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   let response = NextResponse.next({
     request: { headers: requestHeaders },
   });

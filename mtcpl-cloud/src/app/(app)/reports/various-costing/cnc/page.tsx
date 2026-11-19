@@ -335,48 +335,13 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
           hint={`Op ${fmtINR(report.operationalForPeriod)} + Dep ${fmtINR(report.depreciationForPeriod)}`}
           tone="warning"
         />
-        {/* Daksh's dad, Nov 2026: "how much does it cost to make one CFT,
-            tools only." Tools are the one input he buys per piece and
-            can argue about with a supplier, so the blended cost-per-unit
-            above buries exactly the number he wanted.
-
-            Over SFT + CFT, not CFT alone. Daksh, Nov 2026: "in that
-            formula it counts cft but it should count cft with sft too."
-            One tool bill cuts both; charging all of it to the thick work
-            flattered the thin and punished the thick. */}
-        <DualKpiTile
-          label="Tool Cost"
-          primary={
-            report.toolCostForPeriod > 0 && Number.isFinite(report.toolPerCombined)
-              ? `${fmtINR(report.toolPerCombined)} / unit`
-              : "—"
-          }
-          secondary={`${fmtINR(report.toolCostForPeriod)} on tools`}
-          hint={
-            report.toolCostForPeriod > 0
-              ? "Tools only, over SFT + CFT — no labour, power or machine"
-              : "No tool spend entered for this period"
-          }
-          tone="success"
-        />
-        {/* Daksh, Nov 2026: "also add new rupee/maintenance." What the
-            machines cost to keep running, per unit carved — the number
-            that moves first when one of them is on its way out. */}
-        <DualKpiTile
-          label="Maintenance"
-          primary={
-            report.maintenanceForPeriod > 0 && Number.isFinite(report.maintenancePerCombined)
-              ? `${fmtINR(report.maintenancePerCombined)} / unit`
-              : "—"
-          }
-          secondary={`${fmtINR(report.maintenanceForPeriod)} on maintenance`}
-          hint={
-            report.maintenanceForPeriod > 0
-              ? "Repairs and servicing, over SFT + CFT"
-              : "No maintenance entered for this period"
-          }
-          tone="warning"
-        />
+        {/* The Tool Cost and Maintenance tiles lived here. Daksh,
+            Nov 2026: "from these KPI cards remove tool cost and
+            maintenance." Both read "—" for the month he is standing
+            in — the expense entry runs a month behind — so the top of
+            the page was two empty boxes. The numbers are not gone:
+            they are the two ₹ / unit columns in the per-vendor table
+            below, where they sit beside the month that has them. */}
         {dailyAvg && (
           <DualKpiTile
             label="Daily Average"

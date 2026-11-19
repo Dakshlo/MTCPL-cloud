@@ -19,7 +19,7 @@ import { loadStore, orderForTaking, stockSignature, type ToolRow } from "@/lib/c
 import { resolveToolStoreLink } from "@/lib/cnc-tool-guest";
 import { currentToolSession, enrollableVendors, toolRoster } from "@/lib/cnc-tool-session";
 import { allActiveOperators, operatorsForVendor } from "@/lib/cnc-tool-operators";
-import { holdingsForPerson, machinesForVendor, menUnder } from "@/lib/cnc-tool-usage";
+import { attachHoldings, holdingsForPerson, machinesForVendor } from "@/lib/cnc-tool-usage";
 import {
   enrolOperatorAction,
   guestTakeToolAction,
@@ -67,30 +67,53 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
     currentToolSession(token, link.id),
   ]);
 
-  // His own men, ready on first paint — a vendor opening the team
-  // panel should not watch a spinner to see three names. The developer
-  // sees all three companies at once, so his list carries whose man
-  // each one is, and he gets the list of companies to pick from.
-  const anyVendor = session?.canEnrol && session.enrolScope === "any";
-  const team = !session?.canEnrol
-    ? []
-    : anyVendor
-      ? (await allActiveOperators()).map((o) => ({
-          id: o.id, name: o.name, maskedPhone: o.maskedPhone, company: o.vendorName,
-        }))
-      : session.vendorId
-        ? (await operatorsForVendor(session.vendorId)).map((o) => ({
-            id: o.id, name: o.name, maskedPhone: o.maskedPhone,
-          }))
-        : [];
+  // ── Everything that depends only on the session, in ONE wave ────
+  //
+  // This used to be four waits one after another: his men, then the
+  // vendor list, then his account and his machines, then his men's
+  // accounts — which went and fetched the roster a SECOND time. Five
+  // round trips deep on a page a man is standing in front of on shed
+  // wifi, where each one is a chance to be left looking at a spinner.
+  //
+  // None of them needs any of the others. The only real order is that
+  // his men's holdings need his men, so that stays behind, and it is
+  // handed the roster this wave already loaded instead of asking for
+  // it again.
+  //
+  // · the roster, so a vendor opening the 👷 panel does not watch a
+  //   spinner to see three names. The office sees all three firms, so
+  //   their list carries whose man each one is.
+  // · the companies to enrol under — ALWAYS, not only when a session
+  //   is already in hand. Somebody who signs in during this page's
+  //   life needs the picker on the spot, and this page does not
+  //   re-render for them.
+  // · his account and his machines (mig 238), so the strip over the
+  //   shelf is right on first paint and the machine grid is already
+  //   there when he taps through to it.
+  const anyVendor = !!session?.canEnrol && session.enrolScope === "any";
+  const [roughTeam, vendorChoices, held, machines] = await Promise.all([
+    !session?.canEnrol
+      ? Promise.resolve([])
+      : anyVendor
+        ? allActiveOperators()
+        : session.vendorId
+          ? operatorsForVendor(session.vendorId)
+          : Promise.resolve([]),
+    enrollableVendors(),
+    session ? holdingsForPerson(session.profileId, session.operatorId) : Promise.resolve([]),
+    session ? machinesForVendor(session.vendorId) : Promise.resolve([]),
+  ]);
 
-  // ALWAYS, not only when a session is already in hand. Somebody who
-  // signs in during this page's life needs the picker on the spot, and
-  // this page does not re-render for them — it was gated on the
-  // session and so the developer's panel came up with nothing to pick
-  // from. Three company names, already printed as the roster's own
-  // headings: nothing here to keep back.
-  const vendorChoices = await enrollableVendors();
+  const team = roughTeam.map((o) => ({
+    id: o.id,
+    name: o.name,
+    maskedPhone: o.maskedPhone,
+    ...(anyVendor ? { company: o.vendorName } : {}),
+  }));
+
+  // What each of his men is carrying — built from the roster above, so
+  // it costs one query for the holdings and nothing for the names.
+  const men = await attachHoldings(roughTeam, anyVendor);
 
   // Only what can actually be taken. A tool at zero is not offered —
   // there is nothing on the shelf to hand over.
@@ -105,21 +128,6 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
           stock: t.stock, imageUrl: t.imageUrl,
         }))
     : [];
-
-  // Mig 238 — his account, his machines, and (for a vendor) what each of
-  // his men is holding, all on the server, so the strip over the shelf
-  // is right on first paint and the machine grid is already there when
-  // he taps through to it. All three are small and all three are
-  // useless to anyone not signed in, so none is fetched then.
-  // `menUnder` scopes itself from the session, so a vendor's list can
-  // only ever be his own firm's men.
-  const [held, machines, men] = session
-    ? await Promise.all([
-        holdingsForPerson(session.profileId, session.operatorId),
-        machinesForVendor(session.vendorId),
-        menUnder(session),
-      ])
-    : [[], [], []];
 
   const takeable: TakeTool[] = orderForTaking(tools.filter((t: ToolRow) => t.stock > 0)).map((t) => ({
     id: t.id,

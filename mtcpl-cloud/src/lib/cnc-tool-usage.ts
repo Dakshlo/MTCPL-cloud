@@ -313,6 +313,25 @@ export async function menUnder(session: {
   if (!all && !session.vendorId) return [];
 
   const men = all ? await allActiveOperators() : await operatorsForVendor(session.vendorId!);
+  return attachHoldings(men, all);
+}
+
+/**
+ * The same thing for a caller that has ALREADY loaded the roster.
+ *
+ * The guest page loads a vendor's men anyway, to draw the 👷 panel.
+ * Having menUnder() go and fetch the identical list a second time cost
+ * a round trip on every render of a page a man is standing in front of
+ * on shed wifi — so the page hands the list it has.
+ *
+ * `withCompany` only where one list covers all three firms. On a
+ * vendor's own page every name is his, and printing his firm against
+ * each of them says nothing.
+ */
+export async function attachHoldings(
+  men: Array<{ id: string; name: string; vendorName: string }>,
+  withCompany: boolean,
+): Promise<ManHolding[]> {
   if (men.length === 0) return [];
 
   const held = await holdingsForOperators(men.map((m) => m.id));
@@ -323,10 +342,7 @@ export async function menUnder(session: {
       return {
         id: m.id,
         name: m.name,
-        // Only where one list covers all three companies. On a vendor's
-        // own page every name is his, and printing his firm against
-        // each of them says nothing.
-        company: all ? m.vendorName : null,
+        company: withCompany ? m.vendorName : null,
         items,
         total: items.reduce((a, i) => a + i.qty, 0),
       };
