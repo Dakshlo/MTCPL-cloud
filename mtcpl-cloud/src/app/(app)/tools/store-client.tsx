@@ -66,7 +66,7 @@ const OFFICE_POLL_MS = 6000;
 
 export function StoreClient({
   tools, movements, movementsTruncated = false, stockSig, vendorNames, operators, canManage,
-  canScanBills = false,
+  canScanBills = false, heldOut = 0,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
@@ -82,6 +82,11 @@ export function StoreClient({
   /** May this person fill the shelf from a scanned supplier bill
    *  (mig 237)? Narrower than canManage on purpose. */
   canScanBills?: boolean;
+  /** Mig 238 — pcs in the men's hands: taken, not yet reported used or
+   *  given back. A badge on the link, because a pile that nobody has
+   *  accounted for is the one number on this screen that asks to be
+   *  chased. */
+  heldOut?: number;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -231,6 +236,13 @@ export function StoreClient({
         </div>
         {canManage && (
           <div className="tc-hero-actions">
+            {/* Mig 238 — the other half of the store. This screen says
+                what is ON the shelf; that one says where the things
+                that left it went. */}
+            <Link href="/tools/usage" className="tc-btn">
+              Out of the cupboard
+              {heldOut > 0 && <i className="tc-btn-n">{heldOut}</i>}
+            </Link>
             <Link href="/tools/qr" className="tc-btn">Wardrobe QR</Link>
             {canScanBills && (
               <button

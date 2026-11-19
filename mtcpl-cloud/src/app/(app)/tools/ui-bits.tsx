@@ -144,6 +144,13 @@ export const TOOLS_CSS = `
 }
 .tc-btn:hover { background:var(--surface-alt); border-color:var(--muted-light); }
 .tc-btn-ghost { /* same as the default now — kept so markup need not change */ }
+/* Mig 238 — pcs in the men's hands, on the "Out of the cupboard" link.
+   Gold rather than red: it is a pile to chase, not a fault. */
+.tc-btn-n {
+  font-style:normal; font-size:11px; font-weight:700; padding:1px 6px;
+  border-radius:999px; background:var(--gold-subtle); color:var(--gold-dark);
+  border:1px solid var(--gold-border); font-variant-numeric:tabular-nums;
+}
 .tc-btn-solid { background:var(--gold); border-color:var(--gold); color:#fff; }
 .tc-btn-solid:hover { background:var(--gold-dark); border-color:var(--gold-dark); }
 

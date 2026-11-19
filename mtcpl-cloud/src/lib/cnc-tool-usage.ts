@@ -1,0 +1,700 @@
+/**
+ * Where a tool went after it left the cupboard — data layer (mig 238).
+ *
+ * Daksh, Nov 2026: "Mohit took 5 pcs of some tool, then this 5 pcs will
+ * show in his account. Now we have to connect this with our CNC. He
+ * will then do 1 pcs used in CNC no 14. This way we will have CNC wise
+ * consumption too."
+ *
+ * Three places a tool can be, and this file owns the last two:
+ *
+ *     on the shelf   lib/cnc-tool-stock.ts   SUM(movements.delta)
+ *     in his hands   HERE                    taken − returned − used
+ *     spent          HERE                    SUM(usage.qty) per machine
+ *
+ * The custody formula is NOT repeated here. It lives once, in SQL, as
+ * the view `cnc_tool_holdings`, because the database has to apply the
+ * same rule when it refuses a man who reports using more than he took —
+ * and a formula written in two languages is a formula that will
+ * eventually disagree with itself.
+ */
+
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { fetchAllPaged } from "@/lib/paginate";
+import { TOOL_IMAGE_BUCKET, UNDO_WINDOW_MS } from "@/lib/cnc-tool-stock";
+
+/** A wrong machine number lands straight in a costing report, so it is
+ *  takeable back for the same ten minutes as everything else in this
+ *  module and in the Work Diary. One rule across the app. */
+export const USAGE_UNDO_WINDOW_MS = UNDO_WINDOW_MS;
+
+/** A man reports what he spent, not what a plant spends in a month.
+ *  Anything past this is a slipped thumb on a number pad. */
+export const MAX_USE_QTY = 50;
+
+// ── What mig 238's guarded write hands back ────────────────────────
+
+export type SettleOutcome = {
+  ok: boolean;
+  outcome?: "used" | "returned";
+  code?:
+    | "bad_outcome"
+    | "bad_qty"
+    | "no_person"
+    | "missing"
+    | "not_holding"
+    | "over_holding"
+    | "no_machine"
+    | "bad_machine"
+    | "other_vendor";
+  usage_id?: string;
+  movement_id?: string;
+  qty?: number;
+  holding?: number;
+  holding_after?: number;
+  tool?: string;
+  unit?: string;
+  machine?: string;
+};
+
+/** The sentence a refusal turns into — in the same voice as the rest of
+ *  the cupboard screen, and written once so the phone and the office
+ *  never explain the same refusal differently. */
+export function settleRefusal(r: SettleOutcome, opts?: { unit?: boolean }): string {
+  const unit = opts?.unit === false ? "" : ` ${r.unit ?? "pcs"}`;
+  switch (r.code) {
+    case "missing":
+      return "That tool is gone.";
+    case "not_holding":
+      return `You are not holding any ${r.tool ?? "of that"}. Only what you took can be used.`;
+    case "over_holding":
+      return `You have ${Number(r.holding ?? 0)}${unit} in hand — enter ${Number(r.holding ?? 0)} or fewer.`;
+    case "no_machine":
+      return "Which machine? Tap one first.";
+    case "bad_machine":
+      return "That machine is not in use any more. Tell the office.";
+    case "other_vendor":
+      return `Machine ${r.machine ?? "that"} is not yours. Pick one of your own.`;
+    case "no_person":
+      return "Your sign-in has run out. Tap your name again.";
+    case "bad_qty":
+      return "How many? Enter at least 1.";
+    default:
+      return "Could not record that. Try again.";
+  }
+}
+
+// ── In his hands ───────────────────────────────────────────────────
+
+export type HeldItem = {
+  toolId: string;
+  name: string;
+  spec: string | null;
+  unit: string;
+  qty: number;
+  imageUrl: string | null;
+};
+
+export type HeldByPerson = {
+  /** Stable across renders: the kind and the id together, because a
+   *  profile and an operator could in principle share neither but the
+   *  key has to say which table the id is from. */
+  key: string;
+  kind: "profile" | "operator";
+  personId: string;
+  name: string;
+  /** The firm. Null for the office three, who have none. */
+  company: string | null;
+  items: HeldItem[];
+  /** Everything he is holding, added up. Units are mixed in principle;
+   *  in this store they are all pcs, and the screens say so. */
+  total: number;
+};
+
+type HoldingRow = {
+  tool_id: string;
+  profile_id: string | null;
+  operator_id: string | null;
+  qty: number | string;
+};
+
+/** Everything anybody is holding, grouped by the man — the office's
+ *  "who has what" list. */
+export async function loadHoldings(): Promise<HeldByPerson[]> {
+  const admin = createAdminSupabaseClient();
+
+  const rows = await fetchAllPaged<HoldingRow>((from, to) =>
+    admin
+      .from("cnc_tool_holdings")
+      .select("tool_id, profile_id, operator_id, qty")
+      .gt("qty", 0)
+      .order("tool_id")
+      .range(from, to),
+  );
+  if (rows.length === 0) return [];
+
+  const [tools, people] = await Promise.all([
+    toolLookup(admin, rows.map((r) => r.tool_id)),
+    personLookup(
+      admin,
+      rows.map((r) => r.profile_id).filter((v): v is string => !!v),
+      rows.map((r) => r.operator_id).filter((v): v is string => !!v),
+    ),
+  ]);
+
+  const byPerson = new Map<string, HeldByPerson>();
+
+  for (const r of rows) {
+    const kind: "profile" | "operator" = r.profile_id ? "profile" : "operator";
+    const personId = (r.profile_id ?? r.operator_id)!;
+    const key = `${kind}:${personId}`;
+    const tool = tools.get(r.tool_id);
+    if (!tool) continue; // archived out from under us
+
+    let p = byPerson.get(key);
+    if (!p) {
+      const who = people.get(key);
+      p = {
+        key,
+        kind,
+        personId,
+        name: who?.name ?? "Unnamed",
+        company: who?.company ?? null,
+        items: [],
+        total: 0,
+      };
+      byPerson.set(key, p);
+    }
+    const qty = Number(r.qty);
+    p.items.push({ ...tool, qty });
+    p.total += qty;
+  }
+
+  const out = [...byPerson.values()];
+  for (const p of out) p.items.sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  // Most in hand first — that is who the office wants to chase.
+  return out.sort(
+    (a, b) =>
+      b.total - a.total ||
+      (a.company ?? "").localeCompare(b.company ?? "") ||
+      a.name.localeCompare(b.name),
+  );
+}
+
+/** One man's account: what HE is holding. The phone's "my tools". */
+export async function holdingsForPerson(
+  profileId: string | null,
+  operatorId: string | null,
+): Promise<HeldItem[]> {
+  if (!profileId && !operatorId) return [];
+  const admin = createAdminSupabaseClient();
+
+  let q = admin
+    .from("cnc_tool_holdings")
+    .select("tool_id, profile_id, operator_id, qty")
+    .gt("qty", 0);
+  // `.is(col, null)` matters as much as the equality: without it a
+  // profile's row and an operator's row for the same tool would both
+  // match on the one column that was filtered.
+  q = profileId
+    ? q.eq("profile_id", profileId).is("operator_id", null)
+    : q.eq("operator_id", operatorId!).is("profile_id", null);
+
+  const { data } = await q;
+  const rows = (data ?? []) as HoldingRow[];
+  if (rows.length === 0) return [];
+
+  const tools = await toolLookup(admin, rows.map((r) => r.tool_id));
+
+  return rows
+    .map((r) => {
+      const t = tools.get(r.tool_id);
+      return t ? { ...t, qty: Number(r.qty) } : null;
+    })
+    .filter((v): v is HeldItem => !!v)
+    .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+}
+
+type ToolBits = Omit<HeldItem, "qty">;
+
+async function toolLookup(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ids: string[],
+): Promise<Map<string, ToolBits>> {
+  const want = [...new Set(ids)];
+  if (want.length === 0) return new Map();
+  const { data } = await admin
+    .from("cnc_tools")
+    .select("id, name, spec, unit, image_path")
+    .in("id", want);
+
+  const out = new Map<string, ToolBits>();
+  for (const t of (data ?? []) as Array<{
+    id: string; name: string; spec: string | null; unit: string; image_path: string | null;
+  }>) {
+    out.set(t.id, {
+      toolId: t.id,
+      name: t.name,
+      spec: t.spec,
+      unit: t.unit,
+      // Public bucket (mig 233) — the cupboard screen has no app login
+      // to sign a URL with.
+      imageUrl: t.image_path
+        ? admin.storage.from(TOOL_IMAGE_BUCKET).getPublicUrl(t.image_path).data.publicUrl
+        : null,
+    });
+  }
+  return out;
+}
+
+async function personLookup(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  profileIds: string[],
+  operatorIds: string[],
+): Promise<Map<string, { name: string; company: string | null }>> {
+  const out = new Map<string, { name: string; company: string | null }>();
+
+  const [profs, ops] = await Promise.all([
+    profileIds.length
+      ? admin
+          .from("profiles")
+          .select("id, full_name, vendors(name)")
+          .in("id", [...new Set(profileIds)])
+      : Promise.resolve({ data: [] }),
+    operatorIds.length
+      ? admin
+          .from("cnc_tool_operators")
+          .select("id, name, vendors(name)")
+          .in("id", [...new Set(operatorIds)])
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  for (const p of (profs.data ?? []) as Array<{
+    id: string; full_name: string | null; vendors: { name: string } | { name: string }[] | null;
+  }>) {
+    out.set(`profile:${p.id}`, {
+      name: (p.full_name || "Unnamed").trim(),
+      company: one(p.vendors)?.name ?? null,
+    });
+  }
+  for (const o of (ops.data ?? []) as Array<{
+    id: string; name: string | null; vendors: { name: string } | { name: string }[] | null;
+  }>) {
+    out.set(`operator:${o.id}`, {
+      name: (o.name || "Unnamed").trim(),
+      company: one(o.vendors)?.name ?? null,
+    });
+  }
+  return out;
+}
+
+function one<T>(v: T | T[] | null): T | null {
+  return Array.isArray(v) ? v[0] ?? null : v;
+}
+
+// ── The machines a man may spend a tool on ─────────────────────────
+
+export type ToolMachine = {
+  id: string;
+  code: string;
+  vendorId: string;
+  vendorName: string | null;
+  machineType: string;
+  /** Carving right now, as against idle or down for maintenance. Shown
+   *  as a dot so the man can tell he is about to file against a machine
+   *  that is not even running — usually a sign he tapped the wrong one. */
+  busy: boolean;
+};
+
+/**
+ * The store is shared; the machines are not. A man working for MANTHAN
+ * sees 1–18, Mohit's men see 19–41, Vivek's see R1–R7. The office —
+ * Daksh, Nikhil, Vinay, who have no firm — see all of them, which is
+ * how they can file on anybody's behalf.
+ *
+ * The database enforces the same rule (mig 238, code `other_vendor`);
+ * this only decides what is drawn.
+ */
+export async function machinesForVendor(vendorId: string | null): Promise<ToolMachine[]> {
+  const admin = createAdminSupabaseClient();
+  let q = admin
+    .from("cnc_machines")
+    .select("id, machine_code, vendor_id, machine_type, status, is_active, vendors(name)")
+    .eq("is_active", true);
+  if (vendorId) q = q.eq("vendor_id", vendorId);
+
+  const { data } = await q;
+  const rows = (data ?? []) as Array<{
+    id: string; machine_code: string; vendor_id: string; machine_type: string;
+    status: string; vendors: { name: string } | { name: string }[] | null;
+  }>;
+
+  return rows
+    .map((m) => ({
+      id: m.id,
+      code: m.machine_code,
+      vendorId: m.vendor_id,
+      vendorName: one(m.vendors)?.name ?? null,
+      machineType: m.machine_type,
+      busy: m.status === "carving",
+    }))
+    .sort(byMachineCode);
+}
+
+/**
+ * "10" after "9", and "R1" after "41".
+ *
+ * The codes are text, so a plain string sort puts 10 between 1 and 2 —
+ * which on a grid of forty buttons is the difference between finding
+ * your machine and hunting for it. Compare the digits as a number when
+ * both sides have them, and keep the lettered ones (Vivek's R1–R7) in
+ * their own block at the end.
+ */
+export function byMachineCode(a: { code: string }, b: { code: string }): number {
+  const pa = /^(\D*)(\d*)$/.exec(a.code) ?? [];
+  const pb = /^(\D*)(\d*)$/.exec(b.code) ?? [];
+  const la = (pa[1] ?? "").toUpperCase();
+  const lb = (pb[1] ?? "").toUpperCase();
+  if (la !== lb) return la.localeCompare(lb);
+  const na = pa[2] ? Number(pa[2]) : Number.NaN;
+  const nb = pb[2] ? Number(pb[2]) : Number.NaN;
+  if (Number.isNaN(na) || Number.isNaN(nb)) return a.code.localeCompare(b.code);
+  return na - nb;
+}
+
+// ── The window a report covers ─────────────────────────────────────
+
+export const USAGE_WINDOWS = ["today", "7d", "month", "all"] as const;
+export type UsageWindow = (typeof USAGE_WINDOWS)[number];
+
+export const USAGE_WINDOW_LABEL: Record<UsageWindow, string> = {
+  today: "Today",
+  "7d": "Last 7 days",
+  month: "This month",
+  all: "All time",
+};
+
+/** The same windows inside a sentence. A label lowercased does not read
+ *  as English — "nothing used in this month" — so the phrasing is
+ *  written out rather than derived. */
+export const USAGE_WINDOW_PHRASE: Record<UsageWindow, string> = {
+  today: "today",
+  "7d": "in the last seven days",
+  month: "this month",
+  all: "at any point",
+};
+
+/**
+ * IST, always — the shed's day and the shed's month, not the browser's.
+ *
+ * A report that reads differently on a laptop in another timezone is a
+ * report people stop trusting, so the whole codebase buckets the same
+ * way: shift the instant by +5:30 and then read the UTC parts of it.
+ */
+export function usageWindowRange(
+  w: UsageWindow,
+  now = Date.now(),
+): { fromIso: string; toIso: string } {
+  // `toIso` is always just past now: usage is never filed for the future,
+  // and an exclusive upper bound keeps the query a clean half-open range.
+  const toIso = new Date(now + 60_000).toISOString();
+  if (w === "all") return { fromIso: new Date(0).toISOString(), toIso };
+
+  const ist = new Date(now + 5.5 * 3_600_000);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth() + 1;
+  const d = ist.getUTCDate();
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  if (w === "month") {
+    return { fromIso: new Date(`${y}-${pad(m)}-01T00:00:00+05:30`).toISOString(), toIso };
+  }
+  const midnight = new Date(`${y}-${pad(m)}-${pad(d)}T00:00:00+05:30`).getTime();
+  // "Last 7 days" counts today plus the six before it, which is what
+  // somebody means by a week of production.
+  const from = w === "today" ? midnight : midnight - 6 * 86_400_000;
+  return { fromIso: new Date(from).toISOString(), toIso };
+}
+
+// ── Spent, machine by machine ──────────────────────────────────────
+
+export type MachineToolLine = {
+  toolId: string;
+  name: string;
+  spec: string | null;
+  unit: string;
+  qty: number;
+  /** The last rate a posted bill carried for this tool × qty, or null
+   *  when no bill has ever priced it. Never guessed. */
+  value: number | null;
+};
+
+export type MachineUse = {
+  machineId: string;
+  code: string;
+  vendorName: string | null;
+  machineType: string;
+  lines: MachineToolLine[];
+  qty: number;
+  /** The priced part of `qty` only. A machine whose tools have never
+   *  been on a scanned bill reads 0 here and the screen says so rather
+   *  than pretending the tools were free. */
+  value: number;
+  /** True when at least one line had no rate, so the money is a floor
+   *  and not a total. */
+  partlyPriced: boolean;
+};
+
+export type UsageReport = {
+  machines: MachineUse[];
+  /** Spent in the window with no machine left to show it against —
+   *  only possible if a machine row were deleted, which RESTRICT
+   *  prevents. Kept so a surprise is visible instead of silently gone. */
+  orphanQty: number;
+  totalQty: number;
+  totalValue: number;
+  pricedTools: number;
+  unpricedTools: number;
+};
+
+type UsageRow = {
+  tool_id: string;
+  machine_id: string;
+  qty: number | string;
+};
+
+/**
+ * Machine-wise consumption for a window.
+ *
+ * Paginated: a plant with forty machines spending tools daily passes a
+ * thousand rows inside a quarter, and PostgREST truncates at a thousand
+ * without saying so — the trap that once broke the monthly costing.
+ */
+export async function loadMachineUsage(fromIso: string, toIso: string): Promise<UsageReport> {
+  const admin = createAdminSupabaseClient();
+
+  const rows = await fetchAllPaged<UsageRow>((from, to) =>
+    admin
+      .from("cnc_tool_usage")
+      .select("tool_id, machine_id, qty")
+      .is("undone_at", null)
+      .gte("created_at", fromIso)
+      .lt("created_at", toIso)
+      .order("created_at")
+      .order("id")
+      .range(from, to),
+  );
+
+  const empty: UsageReport = {
+    machines: [], orphanQty: 0, totalQty: 0, totalValue: 0,
+    pricedTools: 0, unpricedTools: 0,
+  };
+  if (rows.length === 0) return empty;
+
+  const [tools, rates, machines] = await Promise.all([
+    toolLookup(admin, rows.map((r) => r.tool_id)),
+    latestToolRates(rows.map((r) => r.tool_id)),
+    machineLookup(admin, rows.map((r) => r.machine_id)),
+  ]);
+
+  // machine → tool → qty
+  const grid = new Map<string, Map<string, number>>();
+  let orphanQty = 0;
+
+  for (const r of rows) {
+    const qty = Number(r.qty);
+    if (!machines.has(r.machine_id)) { orphanQty += qty; continue; }
+    let row = grid.get(r.machine_id);
+    if (!row) { row = new Map(); grid.set(r.machine_id, row); }
+    row.set(r.tool_id, (row.get(r.tool_id) ?? 0) + qty);
+  }
+
+  const priced = new Set<string>();
+  const unpriced = new Set<string>();
+
+  const out: MachineUse[] = [];
+  for (const [machineId, row] of grid) {
+    const m = machines.get(machineId)!;
+    const lines: MachineToolLine[] = [];
+    let qty = 0;
+    let value = 0;
+    let partlyPriced = false;
+
+    for (const [toolId, q] of row) {
+      const t = tools.get(toolId);
+      const rate = rates.get(toolId) ?? null;
+      if (rate == null) { partlyPriced = true; unpriced.add(toolId); } else { priced.add(toolId); }
+      lines.push({
+        toolId,
+        name: t?.name ?? "(removed tool)",
+        spec: t?.spec ?? null,
+        unit: t?.unit ?? "pcs",
+        qty: q,
+        value: rate == null ? null : rate * q,
+      });
+      qty += q;
+      if (rate != null) value += rate * q;
+    }
+
+    lines.sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || b.qty - a.qty || a.name.localeCompare(b.name));
+    out.push({
+      machineId,
+      code: m.code,
+      vendorName: m.vendorName,
+      machineType: m.machineType,
+      lines, qty, value, partlyPriced,
+    });
+  }
+
+  return {
+    machines: out.sort(byMachineCode),
+    orphanQty,
+    totalQty: out.reduce((a, m) => a + m.qty, 0) + orphanQty,
+    totalValue: out.reduce((a, m) => a + m.value, 0),
+    pricedTools: priced.size,
+    unpricedTools: unpriced.size,
+  };
+}
+
+async function machineLookup(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ids: string[],
+): Promise<Map<string, { code: string; vendorName: string | null; machineType: string }>> {
+  const want = [...new Set(ids)];
+  if (want.length === 0) return new Map();
+  const { data } = await admin
+    .from("cnc_machines")
+    .select("id, machine_code, machine_type, vendors(name)")
+    .in("id", want);
+
+  const out = new Map<string, { code: string; vendorName: string | null; machineType: string }>();
+  for (const m of (data ?? []) as Array<{
+    id: string; machine_code: string; machine_type: string;
+    vendors: { name: string } | { name: string }[] | null;
+  }>) {
+    out.set(m.id, {
+      code: m.machine_code,
+      vendorName: one(m.vendors)?.name ?? null,
+      machineType: m.machine_type,
+    });
+  }
+  return out;
+}
+
+/**
+ * The last price anybody paid for each tool, from the scanned bills
+ * (mig 237).
+ *
+ * This is the ONLY money in the tool store, and it is deliberately
+ * one-directional: the consumption report reads a rate the bill module
+ * recorded, and nothing here writes to Finance or is read by it. Daksh
+ * was explicit when the bill scan was built — "don't link this to
+ * finance at all, it's completely separate."
+ *
+ * A tool nobody has billed has no rate and gets NULL, not zero. A zero
+ * would quietly say the tool was free; a null makes the screen admit it
+ * does not know.
+ */
+export async function latestToolRates(toolIds?: string[]): Promise<Map<string, number>> {
+  const admin = createAdminSupabaseClient();
+
+  let q = admin
+    .from("cnc_tool_bill_lines")
+    .select("tool_id, rate, created_at, cnc_tool_bills!inner(status, bill_date)")
+    .not("tool_id", "is", null)
+    .not("rate", "is", null)
+    .gt("rate", 0)
+    .eq("cnc_tool_bills.status", "posted");
+  if (toolIds && toolIds.length) q = q.in("tool_id", [...new Set(toolIds)]);
+
+  const { data } = await q;
+  const rows = (data ?? []) as Array<{
+    tool_id: string;
+    rate: number | string;
+    created_at: string;
+    cnc_tool_bills: { status: string; bill_date: string | null } | { status: string; bill_date: string | null }[] | null;
+  }>;
+
+  // Newest bill wins. bill_date is what the supplier printed, which is
+  // the date that means something; created_at only breaks a tie between
+  // two bills dated the same day (or stands in when a date was missed).
+  const best = new Map<string, { rate: number; on: string }>();
+  for (const r of rows) {
+    const bill = one(r.cnc_tool_bills);
+    const on = `${bill?.bill_date ?? "0000-00-00"}|${r.created_at}`;
+    const prev = best.get(r.tool_id);
+    if (!prev || on > prev.on) best.set(r.tool_id, { rate: Number(r.rate), on });
+  }
+
+  return new Map([...best].map(([id, v]) => [id, v.rate]));
+}
+
+// ── The usage log (for the register, and for taking one back) ──────
+
+export type UsageLine = {
+  id: string;
+  toolId: string;
+  toolName: string;
+  machineCode: string;
+  qty: number;
+  unit: string;
+  usedBy: string;
+  company: string | null;
+  mine: boolean;
+  createdAt: string;
+  undoneAt: string | null;
+};
+
+/** Usage rows for the cupboard register, over the same window the
+ *  movements use. `mine` is decided from the session on the server —
+ *  never from anything the page sent. */
+export async function usageLinesSince(
+  sinceIso: string,
+  me: { profileId: string | null; operatorId: string | null },
+  max = 300,
+): Promise<UsageLine[]> {
+  const admin = createAdminSupabaseClient();
+
+  const { data } = await admin
+    .from("cnc_tool_usage")
+    .select("id, tool_id, machine_id, qty, used_by, used_by_profile_id, used_by_operator_id, vendor_id, created_at, undone_at, cnc_tools(name, unit), cnc_machines(machine_code), vendors(name)")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(max);
+
+  const rows = (data ?? []) as Array<{
+    id: string; tool_id: string; machine_id: string; qty: number | string;
+    used_by: string; used_by_profile_id: string | null; used_by_operator_id: string | null;
+    created_at: string; undone_at: string | null;
+    cnc_tools: { name: string; unit: string } | { name: string; unit: string }[] | null;
+    cnc_machines: { machine_code: string } | { machine_code: string }[] | null;
+    vendors: { name: string } | { name: string }[] | null;
+  }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    toolId: r.tool_id,
+    toolName: one(r.cnc_tools)?.name ?? "tool",
+    machineCode: one(r.cnc_machines)?.machine_code ?? "?",
+    qty: Number(r.qty),
+    unit: one(r.cnc_tools)?.unit ?? "pcs",
+    usedBy: r.used_by,
+    company: one(r.vendors)?.name ?? null,
+    mine:
+      (!!me.profileId && r.used_by_profile_id === me.profileId) ||
+      (!!me.operatorId && r.used_by_operator_id === me.operatorId),
+    createdAt: r.created_at,
+    undoneAt: r.undone_at,
+  }));
+}
+
+/** Can this usage line still be taken back? Same ten minutes, same
+ *  shape as canUndo() for a movement. */
+export function canUndoUsage(
+  u: Pick<UsageLine, "createdAt" | "undoneAt">,
+  now = Date.now(),
+): boolean {
+  if (u.undoneAt) return false;
+  return now - new Date(u.createdAt).getTime() < USAGE_UNDO_WINDOW_MS;
+}

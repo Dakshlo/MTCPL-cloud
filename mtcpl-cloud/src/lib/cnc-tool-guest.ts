@@ -72,6 +72,19 @@ export async function takesThroughLinkToday(linkId: string): Promise<number> {
   return count ?? 0;
 }
 
+/** Tools reported SPENT through this sticker today (IST). The cap is
+ *  about how much a sticker may write in a day, and a usage report is a
+ *  write — so it counts, even though it never moves the shelf. */
+export async function usesThroughLinkToday(linkId: string): Promise<number> {
+  const admin = createAdminSupabaseClient();
+  const { count } = await admin
+    .from("cnc_tool_usage")
+    .select("id", { count: "exact", head: true })
+    .eq("guest_link_id", linkId)
+    .gte("created_at", istDayStartIso());
+  return count ?? 0;
+}
+
 /** A take may be at most this many units in one go. A cupboard tool goes
  *  out in ones and twos; 50 is a fat-finger, not a withdrawal. */
 export const GUEST_MAX_QTY = 50;

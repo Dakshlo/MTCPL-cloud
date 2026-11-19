@@ -24,8 +24,18 @@ import {
   GUEST_MAX_QTY,
   resolveToolStoreLink,
   takesThroughLinkToday,
+  usesThroughLinkToday,
 } from "@/lib/cnc-tool-guest";
 import { TOOL_IMAGE_BUCKET, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
+import {
+  MAX_USE_QTY,
+  canUndoUsage,
+  holdingsForPerson,
+  settleRefusal,
+  usageLinesSince,
+  type HeldItem,
+  type SettleOutcome,
+} from "@/lib/cnc-tool-usage";
 import {
   SESSION_HOURS,
   TOOL_OTP_DIGITS,
@@ -795,11 +805,19 @@ export type RegisterLine = {
   id: string;
   /** ISO. Grouped into days and clock times on the client, in IST. */
   at: string;
+  /** The five movement kinds, plus "use" — a tool spent on a machine
+   *  (mig 238), which is not a movement at all but belongs in the same
+   *  story. Leaving it out would make the register lie: a man would see
+   *  himself take five and never see where four of them went. */
   kind: string;
-  /** Signed: negative is a take, positive is stock arriving. */
+  /** Signed: negative is a take, positive is stock arriving. A "use"
+   *  carries negative too — it leaves his hands — but it is the one
+   *  kind that does NOT move the shelf. */
   delta: number;
   toolName: string;
   unit: string;
+  /** Mig 238 — which CNC it was spent on. Only ever set on a "use". */
+  machineCode: string | null;
   /** Who did it. Null means the store itself — a delivery with no
    *  name against it. */
   personName: string | null;
@@ -835,14 +853,25 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
   const admin = createAdminSupabaseClient();
   const since = new Date(Date.now() - REGISTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: rows, error } = await admin
-    .from("cnc_tool_movements")
-    .select(
-      "id, tool_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, vendor_id, note, created_at, undone_at",
-    )
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(REGISTER_MAX + 1);
+  // Two ledgers, one story. The shelf's movements and mig 238's usage
+  // rows are read separately — they are different tables about different
+  // things — and merged on time, because a man reading his own register
+  // does not care which table a line came out of.
+  const [{ data: rows, error }, uses] = await Promise.all([
+    admin
+      .from("cnc_tool_movements")
+      .select(
+        "id, tool_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, vendor_id, note, created_at, undone_at",
+      )
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(REGISTER_MAX + 1),
+    usageLinesSince(
+      since,
+      { profileId: session.profileId, operatorId: session.operatorId },
+      REGISTER_MAX + 1,
+    ),
+  ]);
   if (error) return { ok: false, error: error.message };
 
   const all = (rows ?? []) as Array<{
@@ -851,8 +880,7 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
     taken_by_operator_id: string | null; vendor_id: string | null;
     note: string | null; created_at: string; undone_at: string | null;
   }>;
-  const truncated = all.length > REGISTER_MAX;
-  const lines = truncated ? all.slice(0, REGISTER_MAX) : all;
+  const lines = all;
 
   // Names, in two small lookups rather than a join per row.
   const toolIds = [...new Set(lines.map((l) => l.tool_id))];
@@ -874,28 +902,282 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
     ((vendorRows ?? []) as Array<{ id: string; name: string }>).map((v) => [v.id, v.name]),
   );
 
+  const moved: RegisterLine[] = lines.map((l) => {
+    const tool = tools.get(l.tool_id);
+    return {
+      id: l.id,
+      at: l.created_at,
+      kind: l.kind,
+      delta: Number(l.delta),
+      toolName: tool?.name ?? "a tool that has since been removed",
+      unit: tool?.unit ?? "pcs",
+      machineCode: null,
+      personName: l.taken_by,
+      company: l.vendor_id ? vendors.get(l.vendor_id) ?? null : null,
+      // Identity comes off the session, so nobody can make a line
+      // look like somebody else's by editing what is on the page.
+      mine:
+        (!!session.profileId && l.taken_by_profile_id === session.profileId) ||
+        (!!session.operatorId && l.taken_by_operator_id === session.operatorId),
+      note: l.note,
+      undone: !!l.undone_at,
+    };
+  });
+
+  const spent: RegisterLine[] = uses.map((u) => ({
+    id: `use:${u.id}`,
+    at: u.createdAt,
+    kind: "use",
+    // Negative because it leaves him, the same way a take does. The
+    // screen is what draws the distinction between "off the shelf" and
+    // "into a machine"; the sign only says which direction.
+    delta: -u.qty,
+    toolName: u.toolName,
+    unit: u.unit,
+    machineCode: u.machineCode,
+    personName: u.usedBy,
+    company: u.company,
+    mine: u.mine,
+    note: null,
+    undone: !!u.undoneAt,
+  }));
+
+  const merged = [...moved, ...spent].sort((a, b) => b.at.localeCompare(a.at));
+  const truncated = merged.length > REGISTER_MAX;
+
+  return { ok: true, truncated, lines: truncated ? merged.slice(0, REGISTER_MAX) : merged };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// What happens to a tool after he has it (mig 238)
+// ──────────────────────────────────────────────────────────────────
+//
+// Daksh, Nov 2026: "Mohit took 5 pcs of some tool, then this 5 pcs will
+// show in his account… he will then do 1 pcs used in CNC no 14."
+//
+// Two writes, both guarded by the same thing: a man can only account
+// for what he is actually holding. That ceiling is read inside a lock
+// in the database (mig 238) and not here, because custody is derived
+// and two taps on a bad signal would otherwise both pass a check made
+// in TypeScript.
+
+export type MyToolsResult =
+  | { ok: true; items: HeldItem[] }
+  | { ok: false; error: string; signedOut?: boolean };
+
+/** His account: what he took and has not yet spent or given back. */
+export async function guestMyToolsAction(fd: FormData): Promise<MyToolsResult> {
+  const token = String(fd.get("token") || "").trim();
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false, error: "This QR is not valid. Ask the office for the new one." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+
+  return { ok: true, items: await holdingsForPerson(session.profileId, session.operatorId) };
+}
+
+export type SettleResult =
+  | {
+      ok: true;
+      outcome: "used" | "returned";
+      /** Set on a usage, so the phone can offer to take it back. */
+      usageId: string | null;
+      toolName: string;
+      qty: number;
+      machine: string | null;
+      /** What is left in his hands afterwards. */
+      left: number;
+      items: HeldItem[];
+    }
+  | { ok: false; error: string; signedOut?: boolean };
+
+/**
+ * One pc leaves his hands — spent on a machine, or back on the shelf.
+ *
+ * Both outcomes go through one function here and one function in the
+ * database for the same reason: they are the same operation seen from
+ * his account, and the ceiling that makes either of them safe is the
+ * same number.
+ */
+export async function guestSettleHeldAction(fd: FormData): Promise<SettleResult> {
+  const token = String(fd.get("token") || "").trim();
+  const toolId = String(fd.get("tool_id") || "").trim();
+  const outcome = String(fd.get("outcome") || "").trim();
+  const machineId = String(fd.get("machine_id") || "").trim();
+  const qty = Number(fd.get("qty"));
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return {
+      ok: false,
+      error:
+        resolved.problem === "revoked"
+          ? "This QR has been switched off. Ask the office for the new one."
+          : "This QR is not valid. Ask the office for the new one.",
+    };
+  }
+  const link = resolved.link;
+
+  const session = await currentToolSession(token, link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+
+  if (outcome !== "used" && outcome !== "returned") {
+    return { ok: false, error: "Pick what happened to it." };
+  }
+  if (!toolId) return { ok: false, error: "Pick a tool first." };
+  if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
+    return { ok: false, error: "How many? Enter at least 1." };
+  }
+  if (qty > MAX_USE_QTY) {
+    return { ok: false, error: `That is a lot — ${MAX_USE_QTY} is the most in one go.` };
+  }
+  if (outcome === "used" && !machineId) {
+    return { ok: false, error: "Which machine? Tap one first." };
+  }
+
+  const admin = createAdminSupabaseClient();
+
+  // The day's ceiling on this sticker, counting both ledgers — a
+  // runaway QR writes usage rows just as happily as it writes takes.
+  const [takes, uses] = await Promise.all([
+    takesThroughLinkToday(link.id),
+    usesThroughLinkToday(link.id),
+  ]);
+  if (takes + uses >= link.dailyCap) {
+    return {
+      ok: false,
+      error: "This QR has recorded a lot today and is paused until tomorrow. Tell the office.",
+    };
+  }
+
+  const { data: raw, error } = await admin.rpc("cnc_tool_settle_held", {
+    p_tool_id: toolId,
+    p_outcome: outcome,
+    p_qty: qty,
+    p_machine_id: outcome === "used" ? machineId : null,
+    p_profile_id: session.profileId,
+    p_operator_id: session.operatorId,
+    p_used_by: session.name,
+    p_vendor_id: session.vendorId,
+    p_guest_link: link.id,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const res = (raw ?? {}) as SettleOutcome;
+  // The unit is dropped: the cupboard screen already says PCS in big
+  // letters beside every number.
+  if (!res.ok) return { ok: false, error: settleRefusal(res, { unit: false }) };
+
+  await admin
+    .from("cnc_tool_sessions")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", session.id);
+
+  revalidatePath("/tools");
+
   return {
     ok: true,
-    truncated,
-    lines: lines.map((l) => {
-      const tool = tools.get(l.tool_id);
-      return {
-        id: l.id,
-        at: l.created_at,
-        kind: l.kind,
-        delta: Number(l.delta),
-        toolName: tool?.name ?? "a tool that has since been removed",
-        unit: tool?.unit ?? "pcs",
-        personName: l.taken_by,
-        company: l.vendor_id ? vendors.get(l.vendor_id) ?? null : null,
-        // Identity comes off the session, so nobody can make a line
-        // look like somebody else's by editing what is on the page.
-        mine:
-          (!!session.profileId && l.taken_by_profile_id === session.profileId) ||
-          (!!session.operatorId && l.taken_by_operator_id === session.operatorId),
-        note: l.note,
-        undone: !!l.undone_at,
-      };
-    }),
+    outcome: res.outcome ?? (outcome as "used" | "returned"),
+    usageId: res.usage_id ?? null,
+    toolName: res.tool ?? "tool",
+    qty,
+    machine: res.machine ?? null,
+    left: Number(res.holding_after ?? 0),
+    // Handed back so the account on screen is the account in the
+    // database, with no second round-trip and no stale number.
+    items: await holdingsForPerson(session.profileId, session.operatorId),
+  };
+}
+
+/**
+ * Take back a usage line, inside the ten minutes.
+ *
+ * A wrong machine number is the easy mistake on this screen and it goes
+ * straight into a costing report, so it has to be undoable. A soft void,
+ * like everything else in this module: the line stays in the register
+ * with a stroke through it, and the pc goes back into his hands.
+ *
+ * Only his own, and only his own: the id is checked against the session
+ * rather than trusted, so a edited form cannot void somebody else's.
+ */
+export async function guestUndoUsageAction(fd: FormData): Promise<SettleResult> {
+  const token = String(fd.get("token") || "").trim();
+  const usageId = String(fd.get("usage_id") || "").trim();
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false, error: "This QR is not valid. Ask the office for the new one." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+  if (!usageId) return { ok: false, error: "Nothing to take back." };
+
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("cnc_tool_usage")
+    .select("id, qty, created_at, undone_at, used_by_profile_id, used_by_operator_id, cnc_tools(name)")
+    .eq("id", usageId)
+    .maybeSingle();
+
+  const row = data as
+    | {
+        id: string; qty: number | string; created_at: string; undone_at: string | null;
+        used_by_profile_id: string | null; used_by_operator_id: string | null;
+        cnc_tools: { name: string } | { name: string }[] | null;
+      }
+    | null;
+  if (!row) return { ok: false, error: "Nothing to take back." };
+
+  const isMine =
+    (!!session.profileId && row.used_by_profile_id === session.profileId) ||
+    (!!session.operatorId && row.used_by_operator_id === session.operatorId);
+  if (!isMine) return { ok: false, error: "That one is not yours to take back." };
+  if (row.undone_at) return { ok: false, error: "That one is already taken back." };
+  if (!canUndoUsage({ createdAt: row.created_at, undoneAt: row.undone_at })) {
+    return { ok: false, error: "Too late to take that back. Tell the office." };
+  }
+
+  // A no-op if somebody got there first: the WHERE clause is the lock.
+  const { data: done, error } = await admin
+    .from("cnc_tool_usage")
+    .update({
+      undone_at: new Date().toISOString(),
+      // Whichever kind of person he is. An operator has no profile, so
+      // writing undone_by alone would leave the mark with no undoer and
+      // the pair CHECK would refuse it (mig 238).
+      undone_by: session.profileId,
+      undone_by_operator_id: session.operatorId,
+    })
+    .eq("id", usageId)
+    .is("undone_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!done) return { ok: false, error: "That one is already taken back." };
+
+  revalidatePath("/tools");
+
+  const toolName =
+    (Array.isArray(row.cnc_tools) ? row.cnc_tools[0] : row.cnc_tools)?.name ?? "tool";
+  const items = await holdingsForPerson(session.profileId, session.operatorId);
+
+  return {
+    ok: true,
+    outcome: "returned",
+    usageId: null,
+    toolName,
+    qty: Number(row.qty),
+    machine: null,
+    left: items.find((i) => i.name === toolName)?.qty ?? 0,
+    items,
   };
 }

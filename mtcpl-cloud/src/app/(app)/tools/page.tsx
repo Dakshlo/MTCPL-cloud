@@ -31,6 +31,7 @@ import {
 } from "@/lib/cnc-tool-permissions";
 import { loadStore, stockSignature } from "@/lib/cnc-tool-stock";
 import { allActiveOperators } from "@/lib/cnc-tool-operators";
+import { loadHoldings } from "@/lib/cnc-tool-usage";
 
 import { StoreClient } from "./store-client";
 
@@ -42,12 +43,15 @@ export default async function ToolStorePage() {
 
   const admin = createAdminSupabaseClient();
 
-  const [{ tools, movements }, operators, { data: vendorRows }] = await Promise.all([
+  const [{ tools, movements }, operators, { data: vendorRows }, holdings] = await Promise.all([
     loadStore(),
     allActiveOperators(),
     // 28 rows. Cheaper to take the lot than to work out which ids the
     // register happens to mention this time.
     admin.from("vendors").select("id, name").order("name"),
+    // Mig 238 — just the badge number for the "Out of the cupboard"
+    // link. The screen behind it loads the detail itself.
+    loadHoldings(),
   ]);
 
   const vendorNames: Record<string, string> = {};
@@ -74,6 +78,7 @@ export default async function ToolStorePage() {
         vendorName: o.vendorName,
       }))}
       canManage={canManageCncToolStore(profile)}
+      heldOut={holdings.reduce((a, p) => a + p.total, 0)}
       // Mig 237. Developer only for now, while the matcher learns what
       // the suppliers actually print on their bills.
       canScanBills={canScanToolBills(profile)}

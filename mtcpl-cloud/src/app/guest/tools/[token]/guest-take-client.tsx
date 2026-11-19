@@ -62,6 +62,28 @@ export type TeamMate = {
   company?: string;
 };
 export type VendorChoice = { id: string; name: string };
+
+/** Mig 238 — a tool he has taken and not yet spent or given back. */
+export type HeldLite = {
+  toolId: string;
+  name: string;
+  spec: string | null;
+  unit: string;
+  qty: number;
+  imageUrl: string | null;
+};
+
+/** Mig 238 — a CNC he may spend a tool on. His own company's only; the
+ *  office sees all of them. The database checks it again. */
+export type MachineLite = {
+  id: string;
+  code: string;
+  vendorName: string | null;
+  machineType: string;
+  /** Carving right now. Drawn as a dot, so filing against a machine
+   *  that is not even running looks like the slip it usually is. */
+  busy: boolean;
+};
 type Session = {
   name: string;
   company: string | null;
@@ -89,6 +111,24 @@ type VerifyRes =
   | { ok: false; error: string; attemptsLeft?: number };
 type TakeRes =
   | { ok: true; left: number; toolName: string; qty: number }
+  | { ok: false; error: string; signedOut?: boolean };
+type MyToolsRes =
+  | { ok: true; items: HeldLite[] }
+  | { ok: false; error: string; signedOut?: boolean };
+/** Both answers to "what happened to it" come back the same shape, and
+ *  both carry his whole account afterwards — so the number on screen is
+ *  the number in the database with no second round trip. */
+type SettleRes =
+  | {
+      ok: true;
+      outcome: "used" | "returned";
+      usageId: string | null;
+      toolName: string;
+      qty: number;
+      machine: string | null;
+      left: number;
+      items: HeldLite[];
+    }
   | { ok: false; error: string; signedOut?: boolean };
 
 /* "done" is gone — a take drops you straight back on the shelf with a
@@ -133,7 +173,10 @@ function dayLabel(iso: string): string {
   });
 }
 
-type Step = "who" | "code" | "tool" | "qty" | "register" | "team";
+/* "mine" is his account — what he took and has not accounted for yet.
+   "use" is the one screen that empties it: spent on a machine, or back
+   on the shelf (mig 238). */
+type Step = "who" | "code" | "tool" | "qty" | "register" | "team" | "mine" | "use";
 
 const DIGITS = 4;
 
@@ -167,6 +210,7 @@ export function GuestTakeClient({
   sendCodeAction, verifyCodeAction, signOutAction, takeAction,
   enrolAction, removeOperatorAction, myTeamAction, registerAction,
   keeperTools, addStockAction, fixCountAction, newToolAction,
+  held: initialHeld, machines, myToolsAction, settleAction, undoUsageAction,
 }: {
   token: string;
   label: string;
@@ -193,6 +237,16 @@ export function GuestTakeClient({
   addStockAction: (fd: FormData) => Promise<KeeperRes>;
   fixCountAction: (fd: FormData) => Promise<KeeperRes>;
   newToolAction: (fd: FormData) => Promise<KeeperRes>;
+  /** Mig 238 — his account, rendered on the server so the strip over the
+   *  shelf is right on first paint. A man who is holding four things
+   *  should not have to wait for a fetch to be told so. */
+  held: HeldLite[];
+  /** The CNCs he may file against. Empty for nobody — everyone who can
+   *  sign in here belongs to a company or to the office. */
+  machines: MachineLite[];
+  myToolsAction: (fd: FormData) => Promise<MyToolsRes>;
+  settleAction: (fd: FormData) => Promise<SettleRes>;
+  undoUsageAction: (fd: FormData) => Promise<SettleRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
   const [step, setStep] = useState<Step>(session ? "tool" : "who");
@@ -235,6 +289,24 @@ export function GuestTakeClient({
   /** What the keeper's sheet just did. Its own line, because it is a
    *  different kind of news from "you took two". */
   const [kept, setKept] = useState<string | null>(null);
+
+  // ── his account, and what leaves it (mig 238) ───────────────────
+  /** Everything he is holding. Server-rendered, then kept in step by
+   *  every take and every settle rather than refetched. */
+  const [held, setHeld] = useState<HeldLite[]>(initialHeld);
+  /** The one he is accounting for. */
+  const [holding, setHolding] = useState<HeldLite | null>(null);
+  const [useQty, setUseQty] = useState(1);
+  const [useMode, setUseMode] = useState<"used" | "returned">("used");
+  const [machine, setMachine] = useState<MachineLite | null>(null);
+  const [mineBusy, setMineBusy] = useState(false);
+  /** The usage he just filed, while it can still be taken back. Not the
+   *  flash: the flash clears itself in under three seconds and a wrong
+   *  machine number deserves longer than that, because it is going
+   *  straight into a costing report. */
+  const [justUsed, setJustUsed] = useState<
+    { usageId: string; toolName: string; qty: number; unit: string; machine: string } | null
+  >(null);
 
   // Only while somebody is actually looking at the shelf. On the name
   // and code steps there is no number on screen to go stale.
@@ -392,6 +464,108 @@ export function GuestTakeClient({
     });
   }
 
+  /**
+   * His account — what he took and has not accounted for yet (mig 238).
+   *
+   * Daksh, Nov 2026: "Mohit took 5 pcs of some tool, then this 5 pcs
+   * will show in his account."
+   *
+   * Refetched on the way in rather than trusted: the cupboard may have
+   * been open on this phone since the morning, and he may have filed
+   * something from the office screen in between.
+   */
+  function openMine() {
+    setStep("mine");
+    setErr(null);
+    setHolding(null);
+    setMineBusy(true);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      const r = await myToolsAction(fd);
+      setMineBusy(false);
+      if (!r.ok) {
+        setErr(r.error);
+        if (r.signedOut) { setWho(null); setPicked(null); setStep("who"); }
+        return;
+      }
+      setHeld(r.items);
+    });
+  }
+
+  function openUse(h: HeldLite) {
+    setHolding(h);
+    setUseQty(1);
+    setUseMode("used");
+    // One machine in the list is no choice at all — pick it for him.
+    setMachine(machines.length === 1 ? machines[0] : null);
+    setErr(null);
+    setJustUsed(null);
+    setStep("use");
+  }
+
+  /** One pc leaves his hands: spent on a machine, or back on the shelf. */
+  function settle() {
+    if (!holding) return;
+    if (useMode === "used" && !machine) {
+      setErr("Which machine? Tap one first.");
+      return;
+    }
+    setErr(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("tool_id", holding.toolId);
+      fd.set("outcome", useMode);
+      fd.set("qty", String(useQty));
+      if (useMode === "used" && machine) fd.set("machine_id", machine.id);
+      const r = await settleAction(fd);
+      if (!r.ok) {
+        setErr(r.error);
+        if (r.signedOut) { setWho(null); setPicked(null); setStep("who"); }
+        return;
+      }
+      setHeld(r.items);
+      setHolding(null);
+      if (r.outcome === "used" && r.usageId) {
+        setJustUsed({
+          usageId: r.usageId,
+          toolName: r.toolName,
+          qty: r.qty,
+          unit: holding.unit,
+          machine: r.machine ?? "?",
+        });
+      } else {
+        // A return puts stock back on the shelf, so the shelf he is
+        // about to look at is out of date by exactly that much.
+        setJustUsed(null);
+        setKept(`${r.qty} × ${r.toolName} back on the shelf.`);
+        router.refresh();
+      }
+      setStep("mine");
+    });
+  }
+
+  /** Took the wrong machine number. Ten minutes to say so. */
+  function undoUse() {
+    if (!justUsed) return;
+    setErr(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("usage_id", justUsed.usageId);
+      const r = await undoUsageAction(fd);
+      if (!r.ok) {
+        setErr(r.error);
+        if (r.signedOut) { setWho(null); setPicked(null); setStep("who"); }
+        return;
+      }
+      setHeld(r.items);
+      setJustUsed(null);
+      setKept(`${r.qty} × ${r.toolName} is back in your hands.`);
+    });
+  }
+
   function submit() {
     if (!tool) return;
     setErr(null);
@@ -408,6 +582,24 @@ export function GuestTakeClient({
       }
       setTaken((p) => ({ ...p, [tool.id]: (p[tool.id] ?? 0) + r.qty }));
       setTally((p) => [{ toolName: r.toolName, qty: r.qty }, ...p]);
+      // Into his account at the same instant it leaves the shelf —
+      // merged locally rather than refetched, so the strip over the
+      // shelf is already right when the popup clears.
+      setHeld((prev) => {
+        const i = prev.findIndex((h) => h.toolId === tool.id);
+        if (i >= 0) {
+          const next = [...prev];
+          next[i] = { ...next[i], qty: next[i].qty + r.qty };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            toolId: tool.id, name: r.toolName, spec: tool.spec,
+            unit: tool.unit, qty: r.qty, imageUrl: tool.imageUrl,
+          },
+        ];
+      });
       // Daksh, Nov 2026: "if they take anything in phone it gives 2
       // options, take something else and sign out — instead take back
       // to home page, directly after pop up."
@@ -433,6 +625,9 @@ export function GuestTakeClient({
       setTool(null); setFlash(null); setCode(""); setErr(null);
       setTeam([]); setTeamMsg(null);
       setNewName(""); setNewPhone(""); setNewVendor(""); setDropping(null);
+      // His account goes with him. Leaving it on screen would show the
+      // next man at the cupboard what the last one is carrying.
+      setHeld([]); setHolding(null); setMachine(null); setJustUsed(null);
       setStep("who");
     });
   }
@@ -552,7 +747,7 @@ export function GuestTakeClient({
 
         {/* Where you are, in three dots — so a man knows the screen is
             going somewhere and how far is left. */}
-        {who && step !== "register" && step !== "team" && (
+        {who && step !== "register" && step !== "team" && step !== "mine" && step !== "use" && (
           <div className="gt-steps" aria-hidden>
             <i data-on={step === "tool" ? "1" : undefined} data-done={step !== "tool" ? "1" : undefined} />
             <i data-on={step === "qty" ? "1" : undefined} />
@@ -803,6 +998,31 @@ export function GuestTakeClient({
         <section className="gt-body">
           <h1 className="gt-q">What are you taking?</h1>
 
+          {/* ── his account, over the shelf (mig 238) ─────────────
+              A strip and not a header icon. The header already holds
+              four things and is squeezed at 375px — and this one is
+              only worth screen space when there IS something in his
+              hands, which an icon cannot say. It also answers the
+              question the shelf raises: he took five yesterday, so
+              where are they. */}
+          {held.length > 0 && (
+            <button type="button" className="gt-hand" onClick={openMine}>
+              <span className="gt-hand-n">{held.reduce((a, h) => a + h.qty, 0)}</span>
+              <span className="gt-hand-text">
+                <strong>In your hands</strong>
+                {/* Kept short enough to survive a 375px screen without
+                    an ellipsis — the line that explains the tap is the
+                    worst one to cut off halfway. */}
+                <em>
+                  {held.length === 1
+                    ? held[0].name
+                    : `${held.length} tools · use or give back`}
+                </em>
+              </span>
+              <span className="gt-hand-go" aria-hidden>›</span>
+            </button>
+          )}
+
           {tools.length > 6 && (
             <div className="gt-search">
               <span aria-hidden>🔍</span>
@@ -905,6 +1125,196 @@ export function GuestTakeClient({
         </section>
       )}
 
+      {/* ── 5. his account (mig 238) ───────────────────────────── */}
+      {step === "mine" && (
+        <section className="gt-body">
+          <button type="button" className="gt-back" onClick={() => setStep("tool")}>
+            ← Back to the shelf
+          </button>
+
+          <h1 className="gt-h1">In your hands</h1>
+          <p className="gt-sub">
+            What you took and have not accounted for yet. Tap one to say it went
+            into a machine, or to give it back.
+          </p>
+
+          {/* The usage just filed, while it can still be taken back. A
+              wrong machine number is the easy mistake on this screen. */}
+          {justUsed && (
+            <div className="gt-undo" role="status">
+              <span className="gt-undo-text">
+                <strong>
+                  {justUsed.qty} {justUsed.unit} of {justUsed.toolName}
+                </strong>
+                <em>used on machine {justUsed.machine}</em>
+              </span>
+              <button type="button" onClick={undoUse} disabled={pending}>
+                {pending ? "…" : "Undo"}
+              </button>
+            </div>
+          )}
+
+          {mineBusy && <div className="gt-reg-wait">Reading your account…</div>}
+
+          {!mineBusy && held.length === 0 ? (
+            <div className="gt-blank">
+              Nothing in your hands. Everything you took is accounted for.
+            </div>
+          ) : (
+            <div className="gt-mine">
+              {held.map((h) => (
+                <button
+                  key={h.toolId}
+                  type="button"
+                  className="gt-mine-row"
+                  onClick={() => openUse(h)}
+                  disabled={pending}
+                >
+                  <span className="gt-thumb" data-empty={h.imageUrl ? undefined : "1"}>
+                    {h.imageUrl
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={h.imageUrl} alt="" />
+                      : <i>{h.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+                  </span>
+                  <span className="gt-mine-text">
+                    <strong>{h.name}</strong>
+                    {h.spec && <span>{h.spec}</span>}
+                  </span>
+                  <span className="gt-mine-qty">
+                    <b>{h.qty}</b>
+                    <i>{h.unit}</i>
+                  </span>
+                  <span className="gt-hand-go" aria-hidden>›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── 6. what happened to it (mig 238) ───────────────────── */}
+      {step === "use" && holding && (
+        <section className="gt-body">
+          <button
+            type="button"
+            className="gt-back"
+            onClick={() => { setHolding(null); setStep("mine"); }}
+          >
+            ← Back to your hands
+          </button>
+
+          <h1 className="gt-q">What happened to it?</h1>
+
+          <div className="gt-chosen">
+            <span className="gt-thumb gt-thumb-lg" data-empty={holding.imageUrl ? undefined : "1"}>
+              {holding.imageUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={holding.imageUrl} alt="" />
+                : <i>{holding.name.trim().charAt(0).toUpperCase() || "?"}</i>}
+            </span>
+            <span className="gt-chosen-text">
+              <strong>{holding.name}</strong>
+              {holding.spec && <span>{holding.spec}</span>}
+              <em>{holding.qty} {holding.unit} in your hands</em>
+            </span>
+          </div>
+
+          {/* Two answers, and only two. Either it went into a machine —
+              which is the point of the whole screen — or it never got
+              used and goes back on the shelf. */}
+          <div className="gt-reg-seg" role="group" aria-label="What happened">
+            <button
+              type="button"
+              className={useMode === "used" ? "on" : ""}
+              onClick={() => { setUseMode("used"); setErr(null); }}
+            >
+              Used on a machine
+            </button>
+            <button
+              type="button"
+              className={useMode === "returned" ? "on" : ""}
+              onClick={() => { setUseMode("returned"); setErr(null); }}
+            >
+              Gave it back
+            </button>
+          </div>
+
+          <div className="gt-stepper">
+            <button
+              type="button"
+              onClick={() => setUseQty((n) => Math.max(1, n - 1))}
+              disabled={pending || useQty <= 1}
+              aria-label="One less"
+            >
+              −
+            </button>
+            <div className="gt-qty">
+              <b>{useQty}</b>
+              <i>{holding.unit}</i>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUseQty((n) => Math.min(holding.qty, n + 1))}
+              disabled={pending || useQty >= holding.qty}
+              aria-label="One more"
+            >
+              +
+            </button>
+          </div>
+
+          {useMode === "used" && (
+            <>
+              <h2 className="gt-mach-q">Which machine?</h2>
+              {machines.length === 0 ? (
+                <div className="gt-blank">
+                  No machine is listed against your company. Tell the office.
+                </div>
+              ) : (
+                <div className="gt-mach">
+                  {machines.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className="gt-mach-btn"
+                      data-on={machine?.id === m.id ? "1" : undefined}
+                      data-busy={m.busy ? "1" : undefined}
+                      onClick={() => { setMachine(m); setErr(null); }}
+                      disabled={pending}
+                      title={m.busy ? "Carving now" : "Idle"}
+                    >
+                      <b>{m.code}</b>
+                      {m.machineType === "lathe" && <i>lathe</i>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* The office sees every company's machines, so it has to
+                  say whose one it just picked. A vendor's man only ever
+                  sees his own and does not need telling. */}
+              {machine?.vendorName && !who?.company && (
+                <p className="gt-fine">Machine {machine.code} · {machine.vendorName}</p>
+              )}
+            </>
+          )}
+
+          <button
+            type="button"
+            className="gt-take"
+            onClick={settle}
+            disabled={pending || (useMode === "used" && !machine)}
+          >
+            {pending
+              ? "Recording…"
+              : useMode === "used"
+                ? machine
+                  ? `Used ${useQty} ${holding.unit} on ${machine.code}`
+                  : "Pick a machine"
+                : `Give back ${useQty} ${holding.unit}`}
+          </button>
+          <p className="gt-fine">Signed by <strong>{who?.name}</strong></p>
+        </section>
+      )}
+
       {/* ── the office three can fill the shelf from here ──────
           Tucked behind one button at the bottom of the screen, where
           a thumb is, and only on the steps where a shelf is in view.
@@ -945,7 +1355,9 @@ export function GuestTakeClient({
         <section className="gt-body">
           <div className="gt-reg-top">
             <h1 className="gt-h1">The register</h1>
-            <p className="gt-sub">Who took what, and when. Everyone can read it.</p>
+            <p className="gt-sub">
+              Who took what, what went into a machine, and when. Everyone can read it.
+            </p>
           </div>
 
           <div className="gt-reg-seg" role="group" aria-label="Whose lines">
@@ -1001,22 +1413,58 @@ export function GuestTakeClient({
                         // colours, three glyphs, and the word written
                         // out. The sign is still there but it is no
                         // longer carrying the meaning on its own.
-                        const act: "in" | "out" | "fix" =
-                          l.kind === "receive" ? "in" : l.kind === "adjust" ? "fix" : "out";
+                        //
+                        // Mig 238 added a fourth: a tool SPENT on a
+                        // machine. It is the one line here that does
+                        // not move the shelf at all — it moves a pc out
+                        // of a man's hands — so it gets its own colour
+                        // and its own glyph rather than being dressed
+                        // up as a take.
+                        const act: "in" | "out" | "fix" | "use" =
+                          l.kind === "receive"
+                            ? "in"
+                            : l.kind === "adjust"
+                              ? "fix"
+                              : l.kind === "use"
+                                ? "use"
+                                : "out";
                         const qty = Math.abs(l.delta);
-                        const word = act === "in" ? "Stock in" : act === "out" ? "Taken" : "Count fixed";
-                        const glyph = act === "in" ? "↓" : act === "out" ? "↑" : "=";
-                        const sign = act === "in" ? "+" : act === "out" ? "−" : l.delta < 0 ? "−" : "+";
+                        const word =
+                          act === "in" ? "Stock in"
+                          : act === "out" ? (l.kind === "return" ? "Given back" : "Taken")
+                          : act === "use" ? `Used · ${l.machineCode ?? "?"}`
+                          : "Count fixed";
+                        const glyph =
+                          act === "in" ? "↓" : act === "out" ? "↑" : act === "use" ? "⚙" : "=";
+                        const sign =
+                          act === "in" ? "+" : act === "use" ? "−"
+                          : act === "out" ? (l.delta > 0 ? "+" : "−")
+                          : l.delta < 0 ? "−" : "+";
                         // A correction moves no goods, so it says what it
                         // did to the BOOK rather than naming a person who
                         // carried something away.
-                        const who = l.personName
-                          ? `${l.mine ? "You" : l.personName}${l.company && !l.mine ? ` · ${l.company}` : ""}`
+                        // The company is dropped when it IS the name —
+                        // a vendor principal signs for himself, and
+                        // "VIVEK · VIVEK" tells nobody anything.
+                        const whoPart = l.personName
+                          ? `${l.mine ? "You" : l.personName}${
+                              l.company && !l.mine && l.company !== l.personName
+                                ? ` · ${l.company}`
+                                : ""
+                            }`
                           : act === "fix"
                             ? `Register ${l.delta < 0 ? "lowered" : "raised"} by ${qty} · nothing was taken`
                             : act === "in"
                               ? "Onto the shelf"
                               : "Store";
+                        // Spelled out, because this is the one line that
+                        // does not move the shelf: the pc came out of a
+                        // man's hands, where the take had already put
+                        // it, and went into a machine.
+                        const who =
+                          act === "use"
+                            ? `${whoPart} · out of ${l.mine ? "your" : "his"} hands into machine ${l.machineCode ?? "?"}`
+                            : whoPart;
                         return (
                           <div
                             key={l.id}
@@ -1499,6 +1947,10 @@ const CSS = `
 }
 .gt-tl-row[data-act="out"] .gt-tl-dot { background:var(--low); }
 .gt-tl-row[data-act="in"]  .gt-tl-dot { background:var(--ok); }
+/* Spent on a machine: the end of the road for that pc, so it gets the
+   darkest tone on the screen. Not amber — amber is "a man is carrying
+   it", and the whole point of this line is that nobody is any more. */
+.gt-tl-row[data-act="use"] .gt-tl-dot { background:var(--brand); }
 /* A correction is bookkeeping, not goods moving — hollow on purpose,
    so it never reads as a thing that left the cupboard. */
 .gt-tl-row[data-act="fix"] .gt-tl-dot {
@@ -1523,6 +1975,100 @@ const CSS = `
 .gt-tl-row[data-act="in"]  .gt-tl-qty   { color:var(--ok); }
 .gt-tl-row[data-act="fix"] .gt-tl-badge { background:#eeece7; color:#5b5750; }
 .gt-tl-row[data-act="fix"] .gt-tl-qty   { color:#5b5750; font-weight:600; }
+.gt-tl-row[data-act="use"] .gt-tl-badge { background:#efe9dc; color:var(--brand); }
+.gt-tl-row[data-act="use"] .gt-tl-qty   { color:var(--brand); }
+
+/* ── his account, and what leaves it (mig 238) ───────────────────── */
+
+/* The strip over the shelf. Reads as one object — a number, what it is,
+   and somewhere to go — because it is one tap. */
+.gt-hand {
+  display:flex; align-items:center; gap:11px; width:100%; text-align:left;
+  margin:0 0 12px; padding:10px 12px; min-height:60px;
+  background:var(--card); border:1px solid var(--line); border-left:3px solid var(--gold);
+  border-radius:12px; cursor:pointer; font:inherit; color:var(--ink);
+}
+.gt-hand:active { background:#faf9f6; }
+.gt-hand-n {
+  flex:none; min-width:38px; height:38px; padding:0 8px; border-radius:10px;
+  background:var(--brand); color:#fff; display:grid; place-items:center;
+  font-size:17px; font-weight:800; font-variant-numeric:tabular-nums;
+}
+.gt-hand-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.gt-hand-text strong { font-size:13.5px; font-weight:700; }
+.gt-hand-text em {
+  font-style:normal; font-size:11.5px; color:var(--dim); line-height:1.4;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-hand-go { margin-left:auto; flex:none; font-size:20px; color:#b9b4a8; }
+
+.gt-mine { display:flex; flex-direction:column; gap:8px; }
+.gt-mine-row {
+  display:flex; align-items:center; gap:11px; width:100%; text-align:left;
+  /* 60px: this is pressed on a shop floor, sometimes with a glove on. */
+  min-height:60px; padding:9px 11px; font:inherit; color:var(--ink);
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  cursor:pointer;
+}
+.gt-mine-row:active { background:#faf9f6; }
+.gt-mine-row:disabled { opacity:.5; }
+.gt-mine-text { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.gt-mine-text strong {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:13px; font-weight:600; font-variant-numeric:tabular-nums;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-mine-text span { font-size:11px; color:var(--dim); }
+.gt-mine-qty {
+  margin-left:auto; flex:none; display:flex; align-items:baseline; gap:3px;
+  font-variant-numeric:tabular-nums;
+}
+.gt-mine-qty b { font-size:19px; font-weight:800; }
+.gt-mine-qty i { font-style:normal; font-size:10.5px; color:var(--dim); }
+
+/* The ten-minute take-back. Deliberately plainer than the green flash:
+   it is not news, it is a last chance. */
+.gt-undo {
+  display:flex; align-items:center; gap:10px; margin:0 0 12px;
+  padding:9px 11px; border-radius:10px;
+  background:#efe9dc; border:1px solid #ddd2ba; color:var(--brand);
+}
+.gt-undo-text { min-width:0; display:flex; flex-direction:column; gap:1px; }
+.gt-undo-text strong { font-size:12.5px; font-weight:700; }
+.gt-undo-text em { font-style:normal; font-size:11px; opacity:.8; }
+.gt-undo button {
+  margin-left:auto; flex:none; padding:8px 14px; min-height:38px;
+  border-radius:8px; border:1px solid var(--brand); background:transparent;
+  color:var(--brand); font:inherit; font-size:12.5px; font-weight:700;
+  cursor:pointer;
+}
+.gt-undo button:active { background:rgba(45,36,16,.08); }
+
+.gt-mach-q { margin:16px 0 8px; font-size:14px; font-weight:700; color:var(--ink); }
+/* A grid of codes, not a dropdown. Forty machines in a list is a scroll
+   and a mis-tap; forty in a grid is one glance and one thumb. The cells
+   are wide enough for "R7" and for a 44px target. */
+.gt-mach {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(58px, 1fr)); gap:7px;
+}
+.gt-mach-btn {
+  position:relative; min-height:50px; padding:5px 3px; border-radius:10px;
+  background:var(--card); border:1px solid var(--line); color:var(--ink);
+  font:inherit; cursor:pointer; display:grid; place-items:center; gap:1px;
+}
+.gt-mach-btn b { font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; }
+.gt-mach-btn i { font-style:normal; font-size:9px; color:var(--dim); letter-spacing:.04em; }
+.gt-mach-btn[data-busy]::after {
+  content:""; position:absolute; top:6px; right:6px;
+  width:6px; height:6px; border-radius:50%; background:var(--ok);
+}
+.gt-mach-btn[data-on] {
+  background:var(--brand); border-color:var(--brand); color:#fff;
+  box-shadow:0 0 0 2px var(--gold);
+}
+.gt-mach-btn[data-on] i { color:rgba(255,255,255,.7); }
+.gt-mach-btn[data-on][data-busy]::after { background:var(--gold-light); }
+.gt-mach-btn:disabled { opacity:.5; }
 
 .gt-tl-tool {
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
