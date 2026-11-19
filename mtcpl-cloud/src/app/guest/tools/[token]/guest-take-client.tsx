@@ -60,6 +60,9 @@ export type TeamMate = {
   maskedPhone: string;
   /** Only on the developer's view, where one list covers all three. */
   company?: string;
+  /** Mig 238 — pcs in HIS hands. A man's custody is his own, never his
+   *  vendor's; this is the vendor being able to see it, not share it. */
+  held?: number;
 };
 export type VendorChoice = { id: string; name: string };
 
@@ -412,11 +415,18 @@ export function GuestTakeClient({
       setStep("mine");
       setMineBusy(true);
       void (async () => {
-        const mf = new FormData();
-        mf.set("token", token);
-        const mine = await myToolsAction(mf);
-        setMineBusy(false);
-        if (mine.ok) setHeld(mine.items);
+        try {
+          const mf = new FormData();
+          mf.set("token", token);
+          const mine = await myToolsAction(mf);
+          if (mine.ok) setHeld(mine.items);
+        } catch {
+          // A dropped network here must not take the screen down with
+          // it: he is signed in, and an empty list he can refresh beats
+          // an unhandled rejection on a phone at a cupboard.
+        } finally {
+          setMineBusy(false);
+        }
       })();
 
       // The page was rendered before anyone was signed in, so it had no
@@ -841,6 +851,17 @@ export function GuestTakeClient({
                       {m.company ? `${m.company} · ` : ""}{m.maskedPhone}
                     </span>
                   </span>
+                  {/* Mig 238 — what he is carrying. His tools are HIS:
+                      a take by Shyam sits in Shyam's hands and never
+                      in Mohit's, because the man who signed for it is
+                      the man who must account for it. But Mohit
+                      vouched for him, so Mohit sees the total. */}
+                  {!!m.held && m.held > 0 && dropping !== m.id && (
+                    <span className="gt-mate-held" title={`${m.held} pcs in his hands`}>
+                      <b>{m.held}</b>
+                      <i>in hand</i>
+                    </span>
+                  )}
                   {dropping === m.id ? (
                     <span className="gt-mate-confirm">
                       <button type="button" className="gt-mate-yes" onClick={() => dropMate(m.id)} disabled={pending}>
@@ -1034,9 +1055,26 @@ export function GuestTakeClient({
               back. The count rides on it so a take visibly lands in
               his hands without him leaving the shelf to check. */}
           <button type="button" className="gt-back" onClick={openMine}>
-            ← In your hands
+            ← Your tools
             {heldTotal > 0 && <i className="gt-back-n">{heldTotal}</i>}
           </button>
+
+          {/* ── and this one is the shelf ───────────────────────
+              Gold, and the same toolbox as the card that leads here,
+              so arriving looks like the thing he tapped. Without it
+              the two pages were a heading apart and men were losing
+              track of which one they were on. */}
+          <div className="gt-storehead">
+            <span className="gt-storehead-ico" aria-hidden>🧰</span>
+            <span className="gt-storehead-text">
+              <strong>The store</strong>
+              <em>
+                {shelfCount === 0
+                  ? "Nothing on the shelf"
+                  : `${shelfCount} ${shelfCount === 1 ? "tool" : "tools"} on the shelf`}
+              </em>
+            </span>
+          </div>
 
           <h1 className="gt-q">What are you taking?</h1>
 
@@ -1145,7 +1183,30 @@ export function GuestTakeClient({
       {/* ── 5. his account (mig 238) ───────────────────────────── */}
       {step === "mine" && (
         <section className="gt-body">
-          <h1 className="gt-h1">In your hands</h1>
+          {/* ── whose page this is ─────────────────────────────
+              Daksh, Nov 2026: "instead it should say like 'Daksh
+              dashboard', 'tools you have'."
+              "In your hands" alone did not say WHOSE hands, and the
+              two pages read too alike at a glance. His own name and
+              his own initial, in his own colour, so a man who has
+              just scanned a sticker can tell in one look that he is
+              on his own page and not the shelf. */}
+          <div className="gt-dash">
+            <span className="gt-dash-dot" style={{ background: colourFor(who?.name ?? "") }}>
+              {initials(who?.name ?? "")}
+            </span>
+            <span className="gt-dash-text">
+              <strong>{who?.name}</strong>
+              <em>
+                {who?.company ?? "Office"}
+                {heldTotal > 0
+                  ? ` · ${heldTotal} ${heldTotal === 1 ? "pc" : "pcs"} in hand`
+                  : " · nothing in hand"}
+              </em>
+            </span>
+          </div>
+
+          <h1 className="gt-h1">Tools you have</h1>
 
           {/* The usage just filed, while it can still be taken back. A
               wrong machine number is the easy mistake on this screen. */}
@@ -1728,6 +1789,21 @@ const CSS = `
 .gt-mate-body { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1; }
 .gt-mate-body strong { font-size:14.5px; font-weight:700; }
 .gt-mate-body span { font-size:11.5px; color:var(--dim); }
+.gt-mate-held {
+  flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:0;
+  padding:3px 9px; border-radius:8px; margin-right:2px;
+  /* literal, not var(--gold-subtle): this screen keeps its own palette
+     and does not borrow the app's tokens. */
+  background:#f7efdd; border:1px solid rgba(201,151,58,.35);
+}
+.gt-mate-held b {
+  font-size:15px; font-weight:800; line-height:1.1; color:var(--gold-dark);
+  font-variant-numeric:tabular-nums;
+}
+.gt-mate-held i {
+  font-style:normal; font-size:8.5px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--gold-dark); opacity:.75;
+}
 .gt-mate-x {
   flex:0 0 auto; width:30px; height:30px; border-radius:6px; cursor:pointer;
   border:1px solid var(--line); background:#fff; color:var(--dim); font-size:13px;
@@ -2012,6 +2088,48 @@ const CSS = `
   font-style:normal; font-size:11px; font-weight:800; margin-left:7px;
   padding:1px 7px; border-radius:999px; background:var(--brand); color:#fff;
   font-variant-numeric:tabular-nums;
+}
+
+/* ── which page am I on ─────────────────────────────────────────
+   Two bands that cannot be mistaken for one another: his own name on
+   a pale card with his initial, and the shelf in gold with the same
+   toolbox as the card that leads to it. */
+.gt-dash {
+  display:flex; align-items:center; gap:12px;
+  margin:0 0 18px; padding:12px 14px; min-height:64px;
+  background:var(--card); border:1px solid var(--line);
+  border-left:4px solid var(--brand); border-radius:12px;
+}
+.gt-dash-dot {
+  flex:none; width:42px; height:42px; border-radius:50%;
+  display:grid; place-items:center; color:#fff;
+  font-size:15px; font-weight:800; letter-spacing:.02em;
+}
+.gt-dash-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.gt-dash-text strong {
+  font-size:17px; font-weight:800; letter-spacing:-.2px; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.gt-dash-text em {
+  font-style:normal; font-size:11.5px; font-weight:600; color:var(--dim);
+  text-transform:uppercase; letter-spacing:.05em;
+}
+
+.gt-storehead {
+  display:flex; align-items:center; gap:12px;
+  margin:0 0 18px; padding:12px 14px; min-height:64px;
+  background:var(--gold); border:1px solid var(--gold-dark);
+  border-radius:12px; color:#fff;
+}
+.gt-storehead-ico {
+  flex:none; width:42px; height:42px; border-radius:11px;
+  background:rgba(255,255,255,.22); display:grid; place-items:center; font-size:21px;
+}
+.gt-storehead-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.gt-storehead-text strong { font-size:17px; font-weight:800; letter-spacing:-.2px; }
+.gt-storehead-text em {
+  font-style:normal; font-size:11.5px; font-weight:600;
+  color:rgba(255,255,255,.88); text-transform:uppercase; letter-spacing:.05em;
 }
 
 /* ── the way through to the shelf ───────────────────────────────

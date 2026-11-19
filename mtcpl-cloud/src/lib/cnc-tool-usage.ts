@@ -215,6 +215,38 @@ export async function holdingsForPerson(
     .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
 }
 
+/**
+ * How much each of these men is carrying, in one query.
+ *
+ * For a vendor's "my men" page. Daksh, Nov 2026: "if Mohit's added
+ * operator tries to take the tool from store to custody — his separate
+ * dashboard will work, or Mohit's?"
+ *
+ * His own. Custody is keyed on the PERSON, so Shyam's take sits in
+ * Shyam's hands and Mohit's own page is unaffected — the man who signed
+ * for it is the man who must account for it, which is the one rule this
+ * whole module has. But Mohit vouched for him and is answerable for his
+ * firm's tools, so he can see the total each of his men is holding.
+ */
+export async function heldByOperators(operatorIds: string[]): Promise<Map<string, number>> {
+  const want = [...new Set(operatorIds)].filter(Boolean);
+  if (want.length === 0) return new Map();
+
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("cnc_tool_holdings")
+    .select("operator_id, qty")
+    .in("operator_id", want)
+    .gt("qty", 0);
+
+  const out = new Map<string, number>();
+  for (const r of (data ?? []) as Array<{ operator_id: string | null; qty: number | string }>) {
+    if (!r.operator_id) continue;
+    out.set(r.operator_id, (out.get(r.operator_id) ?? 0) + Number(r.qty));
+  }
+  return out;
+}
+
 type ToolBits = Omit<HeldItem, "qty">;
 
 async function toolLookup(

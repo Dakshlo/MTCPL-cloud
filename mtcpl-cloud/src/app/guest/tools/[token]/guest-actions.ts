@@ -30,6 +30,7 @@ import { TOOL_IMAGE_BUCKET, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool
 import {
   MAX_USE_QTY,
   canUndoUsage,
+  heldByOperators,
   holdingsForPerson,
   settleRefusal,
   usageLinesSince,
@@ -423,6 +424,10 @@ export type TeamMember = {
   /** Only filled on the developer's view, where one list covers all
    *  three companies and the name alone would not say whose man it is. */
   company?: string;
+  /** Mig 238 — pcs this man is carrying. His tools are HIS, not his
+   *  vendor's, but the vendor vouched for him and is answerable for the
+   *  firm's tools, so he sees the total. */
+  held?: number;
 };
 
 export type TeamResult =
@@ -436,6 +441,14 @@ const asTeam = (rows: ToolOperator[], withCompany = false): TeamMember[] =>
     maskedPhone: o.maskedPhone,
     ...(withCompany ? { company: o.vendorName } : {}),
   }));
+
+/** The same list with each man's custody on it. One query for the whole
+ *  team, not one per man. */
+async function withHeld(team: TeamMember[]): Promise<TeamMember[]> {
+  if (team.length === 0) return team;
+  const held = await heldByOperators(team.map((t) => t.id));
+  return team.map((t) => ({ ...t, held: held.get(t.id) ?? 0 }));
+}
 
 /**
  * The signed-in person, if they may manage a team at all.
@@ -488,16 +501,18 @@ export async function myTeamAction(fd: FormData): Promise<TeamResult> {
   const who = await enrollingVendor(String(fd.get("token") || "").trim());
   if (!who.ok) return who;
   if (who.scope === "any") {
-    return { ok: true, team: asTeam(await allActiveOperators(), true) };
+    return { ok: true, team: await withHeld(asTeam(await allActiveOperators(), true)) };
   }
-  return { ok: true, team: asTeam(await operatorsForVendor(who.vendorId!)) };
+  return { ok: true, team: await withHeld(asTeam(await operatorsForVendor(who.vendorId!))) };
 }
 
 /** The list after a change, in whichever shape this signer sees. */
 async function teamFor(scope: "own" | "any", vendorId: string | null): Promise<TeamMember[]> {
-  return scope === "any"
-    ? asTeam(await allActiveOperators(), true)
-    : asTeam(await operatorsForVendor(vendorId!));
+  return withHeld(
+    scope === "any"
+      ? asTeam(await allActiveOperators(), true)
+      : asTeam(await operatorsForVendor(vendorId!)),
+  );
 }
 
 /** Add one of my men. Name and number, nothing else — anything more

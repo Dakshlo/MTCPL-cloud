@@ -112,6 +112,56 @@ export function toMsg91Mobile(raw: string): string {
   return digits; // already carries a country code (e.g. 919876543210)
 }
 
+// ── Nothing here may hang for ever ─────────────────────────────────
+//
+// Daksh, Nov 2026, with a screenshot of Safari's "This page couldn't
+// load" taken at the cupboard: "this inventory phone module has some
+// bug, it shows this error even at OTP login time."
+//
+// A `fetch` with no signal waits as long as the other end wants. MSG91
+// is a third party on the far side of the internet, and the OTP send
+// happens inside a SERVER ACTION — so a gateway that accepts the
+// connection and then goes quiet does not fail, it just never answers.
+// The phone sits on a spinner until the browser gives up on the request
+// itself, which is drawn as "This page couldn't load" and looks to the
+// man holding it like the app is broken.
+//
+// A timeout turns that into an ordinary error the screen can explain
+// and he can retry, which is the difference between a bad minute and a
+// dead cupboard. It is not a claim about what caused any particular
+// failure; it is removing the one path that could hang indefinitely.
+const OTP_SEND_TIMEOUT_MS = 15_000;
+const TEMPLATE_SEND_TIMEOUT_MS = 20_000;
+
+async function msg91Fetch(
+  body: unknown,
+  authKey: string,
+  timeoutMs: number,
+): Promise<Response> {
+  try {
+    return await fetch(MSG91_FLOW_URL, {
+      method: "POST",
+      headers: {
+        authkey: authKey,
+        "Content-Type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    // AbortSignal.timeout throws TimeoutError; a dropped connection
+    // throws something else. Both say the same thing to the caller, in
+    // words a person at a cupboard can act on.
+    const timedOut = e instanceof Error && e.name === "TimeoutError";
+    throw new Error(
+      timedOut
+        ? `MSG91 did not answer within ${Math.round(timeoutMs / 1000)}s. Try again.`
+        : `MSG91 could not be reached: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
 /** Send the login OTP via MSG91's DLT-approved template. Throws on any
  *  non-success so the caller (the SMS hook) can report it back to
  *  Supabase. */
@@ -126,20 +176,17 @@ export async function sendOtpSms(mobileRaw: string, otp: string): Promise<void> 
     throw new Error(`Bad recipient mobile "${mobileRaw}" (normalised "${mobiles}").`);
   }
 
-  const res = await fetch(MSG91_FLOW_URL, {
-    method: "POST",
-    headers: {
-      authkey: authKey,
-      "Content-Type": "application/json",
-      accept: "application/json",
-    },
-    body: JSON.stringify({
+  const res = await msg91Fetch(
+    {
       template_id: OTP_TEMPLATE_ID,
       short_url: "0",
       realTimeResponse: "1",
       recipients: [{ mobiles, var1: otp }],
-    }),
-  });
+    },
+    authKey,
+    // Somebody is standing at a cupboard with a phone in their hand.
+    OTP_SEND_TIMEOUT_MS,
+  );
 
   const text = await res.text();
   let json: { type?: string; message?: string } = {};
@@ -171,15 +218,15 @@ export async function sendTemplateSms(opts: {
   const mobiles = toMsg91Mobile(opts.mobile);
   if (!/^\d{12}$/.test(mobiles)) throw new Error(`Bad recipient mobile "${opts.mobile}".`);
 
-  const res = await fetch(MSG91_FLOW_URL, {
-    method: "POST",
-    headers: { authkey: authKey, "Content-Type": "application/json", accept: "application/json" },
-    body: JSON.stringify({
+  const res = await msg91Fetch(
+    {
       template_id: opts.templateId,
       short_url: "0",
       recipients: [{ mobiles, ...opts.vars }],
-    }),
-  });
+    },
+    authKey,
+    TEMPLATE_SEND_TIMEOUT_MS,
+  );
   const text = await res.text();
   let json: { type?: string; message?: string } = {};
   try { json = JSON.parse(text); } catch { /* non-JSON */ }
