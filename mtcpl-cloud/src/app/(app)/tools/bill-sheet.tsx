@@ -117,6 +117,7 @@ const BADGE: Record<string, { text: string; tone: string; why: string }> = {
   skipped: { text: "NOT STOCK", tone: "grey", why: "Freight, packing, discount or tax — never goes on a shelf." },
 };
 
+
 export function BillSheet({
   open,
   tools,
@@ -137,6 +138,8 @@ export function BillSheet({
   const [bill, setBill] = useState<ScannedBill | null>(null);
   const [drafts, setDrafts] = useState<Record<number, Draft>>({});
   const [why, setWhy] = useState<string | null>(null);
+  /** The model's own technical note, folded away until asked for. */
+  const [showNote, setShowNote] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -145,7 +148,7 @@ export function BillSheet({
     // bill left lying around is how the wrong quantity gets posted
     // tomorrow by somebody who thinks it was finished.
     setFile(null); setFileNote(null); setScanning(false);
-    setError(null); setBill(null); setDrafts({}); setWhy(null);
+    setError(null); setBill(null); setDrafts({}); setWhy(null); setShowNote(false);
     if (fileRef.current) fileRef.current.value = "";
   }, [open]);
 
@@ -213,6 +216,42 @@ export function BillSheet({
   });
   const blocked = live.length === 0 || unticked.length > 0 || badQty.length > 0 || namelessNew.length > 0;
 
+  // ── Where you stand, in three numbers ───────────────────────────
+  //
+  // Daksh, Nov 2026: "make the UI of scan a bill more clear and easy."
+  //
+  // The old screen told you what was wrong only at the very bottom, in
+  // grey, after you had already scrolled past every row. With two rows
+  // visible at a time on a laptop you were reading a six-line bill
+  // blind: no idea how many were fine, how many wanted you, or how
+  // close you were to being able to post.
+  const problems = new Set<number>([
+    ...unticked.map((l) => l.line_no),
+    ...badQty.map((l) => l.line_no),
+    ...namelessNew.map((l) => l.line_no),
+  ]);
+  const readyCount = live.length - problems.size;
+  const skipCount = lines.length - live.length;
+
+  /** Every outstanding yes at once — one deliberate press after reading
+   *  the list, instead of six identical ones. It only ever ticks what is
+   *  already on screen and it is undone by the same button, so it adds
+   *  no decision the per-line ticks did not already ask for. */
+  function tickAll(on: boolean) {
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const l of lines) {
+        const d = next[l.line_no];
+        if (d && needsTick(l, d)) next[l.line_no] = { ...d, confirm: on };
+      }
+      return next;
+    });
+  }
+  const tickable = live.filter((l) => {
+    const d = drafts[l.line_no];
+    return d ? needsTick(l, d) : false;
+  });
+
   function post() {
     if (!bill || !file || blocked) return;
     const payload = {
@@ -274,21 +313,28 @@ export function BillSheet({
       title={bill ? "Check the bill" : "Scan a bill"}
       subtitle={
         bill
-          ? "Nothing moves until you press Post. Amber rows need you."
+          // "Amber rows need you" named a colour and left you to go
+          // find it. The counts bar now says how many and the row
+          // buttons say which, so the subtitle only has to say the one
+          // thing that is true of the whole screen.
+          ? "Nothing moves until you press Post."
           : "A photo or PDF of the supplier's bill. The shelf is filled from what it says."
       }
       footer={
         bill ? (
           <div style={{ display: "grid", gap: 8 }}>
+            {/* Say what is wrong AND what to press. The old copy
+                ("amber needs a yes") named a colour and left you to
+                find it. */}
             {blocked && (
               <p className="tb-block">
                 {live.length === 0
                   ? "Every line is marked not stock — there is nothing to post."
                   : unticked.length > 0
-                    ? `${unticked.length} line${unticked.length === 1 ? "" : "s"} waiting for your tick — amber needs a yes.`
+                    ? `${unticked.length} line${unticked.length === 1 ? "" : "s"} still need${unticked.length === 1 ? "s" : ""} your yes — press the amber button on each, or “Yes to all” at the top.`
                     : namelessNew.length > 0
-                      ? "A new item still needs a name."
-                      : `${badQty.length} line${badQty.length === 1 ? "" : "s"} have no quantity.`}
+                      ? "A new item still needs a name — the red box."
+                      : `${badQty.length} line${badQty.length === 1 ? "" : "s"} have no quantity — the red box.`}
               </p>
             )}
             <button type="button" className="tc-sheet-go" disabled={busy || blocked} onClick={post}>
@@ -344,11 +390,24 @@ export function BillSheet({
       {/* ── Step two: the review ────────────────────────────────── */}
       {bill && (
         <div style={{ display: "grid", gap: 14 }}>
+          {/* ── The one thing that must stop you ──────────────────
+              It used to be an amber paragraph stacked above two more
+              amber paragraphs, so the sentence that matters — posting
+              this again doubles the stock — carried exactly as much
+              weight as a note about HSN alignment. Red, first, and
+              shaped like a stop sign. */}
           {bill.duplicate_of && (
-            <p className="tb-warn">
-              <b>This bill has already been posted.</b> {bill.supplier_name} bill {bill.bill_no} is
-              on the record, so posting it again would double the stock. Close this unless you are sure.
-            </p>
+            <div className="tb-dup" role="alert">
+              <span className="tb-dup-ico" aria-hidden>⚠</span>
+              <div>
+                <b>You have already posted this bill</b>
+                <p>
+                  {bill.supplier_name ?? "This supplier"} bill {bill.bill_no ?? "(no number)"} is
+                  on the record. Posting it again adds the stock a second time. Close this
+                  unless you know the first one was wrong.
+                </p>
+              </div>
+            </div>
           )}
 
           <div className="tb-head">
@@ -367,16 +426,58 @@ export function BillSheet({
             </div>
           </div>
 
+          {/* How well it read: one line, with the model's own technical
+              note folded away. That note is three lines of HSN
+              reasoning — useful when a number looks wrong, noise when
+              you are trying to see the rows. */}
           <div className="tb-conf" data-tone={conf === "high" ? "green" : conf === "medium" ? "amber" : "red"}>
+            <span className="tb-conf-dot" aria-hidden />
             <b>{conf === "high" ? "Read cleanly" : conf === "medium" ? "Check the numbers" : "Low confidence"}</b>
-            <span>
+            <span className="tb-conf-say">
               {conf === "high"
                 ? "A clean printed bill. Still worth a glance at the quantities."
                 : conf === "medium"
                   ? "Hand-written, or not perfectly sharp. Check every quantity against the paper."
                   : "Blurred, cut off, or a digit it could not settle. Check every line."}
             </span>
-            {bill.note && <em>{bill.note}</em>}
+            {bill.note && (
+              <button type="button" className="tb-conf-more" onClick={() => setShowNote((v) => !v)}>
+                {showNote ? "hide detail" : "what it noticed"}
+              </button>
+            )}
+          </div>
+          {bill.note && showNote && <p className="tb-note">{bill.note}</p>}
+
+          {/* ── Where you stand ───────────────────────────────────
+              Three numbers and, when there is more than one yes
+              outstanding, a way to give them in one press. */}
+          <div className="tb-bar">
+            <div className="tb-bar-counts">
+              <span className="tb-pill" data-tone="green">
+                <b>{readyCount}</b> ready
+              </span>
+              {problems.size > 0 && (
+                <span className="tb-pill" data-tone="amber">
+                  <b>{problems.size}</b> need you
+                </span>
+              )}
+              {skipCount > 0 && (
+                <span className="tb-pill" data-tone="grey">
+                  <b>{skipCount}</b> not stock
+                </span>
+              )}
+            </div>
+            {tickable.length > 1 && (
+              <button
+                type="button"
+                className="tb-bar-all"
+                onClick={() => tickAll(unticked.length > 0)}
+              >
+                {unticked.length > 0
+                  ? `Yes to all ${unticked.length}`
+                  : "Undo all"}
+              </button>
+            )}
           </div>
 
           <div className="tb-rows">
@@ -439,22 +540,29 @@ function BillRow({
   const tone = skip ? "grey" : tick ? (draft.confirm ? "green" : "amber") : "green";
 
   const qtyBad = !skip && !(Number(draft.qty) > 0);
+  const nameBad = draft.action === "create" && !draft.newName.trim();
+
+  /**
+   * Three states, named, with the one you are in lit up.
+   *
+   * It used to be two small grey buttons whose labels changed with the
+   * state — "use existing" appeared only when creating, "make new" only
+   * when matching — so the control told you what you could do next but
+   * never what you were doing now, and both read as disabled. A man
+   * looking at this screen should be able to see the answer without
+   * pressing anything.
+   */
+  function pick(next: Draft["action"]) {
+    if (next === draft.action) return;
+    if (next === "add") onChange({ action: "add", toolId: draft.toolId ?? line.tool_id ?? tools[0]?.id ?? null, confirm: false });
+    else if (next === "create") onChange({ action: "create", confirm: false });
+    else onChange({ action: "skip", confirm: false });
+  }
 
   return (
     <div className="tb-row" data-tone={tone} data-skip={skip ? "1" : undefined}>
-      {/* The evidence, first and unaltered. */}
+      {/* ── The evidence, first and unaltered ─────────────────── */}
       <div className="tb-row-raw">
-        <code>{line.raw_text}</code>
-        <span className="tb-row-meta">
-          {line.qty != null && `${line.qty}${line.unit ? ` ${line.unit}` : ""}`}
-          {line.rate != null && ` · ${inr(line.rate)}/unit`}
-          {line.amount != null && ` · ${inr(line.amount)}`}
-          {line.hsn && ` · HSN ${line.hsn}`}
-        </span>
-      </div>
-
-      {/* What we think it is. */}
-      <div className="tb-row-decide">
         <button
           type="button"
           className="tb-badge"
@@ -464,103 +572,116 @@ function BillRow({
         >
           {badge.text}
         </button>
-
-        {skip ? (
-          <span className="tb-row-skip">left out of the stock</span>
-        ) : draft.action === "create" ? (
-          <div className="tb-new">
-            <input
-              className="tb-in tb-in-name"
-              value={draft.newName}
-              maxLength={80}
-              placeholder="Name for the new item"
-              onChange={(e) => onChange({ newName: e.target.value })}
-              aria-label={`Name for line ${line.line_no}`}
-            />
-            <input
-              className="tb-in tb-in-unit"
-              value={draft.newUnit}
-              maxLength={12}
-              onChange={(e) => onChange({ newUnit: e.target.value })}
-              aria-label={`Unit for line ${line.line_no}`}
-            />
-            <label className="tb-tick">
-              <input
-                type="checkbox"
-                checked={draft.confirm}
-                onChange={(e) => onChange({ confirm: e.target.checked })}
-              />
-              <span>Create this new item</span>
-            </label>
-          </div>
-        ) : (
-          <select
-            className="tb-in tb-in-tool"
-            value={draft.toolId ?? ""}
-            // Choosing by hand IS the confirmation, so the tick goes
-            // away rather than asking a second time.
-            onChange={(e) => onChange({ toolId: e.target.value || null, confirm: false })}
-            aria-label={`Tool for line ${line.line_no}`}
-          >
-            {tools.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}{t.spec ? ` · ${t.spec}` : ""}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {/* The AI's guess, kept as-is, needs a yes of its own. */}
-        {!skip && draft.action === "add" && tick && (
-          <label className="tb-tick">
-            <input
-              type="checkbox"
-              checked={draft.confirm}
-              onChange={(e) => onChange({ confirm: e.target.checked })}
-            />
-            <span>Yes, this is the one</span>
-          </label>
-        )}
+        <code>{line.raw_text}</code>
+        <span className="tb-row-meta">
+          {line.qty != null && `${line.qty}${line.unit ? ` ${line.unit}` : ""}`}
+          {line.rate != null && ` · ${inr(line.rate)}/unit`}
+          {line.amount != null && ` · ${inr(line.amount)}`}
+          {line.hsn && ` · HSN ${line.hsn}`}
+        </span>
       </div>
 
-      {/* How many, and whether it counts at all. */}
-      <div className="tb-row-qty">
-        {!skip && (
-          <input
-            className="tb-in tb-in-qty"
-            data-bad={qtyBad ? "1" : undefined}
-            inputMode="decimal"
-            value={draft.qty}
-            onChange={(e) => onChange({ qty: e.target.value.replace(/[^\d.]/g, "") })}
-            aria-label={`Quantity for line ${line.line_no}`}
-          />
-        )}
-        <div className="tb-row-switch">
-          {!skip && draft.action === "create" && (
-            <button
-              type="button"
-              onClick={() => onChange({ action: "add", toolId: tools[0]?.id ?? null, confirm: false })}
-              disabled={tools.length === 0}
-              title={tools.length === 0 ? "The shelf is empty — there is nothing to point at yet" : undefined}
-            >
-              use existing
-            </button>
-          )}
-          {!skip && draft.action === "add" && (
-            <button
-              type="button"
-              onClick={() => onChange({ action: "create", confirm: false })}
-            >
-              make new
-            </button>
-          )}
+      {/* ── What to do with it ────────────────────────────────── */}
+      <div className="tb-row-act">
+        <div className="tb-seg" role="group" aria-label={`What to do with line ${line.line_no}`}>
           <button
             type="button"
-            onClick={() => onChange({ action: skip ? (line.tool_id ? "add" : "create") : "skip", confirm: false })}
+            data-on={draft.action === "add" ? "1" : undefined}
+            onClick={() => pick("add")}
+            disabled={tools.length === 0}
+            title={tools.length === 0 ? "The shelf is empty — there is nothing to point at yet" : "Add to a tool already on the shelf"}
           >
-            {skip ? "count it" : "not stock"}
+            Existing
+          </button>
+          <button
+            type="button"
+            data-on={draft.action === "create" ? "1" : undefined}
+            onClick={() => pick("create")}
+            title="Create a tool the shelf has never had"
+          >
+            New item
+          </button>
+          <button
+            type="button"
+            data-on={skip ? "1" : undefined}
+            onClick={() => pick("skip")}
+            title="Freight, packing, discount — never goes on a shelf"
+          >
+            Not stock
           </button>
         </div>
+
+        {skip ? (
+          <span className="tb-row-skip">Left out of the stock.</span>
+        ) : (
+          <>
+            {draft.action === "create" ? (
+              <>
+                <input
+                  className="tb-in tb-in-name"
+                  data-bad={nameBad ? "1" : undefined}
+                  value={draft.newName}
+                  maxLength={80}
+                  placeholder="Name for the new item"
+                  onChange={(e) => onChange({ newName: e.target.value })}
+                  aria-label={`Name for line ${line.line_no}`}
+                />
+                <input
+                  className="tb-in tb-in-unit"
+                  value={draft.newUnit}
+                  maxLength={12}
+                  onChange={(e) => onChange({ newUnit: e.target.value })}
+                  aria-label={`Unit for line ${line.line_no}`}
+                />
+              </>
+            ) : (
+              <select
+                className="tb-in tb-in-tool"
+                value={draft.toolId ?? ""}
+                // Choosing by hand IS the confirmation, so the tick goes
+                // away rather than asking a second time.
+                onChange={(e) => onChange({ toolId: e.target.value || null, confirm: false })}
+                aria-label={`Tool for line ${line.line_no}`}
+              >
+                {tools.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.spec ? ` · ${t.spec}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <label className="tb-qty">
+              <span>Qty</span>
+              <input
+                className="tb-in tb-in-qty"
+                data-bad={qtyBad ? "1" : undefined}
+                inputMode="decimal"
+                value={draft.qty}
+                onChange={(e) => onChange({ qty: e.target.value.replace(/[^\d.]/g, "") })}
+                aria-label={`Quantity for line ${line.line_no}`}
+              />
+            </label>
+
+            {/* The yes. It unblocks Post, so it is the biggest thing on
+                the row — it used to be a 17px checkbox. */}
+            {tick && (
+              <button
+                type="button"
+                className="tb-yes"
+                data-on={draft.confirm ? "1" : undefined}
+                onClick={() => onChange({ confirm: !draft.confirm })}
+                aria-pressed={draft.confirm}
+              >
+                {draft.confirm
+                  ? "✓ Yes"
+                  : draft.action === "create"
+                    ? "Create it?"
+                    : "Right one?"}
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -597,6 +718,16 @@ const BILL_CSS = `
   font-size:11.5px; color:var(--muted); line-height:1.5; }
 .tb-fine-one { margin:0; font-size:11px; color:var(--muted); line-height:1.5; }
 
+/* ── the duplicate stop sign ─────────────────────────────────── */
+.tb-dup {
+  display:flex; gap:11px; align-items:flex-start;
+  padding:13px 14px; border-radius:13px;
+  background:#fef2f2; border:1px solid #fca5a5; border-left:4px solid #dc2626; color:#991b1b;
+}
+.tb-dup-ico { font-size:18px; line-height:1.2; flex:0 0 auto; }
+.tb-dup b { display:block; font-size:13.5px; margin-bottom:3px; }
+.tb-dup p { margin:0; font-size:12.5px; line-height:1.55; }
+
 /* ── the bill header ─────────────────────────────────────────── */
 .tb-head {
   display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:flex-start;
@@ -610,17 +741,60 @@ const BILL_CSS = `
 .tb-head-money [data-k] { color:var(--muted); }
 .tb-head-money span:nth-child(even), .tb-head-money b { text-align:right; }
 
-.tb-conf { display:grid; gap:3px; padding:10px 13px; border-radius:12px; font-size:12px; line-height:1.5; }
-.tb-conf b { font-size:12.5px; }
-.tb-conf em { font-style:normal; opacity:.85; }
+/* One line, not a paragraph block. */
+.tb-conf {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:8px 12px; border-radius:10px; font-size:12px; line-height:1.5;
+}
+.tb-conf b { font-size:12.5px; flex:0 0 auto; }
+.tb-conf-say { color:inherit; opacity:.85; min-width:0; }
+.tb-conf-dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:currentColor; }
+.tb-conf-more {
+  margin-left:auto; flex:0 0 auto; border:none; background:none; font:inherit; font-size:11.5px;
+  color:inherit; text-decoration:underline; cursor:pointer; padding:0; opacity:.8;
+}
 .tb-conf[data-tone="green"] { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; }
 .tb-conf[data-tone="amber"] { background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
 .tb-conf[data-tone="red"]   { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; }
+.tb-note {
+  margin:-6px 0 0; padding:10px 13px; border-radius:10px; font-size:11.5px; line-height:1.6;
+  background:var(--surface-alt); border:1px solid var(--border-light); color:var(--muted);
+}
+
+/* ── where you stand ─────────────────────────────────────────── */
+.tb-bar {
+  position:sticky; top:0; z-index:2;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:9px 4px; background:var(--surface);
+  border-bottom:1px solid var(--border-light);
+}
+.tb-bar-counts { display:flex; gap:6px; flex-wrap:wrap; min-width:0; }
+.tb-pill {
+  display:inline-flex; align-items:baseline; gap:4px;
+  padding:4px 10px; border-radius:999px; font-size:11.5px; font-weight:600;
+}
+.tb-pill b { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
+.tb-pill[data-tone="green"] { background:#dcfce7; color:#166534; }
+.tb-pill[data-tone="amber"] { background:#fef3c7; color:#92400e; }
+.tb-pill[data-tone="grey"]  { background:var(--bg); color:var(--muted); }
+.tb-bar-all {
+  margin-left:auto; flex:0 0 auto; cursor:pointer; font:inherit;
+  font-size:12px; font-weight:700; padding:7px 13px; border-radius:9px;
+  border:1px solid var(--warning); background:var(--warning-bg); color:#92400e;
+}
+.tb-bar-all:hover { background:#fde68a; }
+/* At 375px the counts already fill the line, so margin-left:auto threw
+   the button off the right edge. Give it its own line and the full
+   width — it is the fastest way out of this screen and should be the
+   easiest thing on it to hit with a thumb. */
+@media (max-width: 560px) {
+  .tb-bar-all { margin-left:0; width:100%; min-height:40px; }
+}
 
 /* ── the lines ───────────────────────────────────────────────── */
-.tb-rows { display:grid; gap:7px; }
+.tb-rows { display:grid; gap:6px; }
 .tb-row {
-  display:grid; gap:9px; padding:11px 12px; border-radius:12px;
+  display:grid; gap:8px; padding:10px 12px; border-radius:12px;
   background:var(--surface); border:1px solid var(--border);
   border-left:3px solid var(--border);
 }
@@ -629,14 +803,15 @@ const BILL_CSS = `
 .tb-row[data-tone="grey"]  { border-left-color:var(--border); }
 .tb-row[data-skip] { opacity:.6; }
 
-.tb-row-raw { min-width:0; display:grid; gap:3px; }
+/* Badge, printed text and money all on one line — the evidence reads
+   as one sentence instead of three stacked blocks. */
+.tb-row-raw { min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
 .tb-row-raw code {
   font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size:12.5px; color:var(--text); word-break:break-word; line-height:1.4;
+  font-size:12.5px; font-weight:600; color:var(--text); word-break:break-word; line-height:1.4;
 }
 .tb-row-meta { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
 
-.tb-row-decide { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .tb-badge {
   flex:0 0 auto; border:none; cursor:pointer; font:inherit; padding:3px 8px; border-radius:999px;
   font-size:9.5px; font-weight:800; letter-spacing:.08em;
@@ -645,32 +820,45 @@ const BILL_CSS = `
 .tb-badge[data-tone="amber"] { background:#fef3c7; color:#92400e; }
 .tb-badge[data-tone="grey"]  { background:var(--bg); color:var(--muted); }
 
+.tb-row-act { display:flex; gap:8px; align-items:center; flex-wrap:wrap; min-width:0; }
+
+/* Three named states, the live one lit. */
+.tb-seg { display:inline-flex; flex:0 0 auto; border:1px solid var(--border);
+  border-radius:9px; overflow:hidden; background:var(--bg); }
+.tb-seg button {
+  border:none; background:none; font:inherit; font-size:11.5px; font-weight:600;
+  padding:6px 11px; cursor:pointer; color:var(--muted); white-space:nowrap;
+}
+.tb-seg button + button { border-left:1px solid var(--border); }
+.tb-seg button:hover:not(:disabled):not([data-on]) { background:var(--surface-alt); color:var(--text); }
+.tb-seg button[data-on] { background:var(--text); color:var(--surface); font-weight:700; }
+.tb-seg button:disabled { opacity:.4; cursor:not-allowed; }
+
 .tb-in {
   font:inherit; font-size:13px; padding:7px 9px; border-radius:9px;
   border:1px solid var(--border); background:var(--surface); color:var(--text);
 }
 .tb-in:focus { outline:2px solid var(--gold); outline-offset:-1px; }
-.tb-in-tool { flex:1 1 200px; min-width:0; }
-.tb-in-name { flex:1 1 180px; min-width:0; }
-.tb-in-unit { width:72px; flex:0 0 auto; }
-.tb-in-qty { width:84px; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
-.tb-in-qty[data-bad] { border-color:#f87171; background:#fef2f2; }
+.tb-in-tool { flex:1 1 190px; min-width:0; }
+.tb-in-name { flex:1 1 170px; min-width:0; }
+.tb-in-unit { width:66px; flex:0 0 auto; }
+.tb-in-qty { width:72px; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
+.tb-in[data-bad] { border-color:#f87171; background:#fef2f2; }
 
-.tb-new { display:flex; flex-wrap:wrap; gap:7px; align-items:center; flex:1 1 auto; min-width:0; }
-.tb-tick { display:inline-flex; align-items:center; gap:6px; font-size:12px;
-  font-weight:700; color:#92400e; cursor:pointer; white-space:nowrap; }
-.tb-tick input { width:17px; height:17px; accent-color:var(--warning); cursor:pointer; }
-.tb-row[data-tone="green"] .tb-tick { color:#166534; }
+.tb-qty { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; }
+.tb-qty span { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+
+/* The yes that unblocks Post. It was a 17px checkbox. */
+.tb-yes {
+  flex:0 0 auto; cursor:pointer; font:inherit; font-size:12px; font-weight:700;
+  padding:7px 14px; border-radius:9px; white-space:nowrap;
+  border:1px solid var(--warning); background:var(--surface); color:#92400e;
+}
+.tb-yes:hover { background:#fef3c7; }
+.tb-yes[data-on] { background:#16a34a; border-color:#16a34a; color:#fff; }
+.tb-yes[data-on]:hover { background:#15803d; }
 
 .tb-row-skip { font-size:12px; color:var(--muted); }
-.tb-row-qty { display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
-.tb-row-switch { display:flex; gap:6px; flex-wrap:wrap; }
-.tb-row-switch button {
-  border:1px solid var(--border); background:var(--bg); color:var(--muted);
-  font:inherit; font-size:11px; padding:5px 9px; border-radius:8px; cursor:pointer;
-}
-.tb-row-switch button:hover:not(:disabled) { border-color:var(--gold); color:var(--text); }
-.tb-row-switch button:disabled { opacity:.45; cursor:not-allowed; }
 
 .tb-why { margin:0; padding:10px 13px; border-radius:11px; font-size:12px; line-height:1.55;
   background:var(--surface-alt); border:1px solid var(--border-light); color:var(--text); }
@@ -680,8 +868,13 @@ const BILL_CSS = `
 /* On a wide screen a line reads across in one go: evidence, decision,
    quantity. On a phone it stacks, because three columns at 360px is
    three unreadable columns. */
+/* The row stacks at every width now: the evidence on top, the decision
+   under it. Side by side it cost both of them the room to be read —
+   a mono tool code and a select and a quantity and a confirm, in three
+   squeezed columns, which is what made this screen hard to scan. */
 @media (min-width: 720px) {
-  .tb-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto; align-items:center; gap:12px; }
-  .tb-row-qty { justify-content:flex-end; flex-wrap:nowrap; }
+  .tb-row { padding:11px 14px; }
+  .tb-row-act { flex-wrap:nowrap; }
+  .tb-in-tool, .tb-in-name { flex:1 1 auto; }
 }
 `;
