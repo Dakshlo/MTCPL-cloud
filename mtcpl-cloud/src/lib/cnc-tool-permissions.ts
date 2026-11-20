@@ -50,45 +50,52 @@ export function canUseCncTools(p: ToolProfile): boolean {
  * their role is owner — which is exactly the mistake the keeper flag
  * exists to avoid.
  *
- * Their operators come from mig 234 and are checked separately; this is
- * only about people with a profile.
+ * Daksh, Nov 2026: "if a vendor's operator wants access they will click
+ * on their respective vendor — eg Vivek — then his operator will click
+ * on Vivek and take the OTP from Vivek. No separate thing for them."
+ * So this is now the whole list: there is nobody else who can sign in
+ * at a cupboard. See mig 234's note in lib/cnc-tool-operators.ts.
  */
 export function canSignInAtCupboard(p: ToolProfile): boolean {
   return p.role === "vendor" || canUseCncTools(p);
 }
 
 /**
- * May this person enrol a man under ANY vendor, rather than only their
- * own? The office side: no company of their own, so they pick each
- * time. A vendor is pinned to his own firm and an operator to nothing.
- */
-export function canEnrolForAnyVendor(p: ToolProfile): boolean {
-  return canUseCncTools(p);
-}
-
-/**
  * May this person fill the shelf FROM THE CUPBOARD — add stock, add a
  * tool, correct a count?
  *
- * The office three, and the CNC vendors themselves. Daksh, Nov 2026:
- * "that add stock feature on qr login, enable that for mohit also, he
- * can also maintain and add stock."
+ * THE OFFICE THREE ONLY. Daksh, Nov 2026: "there are some features like
+ * developer and owner which Mohit also has, like add stock and fix
+ * count. Remove that from Mohit's account for mobile — only developer
+ * and owner can have these options on long press, others will only have
+ * take pcs. And for vendors remove that add item also."
  *
- * He named Mohit; this opens it to all three vendor principals, because
- * they are the same kind of person doing the same job at the same
- * cupboard and naming one of them in code would be a rule nobody could
- * explain in six months. Their OPERATORS still cannot: a man enrolled
- * off a sticker can take a tool and nothing else.
+ * This REVERSES his own earlier instruction, which this function used to
+ * quote: "that add stock feature on qr login, enable that for Mohit
+ * also, he can also maintain and add stock." It ran that way for a
+ * fortnight and he has decided against it, so the reason is worth
+ * writing down rather than just the rule.
  *
- * Note what this is NOT. It is not canUseCncTools: a vendor still has
- * no business on the office screen, where the whole register and every
- * company's takes are laid out. This is the cupboard he stands at.
+ * What a vendor could do with it is the whole argument. Add stock and
+ * fix count are the two writes that move the shelf WITHOUT anybody
+ * taking anything — the only two places where a number can change with
+ * no corresponding tool in a man's hands. Whoever holds them can cover
+ * a shortfall. Keeping them with the people who answer for the cupboard
+ * and not the people who draw from it is the ordinary separation, and
+ * it costs a vendor nothing: he can still take, and still account for
+ * what he took.
+ *
+ * `opts` is kept in the signature deliberately. Every caller already
+ * computes it and the day this opens up again it will be the thing that
+ * decides, so the argument stays rather than being deleted and
+ * re-plumbed through four files.
  */
 export function canKeepAtCupboard(
   p: ToolProfile,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   opts: { hasOwnCompany: boolean },
 ): boolean {
-  return canUseCncTools(p) || opts.hasOwnCompany;
+  return canUseCncTools(p);
 }
 
 /** May this person change the catalogue (add a tool, set its warn line,

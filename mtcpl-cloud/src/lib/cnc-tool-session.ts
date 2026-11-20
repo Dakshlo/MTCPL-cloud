@@ -26,9 +26,8 @@ import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { allActiveOperators, maskTail } from "@/lib/cnc-tool-operators";
+import { maskTail } from "@/lib/cnc-tool-operators";
 import {
-  canEnrolForAnyVendor,
   canKeepAtCupboard,
   canSignInAtCupboard,
 } from "@/lib/cnc-tool-permissions";
@@ -71,47 +70,15 @@ export type ToolSession = {
   name: string;
   vendorId: string | null;
   vendorName: string | null;
-  /** May this session add somebody to a team? */
-  canEnrol: boolean;
+
   /** May this person fill the shelf from the cupboard itself — add a
    *  tool, add stock, fix a count? The office three, and nobody else.
    *  Daksh, Nov 2026: "so i can directly maintain or add stock from
    *  phone only." */
   canKeep: boolean;
-  /** WHOSE team. A vendor principal manages his own and only his own;
-   *  the developer (Daksh, Nov 2026: "as a developer in my number when
-   *  i login through qr i can also enroll operator under these 3
-   *  vendors") picks the company each time. */
-  enrolScope: "own" | "any" | null;
+
   expiresAt: string;
 };
-
-/** The companies a developer may enrol under: the ones with a vendor
- *  account of their own, which is the same set the roster heads. */
-export async function enrollableVendors(): Promise<Array<{ id: string; name: string }>> {
-  const admin = createAdminSupabaseClient();
-  const { data } = await admin
-    .from("profiles")
-    .select("vendor_id, is_active, role, vendors(name)")
-    .eq("role", "vendor")
-    .eq("is_active", true)
-    .not("vendor_id", "is", null);
-
-  const rows = (data ?? []) as Array<{
-    vendor_id: string | null;
-    vendors: { name: string } | { name: string }[] | null;
-  }>;
-
-  const out = new Map<string, string>();
-  for (const r of rows) {
-    if (!r.vendor_id) continue;
-    const v = Array.isArray(r.vendors) ? r.vendors[0] ?? null : r.vendors;
-    out.set(r.vendor_id, v?.name ?? "—");
-  }
-  return [...out.entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 
 /**
  * The roster the QR screen shows.
@@ -123,11 +90,29 @@ export async function enrollableVendors(): Promise<Array<{ id: string; name: str
  * So the list is: the CNC vendors, and whoever keeps the store. Not a
  * list of roles, which is what left the two owners off — the rule is
  * canSignInAtCupboard(), the same one the sign-in action re-checks.
- * Their operators come from mig 234 and need no office involvement.
  *
- * Ordered company by company, each vendor at the head of his own men,
- * because that is how the man scanning thinks about it: he looks for
- * his boss's name and then for his own underneath it.
+ * ── Operators are no longer on it (Nov 2026) ──────────────────────
+ *
+ * Mig 234 gave each vendor's men a tile of their own and a code to
+ * their own number. Daksh has taken it back out: "that login module we
+ * made so vendors' operators can also login — remove that thing. If a
+ * vendor's operator wants access they will click on their respective
+ * vendor, eg Vivek, then his operator will click on Vivek and take the
+ * OTP from Vivek. No separate thing for them."
+ *
+ * Which is how the shed actually works. The vendor is on site with his
+ * men and the code reaches his phone; a second identity per man bought
+ * nothing the vendor's own name did not already cover, and cost a
+ * screen, an enrolment form and a phone number per person to maintain.
+ *
+ * What this means for the register: a take now says MOHIT, not Shyam.
+ * The firm is accountable, which is the relationship the company
+ * actually has — the men are Mohit's, not ours.
+ *
+ * Nothing is dropped from the database. cnc_tool_operators and the
+ * taken_by_operator_id column stay exactly as they are, so the handful
+ * of takes ever signed by an operator still read correctly in history.
+ * They are simply never written again.
  *
  * Anyone without a usable phone is left out rather than shown as a dead
  * button: tapping a name that can never receive a code is worse than
@@ -136,18 +121,15 @@ export async function enrollableVendors(): Promise<Array<{ id: string; name: str
 export async function toolRoster(): Promise<ToolPerson[]> {
   const admin = createAdminSupabaseClient();
 
-  const [{ data: profileRows }, operators] = await Promise.all([
-    admin
-      .from("profiles")
-      .select("id, full_name, role, phone, is_active, vendor_id, can_keep_tool_store, vendors(name)")
-      // Vendors by role, keepers by flag. Narrowed here so the query
-      // does not drag the whole staff list back; the real gate is the
-      // filter below, which is the same function the action uses.
-      .or("role.eq.vendor,role.eq.developer,can_keep_tool_store.is.true")
-      .eq("is_active", true)
-      .order("full_name"),
-    allActiveOperators(),
-  ]);
+  const { data: profileRows } = await admin
+    .from("profiles")
+    .select("id, full_name, role, phone, is_active, vendor_id, can_keep_tool_store, vendors(name)")
+    // Vendors by role, keepers by flag. Narrowed here so the query
+    // does not drag the whole staff list back; the real gate is the
+    // filter below, which is the same function the action uses.
+    .or("role.eq.vendor,role.eq.developer,can_keep_tool_store.is.true")
+    .eq("is_active", true)
+    .order("full_name");
 
   type Row = {
     id: string;
@@ -177,46 +159,12 @@ export async function toolRoster(): Promise<ToolPerson[]> {
       };
     });
 
-  const out: ToolPerson[] = [];
-  const placed = new Set<string>();
-
-  // A company at a time: the vendor, then his men.
-  for (const { person, vendorId } of principals) {
-    if (!vendorId) continue; // the developer — he goes at the end
-    out.push(person);
-    for (const op of operators.filter((o) => o.vendorId === vendorId)) {
-      out.push({
-        id: op.id,
-        kind: "operator",
-        name: op.name,
-        maskedPhone: op.maskedPhone,
-        company: op.vendorName,
-        isPrincipal: false,
-      });
-      placed.add(op.id);
-    }
-  }
-
-  // An operator whose vendor has no account of their own would otherwise
-  // vanish off the list and be unable to sign in. Show them anyway.
-  for (const op of operators) {
-    if (placed.has(op.id)) continue;
-    out.push({
-      id: op.id,
-      kind: "operator",
-      name: op.name,
-      maskedPhone: op.maskedPhone,
-      company: op.vendorName,
-      isPrincipal: false,
-    });
-  }
-
-  // Then anyone with no company — the developer.
-  for (const { person, vendorId } of principals) {
-    if (!vendorId) out.push(person);
-  }
-
-  return out;
+  // The companies first, then the office — a man scanning this looks
+  // for his firm's name, and the office three are not what he is after.
+  return [
+    ...principals.filter((p) => p.vendorId).map((p) => p.person),
+    ...principals.filter((p) => !p.vendorId).map((p) => p.person),
+  ];
 }
 
 /** Mint a session after a code checks out. Exactly one of profileId /
@@ -317,16 +265,7 @@ export async function currentToolSession(
       canKeepAtCupboard(prof as Parameters<typeof canKeepAtCupboard>[0], {
         hasOwnCompany: !!row.vendor_id,
       }),
-    canEnrol:
-      !!row.profile_id &&
-      (!!row.vendor_id || (!!prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0]))),
-    enrolScope: !row.profile_id
-      ? null
-      : row.vendor_id
-        ? "own"
-        : prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0])
-          ? "any"
-          : null,
+
     expiresAt: row.expires_at,
   };
 }
