@@ -1270,32 +1270,49 @@ export function GuestTakeClient({
       {/* ── 3. tool ────────────────────────────────────────────── */}
       {step === "tool" && (
         <section className="gt-body">
-          {/* The shelf is a place he went TO now, so it needs a way
-              back. The count rides on it so a take visibly lands in
-              his hands without him leaving the shelf to check. */}
-          <button type="button" className="gt-back" onClick={openMine}>
-            ← Your tools
-            {heldTotal > 0 && <i className="gt-back-n">{heldTotal}</i>}
-          </button>
+          {/* ── you are in the store ───────────────────────────
+              Daksh, Nov 2026: "now it shows a card which shows the
+              store, then what are you taking, then item — but that box
+              makes it confusing, which is the button to the store."
 
-          {/* ── and this one is the shelf ───────────────────────
-              Gold, and the same toolbox as the card that leads here,
-              so arriving looks like the thing he tapped. Without it
-              the two pages were a heading apart and men were losing
-              track of which one they were on. */}
-          <div className="gt-storehead">
-            <span className="gt-storehead-ico" aria-hidden>🧰</span>
-            <span className="gt-storehead-text">
-              <strong>The store</strong>
-              <em>
-                {shelfCount === 0
-                  ? "Nothing on the shelf"
-                  : `${shelfCount} ${shelfCount === 1 ? "tool" : "tools"} on the shelf`}
-              </em>
-            </span>
-          </div>
+              He was right and it was the same mistake twice. The
+              store's HEADING and the dashboard's BUTTON to the store
+              were the same object: gold fill, gold border, 12px radius,
+              64px tall, white text, a toolbox in a tinted tile. One of
+              them goes somewhere and the other is a title, and nothing
+              about either said which.
 
-          <h1 className="gt-q">What are you taking?</h1>
+              So the page's own name is a BAND now — flat, running edge
+              to edge, no border, no radius, with the page named in the
+              corner. Nothing else on this screen is shaped like that,
+              and nothing that is shaped like that can be tapped.
+              Rounded card with a chevron means go; flat coloured band
+              means you are here.
+
+              The three stacked headings went with it. "The store" and
+              "What are you taking?" were two titles arguing over one
+              page, so the question is the title and the shelf count
+              sits under it where the subtitle always is. */}
+          <header className="gt-band gt-band-store">
+            <div className="gt-band-top">
+              <button type="button" className="gt-band-back" onClick={openMine}>
+                ‹ Your tools
+                {heldTotal > 0 && <i>{heldTotal}</i>}
+              </button>
+              <span className="gt-band-tag">Store</span>
+            </div>
+            <div className="gt-band-main">
+              <span className="gt-band-ico" aria-hidden>🧰</span>
+              <span className="gt-band-text">
+                <strong>What are you taking?</strong>
+                <em>
+                  {shelfCount === 0
+                    ? "Nothing on the shelf"
+                    : `${shelfCount} ${shelfCount === 1 ? "tool" : "tools"} on the shelf`}
+                </em>
+              </span>
+            </div>
+          </header>
 
           {tools.length > 6 && (
             <div className="gt-search">
@@ -1404,28 +1421,47 @@ export function GuestTakeClient({
         <section className="gt-body">
           {/* ── whose page this is ─────────────────────────────
               Daksh, Nov 2026: "instead it should say like 'Daksh
-              dashboard', 'tools you have'."
-              "In your hands" alone did not say WHOSE hands, and the
-              two pages read too alike at a glance. His own name and
-              his own initial, in his own colour, so a man who has
-              just scanned a sticker can tell in one look that he is
-              on his own page and not the shelf. */}
-          <div className="gt-dash">
-            <span className="gt-dash-dot" style={{ background: colourFor(who?.name ?? "") }}>
-              {initials(who?.name ?? "")}
-            </span>
-            <span className="gt-dash-text">
-              <strong>{who?.name}</strong>
-              <em>
-                {who?.company ?? "Office"}
-                {heldTotal > 0
-                  ? ` · ${heldTotal} ${heldTotal === 1 ? "pc" : "pcs"} in hand`
-                  : " · nothing in hand"}
-              </em>
-            </span>
-          </div>
+              dashboard', 'tools you have'" — and then, when the two
+              pages still read alike: "make font and everything this
+              way it looks obvious, store and dashboard."
 
-          <h1 className="gt-h1">Tools you have</h1>
+              The same band as the store, in the other colour. Dark is
+              his page, gold is the shelf, and the word is written in
+              the corner of each so it is never a matter of remembering
+              which colour meant which.
+
+              The initial is on a white tile rather than in his own
+              colour: since the palette went to one ink the two would
+              be the same brown, and a dark circle on a dark band is
+              not a circle. */}
+          <header className="gt-band gt-band-mine">
+            <div className="gt-band-top">
+              <span className="gt-band-who">{who?.company ?? "Office"}</span>
+              <span className="gt-band-tag">Dashboard</span>
+            </div>
+            <div className="gt-band-main">
+              <span className="gt-band-ico gt-band-dot" aria-hidden>
+                {initials(who?.name ?? "")}
+              </span>
+              <span className="gt-band-text">
+                <strong>{who?.name}</strong>
+                <em>
+                  {heldTotal > 0
+                    ? `${heldTotal} ${heldTotal === 1 ? "pc" : "pcs"} in your hands`
+                    : "Nothing in your hands"}
+                </em>
+              </span>
+            </div>
+          </header>
+
+          {/* A section label, not a title. The band above is the only
+              thing on the page allowed to look like a heading. */}
+          <div className="gt-sect">
+            <strong>Tools you have</strong>
+            {held.length > 0 && (
+              <em>{held.length} {held.length === 1 ? "kind" : "kinds"}</em>
+            )}
+          </div>
 
           {/* The usage just filed, while it can still be taken back. A
               wrong machine number is the easy mistake on this screen. */}
@@ -1508,7 +1544,7 @@ export function GuestTakeClient({
               alone answers "is anything out", not "what is out". */}
           {who?.canEnrol && men.length > 0 && (
             <section className="gt-crew">
-              <div className="gt-crew-head">
+              <div className="gt-sect">
                 <strong>{who.enrolScope === "any" ? "All the men" : "Your men"}</strong>
                 <em>
                   {menTotal === 0
@@ -2620,52 +2656,108 @@ const CSS = `
 .gt-hand-go { margin-left:auto; flex:none; font-size:20px; color:#b9b4a8; }
 
 /* The count riding on the way back to his own tools. */
-.gt-back-n {
-  font-style:normal; font-size:11px; font-weight:800; margin-left:7px;
-  padding:1px 7px; border-radius:999px; background:var(--brand); color:#fff;
-  font-variant-numeric:tabular-nums;
-}
 
 /* ── which page am I on ─────────────────────────────────────────
    Two bands that cannot be mistaken for one another: his own name on
    a pale card with his initial, and the shelf in gold with the same
    toolbox as the card that leads to it. */
-.gt-dash {
-  display:flex; align-items:center; gap:12px;
-  margin:0 0 18px; padding:12px 14px; min-height:64px;
-  background:var(--card); border:1px solid var(--line);
-  border-left:4px solid var(--brand); border-radius:12px;
+/* ── which page am I on ──────────────────────────────────────────
+   A BAND, not a card. Flat, edge to edge, no border and no radius,
+   with the page's name in the corner.
+
+   The rule it buys, and the reason the shapes are this far apart:
+
+     rounded card + chevron  →  tapping it goes somewhere
+     flat coloured band      →  this is where you are
+
+   Before this, the store's heading and the dashboard's button to the
+   store were the same object down to the border colour, and the only
+   difference was a › nobody reads. Colour alone could not fix it —
+   gold has to mean "store" in both places — so the shapes had to part
+   company instead. */
+.gt-band {
+  /* FULL BLEED is the tell, not flatness.
+     .gt-head above is already brand-dark with a rounded bottom, so a
+     flat band flush under it would have shown the band's colour through
+     the bar's corners — two gold triangles under a brown bar. It sits a
+     breath below instead and carries the same rounded bottom, so the two
+     read as a stack of headers rather than a collision.
+     Everything tappable on these pages is INSET by 16px. Nothing
+     tappable touches the glass; nothing that touches the glass can be
+     tapped. */
+  margin:-6px -16px 18px; padding:13px 16px 15px;
+  border-radius:0 0 16px 16px;
+  display:flex; flex-direction:column; gap:11px;
 }
-.gt-dash-dot {
-  flex:none; width:42px; height:42px; border-radius:50%;
-  display:grid; place-items:center; color:#fff;
-  font-size:15px; font-weight:800; letter-spacing:.02em;
+.gt-band-top { display:flex; align-items:center; gap:10px; min-height:24px; }
+.gt-band-tag {
+  margin-left:auto; flex:none; padding:3px 9px; border-radius:999px;
+  font-size:10px; font-weight:800; letter-spacing:.16em; text-transform:uppercase;
 }
-.gt-dash-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
-.gt-dash-text strong {
-  font-size:17px; font-weight:800; letter-spacing:-.2px; color:var(--ink);
+.gt-band-main { display:flex; align-items:center; gap:13px; }
+.gt-band-ico {
+  flex:none; width:46px; height:46px; border-radius:13px;
+  display:grid; place-items:center; font-size:23px;
+  background:rgba(255,255,255,.18);
+}
+.gt-band-dot {
+  border-radius:50%; font-size:16px; font-weight:800; letter-spacing:.02em;
+  background:rgba(255,255,255,.2);
+}
+.gt-band-text { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.gt-band-text strong {
+  /* Bigger than any other text on the page on purpose: the one thing
+     he should be able to read without looking is which page he is on. */
+  font-size:22px; font-weight:800; letter-spacing:-.45px; line-height:1.14;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
-.gt-dash-text em {
-  font-style:normal; font-size:11.5px; font-weight:600; color:var(--dim);
-  text-transform:uppercase; letter-spacing:.05em;
+.gt-band-text em { font-style:normal; font-size:12.5px; font-weight:600; }
+
+/* His page. One shade off the bar above it — same family, so it still
+   reads as "his", but a visible seam rather than one eight-inch slab of
+   brown with a sign-out button floating in it. */
+.gt-band-mine { background:var(--brand2); color:#fff; }
+.gt-band-mine .gt-band-tag { background:rgba(255,255,255,.15); color:#fff; }
+.gt-band-mine .gt-band-text em { color:rgba(255,255,255,.72); }
+.gt-band-who {
+  min-width:0; font-size:11px; font-weight:800; letter-spacing:.12em;
+  text-transform:uppercase; color:rgba(255,255,255,.58);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
-.gt-storehead {
-  display:flex; align-items:center; gap:12px;
-  margin:0 0 18px; padding:12px 14px; min-height:64px;
-  background:var(--gold); border:1px solid var(--gold-dark);
-  border-radius:12px; color:#fff;
+/* The shelf. */
+.gt-band-store { background:var(--gold); color:#fff; }
+.gt-band-store .gt-band-tag { background:rgba(255,255,255,.24); color:#fff; }
+.gt-band-store .gt-band-text em { color:rgba(255,255,255,.86); }
+
+/* The way back, inside the band it is taking you out of. */
+.gt-band-back {
+  display:inline-flex; align-items:center; gap:7px;
+  margin:0; padding:5px 11px 5px 8px; min-height:30px;
+  background:rgba(255,255,255,.17); border:0; border-radius:999px;
+  cursor:pointer; font:inherit; font-size:12.5px; font-weight:700; color:#fff;
 }
-.gt-storehead-ico {
-  flex:none; width:42px; height:42px; border-radius:11px;
-  background:rgba(255,255,255,.22); display:grid; place-items:center; font-size:21px;
+.gt-band-back:active { background:rgba(255,255,255,.32); }
+.gt-band-back i {
+  font-style:normal; font-size:10.5px; font-weight:800; padding:1px 6px;
+  border-radius:999px; background:rgba(255,255,255,.28);
+  font-variant-numeric:tabular-nums;
 }
-.gt-storehead-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
-.gt-storehead-text strong { font-size:17px; font-weight:800; letter-spacing:-.2px; }
-.gt-storehead-text em {
-  font-style:normal; font-size:11.5px; font-weight:600;
-  color:rgba(255,255,255,.88); text-transform:uppercase; letter-spacing:.05em;
+
+/* A label for a section WITHIN a page. Deliberately small and grey:
+   the band is the only thing allowed to read as a heading, or we are
+   back to three titles arguing over one screen. */
+.gt-sect {
+  display:flex; align-items:baseline; gap:8px; margin:0 0 9px;
+  padding-bottom:7px; border-bottom:1px solid var(--line);
+}
+.gt-sect strong {
+  font-size:11.5px; font-weight:800; color:var(--dim);
+  text-transform:uppercase; letter-spacing:.07em;
+}
+.gt-sect em {
+  margin-left:auto; font-style:normal; font-size:11.5px; font-weight:700;
+  color:var(--brand); font-variant-numeric:tabular-nums;
 }
 
 /* ── the way through to the shelf ───────────────────────────────
@@ -2675,11 +2767,18 @@ const CSS = `
    empty dashboard it is the only thing to do at all. */
 .gt-store-go {
   display:flex; align-items:center; gap:12px; width:100%; text-align:left;
-  margin:16px 0 0; padding:13px 14px; min-height:64px;
-  background:var(--gold); border:1px solid var(--gold-dark); border-radius:12px;
+  margin:18px 0 0; padding:13px 14px; min-height:66px;
+  background:var(--gold); border:1px solid var(--gold-dark); border-radius:14px;
   cursor:pointer; font:inherit; color:#fff;
+  /* Lifted. Gold has to go on meaning "store" in both places, so the
+     band and this cannot be told apart by colour — they are told apart
+     by being flat against the page and sitting on top of it. */
+  box-shadow:0 2px 0 var(--gold-dark), 0 6px 16px rgba(201,151,58,.3);
 }
-.gt-store-go:active { background:var(--gold-dark); }
+.gt-store-go:active {
+  background:var(--gold-dark); transform:translateY(2px);
+  box-shadow:0 0 0 var(--gold-dark), 0 2px 8px rgba(201,151,58,.26);
+}
 .gt-store-ico {
   flex:none; width:38px; height:38px; border-radius:10px;
   background:rgba(255,255,255,.22); display:grid; place-items:center; font-size:19px;
@@ -2718,18 +2817,6 @@ const CSS = `
    and a row that looks like .gt-mine-row looks tappable-to-act. No
    card, no shadow — a ruled list under a small heading. */
 .gt-crew { margin:22px 0 0; }
-.gt-crew-head {
-  display:flex; align-items:baseline; gap:8px; margin:0 0 9px;
-  padding-bottom:7px; border-bottom:1px solid var(--line);
-}
-.gt-crew-head strong {
-  font-size:11.5px; font-weight:800; color:var(--dim);
-  text-transform:uppercase; letter-spacing:.07em;
-}
-.gt-crew-head em {
-  margin-left:auto; font-style:normal; font-size:11.5px; font-weight:700;
-  color:var(--brand); font-variant-numeric:tabular-nums;
-}
 .gt-crew-list { display:flex; flex-direction:column; gap:7px; }
 .gt-man {
   background:var(--card); border:1px solid var(--line); border-radius:10px;
