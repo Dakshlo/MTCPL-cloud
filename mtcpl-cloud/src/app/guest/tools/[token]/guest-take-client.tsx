@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import { useLiveStock } from "@/lib/use-live-stock";
 import { KEEPER_CSS, KeeperSheet, type KeeperTool } from "./keeper-sheet";
 import { useLongPress } from "@/lib/use-long-press";
-import type { RegisterLine, RegisterResult } from "./guest-actions";
+import type { RegisterLine, RegisterResult, TakeSlip } from "./guest-actions";
 
 export type TakeTool = {
   id: string;
@@ -132,7 +132,17 @@ type VerifyRes =
     }
   | { ok: false; error: string; attemptsLeft?: number };
 type TakeRes =
-  | { ok: true; left: number; toolName: string; qty: number }
+  | {
+      ok: true;
+      left: number;
+      toolName: string;
+      unit: string;
+      qty: number;
+      slip: TakeSlip;
+    }
+  | { ok: false; error: string; signedOut?: boolean };
+type UndoTakeRes =
+  | { ok: true; toolName: string; qty: number; left: number }
   | { ok: false; error: string; signedOut?: boolean };
 type MyToolsRes =
   | { ok: true; items: HeldLite[]; men: ManLite[] }
@@ -179,6 +189,16 @@ function istTime(iso: string): string {
   const ampm = h >= 12 ? "pm" : "am";
   h = h % 12 || 12;
   return `${h}:${m}${ampm}`;
+}
+
+/** The whole stamp, for the slip — a date he can read out on a phone
+ *  call three weeks later, not a clock time that needs today's context. */
+function istStamp(iso: string): string {
+  const d = istParts(iso);
+  const date = d.toLocaleDateString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric", timeZone: "UTC",
+  });
+  return `${date}, ${istTime(iso)}`;
 }
 
 /** "Today" and "Yesterday" by the same IST day the lines are grouped
@@ -233,6 +253,7 @@ export function GuestTakeClient({
   enrolAction, removeOperatorAction, myTeamAction, registerAction,
   keeperTools, addStockAction, fixCountAction, newToolAction,
   held: initialHeld, men: initialMen, machines, myToolsAction, settleAction, undoUsageAction,
+  undoTakeAction,
 }: {
   token: string;
   label: string;
@@ -273,6 +294,10 @@ export function GuestTakeClient({
   myToolsAction: (fd: FormData) => Promise<MyToolsRes>;
   settleAction: (fd: FormData) => Promise<SettleRes>;
   undoUsageAction: (fd: FormData) => Promise<SettleRes>;
+  /** Mig 240 — the undo on the slip. His own line, ten minutes, and
+   *  only while the pcs are still in his hands; all three decided in
+   *  the database, not here. */
+  undoTakeAction: (fd: FormData) => Promise<UndoTakeRes>;
 }) {
   const [who, setWho] = useState<Session | null>(session);
   // Signed in lands on HIS TOOLS, not on the shelf. Daksh, Nov 2026:
@@ -290,11 +315,31 @@ export function GuestTakeClient({
   const [jump, setJump] = useState<KeeperTool | null>(null);
   /** Opens the keeper sheet straight on New tool, from the header. */
   const [wantNew, setWantNew] = useState(false);
-  /** The "3 × DSZ 10.4-40 taken" popup that replaced the done screen.
-   *  It sits over the shelf and takes itself away. */
+  /** The "3 × DSZ 10.4-40 taken" popup. Still used by the keeper's own
+   *  writes, where there is nothing to prove and nobody to show. */
   const [flash, setFlash] = useState<
     { toolName: string; qty: number; left: number; at: number } | null
   >(null);
+  /**
+   * The slip for a take: a full card, not a toast.
+   *
+   * Daksh, Nov 2026: "after take 1 pcs it only gives a small feedback —
+   * instead it should give a full page card that this is taken… taken by
+   * Mohit, time, what taken, and a QR they can save… and make that card
+   * look good that can be shared to WhatsApp."
+   *
+   * The toast was right while a take was the end of the story. It is
+   * not: a take is now a thing a man will be asked about later, by
+   * somebody holding a different number, and the slip is what he answers
+   * with. A proof you cannot read for longer than three seconds is not
+   * one — see the note on the card itself about the four seconds.
+   */
+  const [slip, setSlip] = useState<
+    { tool: string; unit: string; qty: number; left: number; toolId: string; slip: TakeSlip } | null
+  >(null);
+  /** Ticks while the slip is open, for the undo countdown. */
+  const [tick, setTick] = useState(0);
+  const [shared, setShared] = useState(false);
   /** The cupboard's register. Loaded when it is opened, not before —
    *  most visits are somebody taking one thing and leaving. */
   const [reg, setReg] = useState<RegisterLine[] | null>(null);
@@ -481,6 +526,15 @@ export function GuestTakeClient({
     const t = setTimeout(() => setFlash(null), 2800);
     return () => clearTimeout(t);
   }, [flash]);
+
+  /** One second at a time while a slip is on screen, so the undo can
+   *  count itself down and then take itself away. Nothing ticks when
+   *  there is no slip — this screen sits open on a cupboard all day. */
+  useEffect(() => {
+    if (!slip) return;
+    const i = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(i);
+  }, [slip]);
 
   /**
    * The men, on a page of their own.
@@ -690,11 +744,105 @@ export function GuestTakeClient({
       // signs out when he walks away, and Sign out is in the header on
       // every screen anyway. So the confirmation is a popup over the
       // shelf, and he is already back where the next tool is.
-      setFlash({ toolName: r.toolName, qty: r.qty, left: r.left, at: Date.now() });
+      setShared(false);
+      setSlip({
+        tool: r.toolName, unit: r.unit, qty: r.qty, left: r.left,
+        toolId: tool.id, slip: r.slip,
+      });
       setTool(null);
       setQ("");
       setStep("tool");
     });
+  }
+
+  /**
+   * Take it back.
+   *
+   * Everything that decides whether this is allowed lives in mig 240 —
+   * his own line, inside ten minutes, and only while the pcs are still
+   * in his hands. What happens HERE is putting the screen back the way
+   * it was: the take was merged into his account and into the day's
+   * tally locally, so that has to come back out, and the shelf number
+   * comes from the server's answer rather than from arithmetic.
+   */
+  function undoSlip() {
+    const s = slip;
+    if (!s) return;
+    setErr(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("token", token);
+      fd.set("movement_id", s.slip.movementId);
+      const r = await undoTakeAction(fd);
+      if (!r.ok) {
+        setErr(r.error);
+        if (r.signedOut) { setWho(null); setPicked(null); setStep("who"); }
+        // The card stays up with the reason on it. Closing it would
+        // leave him with a take he was told he could undo and no way
+        // back to it.
+        return;
+      }
+      setTaken((p) => {
+        const left = (p[s.toolId] ?? 0) - r.qty;
+        const next = { ...p };
+        if (left > 0) next[s.toolId] = left; else delete next[s.toolId];
+        return next;
+      });
+      setTally((p) => {
+        // Drop the one line this slip put there, not every line for
+        // that tool: he may have taken the same bit twice.
+        const i = p.findIndex((t) => t.toolName === s.tool && t.qty === r.qty);
+        return i < 0 ? p : [...p.slice(0, i), ...p.slice(i + 1)];
+      });
+      setHeld((prev) =>
+        prev
+          .map((h) => (h.toolId === s.toolId ? { ...h, qty: h.qty - r.qty } : h))
+          .filter((h) => h.qty > 0),
+      );
+      setSlip(null);
+      setFlash({ toolName: r.toolName, qty: r.qty, left: r.left, at: Date.now() });
+    });
+  }
+
+  /**
+   * Hand the slip on.
+   *
+   * The text carries the facts and the link carries the truth: whoever
+   * opens it reads the live row, so a slip shared this morning says
+   * CANCELLED this afternoon if the line was voided. That is why the url
+   * goes in `url` and not into the message body — the share sheet
+   * appends it once, and WhatsApp then draws its own preview of the
+   * page.
+   *
+   * No fallthrough after navigator.share: if the sheet opened and he
+   * backed out of it, he meant to back out. The wa.me link is only for
+   * a browser that has no share sheet at all.
+   */
+  async function shareSlip() {
+    const s = slip;
+    if (!s) return;
+    const lines = [
+      `${s.qty} ${s.unit} — ${s.tool}`,
+      `Taken by ${s.slip.takenBy}${s.slip.company ? ` · ${s.slip.company}` : ""}`,
+      istStamp(s.slip.at),
+      `Slip ${s.slip.no}`,
+    ];
+    const text = lines.join("\n");
+    setShared(true);
+    const nav = typeof navigator === "undefined" ? null : navigator;
+    if (nav?.share) {
+      try {
+        await nav.share({ title: `Tool slip ${s.slip.no}`, text, url: s.slip.url });
+      } catch {
+        /* he closed the sheet */
+      }
+      return;
+    }
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(`${text}\n${s.slip.url}`)}`,
+      "_blank",
+      "noopener",
+    );
   }
 
   function signOut() {
@@ -703,7 +851,7 @@ export function GuestTakeClient({
       fd.set("token", token);
       await signOutAction(fd);
       setWho(null); setPicked(null); setTally([]); setTaken({});
-      setTool(null); setFlash(null); setCode(""); setErr(null);
+      setTool(null); setFlash(null); setSlip(null); setCode(""); setErr(null);
       setTeam([]); setTeamMsg(null);
       setNewName(""); setNewPhone(""); setNewVendor(""); setDropping(null);
       // His account goes with him. Leaving it on screen would show the
@@ -1601,6 +1749,121 @@ export function GuestTakeClient({
       )}
 
       {/* ── the popup that replaced the done screen ───────────── */}
+      {/* ── the slip ─────────────────────────────────────────────
+          A full card over the whole screen, because this is the thing a
+          man is asked about later and the only moment he has it in
+          front of him.
+
+          IT DOES NOT TAKE ITSELF AWAY. Daksh asked for four seconds,
+          and then in the same breath for a QR he can save and a card he
+          can send to WhatsApp — neither of which is possible in four
+          seconds with a phone in one hand and a drill bit in the other.
+          The four seconds were about not being trapped, so the way out
+          is one big button he cannot miss, and the backdrop closes it
+          too. If he wants the slip back it is on the register line, for
+          as long as the line exists. */}
+      {slip && (
+        <div
+          className="gt-slip-wrap"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Tool slip"
+          onClick={(e) => { if (e.target === e.currentTarget) setSlip(null); }}
+        >
+          <div className="gt-slip">
+            <div className="gt-slip-band">
+              <span className="gt-slip-tick" aria-hidden>✓</span>
+              <span>
+                <b>Taken</b>
+                <em>Signed by you · on the register</em>
+              </span>
+            </div>
+
+            <div className="gt-slip-body">
+              <div className="gt-slip-what">
+                <span className="gt-slip-qty">{slip.qty}</span>
+                <span className="gt-slip-unit">{slip.unit}</span>
+              </div>
+              <h2 className="gt-slip-tool">{slip.tool}</h2>
+
+              <dl className="gt-slip-rows">
+                <div>
+                  <dt>Taken by</dt>
+                  <dd>
+                    {slip.slip.takenBy}
+                    {slip.slip.company && <em> · {slip.slip.company}</em>}
+                  </dd>
+                </div>
+                <div>
+                  <dt>When</dt>
+                  <dd>{istStamp(slip.slip.at)}</dd>
+                </div>
+                <div>
+                  <dt>Left on the shelf</dt>
+                  <dd>{slip.left} {slip.unit}</dd>
+                </div>
+                <div>
+                  <dt>Slip no.</dt>
+                  <dd className="gt-slip-mono">{slip.slip.no}</dd>
+                </div>
+              </dl>
+
+              {/* The code, big enough to photograph off this screen and
+                  still scan from the photograph. It carries a link, not
+                  the details: undo the take and the same picture opens a
+                  page that says CANCELLED. */}
+              {slip.slip.qr && (
+                <div className="gt-slip-qr">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={slip.slip.qr} alt={`QR code for slip ${slip.slip.no}`} />
+                  <em>Save or send this. Scanning it always shows the latest.</em>
+                </div>
+              )}
+
+              {err && <div className="gt-slip-err" role="alert">{err}</div>}
+            </div>
+
+            <div className="gt-slip-acts">
+              <button type="button" className="gt-slip-go" onClick={() => setSlip(null)}>
+                Back to the shelf
+              </button>
+              <div className="gt-slip-row2">
+                <button
+                  type="button"
+                  className="gt-slip-share"
+                  onClick={() => void shareSlip()}
+                  data-done={shared ? "1" : undefined}
+                >
+                  Send on WhatsApp
+                </button>
+                {(() => {
+                  // The window is the SERVER's, carried on the slip. A
+                  // phone whose clock is wrong would otherwise offer an
+                  // undo the database is going to refuse, or hide one it
+                  // would have allowed.
+                  const msLeft = slip.slip.undoUntil - Date.now();
+                  if (msLeft <= 0) return null;
+                  const mins = Math.floor(msLeft / 60000);
+                  const secs = Math.floor((msLeft % 60000) / 1000);
+                  return (
+                    <button
+                      type="button"
+                      className="gt-slip-undo"
+                      onClick={undoSlip}
+                      disabled={pending}
+                      // tick is read here so the countdown re-renders.
+                      data-tick={tick}
+                    >
+                      {pending ? "…" : `Undo · ${mins}:${String(secs).padStart(2, "0")}`}
+                    </button>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {flash && (
         <div className="gt-flash" role="status">
           <span className="gt-flash-tick" aria-hidden>✓</span>
@@ -2168,6 +2431,90 @@ const CSS = `
    drill bit — they want the next one. So the confirmation floats over
    the shelf, says the number, and takes itself away.
 */
+/* ── the slip ──────────────────────────────────────────────
+   Over everything, because for the two seconds he is reading it there
+   is nothing else on this screen he needs. Scrolls inside itself: the
+   tool names are long, the QR is 180px, and a 667px phone in landscape
+   is a real thing at a cupboard. */
+.gt-slip-wrap {
+  position:fixed; inset:0; z-index:60; display:flex; align-items:center;
+  justify-content:center; padding:14px;
+  background:rgba(21,24,29,.62); backdrop-filter:blur(2px);
+  animation:gt-slip-in .16s ease-out;
+}
+@keyframes gt-slip-in { from { opacity:0; } }
+.gt-slip {
+  width:100%; max-width:360px; max-height:calc(100dvh - 28px);
+  display:flex; flex-direction:column; overflow:hidden;
+  background:#fff; border-radius:16px;
+  box-shadow:0 18px 48px rgba(21,24,29,.34);
+}
+
+.gt-slip-band {
+  display:flex; align-items:center; gap:11px; padding:14px 16px;
+  background:var(--ok); color:#fff;
+}
+.gt-slip-tick {
+  flex:0 0 auto; width:28px; height:28px; border-radius:999px;
+  background:rgba(255,255,255,.22); display:grid; place-items:center;
+  font-size:15px; font-weight:800;
+}
+.gt-slip-band b { display:block; font-size:16px; font-weight:800; letter-spacing:.02em; }
+.gt-slip-band em { font-style:normal; font-size:11.5px; opacity:.9; }
+
+.gt-slip-body { padding:16px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.gt-slip-what { display:flex; align-items:baseline; gap:5px; }
+.gt-slip-qty { font-size:40px; font-weight:800; line-height:1; color:var(--ink); }
+.gt-slip-unit { font-size:14px; color:var(--dim); }
+.gt-slip-tool {
+  margin:4px 0 14px; font-size:16px; font-weight:700; line-height:1.3; color:var(--ink);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-word;
+}
+
+.gt-slip-rows { margin:0; display:flex; flex-direction:column; }
+.gt-slip-rows > div {
+  display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+  padding:8px 0; border-top:1px solid var(--line);
+}
+.gt-slip-rows dt { font-size:11.5px; color:var(--dim); flex:0 0 auto; }
+.gt-slip-rows dd { margin:0; font-size:13px; font-weight:600; text-align:right; color:var(--ink); }
+.gt-slip-rows dd em { font-style:normal; font-weight:500; color:var(--dim); }
+.gt-slip-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.04em; }
+
+.gt-slip-qr {
+  margin:14px 0 0; padding:12px; border:1px solid var(--line); border-radius:10px;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+}
+.gt-slip-qr img { display:block; width:180px; height:180px; image-rendering:pixelated; }
+.gt-slip-qr em {
+  font-style:normal; font-size:11px; line-height:1.45; color:var(--dim); text-align:center;
+}
+
+.gt-slip-err {
+  margin:12px 0 0; padding:10px 12px; border-radius:8px;
+  background:#fef2f2; border:1px solid #fecaca; color:#991b1b;
+  font-size:12.5px; line-height:1.5;
+}
+
+.gt-slip-acts {
+  padding:12px 16px 16px; border-top:1px solid var(--line);
+  display:flex; flex-direction:column; gap:8px; background:#fff;
+}
+.gt-slip-go {
+  width:100%; min-height:52px; border:0; border-radius:10px; cursor:pointer;
+  background:var(--brand); color:#fff; font:inherit; font-size:15px; font-weight:700;
+}
+.gt-slip-go:active { background:var(--brand2); }
+.gt-slip-row2 { display:flex; gap:8px; }
+.gt-slip-share, .gt-slip-undo {
+  flex:1 1 0; min-height:46px; border-radius:10px; cursor:pointer; font:inherit;
+  font-size:13px; font-weight:700; background:#fff; color:var(--ink);
+  border:1px solid var(--line);
+}
+.gt-slip-share[data-done="1"] { color:var(--dim); }
+.gt-slip-undo { color:var(--low); border-color:#f3dcb4; }
+.gt-slip-undo:disabled { opacity:.55; }
+
 .gt-flash {
   position:fixed; left:50%; transform:translateX(-50%);
   bottom:calc(18px + env(safe-area-inset-bottom)); z-index:70;

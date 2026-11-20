@@ -26,7 +26,8 @@ import {
   takesThroughLinkToday,
   usesThroughLinkToday,
 } from "@/lib/cnc-tool-guest";
-import { TOOL_IMAGE_BUCKET, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
+import { TOOL_IMAGE_BUCKET, UNDO_WINDOW_MS, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
+import { receiptNo, receiptQr, receiptUrl } from "@/lib/cnc-tool-receipt";
 import {
   MAX_USE_QTY,
   canUndoUsage,
@@ -305,8 +306,30 @@ export async function toolSignOutAction(fd: FormData): Promise<{ ok: boolean }> 
   return { ok: true };
 }
 
+/**
+ * The slip the phone draws after a take.
+ *
+ * Everything on it is server-made: the name comes off the session, the
+ * time off the row, the QR off our own server. Nothing here can be
+ * typed by the man being named on it.
+ */
+export type TakeSlip = {
+  /** The movement's own id. Also the undo handle and the url path. */
+  movementId: string;
+  no: string;
+  url: string;
+  /** PNG data url, or null if the draw failed — the slip still works. */
+  qr: string | null;
+  takenBy: string;
+  company: string | null;
+  at: string;
+  /** When the undo button stops being offered, in ms since epoch. The
+   *  server decides this, not the phone's clock. */
+  undoUntil: number;
+};
+
 export type GuestTakeResult =
-  | { ok: true; left: number; toolName: string; qty: number }
+  | { ok: true; left: number; toolName: string; unit: string; qty: number; slip: TakeSlip }
   | { ok: false; error: string; signedOut?: boolean };
 
 /** The only write: this signed-in person took N of one tool. */
@@ -393,11 +416,131 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
 
   revalidatePath("/tools");
 
+  // ── The slip ────────────────────────────────────────────────────
+  //
+  // Built here rather than on the phone because every field on it is a
+  // fact about the row that was just written, and the row is the only
+  // thing that knows them. The QR is drawn on our own server for the
+  // same reason the wardrobe sticker is (mig 229): a proof that depends
+  // on an external image service being up is not a proof.
+  const movementId = String(res.movement_id ?? "");
+  const url = movementId ? receiptUrl(movementId) : "";
+  const slip: TakeSlip = {
+    movementId,
+    no: movementId ? receiptNo(movementId) : "—",
+    url,
+    qr: url ? await receiptQr(url) : null,
+    takenBy: session.name,
+    company: session.vendorName,
+    at: new Date().toISOString(),
+    undoUntil: Date.now() + UNDO_WINDOW_MS,
+  };
+
   return {
     ok: true,
     left: Number(res.stock_after ?? 0),
     toolName: res.tool ?? "tool",
+    unit: res.unit ?? "pcs",
     qty,
+    slip,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Taking it back (mig 240)
+// ──────────────────────────────────────────────────────────────────
+//
+// Daksh: "on that card there will be an undo button."
+//
+// The easiest mistake on this flow is the quantity — the number comes
+// up as a keypad, with gloves on, next to a shelf somebody is waiting
+// at. Until now the only way to void a take was the office screen, so a
+// man who typed 10 and meant 1 had to telephone somebody, and in the
+// meantime the shelf was nine short and his own account nine over. Both
+// of those are numbers other people act on within the hour.
+//
+// Everything that decides whether this is allowed is in the database
+// (mig 240): his own line, inside ten minutes, and only while the pcs
+// are still in his hands — a pc already reported into a CNC cannot be
+// un-taken, because it is really gone. This function's whole job is to
+// turn each refusal into a sentence in the same voice as the rest of
+// the screen.
+
+export type UndoTakeResult =
+  | { ok: true; toolName: string; qty: number; left: number }
+  | { ok: false; error: string; signedOut?: boolean };
+
+type UndoOutcome = {
+  ok: boolean;
+  code?: "no_person" | "gone" | "bad_kind" | "already" | "not_mine" | "too_late" | "spent" | "short";
+  tool?: string;
+  unit?: string;
+  qty?: number;
+  held?: number;
+  stock?: number;
+  stock_after?: number;
+};
+
+export async function guestUndoTakeAction(fd: FormData): Promise<UndoTakeResult> {
+  const token = String(fd.get("token") || "").trim();
+  const movementId = String(fd.get("movement_id") || "").trim();
+  if (!movementId) return { ok: false, error: "Nothing to take back." };
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false, error: "This QR is not valid. Ask the office for the new one." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: raw, error } = await admin.rpc("cnc_tool_undo_take", {
+    p_movement_id: movementId,
+    p_profile_id: session.profileId,
+    p_operator_id: session.operatorId,
+    p_window_secs: Math.round(UNDO_WINDOW_MS / 1000),
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const r = (raw ?? {}) as UndoOutcome;
+  if (!r.ok) {
+    const mins = Math.round(UNDO_WINDOW_MS / 60000);
+    switch (r.code) {
+      case "not_mine":
+        return { ok: false, error: "That line is not yours. Only the man who took it can take it back." };
+      case "too_late":
+        return {
+          ok: false,
+          error: `The ${mins}-minute window has passed. Hand it back at the cupboard instead — that way both lines stay in the register.`,
+        };
+      case "spent":
+        return {
+          ok: false,
+          error:
+            Number(r.held ?? 0) > 0
+              ? `You are only holding ${r.held} of those now. Report what you used instead.`
+              : "Those pcs have already gone into a machine or back on the shelf, so there is nothing left to un-take.",
+        };
+      case "short":
+        return { ok: false, error: "The shelf cannot give those back right now. Tell the office." };
+      case "already":
+        return { ok: false, error: "That one is already taken back." };
+      case "gone":
+        return { ok: false, error: "That line is gone." };
+      default:
+        return { ok: false, error: "That cannot be taken back." };
+    }
+  }
+
+  revalidatePath("/tools");
+
+  return {
+    ok: true,
+    toolName: r.tool ?? "tool",
+    qty: Number(r.qty ?? 0),
+    left: Number(r.stock_after ?? 0),
   };
 }
 
