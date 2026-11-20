@@ -103,7 +103,6 @@ export function StoreClient({
   const [editing, setEditing] = useState<ToolRow | null>(null);
   const [done, setDone] = useState<Done | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
   /** Set by the History chip on a card — the register, one tool only. */
   const [onlyTool, setOnlyTool] = useState<string | null>(null);
   /** The tool whose Delete has been pressed once. Deleting is rare and
@@ -260,9 +259,13 @@ export function StoreClient({
                 </button>
               </>
             )}
+            {/* Desktop only. On a phone the same action is the gold
+                pill in the corner, and showing both put two Add tools
+                on one 375px screen — the exact duplication Daksh was
+                counting elsewhere on this page. */}
             <button
               type="button"
-              className="tc-btn tc-btn-solid"
+              className="tc-btn tc-btn-solid tc-btn-wide"
               onClick={() => { setEditing(null); setAddOpen(true); }}
             >
               Add tool
@@ -335,24 +338,8 @@ export function StoreClient({
               {visible.map((t) => (
                 <ToolCard
                   key={t.id} tool={t} canManage={canManage}
-                  menuOpen={menuFor === t.id}
-                  confirmingDelete={confirmDelete === t.id}
-                  onMenu={() => { setMenuFor((m) => (m === t.id ? null : t.id)); setConfirmDelete(null); }}
-                  onCloseMenu={() => { setMenuFor(null); setConfirmDelete(null); }}
-                  onAddStock={() => { setMenuFor(null); setIntent({ tool: t, kind: "receive" }); }}
-                  onFixCount={() => { setMenuFor(null); setIntent({ tool: t, kind: "adjust" }); }}
-                  onEdit={() => { setMenuFor(null); setEditing(t); setAddOpen(true); }}
-                  onHistory={() => { setMenuFor(null); setOnlyTool(t.id); setTab("register"); }}
+                  onAddStock={() => setIntent({ tool: t, kind: "receive" })}
                   onOpen={() => { setConfirmDelete(null); setSheetTool(t); }}
-                  onAskDelete={() => setConfirmDelete(t.id)}
-                  onCancelDelete={() => setConfirmDelete(null)}
-                  onDelete={() => {
-                    setMenuFor(null); setConfirmDelete(null);
-                    const fd = new FormData();
-                    fd.set("tool_id", t.id);
-                    run(() => deleteToolAction(fd),
-                        (msg) => setDone({ at: Date.now(), text: msg ?? "Deleted" }));
-                  }}
                 />
               ))}
             </div>
@@ -880,28 +867,32 @@ function RegLine({ l }: { l: Line }) {
 // ── Tool card ──────────────────────────────────────────────────────
 
 function ToolCard({
-  tool, canManage, menuOpen, confirmingDelete,
-  onMenu, onCloseMenu, onAddStock, onFixCount, onEdit, onHistory,
-  onOpen, onAskDelete, onCancelDelete, onDelete,
+  tool, canManage, onAddStock, onOpen,
 }: {
-  tool: ToolRow; canManage: boolean; menuOpen: boolean; confirmingDelete: boolean;
-  onMenu: () => void; onCloseMenu: () => void;
-  onAddStock: () => void; onFixCount: () => void; onEdit: () => void; onHistory: () => void;
+  tool: ToolRow; canManage: boolean;
+  onAddStock: () => void;
   onOpen: () => void;
-  onAskDelete: () => void; onCancelDelete: () => void; onDelete: () => void;
 }) {
-  // Press the tool to get at everything that can happen to it. A hold
-  // works, which is what Daksh asked for and what the cupboard QR needs
-  // (a tap there already means "I am taking this one"). Here a plain
-  // tap does it too: nothing else on this screen uses the tap, and a
-  // gesture nobody can see is a feature only its author uses.
+  // ── ONE menu per tool ──────────────────────────────────────────
+  //
+  // Daksh, Nov 2026: "when we press on item then also option, if we
+  // press on that 3 dots then also there are options — make it easy
+  // and good for usability."
+  //
+  // He was counting. Every single thing a tool can do existed twice:
+  // the row opened a sheet with Add stock / Fix count / register /
+  // Edit / Delete, and the ⋯ opened a menu with Fix count / register /
+  // Edit / Delete. Two delete confirmations, two register links, two
+  // ways to edit, written and maintained separately — and whichever
+  // one you learned, the other was still there looking like it might
+  // do something different.
+  //
+  // The ⋯ is gone. The row opens the sheet, which is the same gesture
+  // and the same sheet as the cupboard phone, so there is one thing to
+  // learn for both screens. Add stock stays on the row because it is
+  // the one action people come here to do; it is a shortcut INTO the
+  // sheet's first item, not a second menu.
   const press = useLongPress(onOpen, { onClick: onOpen });
-  const dotsRef = useRef<HTMLButtonElement | null>(null);
-  /** Open the menu upwards when there is not room below it. Measured
-   *  on the click rather than in an effect: it has to be decided
-   *  before the menu paints, and useLayoutEffect warns on the server. */
-  const [up, setUp] = useState(false);
-  const MENU_H = 250;
 
   const level = tool.stock <= 0 ? "out" : tool.stock <= tool.lowLine ? "low" : "ok";
 
@@ -916,8 +907,8 @@ function ToolCard({
     : "nothing taken yet";
 
   return (
-    <article className="tc-card" data-level={level} {...press}>
-      {/* Mig 233 — the photo. A tool WITHOUT one now shows a quiet empty
+    <article className="tc-card" data-level={level} tabIndex={0} role="button" {...press}>
+      {/* Mig 233 — the photo. A tool WITHOUT one shows a quiet empty
           frame rather than its first letter in a colour: six of the
           seven codes on this shelf begin with D, so the letter taught
           nobody anything and only added colour. */}
@@ -948,74 +939,20 @@ function ToolCard({
 
       {/* The row owns the press gesture, so anything inside it that is
           pressable has to keep its own events to itself — otherwise
-          holding "Add stock" would open the sheet behind it. */}
+          pressing "Add stock" would open the sheet behind it. */}
       <div
         className="tc-rowacts"
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
         {canManage && (
-          <>
-            <button type="button" className="tc-addstock" onClick={onAddStock}>
-              Add stock
-            </button>
-            <div style={{ position: "relative", flex: "0 0 auto" }}>
-            <button
-              ref={dotsRef}
-              type="button"
-              className="tc-dots"
-              aria-label="More"
-              onClick={() => {
-                const r = dotsRef.current?.getBoundingClientRect();
-                setUp(!!r && r.bottom + MENU_H > window.innerHeight);
-                onMenu();
-              }}
-            >
-              ⋯
-            </button>
-            {menuOpen && (
-              <>
-                <div className="tc-menu-scrim" onClick={onCloseMenu} />
-                <div className="tc-menu" role="menu" data-up={up ? "1" : undefined}>
-                  <button type="button" onClick={onFixCount}>Fix count</button>
-                  <button type="button" onClick={onHistory}>This tool&apos;s register</button>
-                  <div className="tc-menu-sep" />
-                  <button type="button" onClick={onEdit}>Edit tool</button>
-
-                  {/* Delete only shows at zero. Not greyed out at other
-                      times — a disabled button people cannot press is a
-                      question they have to ask somebody. The rule is
-                      written where they can read it instead. */}
-                  <div className="tc-menu-sep" />
-                  {tool.stock <= 0 ? (
-                    confirmingDelete ? (
-                      <div className="tc-menu-ask">
-                        <span>Delete {tool.name} from the store?</span>
-                        <div>
-                          <button type="button" className="tc-menu-yes" onClick={onDelete}>
-                            Yes, delete
-                          </button>
-                          <button type="button" className="tc-menu-no" onClick={onCancelDelete}>
-                            Keep it
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button type="button" className="tc-menu-danger" onClick={onAskDelete}>
-                        🗑 Delete tool
-                      </button>
-                    )
-                  ) : (
-                    <div className="tc-menu-why">
-                      Empty it to delete it — {tool.stock} {tool.unit} still on the shelf.
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-            </div>
-          </>
+          <button type="button" className="tc-addstock" onClick={onAddStock}>
+            Add stock
+          </button>
         )}
+        {/* Says the row opens. Without it the only clue was the cursor,
+            which a touchscreen does not have. */}
+        <span className="tc-go" aria-hidden>›</span>
       </div>
     </article>
   );

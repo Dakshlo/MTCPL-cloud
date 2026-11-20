@@ -305,32 +305,38 @@ export const TOOLS_CSS = `
   border:1px solid var(--gold-border); white-space:nowrap; }
 .tc-addstock:hover { background:var(--gold); border-color:var(--gold); color:#fff; }
 
-.tc-dots { width:28px; height:28px; border-radius:var(--radius-sm);
-  border:1px solid var(--border); background:var(--surface); color:var(--muted);
-  cursor:pointer; font-size:14px; line-height:1; flex:0 0 auto; }
-.tc-dots:hover { background:var(--surface-alt); color:var(--text); }
-.tc-menu-scrim { position:fixed; inset:0; z-index:40; }
-.tc-menu { position:absolute; right:0; top:32px; z-index:41; min-width:206px; padding:5px;
-  border-radius:var(--radius); background:var(--surface); border:1px solid var(--border);
-  box-shadow:var(--shadow-md, 0 12px 28px rgba(45,36,16,.16)); }
-/* Opens upwards for a row near the bottom of the window. */
-.tc-menu[data-up] { top:auto; bottom:32px; }
-.tc-menu button { display:block; width:100%; text-align:left; padding:8px 11px; font:inherit;
-  font-size:13px; font-weight:500; border:none; background:none; color:var(--text);
-  border-radius:var(--radius-sm); cursor:pointer; }
-.tc-menu button:hover { background:var(--surface-alt); }
-.tc-menu-sep { height:1px; background:var(--border); margin:4px 2px; }
-.tc-menu button.tc-menu-danger { color:var(--danger); }
-.tc-menu button.tc-menu-danger:hover { background:var(--danger-bg); }
-.tc-menu-why { padding:7px 11px 5px; font-size:11.5px; line-height:1.45; color:var(--muted); }
-.tc-menu-ask { padding:7px 11px 5px; }
-.tc-menu-ask > span { display:block; font-size:12px; font-weight:600; color:var(--text);
-  line-height:1.45; margin-bottom:8px; }
-.tc-menu-ask > div { display:flex; gap:6px; }
-.tc-menu button.tc-menu-yes { width:auto; padding:6px 10px; font-size:12px;
-  background:var(--danger); color:#fff; font-weight:600; }
-.tc-menu button.tc-menu-no { width:auto; padding:6px 10px; font-size:12px;
-  background:var(--surface-alt); color:var(--muted); font-weight:600; }
+/* The phone's Add tool.
+   It was written as a phone-only floating button and then never given
+   a single line of CSS, so it rendered as a bare unstyled <button>
+   under the list — on the desktop, where the gold Add tool in the
+   header already sits four inches above it. Two identical actions
+   stacked on one screen, which is the same complaint as the ⋯ below.
+   Styled, and hidden where the header button is in reach. */
+.tc-fab { display:none; }
+/* Its desktop twin steps aside where the pill takes over. */
+@media (max-width: 720px) { .tc-btn-wide { display:none; } }
+@media (max-width: 720px) {
+  .tc-fab {
+    display:inline-flex; align-items:center; gap:7px;
+    position:fixed; right:16px; bottom:18px; z-index:30;
+    padding:13px 18px; min-height:50px; border-radius:999px;
+    background:var(--gold); color:#fff; border:1px solid var(--gold-dark);
+    font:inherit; font-size:14px; font-weight:700; cursor:pointer;
+    box-shadow:0 4px 14px rgba(201,151,58,.42);
+  }
+  .tc-fab:active { background:var(--gold-dark); }
+}
+
+/* The ⋯ and its menu are gone — every one of their items was already
+   in the sheet the row opens. Daksh: "when we press on item then also
+   option, if we press on that 3 dots then also there are options."
+   This is the chevron that replaced them: it is the row saying it
+   opens, which the cursor used to say and a touchscreen cannot. */
+.tc-go {
+  flex:0 0 auto; width:22px; text-align:center; font-size:17px; line-height:1;
+  color:var(--muted-light); transition:color .12s, transform .12s;
+}
+.tc-card:hover .tc-go { color:var(--gold-dark); transform:translateX(2px); }
 
 /* A phone has no room for five columns. The thing you came to read —
    the code and how many are left — keeps the first line; the badge and
