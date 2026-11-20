@@ -243,14 +243,22 @@ export function StoreClient({
             </Link>
             <Link href="/tools/qr" className="tc-btn">Wardrobe QR</Link>
             {canScanBills && (
-              <button
-                type="button"
-                className="tc-btn"
-                onClick={() => setBillOpen(true)}
-                title="Read a supplier's bill and fill the shelf from it"
-              >
-                Scan bill
-              </button>
+              <>
+                {/* Daksh, Nov 2026: "we need a place so we can see all
+                    scanned bills." Beside the scan rather than inside
+                    the register, because a bill is not a movement — it
+                    is the paper a dozen movements came from, and it
+                    carries rates the register deliberately does not. */}
+                <Link href="/tools/bills" className="tc-btn">Scanned bills</Link>
+                <button
+                  type="button"
+                  className="tc-btn"
+                  onClick={() => setBillOpen(true)}
+                  title="Read a supplier's bill and fill the shelf from it"
+                >
+                  Scan bill
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -506,6 +514,12 @@ type Line = {
   toolName: string;
   person: string | null;
   vendorId: string | null;
+  /** Which WHO chip this line belongs under. Decided ONCE, here, and
+   *  never re-derived from the action — a scrap is an "out" by sign but
+   *  it is the store throwing something away, not a man taking it, and
+   *  working that out twice in two places is how it ends up on the
+   *  wrong chip in one of them. */
+  whoKey: string;
   company: string | null;
   machineCode: string | null;
   viaQr: boolean;
@@ -618,9 +632,10 @@ function Register({
         toolId: m.tool_id,
         toolName: toolName.get(m.tool_id) ?? "a tool since removed",
         person: m.taken_by,
-        // A delivery or a correction belongs to the store, never to a
-        // company, even when the row happens to carry a vendor id.
+        // A delivery, a scrap or a correction belongs to the store,
+        // never to a company, even when the row carries a vendor id.
         vendorId: storeSide ? null : m.vendor_id,
+        whoKey: storeSide ? STORE_KEY : m.vendor_id ?? OFFICE_KEY,
         company: storeSide ? null : m.vendor_id ? vendorNames[m.vendor_id] ?? null : null,
         machineCode: null,
         viaQr: !!m.guest_link_id,
@@ -640,6 +655,7 @@ function Register({
       toolName: u.toolName,
       person: u.usedBy,
       vendorId: u.vendorId,
+      whoKey: u.vendorId ?? OFFICE_KEY,
       company: u.company,
       machineCode: u.machineCode,
       viaQr: false,
@@ -661,10 +677,7 @@ function Register({
 
   const whoChips = useMemo(() => {
     const n = new Map<string, number>();
-    for (const l of inPeriod) {
-      const k = l.vendorId ?? (l.act === "out" || l.act === "use" ? OFFICE_KEY : STORE_KEY);
-      n.set(k, (n.get(k) ?? 0) + 1);
-    }
+    for (const l of inPeriod) n.set(l.whoKey, (n.get(l.whoKey) ?? 0) + 1);
     const vendors = [...n.entries()]
       .filter(([k]) => k !== OFFICE_KEY && k !== STORE_KEY)
       .map(([k, c]) => ({ key: k, label: vendorNames[k] ?? "Unknown company", n: c }))
@@ -681,10 +694,7 @@ function Register({
   const lines = useMemo(() => {
     const needle = find.trim().toLowerCase();
     return inPeriod.filter((l) => {
-      if (who !== ALL_KEY) {
-        const k = l.vendorId ?? (l.act === "out" || l.act === "use" ? OFFICE_KEY : STORE_KEY);
-        if (k !== who) return false;
-      }
+      if (who !== ALL_KEY && l.whoKey !== who) return false;
       if (!needle) return true;
       return (
         l.toolName.toLowerCase().includes(needle) ||
