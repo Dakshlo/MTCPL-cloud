@@ -70,25 +70,35 @@ export function canEnrolForAnyVendor(p: ToolProfile): boolean {
  * May this person fill the shelf FROM THE CUPBOARD — add stock, add a
  * tool, correct a count?
  *
- * The office three, and the CNC vendors themselves. Daksh, Nov 2026:
- * "that add stock feature on qr login, enable that for mohit also, he
- * can also maintain and add stock."
+ * The office three, and nobody else.
  *
- * He named Mohit; this opens it to all three vendor principals, because
- * they are the same kind of person doing the same job at the same
- * cupboard and naming one of them in code would be a rule nobody could
- * explain in six months. Their OPERATORS still cannot: a man enrolled
- * off a sticker can take a tool and nothing else.
+ * Daksh, Nov 2026, reversing his own earlier instruction: "there are
+ * some feature like developer and owner which mohit also have, like add
+ * stock and fix count — remove that from mohit account. For mobile only
+ * developer and owner can have these option on long press, other will
+ * only have take pcs. And for vendors remove that add item also."
  *
- * Note what this is NOT. It is not canUseCncTools: a vendor still has
- * no business on the office screen, where the whole register and every
- * company's takes are laid out. This is the cupboard he stands at.
+ * It had been opened to the vendor principals on his word — "that add
+ * stock feature on qr login, enable that for mohit also, he can also
+ * maintain and add stock" — and real use answered it: the man who takes
+ * the tools should not also be the man who says how many arrived, or
+ * what the shelf really holds when it disagrees with the register. Both
+ * of those are now written by someone with nothing to gain from the
+ * number, and since mig 237 the arrivals come off the supplier's own
+ * bill rather than off anybody's memory.
+ *
+ * So this gate asks the same question the office screen asks, and the
+ * answer is a flag granted by name — see canUseCncTools. What a vendor
+ * can still do at the cupboard is the whole of his job there: take a
+ * tool, say which machine ate it, hand back what he did not use.
+ *
+ * Kept as its own function rather than folded into canUseCncTools
+ * because the two are different questions that happen to share an
+ * answer today: this one is "may he write to the shelf from a sticker",
+ * which is the one that will be argued about again.
  */
-export function canKeepAtCupboard(
-  p: ToolProfile,
-  opts: { hasOwnCompany: boolean },
-): boolean {
-  return canUseCncTools(p) || opts.hasOwnCompany;
+export function canKeepAtCupboard(p: ToolProfile): boolean {
+  return canUseCncTools(p);
 }
 
 /** May this person change the catalogue (add a tool, set its warn line,

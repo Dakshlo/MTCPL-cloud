@@ -301,6 +301,12 @@ export function GuestTakeClient({
   const [regBusy, setRegBusy] = useState(false);
   const [regMine, setRegMine] = useState(false);
   const [regTrunc, setRegTrunc] = useState(false);
+  /** Whose lines came back. Decided on the server from the session —
+   *  the screen only reports it. */
+  const [regScope, setRegScope] = useState<{
+    kind: "all" | "company" | "person";
+    company: string | null;
+  }>({ kind: "all", company: null });
   const [sentTo, setSentTo] = useState("");
   const [code, setCode] = useState("");
   const [tool, setTool] = useState<TakeTool | null>(null);
@@ -518,6 +524,10 @@ export function GuestTakeClient({
       }
       setReg(r.lines);
       setRegTrunc(r.truncated);
+      setRegScope({ kind: r.scope, company: r.company });
+      // A man who can only ever see his own lines has nothing to switch
+      // between, so the switch goes and the one list he has is shown.
+      if (r.scope === "person") setRegMine(false);
     });
   }
 
@@ -1606,19 +1616,29 @@ export function GuestTakeClient({
         <section className="gt-body">
           <div className="gt-reg-top">
             <h1 className="gt-h1">The register</h1>
+            {/* It used to say "everyone can read it", which was true and
+                is now not. The screen names its own scope instead, so
+                six quiet weeks read as "my company has been quiet" and
+                never as "the cupboard has been quiet". */}
             <p className="gt-sub">
-              Who took what, what went into a machine, and when. Everyone can read it.
+              {regScope.kind === "all"
+                ? "Who took what, what went into a machine, and when — the whole cupboard."
+                : regScope.kind === "company"
+                  ? `Everything ${regScope.company ?? "your company"} has taken, used and handed back. Other companies keep their own book.`
+                  : "Everything you have taken, used and handed back."}
             </p>
           </div>
 
-          <div className="gt-reg-seg" role="group" aria-label="Whose lines">
-            <button type="button" className={!regMine ? "on" : ""} onClick={() => setRegMine(false)}>
-              Everyone
-            </button>
-            <button type="button" className={regMine ? "on" : ""} onClick={() => setRegMine(true)}>
-              Just me
-            </button>
-          </div>
+          {regScope.kind !== "person" && (
+            <div className="gt-reg-seg" role="group" aria-label="Whose lines">
+              <button type="button" className={!regMine ? "on" : ""} onClick={() => setRegMine(false)}>
+                {regScope.kind === "company" ? regScope.company ?? "My company" : "Everyone"}
+              </button>
+              <button type="button" className={regMine ? "on" : ""} onClick={() => setRegMine(true)}>
+                Just me
+              </button>
+            </div>
+          )}
 
           {regBusy && <div className="gt-reg-wait">Reading the register…</div>}
 
@@ -1627,7 +1647,11 @@ export function GuestTakeClient({
             if (lines.length === 0) {
               return (
                 <div className="gt-blank">
-                  {regMine ? "You have not taken anything yet." : "Nothing in the last six weeks."}
+                  {regMine || regScope.kind === "person"
+                    ? "You have not taken anything yet."
+                    : regScope.kind === "company"
+                      ? `Nobody at ${regScope.company ?? "your company"} has taken anything in the last six weeks.`
+                      : "Nothing in the last six weeks."}
                 </div>
               );
             }

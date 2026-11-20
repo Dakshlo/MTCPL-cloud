@@ -794,20 +794,74 @@ export type UsageLine = {
   undoneAt: string | null;
 };
 
+/**
+ * Whose lines a register is allowed to contain.
+ *
+ * Daksh, Nov 2026: "the register in phone — owner and developer can see
+ * all activity, but respective vendor will see theirs only."
+ *
+ * This is a SCOPE, not a filter. The difference matters: a filter is
+ * applied to rows the phone has already been sent, and a phone that has
+ * been sent a row has been told the answer whether or not it draws it.
+ * Every reader of these two ledgers takes one of these and puts it in
+ * the query.
+ *
+ *   all      the office three and the developer
+ *   company  a vendor principal: his own firm, his men included
+ *   person   an operator: the lines he signed himself, and no others
+ */
+export type LedgerScope =
+  | { kind: "all" }
+  | { kind: "company"; vendorId: string }
+  | { kind: "person"; profileId: string | null; operatorId: string | null };
+
+/**
+ * The PostgREST `or` for "lines this person signed", against whichever
+ * pair of columns the table uses.
+ *
+ * Returns null when the session names nobody at all. A caller that gets
+ * null must return NOTHING — an empty filter would widen the query to
+ * everything, which is the one mistake this whole type exists to stop.
+ */
+export function personScopeFilter(
+  who: { profileId: string | null; operatorId: string | null },
+  cols: { profileCol: string; operatorCol: string },
+): string | null {
+  const parts: string[] = [];
+  if (who.profileId) parts.push(`${cols.profileCol}.eq.${who.profileId}`);
+  if (who.operatorId) parts.push(`${cols.operatorCol}.eq.${who.operatorId}`);
+  return parts.length ? parts.join(",") : null;
+}
+
 /** Usage rows for the cupboard register, over the same window the
  *  movements use. `mine` is decided from the session on the server —
- *  never from anything the page sent. */
+ *  never from anything the page sent — and `scope` decides which rows
+ *  the phone is allowed to be handed in the first place. */
 export async function usageLinesSince(
   sinceIso: string,
   me: { profileId: string | null; operatorId: string | null },
-  max = 300,
+  max: number,
+  scope: LedgerScope,
 ): Promise<UsageLine[]> {
   const admin = createAdminSupabaseClient();
 
-  const { data } = await admin
+  let q = admin
     .from("cnc_tool_usage")
     .select("id, tool_id, machine_id, qty, used_by, used_by_profile_id, used_by_operator_id, vendor_id, created_at, undone_at, cnc_tools(name, unit), cnc_machines(machine_code), vendors(name)")
-    .gte("created_at", sinceIso)
+    .gte("created_at", sinceIso);
+
+  if (scope.kind === "company") {
+    q = q.eq("vendor_id", scope.vendorId);
+  } else if (scope.kind === "person") {
+    const f = personScopeFilter(scope, {
+      profileCol: "used_by_profile_id",
+      operatorCol: "used_by_operator_id",
+    });
+    if (!f) return [];
+    q = q.or(f);
+  }
+
+  const { data } = await q
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(max);

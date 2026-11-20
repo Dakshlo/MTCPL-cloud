@@ -35,6 +35,8 @@ import {
   menUnder,
   settleRefusal,
   usageLinesSince,
+  personScopeFilter,
+  type LedgerScope,
   type HeldItem,
   type ManHolding,
   type SettleOutcome,
@@ -175,9 +177,7 @@ async function resolveSigner(
       vendorName: pv?.name ?? null,
       canEnrol: !!p.vendor_id || anyVendor,
       enrolScope: p.vendor_id ? "own" : anyVendor ? "any" : null,
-      canKeep: canKeepAtCupboard(p as Parameters<typeof canKeepAtCupboard>[0], {
-        hasOwnCompany: !!p.vendor_id,
-      }),
+      canKeep: canKeepAtCupboard(p as Parameters<typeof canKeepAtCupboard>[0]),
     },
   };
 }
@@ -847,7 +847,18 @@ export type RegisterLine = {
 };
 
 export type RegisterResult =
-  | { ok: true; lines: RegisterLine[]; truncated: boolean }
+  | {
+      ok: true;
+      lines: RegisterLine[];
+      truncated: boolean;
+      /** Whose lines these are — decided on the server from the
+       *  session. The screen needs it to say so out loud: a vendor
+       *  reading six quiet weeks must know he is looking at his own
+       *  company and not at an empty cupboard. */
+      scope: "all" | "company" | "person";
+      /** The company name, when the scope is one. */
+      company: string | null;
+    }
   | { ok: false; error: string; signedOut?: boolean };
 
 /** How far back the phone reads. Six weeks is longer than any argument
@@ -870,23 +881,63 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
   const admin = createAdminSupabaseClient();
   const since = new Date(Date.now() - REGISTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  // ── Whose book is this ──────────────────────────────────────────
+  //
+  // Daksh, Nov 2026: "the register in phone — owner and developer can
+  // see all activity, but respective vendor will see theirs only."
+  //
+  // It read every line in the table and sent the lot to whoever asked,
+  // with a `mine` flag on top for colour. So Mohit's phone was carrying
+  // Vivek's takes — which tools his competitor goes through and how
+  // fast — and the only thing between the two of them was that the
+  // screen did not happen to draw it.
+  //
+  // Scoped from the SESSION and applied in the QUERY. Not from the
+  // form, because a form is typed by the person being scoped; and not
+  // after the fetch, because by then the phone has the rows.
+  //
+  // An operator gets his own lines only. He was never named in that
+  // instruction, and this is the reading that matches the rest of the
+  // module — "each man accounts for his own tools from his own phone".
+  // His company's whole book is his vendor's business, not his.
+  const scope: LedgerScope = session.canKeep
+    ? { kind: "all" }
+    : session.operatorId
+      ? { kind: "person", profileId: session.profileId, operatorId: session.operatorId }
+      : session.vendorId
+        ? { kind: "company", vendorId: session.vendorId }
+        : { kind: "person", profileId: session.profileId, operatorId: session.operatorId };
+
   // Two ledgers, one story. The shelf's movements and mig 238's usage
   // rows are read separately — they are different tables about different
   // things — and merged on time, because a man reading his own register
   // does not care which table a line came out of.
+  let mq = admin
+    .from("cnc_tool_movements")
+    .select(
+      "id, tool_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, vendor_id, note, created_at, undone_at",
+    )
+    .gte("created_at", since);
+
+  if (scope.kind === "company") {
+    mq = mq.eq("vendor_id", scope.vendorId);
+  } else if (scope.kind === "person") {
+    const f = personScopeFilter(scope, {
+      profileCol: "taken_by_profile_id",
+      operatorCol: "taken_by_operator_id",
+    });
+    // No filter means no identity, and no identity must mean no rows.
+    if (!f) return { ok: true, lines: [], truncated: false, scope: "person", company: null };
+    mq = mq.or(f);
+  }
+
   const [{ data: rows, error }, uses] = await Promise.all([
-    admin
-      .from("cnc_tool_movements")
-      .select(
-        "id, tool_id, kind, delta, taken_by, taken_by_profile_id, taken_by_operator_id, vendor_id, note, created_at, undone_at",
-      )
-      .gte("created_at", since)
-      .order("created_at", { ascending: false })
-      .limit(REGISTER_MAX + 1),
+    mq.order("created_at", { ascending: false }).limit(REGISTER_MAX + 1),
     usageLinesSince(
       since,
       { profileId: session.profileId, operatorId: session.operatorId },
       REGISTER_MAX + 1,
+      scope,
     ),
   ]);
   if (error) return { ok: false, error: error.message };
@@ -962,7 +1013,13 @@ export async function guestRegisterAction(fd: FormData): Promise<RegisterResult>
   const merged = [...moved, ...spent].sort((a, b) => b.at.localeCompare(a.at));
   const truncated = merged.length > REGISTER_MAX;
 
-  return { ok: true, truncated, lines: truncated ? merged.slice(0, REGISTER_MAX) : merged };
+  return {
+    ok: true,
+    truncated,
+    lines: truncated ? merged.slice(0, REGISTER_MAX) : merged,
+    scope: scope.kind,
+    company: scope.kind === "company" ? session.vendorName ?? null : null,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────

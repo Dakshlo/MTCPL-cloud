@@ -306,17 +306,18 @@ export async function currentToolSession(
     name,
     vendorId: row.vendor_id,
     vendorName: vend?.name ?? null,
-    // A vendor principal manages his own men. Anyone who keeps the
-    // store — the developer, Nikhil, Vinay — manages all three teams
-    // and picks the company each time. An operator can never grow a
-    // team of his own: that is the one thing the two kinds of signer
-    // genuinely differ on.
+    // Writing to the shelf is the office's, and it is re-asked of the
+    // profile on every call rather than trusted from the session row —
+    // a flag taken away at lunchtime must be gone by the afternoon.
+    //
+    // Enrolling a man is a different question and keeps its own answer:
+    // a vendor principal manages his own men, the office three manage
+    // all the teams and pick the company each time, and an operator can
+    // never grow a team of his own.
     canKeep:
       !!row.profile_id &&
       !!prof &&
-      canKeepAtCupboard(prof as Parameters<typeof canKeepAtCupboard>[0], {
-        hasOwnCompany: !!row.vendor_id,
-      }),
+      canKeepAtCupboard(prof as Parameters<typeof canKeepAtCupboard>[0]),
     canEnrol:
       !!row.profile_id &&
       (!!row.vendor_id || (!!prof && canEnrolForAnyVendor(prof as Parameters<typeof canEnrolForAnyVendor>[0]))),
