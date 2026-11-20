@@ -34,6 +34,7 @@
 import QRCode from "qrcode";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { TOOL_IMAGE_BUCKET } from "@/lib/cnc-tool-stock";
 import { appBaseUrl } from "@/lib/wa-diary-mention";
 
 /** Where a slip's QR points. One place, so the writer and the reader
@@ -62,6 +63,32 @@ export async function takeReceiptQr(url: string): Promise<string> {
   });
 }
 
+/**
+ * The same QR as a PNG data URL.
+ *
+ * The card on the phone uses the SVG above, which is sharper and
+ * smaller. This one exists for the shareable image: that is drawn by
+ * Satori (next/og), which rasterises <img> but does not reliably render
+ * an inline SVG, so the picture that goes to WhatsApp needs a bitmap.
+ */
+export async function takeReceiptQrPng(url: string): Promise<string> {
+  return QRCode.toDataURL(url, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 320,
+    color: { dark: "#2D2410", light: "#FFFFFF" },
+  });
+}
+
+/** The tool's photograph, or null. Public bucket (mig 233), so the URL
+ *  works on a phone with no login and inside the image renderer, which
+ *  fetches it as an anonymous stranger would. */
+export function toolPhotoUrl(imagePath: string | null): string | null {
+  if (!imagePath) return null;
+  const admin = createAdminSupabaseClient();
+  return admin.storage.from(TOOL_IMAGE_BUCKET).getPublicUrl(imagePath).data.publicUrl;
+}
+
 /** What the public slip shows. No rate, no cost, no phone number. */
 export type TakeReceipt = {
   id: string;
@@ -71,6 +98,10 @@ export type TakeReceipt = {
   qty: number;
   toolName: string;
   toolSpec: string | null;
+  /** Daksh, Nov 2026: "if there is item image then card should also
+   *  show item image." A part code tells a storeman which bit it is; a
+   *  photograph tells the man holding it. */
+  toolImageUrl: string | null;
   unit: string;
   takenBy: string;
   company: string | null;
@@ -98,7 +129,7 @@ export async function loadTakeReceipt(id: string): Promise<TakeReceipt | null> {
   const { data } = await admin
     .from("cnc_tool_movements")
     .select(
-      "id, kind, delta, taken_by, created_at, undone_at, vendor_id, cnc_tools(name, spec, unit), vendors(name)",
+      "id, kind, delta, taken_by, created_at, undone_at, vendor_id, cnc_tools(name, spec, unit, image_path), vendors(name)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -112,8 +143,9 @@ export async function loadTakeReceipt(id: string): Promise<TakeReceipt | null> {
         created_at: string;
         undone_at: string | null;
         vendor_id: string | null;
-        cnc_tools: { name: string; spec: string | null; unit: string }
-          | { name: string; spec: string | null; unit: string }[]
+        cnc_tools:
+          | { name: string; spec: string | null; unit: string; image_path: string | null }
+          | { name: string; spec: string | null; unit: string; image_path: string | null }[]
           | null;
         vendors: { name: string } | { name: string }[] | null;
       }
@@ -132,6 +164,7 @@ export async function loadTakeReceipt(id: string): Promise<TakeReceipt | null> {
     qty: Math.abs(Number(row.delta)),
     toolName: tool?.name ?? "a tool that has since been removed",
     toolSpec: tool?.spec ?? null,
+    toolImageUrl: toolPhotoUrl(tool?.image_path ?? null),
     unit: tool?.unit ?? "pcs",
     takenBy: (row.taken_by ?? "").trim() || "Unsigned",
     company: one(row.vendors)?.name ?? null,

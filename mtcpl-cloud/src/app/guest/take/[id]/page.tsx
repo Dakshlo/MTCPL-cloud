@@ -113,6 +113,16 @@ export default async function TakeSlipPage({
         )}
 
         <div className="ts-what">
+          {/* The photograph, where the tool has one. The man scanning
+              this is often holding the bit and checking it is the one
+              the slip is about — a part code does not settle that and
+              a picture does. */}
+          {slip.toolImageUrl && (
+            <span className="ts-pic">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={slip.toolImageUrl} alt="" />
+            </span>
+          )}
           <b>{slip.qty}</b>
           <span>
             <strong>{slip.toolName}</strong>
@@ -189,6 +199,10 @@ const CSS = `
 
 .ts-what { display:flex; align-items:center; gap:14px; padding:18px 0 16px;
   justify-content:center; text-align:left; }
+.ts-pic { flex:0 0 auto; width:62px; height:62px; border-radius:12px; overflow:hidden;
+  border:1px solid #EDE8E0; background:#fff; display:block; }
+.ts-pic img { width:100%; height:100%; object-fit:cover; display:block; }
+.ts-card[data-state="dead"] .ts-pic { filter:grayscale(1); }
 .ts-what b { font-size:42px; font-weight:800; letter-spacing:-.03em; line-height:1;
   font-variant-numeric:tabular-nums; }
 .ts-what span { display:flex; flex-direction:column; gap:2px; min-width:0; }

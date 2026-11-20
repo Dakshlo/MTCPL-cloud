@@ -286,14 +286,29 @@ export function GuestTakeClient({
    * which should not happen; the card then shows the take without a QR
    * rather than claiming nothing was taken.
    */
-  const [done, setDone] = useState<
-    { slip: TakeSlip | null; toolName: string; qty: number; left: number; undone: boolean } | null
-  >(null);
+  const [done, setDone] = useState<{
+    slip: TakeSlip | null;
+    toolName: string;
+    qty: number;
+    left: number;
+    undone: boolean;
+    /** Daksh, Nov 2026: "if there is item image then card should also
+     *  show item image." Taken from the shelf row he just pressed
+     *  rather than fetched again — the phone already has it, and the
+     *  take path is the one place on this screen where latency is felt
+     *  with somebody waiting at the cupboard. */
+    imageUrl: string | null;
+    spec: string | null;
+  } | null>(null);
   /** The four seconds are a DEFAULT, not a deadline. Four seconds is
    *  plenty to read "4 taken" and nowhere near enough to photograph a
    *  QR, so the first touch anywhere on the card cancels the timer and
    *  the card stays until he closes it. */
   const [pinned, setPinned] = useState(false);
+  /** True while the card is being drawn for the share sheet. It is one
+   *  fetch of a server-rendered PNG, which on shed wifi is long enough
+   *  for a second tap if the button says nothing. */
+  const [drawing, setDrawing] = useState(false);
   const [shared, setShared] = useState(false);
   /** The cupboard's register. Loaded when it is opened, not before —
    *  most visits are somebody taking one thing and leaving. */
@@ -497,14 +512,32 @@ export function GuestTakeClient({
   }
 
   /**
-   * Hand the slip on.
+   * Hand the slip on — as a picture.
    *
-   * Daksh: "make that card look good that can be share to whatsapp." The
-   * native sheet is the right thing where it exists — WhatsApp is in it,
-   * along with everything else he might want — and wa.me is the fallback
-   * for a browser without it. What travels is the LINK, not a picture of
-   * the card: a link re-reads the take every time it is opened, and a
-   * screenshot would keep saying "taken" long after it was given back.
+   * Daksh, Nov 2026: "when we share it should not send link, it should
+   * send card image. Eg I share on WhatsApp, then instead of link if
+   * possible it should send the image of that card."
+   *
+   * BOTH, not one instead of the other, and the reason matters.
+   *
+   * The picture is what he asked for and what anybody actually looks at
+   * in a chat. But a picture is frozen: it says "4 taken" for ever,
+   * including after the take is voided, in every chat it was ever
+   * forwarded to. That is the precise failure the QR was built to
+   * avoid. The link keeps the slip honest, because the page it opens
+   * re-reads the row.
+   *
+   * So the share sheet gets a file AND a url. The file is drawn from
+   * the live row at the moment of sharing, which means a slip that has
+   * already been cancelled is shared as a picture that says CANCELLED
+   * across its face.
+   *
+   * Three rungs down, because `canShare({files})` is the only honest
+   * test and a good third of the phones at a shed will fail it:
+   *
+   *   1. share sheet with the image attached
+   *   2. share sheet with the link alone
+   *   3. wa.me with the link in the message body
    */
   async function shareSlip() {
     const d = done;
@@ -514,7 +547,42 @@ export function GuestTakeClient({
       `${d.slip.company && d.slip.company !== d.slip.takenBy ? ` (${d.slip.company})` : ""}` +
       ` · ${istStamp(d.slip.at)}`;
     setPinned(true);
-    const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+
+    const nav = navigator as Navigator & {
+      share?: (d: ShareData) => Promise<void>;
+      canShare?: (d: ShareData) => boolean;
+    };
+
+    // ── 1. the card itself ────────────────────────────────────────
+    if (typeof nav.share === "function" && typeof nav.canShare === "function") {
+      try {
+        setDrawing(true);
+        // Same drawing WhatsApp would fetch for the link preview, so
+        // there is one card and not two that drift apart.
+        const res = await fetch(`${d.slip.url}/opengraph-image`, { cache: "no-store" });
+        if (res.ok) {
+          const blob = await res.blob();
+          const file = new File([blob], `tool-slip-${d.slip.id.slice(0, 8)}.png`, {
+            type: blob.type || "image/png",
+          });
+          // Ask BEFORE sharing: a phone that cannot take files throws
+          // from share() rather than refusing politely, and by then the
+          // sheet has already flickered open and shut.
+          if (nav.canShare({ files: [file] })) {
+            await nav.share({ title: "Tool slip", text, url: d.slip.url, files: [file] });
+            setShared(true);
+            return;
+          }
+        }
+      } catch {
+        // Offline, a slow shed connection, or he closed the sheet.
+        // Either way there is still a link to send.
+      } finally {
+        setDrawing(false);
+      }
+    }
+
+    // ── 2. the link through the sheet ─────────────────────────────
     if (typeof nav.share === "function") {
       try {
         await nav.share({ title: "Tool slip", text, url: d.slip.url });
@@ -525,6 +593,8 @@ export function GuestTakeClient({
         // through to WhatsApp rather than leaving the button dead.
       }
     }
+
+    // ── 3. WhatsApp, told in words ────────────────────────────────
     window.open(
       `https://wa.me/?text=${encodeURIComponent(`${text}\n${d.slip.url}`)}`,
       "_blank",
@@ -722,6 +792,8 @@ export function GuestTakeClient({
         qty: r.qty,
         left: r.left,
         undone: false,
+        imageUrl: tool.imageUrl,
+        spec: tool.spec,
       });
       setTool(null);
       setQ("");
@@ -1418,9 +1490,19 @@ export function GuestTakeClient({
             )}
 
             <div className="gt-slip-what">
+              {/* The photograph, where the tool has one. A part code
+                  tells a storeman which bit it is; a picture tells the
+                  man holding it, and he is the one reading this. */}
+              {done.imageUrl && (
+                <span className="gt-slip-pic">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={done.imageUrl} alt="" />
+                </span>
+              )}
               <b>{done.qty}</b>
               <span>
                 <strong>{done.toolName}</strong>
+                {done.spec && <i className="gt-slip-spec">{done.spec}</i>}
                 <em>{done.left} left on the shelf</em>
               </span>
             </div>
@@ -1472,8 +1554,13 @@ export function GuestTakeClient({
                 </button>
               )}
               {done.slip && (
-                <button type="button" className="gt-slip-share" onClick={shareSlip}>
-                  {shared ? "Shared ✓" : "Share"}
+                <button
+                  type="button"
+                  className="gt-slip-share"
+                  onClick={shareSlip}
+                  disabled={drawing}
+                >
+                  {drawing ? "Making the card…" : shared ? "Shared ✓" : "Share the card"}
                 </button>
               )}
               <button type="button" className="gt-slip-ok" onClick={() => setDone(null)}>
@@ -2061,6 +2148,23 @@ const CSS = `
   color:var(--out, #DC2626);
 }
 .gt-slip-undo:disabled { opacity:.55; }
+/* The item's photograph on the slip. Square and small — it is there to
+   say "this bit", not to be looked at; the number beside it is still
+   the biggest thing on the card. */
+/* Scoped under .gt-slip-what on purpose: the rule for the TEXT span
+   beside it is ".gt-slip-what span", which also matches this one and
+   out-specifies a bare .gt-slip-pic. Without the extra class here the
+   photo quietly becomes a flex column. */
+.gt-slip-what .gt-slip-pic {
+  flex:0 0 auto; width:58px; height:58px; border-radius:12px; overflow:hidden;
+  border:1px solid var(--line); background:#fff; display:block; min-width:58px;
+}
+.gt-slip-what .gt-slip-pic img { width:100%; height:100%; object-fit:cover; display:block; }
+.gt-slip-spec {
+  display:block; font-style:normal; font-size:11.5px; color:var(--dim); margin-top:1px;
+}
+.gt-slip-share:disabled { opacity:.6; }
+
 .gt-slip-share {
   border:1px solid var(--line, #E4DDD2); background:transparent;
   color:var(--ink, #2D2410);
