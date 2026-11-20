@@ -25,7 +25,13 @@ import {
   takesThroughLinkToday,
   usesThroughLinkToday,
 } from "@/lib/cnc-tool-guest";
-import { TOOL_IMAGE_BUCKET, moveRefusal, type MoveOutcome } from "@/lib/cnc-tool-stock";
+import {
+  TOOL_IMAGE_BUCKET,
+  UNDO_WINDOW_MS,
+  moveRefusal,
+  type MoveOutcome,
+} from "@/lib/cnc-tool-stock";
+import { takeReceiptQr, takeReceiptUrl } from "@/lib/cnc-tool-receipt";
 import {
   MAX_USE_QTY,
   canUndoUsage,
@@ -250,8 +256,45 @@ export async function toolSignOutAction(fd: FormData): Promise<{ ok: boolean }> 
   return { ok: true };
 }
 
+/**
+ * The slip the card shows and the man keeps (Nov 2026).
+ *
+ * Built here, on the server, and handed down whole — the QR is already
+ * drawn by the time the card paints, so a phone on a shed connection
+ * does not have to fetch anything or run a QR library to show it.
+ *
+ * `id` is the movement id and nothing else: the QR points at the row,
+ * so the slip is re-read on every scan and dies when the take is undone.
+ * See lib/cnc-tool-receipt.ts for why there is no receipts table.
+ */
+export type TakeSlip = {
+  id: string;
+  url: string;
+  /** The QR as inline SVG, ready to drop into the card. */
+  svg: string;
+  at: string;
+  takenBy: string;
+  company: string | null;
+  toolName: string;
+  toolSpec: string | null;
+  unit: string;
+  qty: number;
+};
+
 export type GuestTakeResult =
-  | { ok: true; left: number; toolName: string; qty: number }
+  | {
+      ok: true; left: number; toolName: string; qty: number;
+      /** Null only if the write somehow came back without an id — the
+       *  take still happened, so the card falls back to the old line
+       *  rather than pretending nothing was taken. */
+      slip: TakeSlip | null;
+    }
+  | { ok: false; error: string; signedOut?: boolean };
+
+/** What a taken-back take reports, so the card can put the pcs back in
+ *  his account without a round trip. */
+export type GuestUndoResult =
+  | { ok: true; toolId: string; toolName: string; qty: number }
   | { ok: false; error: string; signedOut?: boolean };
 
 /** The only write: this signed-in person took N of one tool. */
@@ -338,11 +381,112 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
 
   revalidatePath("/tools");
 
+  const toolName = res.tool ?? "tool";
+  const movementId = res.movement_id ?? null;
+
+  let slip: TakeSlip | null = null;
+  if (movementId) {
+    const url = takeReceiptUrl(movementId);
+    slip = {
+      id: movementId,
+      url,
+      svg: await takeReceiptQr(url),
+      // The row's own created_at would mean another read. This is the
+      // same second, and the SLIP ITSELF is read back from the row when
+      // anybody scans it, so the authoritative time is never this one.
+      at: new Date().toISOString(),
+      takenBy: session.name,
+      company: session.vendorName,
+      toolName,
+      toolSpec: null,
+      unit: res.unit ?? "pcs",
+      qty,
+    };
+  }
+
+  return { ok: true, left: Number(res.stock_after ?? 0), toolName, qty, slip };
+}
+
+/**
+ * Take back a take, inside the ten minutes.
+ *
+ * Daksh, Nov 2026: "on that card there will be an undo button."
+ *
+ * The office has had this since mig 227; the cupboard never did, which
+ * meant the man who made the mistake had to find somebody at a desk to
+ * fix it. Same soft void as everywhere else in this module: the line
+ * stays in the register with a stroke through it, the shelf comes back
+ * on its own because stock is SUM(delta) over live rows, and the slip's
+ * QR starts answering "no longer valid" to anybody who scans it.
+ *
+ * Only his own. The id is checked against the session rather than
+ * trusted, so an edited form cannot void somebody else's take.
+ */
+export async function guestUndoTakeAction(fd: FormData): Promise<GuestUndoResult> {
+  const token = String(fd.get("token") || "").trim();
+  const movementId = String(fd.get("movement_id") || "").trim();
+
+  const resolved = await resolveToolStoreLink(token);
+  if ("problem" in resolved) {
+    return { ok: false, error: "This QR is not valid. Ask the office for the new one." };
+  }
+  const session = await currentToolSession(token, resolved.link.id);
+  if (!session) {
+    return { ok: false, error: "Your sign-in has run out. Tap your name again.", signedOut: true };
+  }
+  if (!movementId) return { ok: false, error: "Nothing to take back." };
+
+  const admin = createAdminSupabaseClient();
+  const { data } = await admin
+    .from("cnc_tool_movements")
+    .select("id, tool_id, kind, delta, created_at, undone_at, taken_by_profile_id, taken_by_operator_id, cnc_tools(name)")
+    .eq("id", movementId)
+    .maybeSingle();
+
+  const row = data as
+    | {
+        id: string; tool_id: string; kind: string; delta: number | string;
+        created_at: string; undone_at: string | null;
+        taken_by_profile_id: string | null; taken_by_operator_id: string | null;
+        cnc_tools: { name: string } | { name: string }[] | null;
+      }
+    | null;
+  if (!row) return { ok: false, error: "Nothing to take back." };
+
+  const isMine =
+    (!!session.profileId && row.taken_by_profile_id === session.profileId) ||
+    (!!session.operatorId && row.taken_by_operator_id === session.operatorId);
+  if (!isMine) return { ok: false, error: "That one is not yours to take back." };
+  if (row.kind !== "issue") return { ok: false, error: "That is not a take." };
+  if (row.undone_at) return { ok: false, error: "That one is already taken back." };
+  if (Date.now() - new Date(row.created_at).getTime() > UNDO_WINDOW_MS) {
+    return { ok: false, error: "Too late to take that back. Tell the office." };
+  }
+
+  // The WHERE clause is the lock: two taps, one undo.
+  const { data: done, error } = await admin
+    .from("cnc_tool_movements")
+    .update({
+      undone_at: new Date().toISOString(),
+      undone_by: session.profileId,
+      undone_by_operator_id: session.operatorId,
+    })
+    .eq("id", movementId)
+    .is("undone_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!done) return { ok: false, error: "That one is already taken back." };
+
+  revalidatePath("/tools");
+
+  const name =
+    (Array.isArray(row.cnc_tools) ? row.cnc_tools[0] : row.cnc_tools)?.name ?? "tool";
   return {
     ok: true,
-    left: Number(res.stock_after ?? 0),
-    toolName: res.tool ?? "tool",
-    qty,
+    toolId: row.tool_id,
+    toolName: name,
+    qty: Math.abs(Number(row.delta)),
   };
 }
 

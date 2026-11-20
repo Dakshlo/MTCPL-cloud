@@ -30,6 +30,7 @@ import {
   guestRegisterAction,
   guestMyToolsAction,
   guestSettleHeldAction,
+  guestUndoTakeAction,
   guestUndoUsageAction,
 } from "./guest-actions";
 import { GuestTakeClient, type TakeTool } from "./guest-take-client";
@@ -139,6 +140,7 @@ export default async function GuestToolsPage({ params }: { params: Params }) {
       myToolsAction={guestMyToolsAction}
       settleAction={guestSettleHeldAction}
       undoUsageAction={guestUndoUsageAction}
+      undoTakeAction={guestUndoTakeAction}
       addStockAction={keeperAddStockAction}
       fixCountAction={keeperFixCountAction}
       newToolAction={keeperNewToolAction}
