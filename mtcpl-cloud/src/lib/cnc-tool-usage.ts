@@ -654,6 +654,10 @@ export type UsageLine = {
   qty: number;
   unit: string;
   usedBy: string;
+  /** The firm the man belongs to. The register groups on this id, not
+   *  on the company NAME — two vendors can be renamed into each other
+   *  and a name is not a key. */
+  vendorId: string | null;
   company: string | null;
   mine: boolean;
   createdAt: string;
@@ -688,6 +692,7 @@ export async function usageLinesSince(
   const rows = (data ?? []) as Array<{
     id: string; tool_id: string; machine_id: string; qty: number | string;
     used_by: string; used_by_profile_id: string | null; used_by_operator_id: string | null;
+    vendor_id: string | null;
     created_at: string; undone_at: string | null;
     cnc_tools: { name: string; unit: string } | { name: string; unit: string }[] | null;
     cnc_machines: { machine_code: string } | { machine_code: string }[] | null;
@@ -702,6 +707,7 @@ export async function usageLinesSince(
     qty: Number(r.qty),
     unit: one(r.cnc_tools)?.unit ?? "pcs",
     usedBy: r.used_by,
+    vendorId: r.vendor_id,
     company: one(r.vendors)?.name ?? null,
     mine:
       (!!me.profileId && r.used_by_profile_id === me.profileId) ||

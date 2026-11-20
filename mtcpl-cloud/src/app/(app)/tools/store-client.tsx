@@ -39,7 +39,6 @@ import {
   createToolAction,
   deleteToolAction,
   recordMovementAction,
-  removeToolOperatorAction,
   undoMovementAction,
   updateToolAction,
 } from "./actions";
@@ -50,14 +49,10 @@ import { BillSheet } from "./bill-sheet";
 import { ToolSheet } from "./tool-sheet";
 import { UndoToast, TOOLS_CSS, ago, type Done } from "./ui-bits";
 
-/** A man enrolled under a CNC vendor (mig 234). */
-export type OperatorRow = {
-  id: string;
-  name: string;
-  maskedPhone: string;
-  vendorId: string;
-  vendorName: string;
-};
+// The OperatorRow type and the register's roster of enrolled men went
+// with the operator sign-in itself (Nov 2026). A vendor's man now takes
+// a tool under his own boss's code, so there is no separate list of
+// people for this screen to show or to prune.
 
 /** How often the keeper screen asks whether the shelf moved. Slower
  *  than the cupboard's: nobody is standing here about to take the last
@@ -65,7 +60,7 @@ export type OperatorRow = {
 const OFFICE_POLL_MS = 6000;
 
 export function StoreClient({
-  tools, movements, movementsTruncated = false, stockSig, vendorNames, operators, canManage,
+  tools, movements, movementsTruncated = false, stockSig, vendorNames, usage, canManage,
   canScanBills = false, heldOut = 0,
 }: {
   tools: ToolRow[];
@@ -75,9 +70,12 @@ export function StoreClient({
   movementsTruncated?: boolean;
   /** The shelf as the server last rendered it (mig 236). */
   stockSig: string;
-  /** vendor id → company name, for the register's group headings. */
+  /** vendor id → company name, for the register's WHO chips. */
   vendorNames: Record<string, string>;
-  operators: OperatorRow[];
+  /** Mig 238 — tools spent on a machine. The register carries these
+   *  beside the shelf movements, because a man taking five and only
+   *  ever being shown taking five is how a cupboard loses four. */
+  usage: UsageLite[];
   canManage: boolean;
   /** May this person fill the shelf from a scanned supplier bill
    *  (mig 237)? Narrower than canManage on purpose. */
@@ -355,19 +353,12 @@ export function StoreClient({
       ) : (
         <Register
           movements={movements}
+          usage={usage}
           tools={tools}
           vendorNames={vendorNames}
-          operators={operators}
-          canManage={canManage}
           truncated={movementsTruncated}
           onlyTool={onlyTool}
           onClearFilter={() => setOnlyTool(null)}
-          onRemoveOperator={(id) => {
-            const fd = new FormData();
-            fd.set("operator_id", id);
-            run(() => removeToolOperatorAction(fd),
-                (msg) => setDone({ at: Date.now(), text: msg ?? "Removed" }));
-          }}
         />
       )}
 
@@ -451,447 +442,430 @@ export function StoreClient({
 
 // ── The register ───────────────────────────────────────────────────
 //
-// Daksh, Nov 2026: "make register more useful, so it's usable — which
-// vendor took what tools, month wise, operator wise under vendor, and
-// all."
+// Daksh, Nov 2026: "in website the register UI is really bad. make this
+// like phone, more good interface — the simple thing, like we will see
+// all at first then we can filter only vivek, or week only and all. but
+// really good UI."
 //
-// It was a roll of lines grouped by company. A line is the proof; it
-// is not the answer. The questions actually asked of this screen are
+// What stood here was a set of company folders, each opening onto two
+// tally columns with the actual lines folded away behind "every line
+// (41)". It was built to answer one question — what did Mohit's lot go
+// through in November — and it answered that one well, but it answered
+// it before anybody had asked, and it answered nothing else. To see
+// what happened this morning you opened four folders. To find a single
+// take you knew the time of, you opened all of them.
 //
-//     what did Mohit's lot go through in November
-//     which tool is it going on
-//     which of his men is taking it
+// The phone, written later and under more pressure, had already got
+// this right: one roll of lines, newest first, and you narrow it rather
+// than navigate it. So this is the phone's register on a desk-sized
+// screen. Everything, in time order, the moment it opens — then three
+// ways to cut it down, which compose:
 //
-// and all three are sums, not lines. So the register leads with the
-// sums and keeps the lines underneath, folded away, for the moment
-// somebody disputes one.
+//   WHO      a company, the office, or the store itself
+//   WHEN     today · 7 days · this month · everything
+//   SEARCH   a tool or a man's name
 //
-// A MONTH AT A TIME, because that is how the question is asked and how
-// the money is settled. Walk back with ‹ ›, or take the whole lot with
-// All time. A month with nothing in it says so and offers the way out
-// rather than looking broken.
+// The strip above the roll says what you are looking at and offers one
+// tap back to all of it, so no filter can be left on by accident and
+// read as "nothing happened".
 //
-// Three kinds of group, and the order is deliberate:
-//
-//   a vendor   takes belonging to a company, biggest taker first
-//   Office     a take by someone with no company of their own
-//   The store  stock added, scrapped, counts fixed — nobody took these
+// It carries machine-use lines too (mig 238), as the phone does. A
+// register that shows a man taking five and never shows four of them
+// going into a CNC is not a register, it is half of one. Those lines
+// are the one kind here that does not move the shelf — the pc left his
+// hands, not the cupboard — so they get their own colour and say the
+// machine out loud instead of being dressed up as a take.
 
-type Tally = { id: string; label: string; qty: number; lines: number };
-
-type RegGroup = {
-  key: string;
-  title: string;
-  /** Null for the Office and The store groups. */
+/** A machine-use row, flattened for this screen (mig 238). */
+export type UsageLite = {
+  id: string;
+  at: string;
+  toolId: string;
+  toolName: string;
+  machineCode: string;
+  qty: number;
+  usedBy: string;
   vendorId: string | null;
-  rows: ToolMovement[];
-  team: OperatorRow[];
-  /** Units taken by this company in the period, voided lines ignored. */
-  taken: number;
-  byTool: Tally[];
-  byPerson: Tally[];
-  lastAt: number;
+  company: string | null;
+  undone: boolean;
 };
 
+/** One thing that happened — a movement or a machine-use — flattened so
+ *  the roll can tell a single story in time order. Keyed on the ACTION,
+ *  never on the sign: a take and a downward count correction are both a
+ *  minus, and one is a man walking off with four bits while the other is
+ *  nothing leaving the cupboard at all. */
+type Line = {
+  id: string;
+  at: string;
+  act: "in" | "out" | "fix" | "use";
+  word: string;
+  qty: number;
+  sign: string;
+  toolId: string;
+  toolName: string;
+  person: string | null;
+  vendorId: string | null;
+  company: string | null;
+  machineCode: string | null;
+  viaQr: boolean;
+  note: string | null;
+  undone: boolean;
+};
+
+type Period = "today" | "week" | "month" | "all";
+
+const PERIODS: Array<{ key: Period; label: string }> = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "7 days" },
+  { key: "month", label: "This month" },
+  { key: "all", label: "Everything" },
+];
+
+const ALL_KEY = "__all";
 const STORE_KEY = "__store";
 const OFFICE_KEY = "__office";
 
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+// The cupboard is in Rajasthan. A register that silently reads
+// differently on a laptop in another timezone is not a register, so
+// every date on this screen is worked out in IST by shifting the
+// instant and then reading its UTC parts.
+const IST = 5.5 * 3_600_000;
 
-/** Which IST month a timestamp falls in. The cupboard is in Rajasthan;
- *  a take at 1am on the 1st belongs to that month, not the last one,
- *  and UTC would put it in the wrong one for five and a half hours
- *  every night. */
-function istMonthOf(iso: string): { y: number; m: number } {
-  const d = new Date(new Date(iso).getTime() + 5.5 * 3_600_000);
-  return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+function istDate(iso: string | number): Date {
+  return new Date(new Date(iso).getTime() + IST);
 }
 
-function istNow(): { y: number; m: number } {
-  return istMonthOf(new Date().toISOString());
+function istDayKey(iso: string | number): string {
+  const d = istDate(iso);
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
 }
 
-type Period = { kind: "month"; y: number; m: number } | { kind: "all" };
+function istClock(iso: string): string {
+  const d = istDate(iso);
+  const h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${h >= 12 ? "pm" : "am"}`;
+}
+
+function dayLabel(iso: string): string {
+  const key = istDayKey(iso);
+  if (key === istDayKey(Date.now())) return "Today";
+  if (key === istDayKey(Date.now() - 86_400_000)) return "Yesterday";
+  return istDate(iso).toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long",
+    // The instant is already shifted, so reading it as UTC gives the
+    // IST calendar date.
+    timeZone: "UTC",
+  });
+}
+
+/** Midnight IST today / the 1st of this IST month, as real instants. */
+function istStartOfToday(): number {
+  const n = istDate(Date.now());
+  return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()) - IST;
+}
+function istStartOfMonth(): number {
+  const n = istDate(Date.now());
+  return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1) - IST;
+}
+
+function periodStart(p: Period): number {
+  if (p === "all") return 0;
+  if (p === "today") return istStartOfToday();
+  if (p === "month") return istStartOfMonth();
+  return Date.now() - 7 * 86_400_000;
+}
 
 function Register({
-  movements, tools, vendorNames, operators, canManage, truncated,
-  onlyTool, onClearFilter, onRemoveOperator,
+  movements, usage, tools, vendorNames, truncated, onlyTool, onClearFilter,
 }: {
   movements: ToolMovement[];
+  usage: UsageLite[];
   tools: ToolRow[];
   vendorNames: Record<string, string>;
-  operators: OperatorRow[];
-  canManage: boolean;
   truncated: boolean;
   onlyTool: string | null;
   onClearFilter: () => void;
-  onRemoveOperator: (operatorId: string) => void;
 }) {
   const toolName = useMemo(() => new Map(tools.map((t) => [t.id, t.name])), [tools]);
-  const [period, setPeriod] = useState<Period>(() => ({ kind: "month", ...istNow() }));
-  const [openLines, setOpenLines] = useState<Record<string, boolean>>({});
-  const [showTeam, setShowTeam] = useState<string | null>(null);
-  const [dropping, setDropping] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>("week");
+  const [who, setWho] = useState<string>(ALL_KEY);
+  const [find, setFind] = useState("");
 
-  const scoped = onlyTool ? movements.filter((m) => m.tool_id === onlyTool) : movements;
-
-  const rows = useMemo(() => {
-    if (period.kind === "all") return scoped;
-    return scoped.filter((m) => {
-      const at = istMonthOf(m.created_at);
-      return at.y === period.y && at.m === period.m;
-    });
-  }, [scoped, period]);
-
-  /** Months that actually have something in them, newest first — so
-   *  "nothing here" can point at the nearest month that does. */
-  const monthsWithData = useMemo(() => {
-    const seen = new Map<string, { y: number; m: number }>();
-    for (const mv of scoped) {
-      const at = istMonthOf(mv.created_at);
-      seen.set(`${at.y}-${at.m}`, at);
-    }
-    return [...seen.values()].sort((a, b) => b.y - a.y || b.m - a.m);
-  }, [scoped]);
-
-  const groups = useMemo<RegGroup[]>(() => {
-    const byKey = new Map<string, RegGroup>();
-    const toolTally = new Map<string, Map<string, Tally>>();
-    const personTally = new Map<string, Map<string, Tally>>();
-
-    const ensure = (key: string, title: string, vendorId: string | null) => {
-      let g = byKey.get(key);
-      if (!g) {
-        g = { key, title, vendorId, rows: [], team: [], taken: 0, byTool: [], byPerson: [], lastAt: 0 };
-        byKey.set(key, g);
-        toolTally.set(key, new Map());
-        personTally.set(key, new Map());
-      }
-      return g;
-    };
-
-    const bump = (
-      store: Map<string, Map<string, Tally>>,
-      key: string, id: string, label: string, qty: number,
-    ) => {
-      const m = store.get(key)!;
-      const t = m.get(id) ?? { id, label, qty: 0, lines: 0 };
-      t.qty += qty;
-      t.lines += 1;
-      m.set(id, t);
-    };
-
-    // Every company that has men gets a group even before it has taken
-    // anything, so the office can see who is enrolled.
-    for (const o of operators) {
-      ensure(o.vendorId, vendorNames[o.vendorId] ?? o.vendorName, o.vendorId).team.push(o);
-    }
-
-    for (const m of rows) {
+  /** Everything that happened, both ledgers, newest first. Built once
+   *  and then only filtered, so the counts on the WHO chips are counts
+   *  of the whole period rather than of whatever is on screen. */
+  const all = useMemo<Line[]>(() => {
+    const moved: Line[] = movements.map((m) => {
+      const act: Line["act"] =
+        m.kind === "receive" ? "in" : m.kind === "adjust" ? "fix" : "out";
+      const qty = Math.abs(Number(m.delta));
       const storeSide = m.kind === "receive" || m.kind === "scrap" || m.kind === "adjust";
-      const key = storeSide ? STORE_KEY : m.vendor_id ?? OFFICE_KEY;
-      const title = storeSide
-        ? "The store"
-        : m.vendor_id
-          ? vendorNames[m.vendor_id] ?? "Unknown company"
-          : "Office";
-      const g = ensure(key, title, storeSide ? null : m.vendor_id);
-      g.rows.push(m);
-      g.lastAt = Math.max(g.lastAt, new Date(m.created_at).getTime());
-
-      if (!m.undone_at && m.kind === "issue") {
-        const qty = Math.abs(Number(m.delta));
-        g.taken += qty;
-        bump(toolTally, key, m.tool_id, toolName.get(m.tool_id) ?? "—", qty);
-        // The man, not the company: "Shyam, under Mohit" is the whole
-        // point of asking operator-wise.
-        const who = (m.taken_by || "").trim() || "Unsigned";
-        bump(personTally, key, who.toLowerCase(), who, qty);
-      }
-    }
-
-    const sortTally = (m: Map<string, Tally> | undefined) =>
-      [...(m?.values() ?? [])].sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
-
-    for (const g of byKey.values()) {
-      g.byTool = sortTally(toolTally.get(g.key));
-      g.byPerson = sortTally(personTally.get(g.key));
-    }
-
-    const all = [...byKey.values()];
-    const rank = (g: RegGroup) => (g.key === STORE_KEY ? 2 : g.key === OFFICE_KEY ? 1 : 0);
-    // Biggest taker first within the companies — the question is who is
-    // going through the most, and that should not depend on who
-    // happened to take something last.
-    return all.sort(
-      (a, b) =>
-        rank(a) - rank(b) ||
-        b.taken - a.taken ||
-        b.lastAt - a.lastAt ||
-        a.title.localeCompare(b.title),
-    );
-  }, [rows, operators, vendorNames, toolName]);
-
-  const periodTaken = groups.reduce((s, g) => s + g.taken, 0);
-  const label =
-    period.kind === "all" ? "All time" : `${MONTHS[period.m]} ${period.y}`;
-
-  function stepMonth(by: number) {
-    setPeriod((p) => {
-      const base = p.kind === "month" ? p : { ...istNow() };
-      const n = base.m + by;
-      return { kind: "month", y: base.y + Math.floor(n / 12), m: ((n % 12) + 12) % 12 };
+      return {
+        id: m.id,
+        at: m.created_at,
+        act,
+        word:
+          m.kind === "receive" ? "Stock in"
+          : m.kind === "return" ? "Given back"
+          : m.kind === "scrap" ? "Scrapped"
+          : m.kind === "adjust" ? "Count fixed"
+          : "Taken",
+        qty,
+        sign: act === "in" ? "+" : Number(m.delta) < 0 ? "−" : "+",
+        toolId: m.tool_id,
+        toolName: toolName.get(m.tool_id) ?? "a tool since removed",
+        person: m.taken_by,
+        // A delivery or a correction belongs to the store, never to a
+        // company, even when the row happens to carry a vendor id.
+        vendorId: storeSide ? null : m.vendor_id,
+        company: storeSide ? null : m.vendor_id ? vendorNames[m.vendor_id] ?? null : null,
+        machineCode: null,
+        viaQr: !!m.guest_link_id,
+        note: m.note,
+        undone: !!m.undone_at,
+      };
     });
-  }
 
-  const hasAnythingAtAll = scoped.length > 0;
+    const spent: Line[] = usage.map((u) => ({
+      id: `use:${u.id}`,
+      at: u.at,
+      act: "use",
+      word: `Used · ${u.machineCode}`,
+      qty: u.qty,
+      sign: "−",
+      toolId: u.toolId,
+      toolName: u.toolName,
+      person: u.usedBy,
+      vendorId: u.vendorId,
+      company: u.company,
+      machineCode: u.machineCode,
+      viaQr: false,
+      note: null,
+      undone: u.undone,
+    }));
+
+    return [...moved, ...spent].sort((a, b) => b.at.localeCompare(a.at));
+  }, [movements, usage, toolName, vendorNames]);
+
+  /** Narrowed by the tool chip and the period, but NOT by who or by the
+   *  search box — this is what the WHO chips count, so their numbers
+   *  stay still as you move between them. */
+  const inPeriod = useMemo(() => {
+    const from = periodStart(period);
+    const base = onlyTool ? all.filter((l) => l.toolId === onlyTool) : all;
+    return from === 0 ? base : base.filter((l) => new Date(l.at).getTime() >= from);
+  }, [all, period, onlyTool]);
+
+  const whoChips = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const l of inPeriod) {
+      const k = l.vendorId ?? (l.act === "out" || l.act === "use" ? OFFICE_KEY : STORE_KEY);
+      n.set(k, (n.get(k) ?? 0) + 1);
+    }
+    const vendors = [...n.entries()]
+      .filter(([k]) => k !== OFFICE_KEY && k !== STORE_KEY)
+      .map(([k, c]) => ({ key: k, label: vendorNames[k] ?? "Unknown company", n: c }))
+      // Busiest first: the question is who is going through the most,
+      // and that should not depend on who moved something last.
+      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+    const tail = [
+      { key: OFFICE_KEY, label: "Office", n: n.get(OFFICE_KEY) ?? 0 },
+      { key: STORE_KEY, label: "The store", n: n.get(STORE_KEY) ?? 0 },
+    ].filter((c) => c.n > 0);
+    return [{ key: ALL_KEY, label: "Everyone", n: inPeriod.length }, ...vendors, ...tail];
+  }, [inPeriod, vendorNames]);
+
+  const lines = useMemo(() => {
+    const needle = find.trim().toLowerCase();
+    return inPeriod.filter((l) => {
+      if (who !== ALL_KEY) {
+        const k = l.vendorId ?? (l.act === "out" || l.act === "use" ? OFFICE_KEY : STORE_KEY);
+        if (k !== who) return false;
+      }
+      if (!needle) return true;
+      return (
+        l.toolName.toLowerCase().includes(needle) ||
+        (l.person ?? "").toLowerCase().includes(needle) ||
+        (l.company ?? "").toLowerCase().includes(needle) ||
+        (l.machineCode ?? "").toLowerCase().includes(needle)
+      );
+    });
+  }, [inPeriod, who, find]);
+
+  /** Taken and added over what is on screen. A voided line is not a
+   *  fact about the shelf, so it counts towards neither. */
+  const sums = useMemo(() => {
+    let took = 0, came = 0, used = 0;
+    for (const l of lines) {
+      if (l.undone) continue;
+      if (l.act === "out" && l.sign === "−") took += l.qty;
+      else if (l.act === "in") came += l.qty;
+      else if (l.act === "use") used += l.qty;
+    }
+    return { took, came, used };
+  }, [lines]);
+
+  const days = useMemo(() => {
+    const out: Array<{ key: string; label: string; lines: Line[] }> = [];
+    for (const l of lines) {
+      const key = istDayKey(l.at);
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.lines.push(l);
+      else out.push({ key, label: dayLabel(l.at), lines: [l] });
+    }
+    return out;
+  }, [lines]);
+
+  const narrowed = who !== ALL_KEY || find.trim() !== "" || period !== "all" || !!onlyTool;
+
+  function clearAll() {
+    setWho(ALL_KEY);
+    setFind("");
+    setPeriod("all");
+    onClearFilter();
+  }
 
   return (
     <>
-      {onlyTool && <OnlyToolChip name={toolName.get(onlyTool)} onClear={onClearFilter} />}
-
-      {/* ── which month ──────────────────────────────────────── */}
-      <div className="tc-period">
-        <div className="tc-period-nav">
-          <button
-            type="button"
-            onClick={() => stepMonth(-1)}
-            aria-label="Previous month"
-            disabled={period.kind === "all"}
-          >
-            ‹
-          </button>
-          <strong>{label}</strong>
-          <button
-            type="button"
-            onClick={() => stepMonth(1)}
-            aria-label="Next month"
-            disabled={period.kind === "all"}
-          >
-            ›
-          </button>
+      {/* ── how to cut it down ───────────────────────────────── */}
+      <div className="tc-rv-filters">
+        <div className="tc-rv-when" role="group" aria-label="Over what period">
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              data-on={period === p.key ? "1" : undefined}
+              onClick={() => setPeriod(p.key)}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
 
-        <div className="tc-period-right">
-          {periodTaken > 0 && (
-            <span className="tc-period-sum">
-              <b>{periodTaken}</b> taken
-            </span>
-          )}
-          <button
-            type="button"
-            className={`tc-period-all${period.kind === "all" ? " on" : ""}`}
-            onClick={() =>
-              setPeriod((p) => (p.kind === "all" ? { kind: "month", ...istNow() } : { kind: "all" }))
-            }
-          >
-            {period.kind === "all" ? "Back to this month" : "All time"}
-          </button>
-        </div>
+        <input
+          className="tc-rv-find"
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Find a tool, a man, a machine…"
+          aria-label="Find in the register"
+        />
       </div>
 
-      {truncated && period.kind === "all" && (
+      {/* The companies get their own row: there can be a dozen, and
+          cramming them in beside the period buttons was what made the
+          old filter bar unreadable on a laptop. */}
+      <div className="tc-rv-who" role="group" aria-label="Whose lines">
+        {whoChips.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            data-on={who === c.key ? "1" : undefined}
+            data-kind={c.key === STORE_KEY ? "store" : c.key === OFFICE_KEY ? "office" : undefined}
+            onClick={() => setWho(c.key)}
+          >
+            {c.label}
+            <i>{c.n}</i>
+          </button>
+        ))}
+      </div>
+
+      {/* ── what you are looking at ──────────────────────────── */}
+      <div className="tc-rv-strip">
+        <span className="tc-rv-count">
+          <b>{lines.length}</b> {lines.length === 1 ? "line" : "lines"}
+        </span>
+        {sums.took > 0 && <span className="tc-rv-sum" data-act="out"><b>{sums.took}</b> taken</span>}
+        {sums.used > 0 && <span className="tc-rv-sum" data-act="use"><b>{sums.used}</b> used on machines</span>}
+        {sums.came > 0 && <span className="tc-rv-sum" data-act="in"><b>{sums.came}</b> added</span>}
+        {onlyTool && (
+          <span className="tc-rv-chip">
+            {toolName.get(onlyTool) ?? "This tool"} only
+            <button type="button" onClick={onClearFilter} aria-label="Show every tool">✕</button>
+          </span>
+        )}
+        {narrowed && (
+          <button type="button" className="tc-rv-clear" onClick={clearAll}>
+            Show everything
+          </button>
+        )}
+      </div>
+
+      {truncated && period === "all" && (
         <div className="tc-period-note">
           Showing the most recent 2,000 lines. Older ones are in the database but
           not on this screen.
         </div>
       )}
 
-      {rows.length === 0 ? (
+      {/* ── the roll ─────────────────────────────────────────── */}
+      {lines.length === 0 ? (
         <div className="tc-empty-search">
-          {!hasAnythingAtAll ? (
-            <>Nothing has moved yet.</>
-          ) : (
-            <>
-              Nothing in {label}.{" "}
-              {monthsWithData[0] && (
-                <button
-                  type="button"
-                  className="tc-period-jump"
-                  onClick={() => setPeriod({ kind: "month", ...monthsWithData[0] })}
-                >
-                  Jump to {MONTHS[monthsWithData[0].m]} {monthsWithData[0].y}
-                </button>
-              )}
-            </>
-          )}
+          {all.length === 0
+            ? "Nothing has moved yet."
+            : "Nothing matches that. Widen the period, or show everything."}
         </div>
       ) : (
-        <div className="tc-reggroups">
-          {groups.map((g) => {
-            const linesOpen = openLines[g.key] === true;
-            const teamOpen = showTeam === g.key;
-            return (
-              <section key={g.key} className="tc-reggroup" data-kind={g.vendorId ? "vendor" : g.key}>
-                <header className="tc-rg-head">
-                  <span className="tc-rg-title">
-                    <span className="tc-rg-name">{g.title}</span>
-                  </span>
-
-                  <div className="tc-rg-facts">
-                    {g.taken > 0 && <span className="tc-rg-took"><b>{g.taken}</b> taken</span>}
-                    {g.rows.length > 0 && (
-                      <span className="tc-rg-count">
-                        {g.rows.length} {g.rows.length === 1 ? "line" : "lines"}
-                      </span>
-                    )}
-                    {g.team.length > 0 && (
-                      <button
-                        type="button"
-                        className="tc-rg-team"
-                        onClick={() => { setShowTeam(teamOpen ? null : g.key); setDropping(null); }}
-                        aria-expanded={teamOpen}
-                      >
-                        👷 {g.team.length} {g.team.length === 1 ? "man" : "men"}
-                      </button>
-                    )}
-                  </div>
-                </header>
-
-                {/* Who this vendor has enrolled. The office can see the
-                    whole list and take anybody off it — a man who has
-                    left should not still be able to open the cupboard
-                    because nobody told his boss to remove him. */}
-                {teamOpen && g.team.length > 0 && (
-                  <div className="tc-rg-roster">
-                    {g.team.map((o) => (
-                      <div key={o.id} className="tc-rg-man">
-                        <span className="tc-rg-man-name">{o.name}</span>
-                        <span className="tc-rg-man-phone">{o.maskedPhone}</span>
-                        {canManage && (
-                          dropping === o.id ? (
-                            <span className="tc-rg-man-ask">
-                              <button type="button" className="tc-rg-man-yes" onClick={() => { setDropping(null); onRemoveOperator(o.id); }}>
-                                Remove
-                              </button>
-                              <button type="button" className="tc-rg-man-no" onClick={() => setDropping(null)}>
-                                Keep
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="tc-rg-man-x"
-                              onClick={() => setDropping(o.id)}
-                              aria-label={`Take ${o.name} off the list`}
-                            >
-                              ✕
-                            </button>
-                          )
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ── the answer ───────────────────────────────── */}
-                {g.taken > 0 ? (
-                  <div className="tc-rg-sums">
-                    <TallyColumn
-                      head={g.key === STORE_KEY ? "Tools" : "What they took"}
-                      rows={g.byTool}
-                      total={g.taken}
-                    />
-                    {g.key !== STORE_KEY && (
-                      <TallyColumn head="Who took it" rows={g.byPerson} total={g.taken} />
-                    )}
-                  </div>
-                ) : (
-                  <div className="tc-rg-nothing">
-                    {g.rows.length > 0 ? "No takes — stock movements only." : "Nothing taken."}
-                  </div>
-                )}
-
-                {/* ── the proof, folded away ───────────────────── */}
-                {g.rows.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      className="tc-rg-lines"
-                      onClick={() => setOpenLines((c) => ({ ...c, [g.key]: !linesOpen }))}
-                      aria-expanded={linesOpen}
-                    >
-                      {linesOpen ? "▾" : "▸"} every line ({g.rows.length})
-                    </button>
-                    {linesOpen && (
-                      <div className="tc-reg">
-                        {g.rows.map((m) => (
-                          <RegisterRow key={m.id} m={m} toolName={toolName.get(m.tool_id)} />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </section>
-            );
-          })}
+        <div className="tc-rv-tl">
+          {days.map((d) => (
+            <section key={d.key} className="tc-rv-day">
+              <header className="tc-rv-date">
+                <span>{d.label}</span>
+                <i>{d.lines.length} {d.lines.length === 1 ? "line" : "lines"}</i>
+              </header>
+              <div className="tc-rv-rail">
+                {d.lines.map((l) => <RegLine key={l.id} l={l} />)}
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </>
   );
 }
 
-/** One side of a group's summary: a name, a bar, a number. The bar is
- *  against the group's own total, so it answers "how much of this
- *  company's month was this tool / this man" at a glance. */
-function TallyColumn({ head, rows, total }: { head: string; rows: Tally[]; total: number }) {
-  if (rows.length === 0) return null;
+/** One line of the roll. Module scope, not nested in Register — a
+ *  component declared inside another remounts on every render, and the
+ *  search box above would lose focus after a single keystroke. */
+function RegLine({ l }: { l: Line }) {
+  const glyph = l.act === "in" ? "↓" : l.act === "out" ? "↑" : l.act === "use" ? "⚙" : "=";
+
+  // A correction moves no goods, so it says what it did to the BOOK
+  // rather than naming somebody who carried something away. And the
+  // company is dropped when it IS the name — a vendor principal signs
+  // for himself, and "VIVEK · VIVEK" tells nobody anything.
+  const whoPart = l.person
+    ? `${l.person}${l.company && l.company !== l.person ? ` · ${l.company}` : ""}`
+    : l.act === "fix"
+      ? `Register ${l.sign === "−" ? "lowered" : "raised"} by ${l.qty} · nothing was taken`
+      : l.act === "in"
+        ? "Onto the shelf"
+        : "Store";
+
   return (
-    <div className="tc-tally">
-      <div className="tc-tally-head">{head}</div>
-      {rows.map((r) => (
-        <div key={r.id} className="tc-tally-row">
-          <span className="tc-tally-name" title={r.label}>{r.label}</span>
-          <span className="tc-tally-bar" aria-hidden>
-            <i style={{ width: `${total > 0 ? Math.max(3, (r.qty / total) * 100) : 0}%` }} />
-          </span>
-          <span className="tc-tally-qty">{r.qty}</span>
-        </div>
-      ))}
+    <div className="tc-rv-row" data-act={l.act} data-void={l.undone ? "1" : undefined}>
+      <span className="tc-rv-time">{istClock(l.at)}</span>
+      <span className="tc-rv-dot" aria-hidden>{glyph}</span>
+      <span className="tc-rv-body">
+        <span className="tc-rv-head">
+          <span className="tc-rv-badge">{l.word}</span>
+          <b className="tc-rv-qty">{l.sign}{l.qty}</b>
+        </span>
+        <span className="tc-rv-tool">{l.toolName}</span>
+        <span className="tc-rv-who-line">
+          {whoPart}
+          {l.act === "use" && <> · out of his hands into machine {l.machineCode}</>}
+          {l.viaQr && <span className="tc-reg-qr" title="Taken at the cupboard QR">▦</span>}
+          {l.note && <> · {l.note}</>}
+          {l.undone && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
+        </span>
+      </span>
     </div>
   );
 }
 
-function OnlyToolChip({ name, onClear }: { name: string | undefined; onClear: () => void }) {
-  return (
-    <button type="button" className="tc-filter" onClick={onClear}>
-      {name ?? "This tool"} only · <span>show everything ✕</span>
-    </button>
-  );
-}
-
-function RegisterRow({ m, toolName }: { m: ToolMovement; toolName: string | undefined }) {
-  const voided = !!m.undone_at;
-  const positive = Number(m.delta) > 0;
-  // The company is already the heading above this row, so the row says
-  // the PERSON — which is the whole point of "Shyam, under Mohit".
-  const operator = !!m.taken_by_operator_id;
-
-  return (
-    <div className="tc-reg-row" data-void={voided ? "1" : undefined}>
-      <div className="tc-reg-delta" data-up={positive ? "1" : undefined}>
-        {positive ? "+" : ""}{m.delta}
-      </div>
-      <div className="tc-reg-main">
-        <div className="tc-reg-title">
-          {toolName ?? "—"}
-          <span className="tc-reg-kind" data-kind={m.kind}>{KIND_LABEL[m.kind]}</span>
-        </div>
-        <div className="tc-reg-sub">
-          {m.taken_by ? <strong>{m.taken_by}</strong> : <>Store</>}
-          {operator && <span className="tc-reg-op" title="Works under this vendor">his man</span>}
-          {m.guest_link_id && <span className="tc-reg-qr" title="Taken at the cupboard QR">▦</span>}
-          {" · "}{ago(m.created_at)}
-          {m.note && <> · {m.note}</>}
-          {voided && <> · <strong style={{ color: "var(--danger)" }}>undone</strong></>}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Tool card ──────────────────────────────────────────────────────
 

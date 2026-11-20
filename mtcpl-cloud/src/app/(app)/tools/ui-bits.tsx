@@ -181,10 +181,8 @@ export const TOOLS_CSS = `
 .tc-search button { background:none; border:none; color:var(--muted); cursor:pointer;
   font-size:13px; }
 
-.tc-filter { display:inline-flex; gap:6px; align-items:center; margin-bottom:12px;
-  padding:6px 12px; border-radius:999px; font:inherit; font-size:12.5px; font-weight:600;
-  cursor:pointer; background:var(--gold-subtle); color:var(--gold-dark);
-  border:1px solid var(--gold-border); }
+/* .tc-filter — the old "this tool only" chip — is now .tc-rv-chip and
+   lives with the rest of the register's styling. */
 
 /* ── the shelf, as a list ──────────────────────────────────── */
 /*
@@ -391,154 +389,124 @@ export const TOOLS_CSS = `
   border:1px dashed var(--border); border-radius:var(--radius); }
 
 /* ── register ──────────────────────────────────────────────── */
-.tc-reg { display:flex; flex-direction:column; gap:8px; }
-.tc-reg-row { display:flex; align-items:center; gap:13px; padding:12px 15px; border-radius:8px;
+/*
+   Nov 2026 — rebuilt as one roll of lines under a filter bar, the way
+   the phone does it. The company folders, the two tally columns and the
+   month stepper are gone, and so are .tc-reggroup, .tc-tally, .tc-rg-*
+   and .tc-period-nav. .tc-period-note stays: the truncation warning
+   still needs saying. .tc-reg-qr stays: the roll still marks a take
+   that came through the wardrobe QR.
+*/
+
+/* the bar: when, and a box to type into */
+.tc-rv-filters { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  margin-bottom:10px; }
+.tc-rv-when { display:inline-flex; padding:3px; gap:2px; border-radius:999px;
+  background:var(--surface-alt); border:1px solid var(--border); }
+.tc-rv-when button { padding:7px 15px; border-radius:999px; border:none; cursor:pointer;
+  font:inherit; font-size:12.5px; font-weight:700; color:var(--muted);
+  background:transparent; white-space:nowrap; }
+.tc-rv-when button:hover { color:var(--text); }
+.tc-rv-when button[data-on] { background:var(--surface); color:var(--text);
+  box-shadow:0 1px 2px rgba(45,36,16,.14); }
+.tc-rv-find { flex:1; min-width:210px; padding:9px 15px; border-radius:999px;
+  border:1px solid var(--border); background:var(--surface); font:inherit;
+  font-size:13px; color:var(--text); }
+.tc-rv-find:focus { outline:none; border-color:var(--gold);
+  box-shadow:0 0 0 3px var(--gold-subtle); }
+.tc-rv-find::placeholder { color:var(--muted-light); }
+
+/* the companies, on their own row — there can be a dozen, and squeezing
+   them in beside the period buttons is what made the old bar unreadable */
+.tc-rv-who { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:13px; }
+.tc-rv-who button { display:inline-flex; align-items:center; gap:7px;
+  padding:6px 13px; border-radius:999px; cursor:pointer; font:inherit;
+  font-size:12.5px; font-weight:700; color:var(--text);
   background:var(--surface); border:1px solid var(--border); }
-.tc-reg-row[data-void] { opacity:.5; text-decoration:line-through; }
-.tc-reg-delta { flex:0 0 auto; min-width:52px; text-align:center; padding:7px 10px;
-  border-radius:6px; font-size:15px; font-weight:700;
-  background:var(--tc-out-bg); color:var(--tc-out); }
-.tc-reg-delta[data-up] { background:var(--tc-ok-bg); color:var(--tc-ok); }
-.tc-reg-main { min-width:0; flex:1; }
-.tc-reg-title { font-size:14px; font-weight:700; color:var(--text); display:flex;
-  align-items:center; gap:8px; flex-wrap:wrap; }
-.tc-reg-kind { font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
-  padding:3px 8px; border-radius:999px; background:var(--surface-alt); color:var(--muted); }
-.tc-reg-kind[data-kind="issue"]   { background:var(--tc-out-bg); color:var(--tc-out); }
-.tc-reg-kind[data-kind="receive"] { background:var(--tc-ok-bg);  color:var(--tc-ok); }
-.tc-reg-sub { font-size:12px; color:var(--muted); margin-top:2px; }
-.tc-reg-qr { margin-left:5px; font-size:11px; color:var(--tc-blue); }
-/* "his man" — the taker works under the company in the heading above. */
-.tc-reg-op { margin-left:6px; font-size:9.5px; font-weight:700; letter-spacing:.05em;
-  text-transform:uppercase; padding:2px 6px; border-radius:999px;
-  background:var(--surface-alt); color:var(--muted); }
+.tc-rv-who button i { font-style:normal; font-size:11px; font-weight:700;
+  color:var(--muted); font-variant-numeric:tabular-nums; }
+.tc-rv-who button:hover { border-color:var(--gold); }
+.tc-rv-who button[data-on] { background:var(--gold-dark); border-color:var(--gold-dark);
+  color:#fff; }
+.tc-rv-who button[data-on] i { color:rgba(255,255,255,.74); }
+/* The store and the office are not companies; they read as quieter so
+   the eye finds a vendor first, which is what is usually being asked. */
+.tc-rv-who button[data-kind] { color:var(--muted); }
+.tc-rv-who button[data-kind][data-on] { color:#fff; }
 
-/* ── register, company by company (mig 234) ────────────────── */
-/* ── the thumb-reach button (phone only) ───────────────────── */
-.tc-fab { display:none; }
-@media (max-width: 760px) {
-  .tc-fab {
-    position:fixed; left:50%; transform:translateX(-50%);
-    bottom:calc(16px + env(safe-area-inset-bottom)); z-index:45;
-    display:flex; align-items:center; gap:8px; cursor:pointer;
-    /* Smaller and quieter than it was. Daksh asked for a bottom-centre
-       button and it stays, but it was a 15px-tall gold lozenge floating
-       over the list — the single most app-like thing left on the page
-       once the banner went. It only has to be reachable, not loud. */
-    padding:10px 18px; border:1px solid var(--gold-dark); border-radius:999px;
-    font:inherit; font-size:13.5px; font-weight:600; color:#fff; white-space:nowrap;
-    background:var(--gold);
-    box-shadow:0 3px 10px rgba(45,36,16,.18);
-  }
-  .tc-fab span { font-size:15px; line-height:1; }
-  .tc-fab:active { transform:translateX(-50%) scale(.97); }
-  /* Clearance so the last card is never under it. */
-  .tc-page { padding-bottom:84px !important; }
-}
-
-/* ── which month ───────────────────────────────────────────── */
-.tc-period { display:flex; align-items:center; justify-content:space-between;
-  gap:12px; flex-wrap:wrap; margin-bottom:14px; padding:10px 12px;
-  border-radius:8px; background:var(--surface); border:1px solid var(--border); }
-.tc-period-nav { display:flex; align-items:center; gap:4px; }
-.tc-period-nav strong { min-width:168px; text-align:center; font-size:15.5px;
-  font-weight:700; letter-spacing:-.01em; }
-.tc-period-nav button { width:32px; height:32px; border-radius:6px; cursor:pointer;
-  font:inherit; font-size:16px; line-height:1;
-  border:1px solid var(--border); background:var(--surface-alt); color:var(--text); }
-.tc-period-nav button:disabled { opacity:.35; cursor:not-allowed; }
-.tc-period-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.tc-period-sum { font-size:12.5px; color:var(--muted); font-weight:700; }
-.tc-period-sum b { font-size:17px; font-weight:700; color:var(--text);
+/* what you are looking at, and one tap back to all of it */
+.tc-rv-strip { display:flex; align-items:center; gap:7px 16px; flex-wrap:wrap;
+  padding:10px 15px; margin-bottom:14px; border-radius:var(--radius);
+  background:var(--surface-alt); border:1px solid var(--border); }
+.tc-rv-count, .tc-rv-sum { font-size:12px; font-weight:700; color:var(--muted); }
+.tc-rv-count b, .tc-rv-sum b { font-size:16px; font-weight:700; color:var(--text);
   font-variant-numeric:tabular-nums; margin-right:3px; }
-.tc-period-all { padding:7px 13px; border-radius:999px; cursor:pointer; font:inherit;
-  font-size:12px; font-weight:700; border:1px solid var(--border);
-  background:var(--surface-alt); color:var(--muted); }
-.tc-period-all.on { background:var(--tc-blue); border-color:var(--tc-blue); color:#fff; }
-.tc-period-note { margin:-6px 0 12px; font-size:11.5px; color:var(--muted); font-style:italic; }
-.tc-period-jump { border:none; background:none; padding:0; cursor:pointer; font:inherit;
-  font-size:inherit; font-weight:700; color:var(--tc-blue); text-decoration:underline; }
+.tc-rv-sum[data-act="out"] b { color:var(--tc-out); }
+.tc-rv-sum[data-act="in"]  b { color:var(--tc-ok); }
+.tc-rv-sum[data-act="use"] b { color:var(--info); }
+.tc-rv-chip { display:inline-flex; align-items:center; gap:7px; font-size:12px;
+  font-weight:700; color:var(--text); padding:4px 5px 4px 11px; border-radius:999px;
+  background:var(--gold-subtle); border:1px solid var(--gold-border); }
+.tc-rv-chip button { width:20px; height:20px; border-radius:999px; cursor:pointer;
+  border:none; background:rgba(45,36,16,.10); color:var(--text); font-size:10px;
+  line-height:1; font-family:inherit; }
+.tc-rv-clear { margin-left:auto; padding:6px 13px; border-radius:999px; cursor:pointer;
+  font:inherit; font-size:12px; font-weight:700; color:var(--text);
+  background:var(--surface); border:1px solid var(--border); }
+.tc-rv-clear:hover { border-color:var(--gold); color:var(--gold-dark); }
 
-/* ── the sums ──────────────────────────────────────────────── */
-.tc-rg-sums { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:13px 15px; }
-.tc-tally { min-width:0; display:flex; flex-direction:column; gap:6px; }
-.tc-tally-head { font-size:10px; font-weight:700; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--muted); margin-bottom:2px; }
-.tc-tally-row { display:grid; grid-template-columns:minmax(0,1fr) 64px 34px;
-  align-items:center; gap:9px; }
-/* The same part codes as the shelf, so the same treatment: monospaced
-   and tabular, because the only hard part is telling 12.4.60 from
-   12.6.120 at a glance. */
-.tc-tally-name { font-size:12.5px; font-weight:600; color:var(--text);
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-variant-numeric:tabular-nums; letter-spacing:-.01em;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tc-tally-bar { height:7px; border-radius:8px; background:var(--surface-alt);
-  overflow:hidden; }
-.tc-tally-bar i { display:block; height:100%; border-radius:8px; background:var(--tc-blue); }
-.tc-tally-qty { font-size:14px; font-weight:700; text-align:right;
-  font-variant-numeric:tabular-nums; color:var(--text); }
-.tc-reggroup[data-kind="__store"] .tc-tally-bar i { background:var(--tc-ok); }
+/* the roll */
+.tc-rv-tl { display:flex; flex-direction:column; gap:18px; }
+.tc-rv-day { display:flex; flex-direction:column; gap:8px; }
+.tc-rv-date { display:flex; align-items:baseline; gap:10px;
+  padding-bottom:7px; border-bottom:1px solid var(--border); }
+.tc-rv-date span { font-size:13px; font-weight:700; letter-spacing:-.01em;
+  color:var(--text); }
+.tc-rv-date i { font-style:normal; font-size:11px; font-weight:700; color:var(--muted); }
+.tc-rv-rail { display:flex; flex-direction:column; gap:5px; }
 
-.tc-rg-lines { width:100%; text-align:left; cursor:pointer; font:inherit;
-  font-size:11.5px; font-weight:700; letter-spacing:.03em; color:var(--muted);
-  padding:9px 15px; border:none; border-top:1px solid var(--border);
-  background:var(--surface-alt); }
-.tc-rg-lines:hover { color:var(--text); }
-
-@media (max-width: 760px) {
-  .tc-rg-sums { grid-template-columns:1fr; gap:14px; }
-  .tc-period-nav strong { min-width:120px; font-size:14px; }
-}
-
-.tc-reggroups { display:flex; flex-direction:column; gap:14px; }
-.tc-reggroup { border:1px solid var(--border); border-radius:8px; overflow:hidden;
-  background:var(--surface); }
-/* These used to carry a coloured left edge each — indigo for a vendor,
-   green for the store, grey for the office. Colour there implied a
-   status that does not exist: a company is not good or bad, it is just
-   whose men took the tools. The heading already names it. */
-.tc-reggroup[data-kind="vendor"],
-.tc-reggroup[data-kind="__store"],
-.tc-reggroup[data-kind="__office"] { border-left:1px solid var(--border); }
-.tc-rg-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-  padding:12px 15px; background:var(--surface-alt); border-bottom:1px solid var(--border); }
-.tc-rg-title { display:flex; align-items:center; gap:8px; min-width:0; flex:1;
-  padding:0; border:none; background:none; font:inherit; cursor:pointer; text-align:left; }
-.tc-rg-caret { font-size:11px; color:var(--muted); flex:0 0 auto; }
-.tc-rg-name { font-size:15px; font-weight:700; letter-spacing:-.01em; color:var(--text);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tc-rg-facts { display:flex; align-items:center; gap:7px; flex-wrap:wrap; flex:0 0 auto; }
-.tc-rg-took { font-size:11.5px; font-weight:700; color:var(--muted); }
-.tc-rg-took b { font-size:14px; font-weight:700; color:var(--text);
-  font-variant-numeric:tabular-nums; }
-.tc-rg-count { font-size:11px; font-weight:700; color:var(--muted);
-  padding:3px 9px; border-radius:999px; background:var(--surface); border:1px solid var(--border); }
-.tc-rg-team { font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
-  cursor:pointer; font-family:inherit;
-  background:var(--surface); border:1px solid var(--border); color:var(--text); }
-.tc-rg-team:hover { background:var(--tc-ok-bg); border-color:var(--tc-ok); color:var(--tc-ok); }
-.tc-rg-roster { display:flex; flex-direction:column; gap:1px; padding:10px 15px;
-  background:var(--surface-alt); border-bottom:1px solid var(--border); }
-.tc-rg-man { display:flex; align-items:center; gap:10px; padding:7px 0; }
-.tc-rg-man + .tc-rg-man { border-top:1px dashed var(--border); }
-.tc-rg-man-name { font-size:13px; font-weight:700; color:var(--text); }
-.tc-rg-man-phone { font-size:11.5px; color:var(--muted); flex:1; }
-.tc-rg-man-x { width:26px; height:26px; flex:0 0 auto; border-radius:6px; cursor:pointer;
-  border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:11px; }
-.tc-rg-man-ask { display:flex; gap:6px; }
-.tc-rg-man-yes { padding:5px 10px; border-radius:6px; border:none; cursor:pointer; font:inherit;
-  font-size:11.5px; font-weight:700; background:var(--tc-out); color:#fff; }
-.tc-rg-man-no { padding:5px 10px; border-radius:6px; cursor:pointer; font:inherit;
-  font-size:11.5px; font-weight:700; background:var(--surface); color:var(--muted);
+.tc-rv-row { display:grid; grid-template-columns:70px 26px minmax(0,1fr);
+  align-items:start; gap:11px; padding:11px 14px; border-radius:var(--radius);
+  background:var(--surface); border:1px solid var(--border); }
+.tc-rv-row:hover { border-color:var(--gold-border); }
+.tc-rv-row[data-void] { opacity:.5; }
+.tc-rv-row[data-void] .tc-rv-tool { text-decoration:line-through; }
+.tc-rv-time { font-size:11.5px; font-weight:700; color:var(--muted);
+  font-variant-numeric:tabular-nums; padding-top:2px; white-space:nowrap; }
+.tc-rv-dot { width:26px; height:26px; border-radius:999px; display:grid;
+  place-items:center; font-size:13px; font-weight:700; }
+/* Keyed on the ACTION, never on the sign. A take and a downward count
+   correction are both a minus, and one is a man walking off with four
+   bits while the other is nothing leaving the cupboard at all. */
+.tc-rv-row[data-act="out"] .tc-rv-dot { background:var(--tc-out-bg); color:var(--tc-out); }
+.tc-rv-row[data-act="in"]  .tc-rv-dot { background:var(--tc-ok-bg);  color:var(--tc-ok); }
+.tc-rv-row[data-act="use"] .tc-rv-dot { background:var(--info-bg);   color:var(--info); }
+.tc-rv-row[data-act="fix"] .tc-rv-dot { background:var(--surface-alt); color:var(--muted);
   border:1px solid var(--border); }
-.tc-rg-nothing { padding:16px 15px; font-size:12.5px; font-style:italic; color:var(--muted); }
-.tc-reggroup .tc-reg { padding:11px; gap:7px; }
-.tc-reggroup .tc-reg-row { border-color:var(--border-light, var(--border)); }
+.tc-rv-body { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.tc-rv-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.tc-rv-badge { font-size:9.5px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; padding:3px 8px; border-radius:999px; }
+.tc-rv-row[data-act="out"] .tc-rv-badge { background:var(--tc-out-bg); color:var(--tc-out); }
+.tc-rv-row[data-act="in"]  .tc-rv-badge { background:var(--tc-ok-bg);  color:var(--tc-ok); }
+.tc-rv-row[data-act="use"] .tc-rv-badge { background:var(--info-bg);   color:var(--info); }
+.tc-rv-row[data-act="fix"] .tc-rv-badge { background:var(--surface-alt); color:var(--muted); }
+.tc-rv-qty { font-size:15px; font-weight:700; font-variant-numeric:tabular-nums;
+  color:var(--text); }
+.tc-rv-tool { font-size:13.5px; font-weight:700; color:var(--text); overflow-wrap:anywhere; }
+.tc-rv-who-line { font-size:11.5px; color:var(--muted); overflow-wrap:anywhere; }
+
+/* Kept from the old register: the wardrobe-QR mark on a take, and the
+   note that says the roll is only showing the most recent lines. */
+.tc-reg-qr { margin-left:5px; font-size:11px; color:var(--tc-blue); }
+.tc-period-note { margin:-6px 0 12px; font-size:11.5px; color:var(--muted); font-style:italic; }
 
 @media (max-width: 640px) {
-  .tc-rg-head { gap:7px; }
-  .tc-rg-name { font-size:14px; }
+  .tc-rv-row { grid-template-columns:58px 24px minmax(0,1fr); gap:9px; padding:10px 12px; }
+  .tc-rv-dot { width:24px; height:24px; font-size:12px; }
+  .tc-rv-when { width:100%; }
+  .tc-rv-when button { flex:1; padding:8px 6px; font-size:12px; }
+  .tc-rv-clear { margin-left:0; }
 }
 
 /* ── sheets ────────────────────────────────────────────────── */

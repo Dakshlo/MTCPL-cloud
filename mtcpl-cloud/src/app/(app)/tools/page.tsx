@@ -30,8 +30,7 @@ import {
   canUseCncTools,
 } from "@/lib/cnc-tool-permissions";
 import { loadStore, stockSignature } from "@/lib/cnc-tool-stock";
-import { allActiveOperators } from "@/lib/cnc-tool-operators";
-import { loadHoldings } from "@/lib/cnc-tool-usage";
+import { loadHoldings, usageLinesSince } from "@/lib/cnc-tool-usage";
 
 import { StoreClient } from "./store-client";
 
@@ -43,15 +42,23 @@ export default async function ToolStorePage() {
 
   const admin = createAdminSupabaseClient();
 
-  const [{ tools, movements }, operators, { data: vendorRows }, holdings] = await Promise.all([
+  const [{ tools, movements }, { data: vendorRows }, holdings, usage] = await Promise.all([
     loadStore(),
-    allActiveOperators(),
     // 28 rows. Cheaper to take the lot than to work out which ids the
     // register happens to mention this time.
     admin.from("vendors").select("id, name").order("name"),
     // Mig 238 — just the badge number for the "Out of the cupboard"
     // link. The screen behind it loads the detail itself.
     loadHoldings(),
+    // The other half of the register. No vendorId, so this is the
+    // office read: everybody's lines, the way the phone gives a vendor
+    // only his own. Six months is longer than any argument about a
+    // missing box and still one quick query.
+    usageLinesSince(
+      new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
+      { profileId: profile.id, operatorId: null },
+      2000,
+    ),
   ]);
 
   const vendorNames: Record<string, string> = {};
@@ -62,20 +69,25 @@ export default async function ToolStorePage() {
   return (
     <StoreClient
       tools={tools}
-      // The register does month arithmetic now, so it needs more than
-      // the last page of lines. 2000 is roughly three years of a busy
-      // cupboard; past that the oldest are dropped and the register
-      // says so rather than quietly reporting a short month.
+      // The register can be opened on "Everything", so it needs more
+      // than the last page of lines. 2000 is roughly three years of a
+      // busy cupboard; past that the oldest are dropped and the screen
+      // says so rather than quietly reporting a short period.
       movements={movements.slice(0, 2000)}
       movementsTruncated={movements.length > 2000}
       stockSig={stockSignature(tools)}
       vendorNames={vendorNames}
-      operators={operators.map((o) => ({
-        id: o.id,
-        name: o.name,
-        maskedPhone: o.maskedPhone,
-        vendorId: o.vendorId,
-        vendorName: o.vendorName,
+      usage={usage.map((u) => ({
+        id: u.id,
+        at: u.createdAt,
+        toolId: u.toolId,
+        toolName: u.toolName,
+        machineCode: u.machineCode,
+        qty: u.qty,
+        usedBy: u.usedBy,
+        vendorId: u.vendorId,
+        company: u.company,
+        undone: !!u.undoneAt,
       }))}
       canManage={canManageCncToolStore(profile)}
       heldOut={holdings.reduce((a, p) => a + p.total, 0)}
