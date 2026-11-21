@@ -275,6 +275,59 @@ export async function updateToolAction(fd: FormData): Promise<ActionResult> {
   }
 
   await logAudit(profile.id, "cnc_tool_updated", "cnc_tool", toolId, patch);
+
+  // ── The count fix, folded in (Nov 2026) ─────────────────────────
+  //
+  // Daksh: "don't keep both Fix count and Edit tool separate — put Fix
+  // count in Edit tool itself, so less clutter." So the edit sheet may
+  // carry a counted figure, and it is handled HERE rather than as a
+  // second action from the browser: one round trip, and a count that
+  // cannot be left half-applied by a phone that lost signal between two
+  // calls.
+  //
+  // It is still not a column being written. `fix_seen` is the stock the
+  // man was looking at while he counted, and mig 235 works out whatever
+  // delta reaches his figure from the stock that is true inside the
+  // lock — so a take that landed mid-count stays on the record
+  // underneath his correction. Exactly the arithmetic the old Fix count
+  // sheet did; only the door it is behind has changed.
+  const fixToRaw = txt(fd, "fix_count_to");
+  if (fixToRaw !== "") {
+    const fixTo = Number(fixToRaw);
+    const seen = Number(txt(fd, "fix_seen"));
+    if (!Number.isFinite(fixTo) || fixTo < 0) {
+      return { ok: false, error: "That count looks wrong." };
+    }
+    if (Number.isFinite(seen) && fixTo !== seen) {
+      const { data: fixRaw, error: fixErr } = await admin.rpc("cnc_tool_record_move", {
+        p_tool_id: toolId,
+        p_kind: "adjust",
+        p_delta: null,
+        p_target: fixTo,
+        p_note: txt(fd, "fix_reason") || null,
+        p_entered_by: profile.id,
+      });
+      if (fixErr) return { ok: false, error: fixErr.message };
+      const fixRes = (fixRaw ?? {}) as MoveOutcome;
+      // The name change is already saved, so a refused correction
+      // reports itself without pretending nothing was saved at all.
+      if (!fixRes.ok) {
+        refresh();
+        return { ok: false, error: `Saved, but the count was not: ${moveRefusal(fixRes)}` };
+      }
+      await logAudit(profile.id, "cnc_tool_adjust", "cnc_tool", toolId, {
+        from: fixRes.stock_before, to: fixRes.stock_after, via: "edit sheet",
+      });
+      refresh();
+      return {
+        ok: true,
+        message: fixRes.noop
+          ? `Saved. Already ${fixRes.stock_after} — somebody put the register right first.`
+          : `Saved, and the count is now ${fixRes.stock_after}.`,
+      };
+    }
+  }
+
   refresh();
   return { ok: true, message: "Saved." };
 }

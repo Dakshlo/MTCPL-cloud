@@ -32,9 +32,13 @@ export function AddToolSheet({
   onSubmit: (fd: FormData, mode: "create" | "edit") => void;
 }) {
   const [name, setName] = useState("");
-  const [spec, setSpec] = useState("");
-  const [unit, setUnit] = useState("pcs");
   const [low, setLow] = useState("");
+  /** Edit only. Mig 235 owns the stock, so this is not a column being
+   *  typed over — it is the count a man just made on the shelf, which
+   *  the server turns into an `adjust` line against the stock that is
+   *  true inside the lock. */
+  const [count, setCount] = useState("");
+  const [why, setWhy] = useState("");
   const [opening, setOpening] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   /** "4.1 MB → 240 KB", once a photo has been through the shrinker. */
@@ -49,9 +53,9 @@ export function AddToolSheet({
   useEffect(() => {
     if (!open) return;
     setName(editing?.name ?? "");
-    setSpec(editing?.spec ?? "");
-    setUnit(editing?.unit ?? "pcs");
     setLow(editing?.low_stock_qty == null ? "" : String(editing.low_stock_qty));
+    setCount(editing ? String(editing.stock) : "");
+    setWhy("");
     setOpening("");
     setPhoto(null);
     setDropped(false);
@@ -71,6 +75,11 @@ export function AddToolSheet({
 
   const mode = editing ? "edit" : "create";
   const ready = name.trim().length > 0 && !busy;
+  /** Only a DIFFERENT number is a correction. Opening the sheet, changing
+   *  the warn line and saving must not write an adjust line saying the
+   *  count was put right when nobody counted anything. */
+  const countChanged =
+    !!editing && count.trim() !== "" && Number(count) !== Number(editing.stock);
 
   return (
     <Sheet
@@ -90,9 +99,22 @@ export function AddToolSheet({
             const fd = new FormData();
             if (editing) fd.set("tool_id", editing.id);
             fd.set("name", name.trim());
-            fd.set("spec", spec.trim());
-            fd.set("unit", unit.trim() || "pcs");
+            // Daksh, Nov 2026: "there is a field size/detail — it's not
+            // needed, they write everything in the name field itself. So
+            // remove this field. And also remove that counted-in option,
+            // by default it's in pcs."
+            //
+            // The columns stay (every screen prints "3 pcs", and a spec
+            // typed before today still shows); they are simply no longer
+            // asked for. Two fields out of a five-field form that one
+            // man fills in standing at a cupboard.
+            fd.set("unit", "pcs");
             fd.set("low_stock_qty", low.trim());
+            if (editing && countChanged) {
+              fd.set("fix_count_to", count.trim());
+              fd.set("fix_seen", String(editing.stock));
+              if (why.trim()) fd.set("fix_reason", why.trim());
+            }
             if (!editing && opening.trim()) fd.set("opening_qty", opening.trim());
             if (photo) fd.set("photo", photo);
             else if (editing && dropped) fd.set("remove_photo", "1");
@@ -141,9 +163,11 @@ export function AddToolSheet({
             {name.trim() || "New tool"}
           </div>
           <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>
-            {spec.trim() ? `${spec.trim()} · ` : ""}
-            counted in {unit}
-            {!editing && opening.trim() ? ` · starting at ${opening.trim()}` : ""}
+            {editing
+              ? `${count.trim() || 0} pcs on the shelf`
+              : opening.trim()
+                ? `starting at ${opening.trim()} pcs`
+                : "counted in pcs"}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
             <button
@@ -207,39 +231,6 @@ export function AddToolSheet({
         />
       </Field>
 
-      <Field label="Size / detail" hint="Optional — only if you keep more than one kind">
-        <input
-          value={spec}
-          onChange={(e) => setSpec(e.target.value)}
-          placeholder="carbide"
-          maxLength={80}
-          style={inp()}
-        />
-      </Field>
-
-      <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Counted in">
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {["pcs", "set", "box", "kg", "m"].map((u) => (
-                <button
-                  key={u} type="button" onClick={() => setUnit(u)}
-                  style={{
-                    padding: "9px 13px", fontSize: 13, fontWeight: 700, borderRadius: 9,
-                    cursor: "pointer",
-                    border: `1px solid ${unit === u ? "var(--gold)" : "var(--border)"}`,
-                    background: unit === u ? "var(--gold-subtle)" : "var(--surface)",
-                    color: unit === u ? "var(--gold-dark)" : "var(--muted)",
-                  }}
-                >
-                  {u}
-                </button>
-              ))}
-            </div>
-          </Field>
-        </div>
-      </div>
-
       <Field
         label="Warn me at"
         hint={`Leave empty and it warns at ${DEFAULT_LOW_STOCK}`}
@@ -265,18 +256,56 @@ export function AddToolSheet({
         </Field>
       )}
 
+      {/* ── Fix count, folded in ──────────────────────────────────
+          Daksh, Nov 2026: "don't keep both Fix count and Edit tool
+          separate — put Fix count in Edit tool itself, so less clutter."
+
+          It used to be a second sheet behind a second menu row, and
+          what stood here was a paragraph telling you to go and find it.
+          Both are gone. This is still NOT a column being typed over:
+          the stock is the sum of the register and always will be. The
+          number is what a man counted on the shelf, and saving it
+          writes an `adjust` line the same way the old sheet did, which
+          is why it only fires when the figure actually changes. */}
       {editing && (
-        <div
-          style={{
-            marginTop: 6, padding: "11px 14px", borderRadius: 11,
-            background: "var(--surface-alt)", border: "1px solid var(--border-light)",
-            fontSize: 12, color: "var(--muted)", lineHeight: 1.55,
-          }}
-        >
-          Stock is not edited here — it is the sum of the register. To correct it, use{" "}
-          <strong style={{ color: "var(--text)" }}>Fix count</strong> on the tool, which leaves a
-          line saying why.
-        </div>
+        <>
+          <Field
+            label="Stock on the shelf now"
+            hint={
+              countChanged
+                ? `The register says ${editing.stock}. Saving puts it right and leaves a line saying so.`
+                : "Count the shelf. Change it only if the register is wrong."
+            }
+          >
+            <input
+              type="number" inputMode="numeric" min={0}
+              value={count}
+              onChange={(e) => setCount(e.target.value)}
+              placeholder={String(editing.stock)}
+              style={{
+                ...inp(),
+                ...(countChanged
+                  ? { borderColor: "var(--warning)", background: "var(--gold-subtle)" }
+                  : null),
+              }}
+            />
+          </Field>
+
+          {/* Only once the number has moved. A reason box standing open
+              beside a field nobody has touched is a question about
+              nothing. */}
+          {countChanged && (
+            <Field label="Why" hint="Optional — it goes on the line in the register">
+              <input
+                value={why}
+                onChange={(e) => setWhy(e.target.value)}
+                placeholder="two were broken"
+                maxLength={120}
+                style={inp()}
+              />
+            </Field>
+          )}
+        </>
       )}
     </Sheet>
   );

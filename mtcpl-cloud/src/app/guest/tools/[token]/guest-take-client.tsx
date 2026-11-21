@@ -305,11 +305,6 @@ export function GuestTakeClient({
    *  QR, so the first touch anywhere on the card cancels the timer and
    *  the card stays until he closes it. */
   const [pinned, setPinned] = useState(false);
-  /** True while the card is being drawn for the share sheet. It is one
-   *  fetch of a server-rendered PNG, which on shed wifi is long enough
-   *  for a second tap if the button says nothing. */
-  const [drawing, setDrawing] = useState(false);
-  const [shared, setShared] = useState(false);
   /** The cupboard's register. Loaded when it is opened, not before —
    *  most visits are somebody taking one thing and leaving. */
   const [reg, setReg] = useState<RegisterLine[] | null>(null);
@@ -511,98 +506,6 @@ export function GuestTakeClient({
     });
   }
 
-  /**
-   * Hand the slip on — as a picture.
-   *
-   * Daksh, Nov 2026: "when we share it should not send link, it should
-   * send card image. Eg I share on WhatsApp, then instead of link if
-   * possible it should send the image of that card."
-   *
-   * BOTH, not one instead of the other, and the reason matters.
-   *
-   * The picture is what he asked for and what anybody actually looks at
-   * in a chat. But a picture is frozen: it says "4 taken" for ever,
-   * including after the take is voided, in every chat it was ever
-   * forwarded to. That is the precise failure the QR was built to
-   * avoid. The link keeps the slip honest, because the page it opens
-   * re-reads the row.
-   *
-   * So the share sheet gets a file AND a url. The file is drawn from
-   * the live row at the moment of sharing, which means a slip that has
-   * already been cancelled is shared as a picture that says CANCELLED
-   * across its face.
-   *
-   * Three rungs down, because `canShare({files})` is the only honest
-   * test and a good third of the phones at a shed will fail it:
-   *
-   *   1. share sheet with the image attached
-   *   2. share sheet with the link alone
-   *   3. wa.me with the link in the message body
-   */
-  async function shareSlip() {
-    const d = done;
-    if (!d?.slip) return;
-    const text =
-      `${d.qty} × ${d.toolName} taken from the MTCPL tool store by ${d.slip.takenBy}` +
-      `${d.slip.company && d.slip.company !== d.slip.takenBy ? ` (${d.slip.company})` : ""}` +
-      ` · ${istStamp(d.slip.at)}`;
-    setPinned(true);
-
-    const nav = navigator as Navigator & {
-      share?: (d: ShareData) => Promise<void>;
-      canShare?: (d: ShareData) => boolean;
-    };
-
-    // ── 1. the card itself ────────────────────────────────────────
-    if (typeof nav.share === "function" && typeof nav.canShare === "function") {
-      try {
-        setDrawing(true);
-        // Same drawing WhatsApp would fetch for the link preview, so
-        // there is one card and not two that drift apart.
-        const res = await fetch(`${d.slip.url}/opengraph-image`, { cache: "no-store" });
-        if (res.ok) {
-          const blob = await res.blob();
-          const file = new File([blob], `tool-slip-${d.slip.id.slice(0, 8)}.png`, {
-            type: blob.type || "image/png",
-          });
-          // Ask BEFORE sharing: a phone that cannot take files throws
-          // from share() rather than refusing politely, and by then the
-          // sheet has already flickered open and shut.
-          if (nav.canShare({ files: [file] })) {
-            await nav.share({ title: "Tool slip", text, url: d.slip.url, files: [file] });
-            setShared(true);
-            return;
-          }
-        }
-      } catch {
-        // Offline, a slow shed connection, or he closed the sheet.
-        // Either way there is still a link to send.
-      } finally {
-        setDrawing(false);
-      }
-    }
-
-    // ── 2. the link through the sheet ─────────────────────────────
-    if (typeof nav.share === "function") {
-      try {
-        await nav.share({ title: "Tool slip", text, url: d.slip.url });
-        setShared(true);
-        return;
-      } catch {
-        // He backed out of the sheet, or the browser refused it. Fall
-        // through to WhatsApp rather than leaving the button dead.
-      }
-    }
-
-    // ── 3. WhatsApp, told in words ────────────────────────────────
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(`${text}\n${d.slip.url}`)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-    setShared(true);
-  }
-
   function openRegister() {
     setStep("register");
     setErr(null);
@@ -785,7 +688,6 @@ export function GuestTakeClient({
       // every screen anyway. So the confirmation is a popup over the
       // shelf, and he is already back where the next tool is.
       setPinned(false);
-      setShared(false);
       setDone({
         slip: r.slip,
         toolName: r.toolName,
@@ -1525,20 +1427,6 @@ export function GuestTakeClient({
                   </div>
                 </dl>
 
-                {/* Drawn on the server and sent down with the take, so
-                    it is already here — no second request on a shed
-                    connection, no QR library in the browser. */}
-                <div className="gt-slip-qr">
-                  <div
-                    className="gt-slip-qr-img"
-                    dangerouslySetInnerHTML={{ __html: done.slip.svg }}
-                  />
-                  <p>
-                    {done.undone
-                      ? "Scanning this now says the take was cancelled."
-                      : "Save this. Scan it any time to see this take."}
-                  </p>
-                </div>
               </>
             )}
 
@@ -1551,16 +1439,6 @@ export function GuestTakeClient({
                   disabled={pending}
                 >
                   {pending ? "…" : "Undo this take"}
-                </button>
-              )}
-              {done.slip && (
-                <button
-                  type="button"
-                  className="gt-slip-share"
-                  onClick={shareSlip}
-                  disabled={drawing}
-                >
-                  {drawing ? "Making the card…" : shared ? "Shared ✓" : "Share the card"}
                 </button>
               )}
               <button type="button" className="gt-slip-ok" onClick={() => setDone(null)}>
@@ -2129,15 +2007,6 @@ const CSS = `
   overflow-wrap:anywhere; }
 .gt-slip-rows dd i { font-style:normal; font-weight:600; color:var(--dim, #7A6A52); }
 
-.gt-slip-qr { display:flex; flex-direction:column; align-items:center; gap:7px;
-  padding:14px 0 4px; }
-.gt-slip-qr-img { width:148px; height:148px; padding:9px; border-radius:11px;
-  background:#fff; border:1px solid var(--line, #E4DDD2); }
-.gt-slip-qr-img svg { width:100%; height:100%; display:block; }
-.gt-slip-qr p { font-size:11px; color:var(--dim, #7A6A52); text-align:center;
-  line-height:1.5; }
-.gt-slip[data-state="undone"] .gt-slip-qr-img { opacity:.35; }
-
 .gt-slip-acts { display:flex; gap:8px; flex-wrap:wrap; padding-top:14px; }
 .gt-slip-acts button {
   flex:1 1 auto; min-height:46px; padding:12px 14px; border-radius:11px;
@@ -2163,19 +2032,12 @@ const CSS = `
 .gt-slip-spec {
   display:block; font-style:normal; font-size:11.5px; color:var(--dim); margin-top:1px;
 }
-.gt-slip-share:disabled { opacity:.6; }
-
-.gt-slip-share {
-  border:1px solid var(--line, #E4DDD2); background:transparent;
-  color:var(--ink, #2D2410);
-}
 .gt-slip-ok { border:none; background:var(--brand, #2D2410); color:#fff; }
 
 @media (max-height: 680px) {
   /* A short phone with the QR in: the tick is the first thing to go,
      because the card itself already says it worked. */
   .gt-slip-tick { display:none; }
-  .gt-slip-qr-img { width:116px; height:116px; }
 }
 
 /* ── the register ──────────────────────────────────────── */

@@ -31,7 +31,6 @@ import {
   moveRefusal,
   type MoveOutcome,
 } from "@/lib/cnc-tool-stock";
-import { takeReceiptQr, takeReceiptUrl } from "@/lib/cnc-tool-receipt";
 import {
   MAX_USE_QTY,
   canUndoUsage,
@@ -267,11 +266,25 @@ export async function toolSignOutAction(fd: FormData): Promise<{ ok: boolean }> 
  * so the slip is re-read on every scan and dies when the take is undone.
  * See lib/cnc-tool-receipt.ts for why there is no receipts table.
  */
+/**
+ * The slip for a take, as the card reads it.
+ *
+ * NO QR AND NO URL since 21 Nov 2026. Daksh: "in phone when someone
+ * takes a tool we have that QR code module — drop that. Just show a
+ * card for 4 seconds that it's taken, no share and no QR."
+ *
+ * So the whole public-slip apparatus went with it: the SVG that was
+ * drawn into the card, the /guest/take/[id] page the code opened, the
+ * opengraph-image that WhatsApp fetched, and lib/cnc-tool-receipt.
+ * None of it had a second way in — the QR was the only door — so
+ * keeping any of it would have left a page nothing can reach.
+ *
+ * What survives is the part that was doing work: the card itself, with
+ * the tool, the photograph, the count and the undo. Git has the rest if
+ * it is ever wanted back.
+ */
 export type TakeSlip = {
   id: string;
-  url: string;
-  /** The QR as inline SVG, ready to drop into the card. */
-  svg: string;
   at: string;
   takenBy: string;
   company: string | null;
@@ -386,11 +399,8 @@ export async function guestTakeToolAction(formData: FormData): Promise<GuestTake
 
   let slip: TakeSlip | null = null;
   if (movementId) {
-    const url = takeReceiptUrl(movementId);
     slip = {
       id: movementId,
-      url,
-      svg: await takeReceiptQr(url),
       // The row's own created_at would mean another read. This is the
       // same second, and the SLIP ITSELF is read back from the row when
       // anybody scans it, so the authoritative time is never this one.

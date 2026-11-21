@@ -382,7 +382,6 @@ export function StoreClient({
         confirmingDelete={confirmDelete === sheetTool?.id}
         onClose={() => { setSheetTool(null); setConfirmDelete(null); }}
         onAddStock={() => { const t = sheetTool; setSheetTool(null); if (t) setIntent({ tool: t, kind: "receive" }); }}
-        onFixCount={() => { const t = sheetTool; setSheetTool(null); if (t) setIntent({ tool: t, kind: "adjust" }); }}
         onHistory={() => { const t = sheetTool; setSheetTool(null); if (t) { setOnlyTool(t.id); setTab("register"); } }}
         onEdit={() => { const t = sheetTool; setSheetTool(null); if (t) { setEditing(t); setAddOpen(true); } }}
         onAskDelete={() => sheetTool && setConfirmDelete(sheetTool.id)}

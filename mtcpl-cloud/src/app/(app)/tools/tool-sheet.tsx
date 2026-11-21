@@ -33,7 +33,6 @@ export function ToolSheet({
   confirmingDelete,
   onClose,
   onAddStock,
-  onFixCount,
   onHistory,
   onEdit,
   onAskDelete,
@@ -45,7 +44,6 @@ export function ToolSheet({
   confirmingDelete: boolean;
   onClose: () => void;
   onAddStock: () => void;
-  onFixCount: () => void;
   onHistory: () => void;
   onEdit: () => void;
   onAskDelete: () => void;
@@ -87,10 +85,6 @@ export function ToolSheet({
               <b>Add stock</b>
               <em>A box has arrived</em>
             </button>
-            <button type="button" className="ts-act" onClick={onFixCount}>
-              <b>Fix count</b>
-              <em>The shelf and the register disagree</em>
-            </button>
           </>
         )}
 
@@ -102,7 +96,12 @@ export function ToolSheet({
         {canManage && (
           <button type="button" className="ts-act" onClick={onEdit}>
             <b>Edit tool</b>
-            <em>Name, unit, the warning line, its photo</em>
+            {/* The count lives here now. Daksh: "don't keep both Fix
+                count and Edit tool separate — put Fix count in Edit
+                tool itself, so less clutter." Four near-identical rows
+                became three, and the two that were always about the
+                same tool are one screen. */}
+            <em>Name, the count on the shelf, the warning line, its photo</em>
           </button>
         )}
       </div>
