@@ -310,23 +310,74 @@ export async function buildCutterCostReport(
     created_at: string | null;
   };
   const PAGE = 1000;
-  const slabsRaw: SlabRow[] = [];
-  let lastId = "";
-  for (let guard = 0; guard < 5000; guard++) {
-    let q = admin
+  const COLS =
+    "id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, source_block_id, precut_at, created_at";
+  const base = () =>
+    admin
       .from("slab_requirements")
-      .select("id, label, temple, stone, quality, length_ft, width_ft, thickness_ft, status, source_block_id, precut_at, created_at")
+      .select(COLS)
       .in("status", CUT_STATUSES as unknown as string[])
-      .not("source_block_id", "is", null)
-      .order("id")
-      .limit(PAGE);
-    if (lastId) q = q.gt("id", lastId);
-    const { data, error: slabsErr } = await q;
-    if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
-    const rows = (data ?? []) as SlabRow[];
-    slabsRaw.push(...rows);
-    if (rows.length < PAGE) break;
-    lastId = rows[rows.length - 1].id;
+      .not("source_block_id", "is", null);
+
+  let slabsRaw: SlabRow[] = [];
+
+  // ── All the pages at once ───────────────────────────────────────
+  //
+  // Nov 2026, measured: 11,136 rows in TWELVE round trips, one after
+  // another, ~950ms of pure waiting — and paid on every load of this
+  // page whatever period is being viewed, because the cut date is
+  // derived and the window can only be applied afterwards.
+  //
+  // Keyset paging (`id > last`) is serial by construction: page two
+  // cannot be asked for until page one has landed. Counting first
+  // turns that into one cheap HEAD and then a single wave of ranged
+  // reads, which the database serves just as happily in parallel.
+  //
+  // PostgREST caps a response at 1,000 rows, so the page size is not
+  // ours to raise; the number of waits is.
+  //
+  // The old loop is kept as the fallback. A count can come back null
+  // (a permissions edge, a changed policy), and a costing page that
+  // silently loses half its slabs is far worse than a slow one.
+  const { count, error: countErr } = await admin
+    .from("slab_requirements")
+    .select("id", { count: "exact", head: true })
+    .in("status", CUT_STATUSES as unknown as string[])
+    .not("source_block_id", "is", null);
+  if (countErr) throw new Error(`slab_requirements count: ${countErr.message}`);
+
+  if (count != null && count >= 0) {
+    const pages = Math.max(1, Math.ceil(count / PAGE));
+    const parts = await Promise.all(
+      Array.from({ length: pages }, (_, i) =>
+        base().order("id").range(i * PAGE, i * PAGE + PAGE - 1),
+      ),
+    );
+    // Deduped by id. Ranged pages are offsets into a live table, so a
+    // row inserted between the count and the wave would shift every
+    // page after it and could hand the same slab back twice. These are
+    // historical cut slabs and the whole wave lasts ~250ms, so it is
+    // unlikely — but double-counting a slab in a cost report is the
+    // kind of wrong that gets believed, and a Map makes it impossible.
+    const byId = new Map<string, SlabRow>();
+    for (const part of parts) {
+      if (part.error) throw new Error(`slab_requirements: ${part.error.message}`);
+      for (const r of (part.data ?? []) as unknown as SlabRow[]) byId.set(r.id, r);
+    }
+    slabsRaw = [...byId.values()];
+  } else {
+    slabsRaw = [];
+    let lastId = "";
+    for (let guard = 0; guard < 5000; guard++) {
+      let q = base().order("id").limit(PAGE);
+      if (lastId) q = q.gt("id", lastId);
+      const { data, error: slabsErr } = await q;
+      if (slabsErr) throw new Error(`slab_requirements: ${slabsErr.message}`);
+      const rows = (data ?? []) as unknown as SlabRow[];
+      slabsRaw.push(...rows);
+      if (rows.length < PAGE) break;
+      lastId = rows[rows.length - 1].id;
+    }
   }
 
   // Real cut date per source block (cut-session 'done' ∪ manual-cut audit).

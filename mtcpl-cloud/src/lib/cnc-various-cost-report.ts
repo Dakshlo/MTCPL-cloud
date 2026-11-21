@@ -549,19 +549,74 @@ export async function buildCncVariousCostReport(
   };
   const ITEM_PAGE = 1000;
   const items: CarvingItemRow[] = [];
-  for (let offset = 0; offset < 500_000; offset += ITEM_PAGE) {
-    const { data, error: itemsErr } = await admin
+
+  // ── Count, then one wave ────────────────────────────────────────
+  //
+  // Same shape of waste the cutter report was carrying (Nov 2026): a
+  // page was only asked for once the one before it had landed, so a
+  // long period cost one round trip per thousand rows in a row. The
+  // rows are ordered and the window is fixed, so the pages are known
+  // in advance and the database serves them just as happily at once.
+  //
+  // The serial loop stays as the fallback, for a count that comes
+  // back null: a costing page that quietly loses output is worse than
+  // a slow one.
+  const itemsQuery = () =>
+    admin
       .from("carving_items")
       .select("vendor_id, vendor_name, slab_requirement_id, review_approved_at, carving_sides, vendor_type")
       .gte("review_approved_at", startIso)
       .lt("review_approved_at", endIso)
-      .not("review_approved_at", "is", null)
+      .not("review_approved_at", "is", null);
+
+  // The count and the FIRST page go together, which matters more than
+  // it looks. Counting first and then fetching cost two waits even for
+  // a month that fits in a single page — measured, it made the CNC page
+  // slower, because most periods here are one page. Asking for both at
+  // once means a one-page period is still one wait, and a long one is
+  // two: the count comes back alongside page 1 and the rest follow in a
+  // single wave.
+  const ordered = () =>
+    itemsQuery()
       .order("review_approved_at", { ascending: true })
-      .range(offset, offset + ITEM_PAGE - 1);
-    if (itemsErr) throw new Error(`carving_items query failed: ${itemsErr.message}`);
-    const pageRows = (data ?? []) as CarvingItemRow[];
-    items.push(...pageRows);
-    if (pageRows.length < ITEM_PAGE) break;
+      .order("slab_requirement_id", { ascending: true });
+
+  const [{ count: itemCount }, firstPage] = await Promise.all([
+    admin
+      .from("carving_items")
+      .select("slab_requirement_id", { count: "exact", head: true })
+      .gte("review_approved_at", startIso)
+      .lt("review_approved_at", endIso)
+      .not("review_approved_at", "is", null),
+    ordered().range(0, ITEM_PAGE - 1),
+  ]);
+
+  if (itemCount != null && itemCount >= 0) {
+    if (firstPage.error) throw new Error(`carving_items query failed: ${firstPage.error.message}`);
+    items.push(...((firstPage.data ?? []) as unknown as CarvingItemRow[]));
+    const pages = Math.max(1, Math.ceil(itemCount / ITEM_PAGE));
+    if (pages > 1) {
+      const parts = await Promise.all(
+        Array.from({ length: pages - 1 }, (_, i) =>
+          ordered().range((i + 1) * ITEM_PAGE, (i + 1) * ITEM_PAGE + ITEM_PAGE - 1),
+        ),
+      );
+      for (const part of parts) {
+        if (part.error) throw new Error(`carving_items query failed: ${part.error.message}`);
+        items.push(...((part.data ?? []) as unknown as CarvingItemRow[]));
+      }
+    }
+  } else {
+    items.length = 0;
+    for (let offset = 0; offset < 500_000; offset += ITEM_PAGE) {
+      const { data, error: itemsErr } = await itemsQuery()
+        .order("review_approved_at", { ascending: true })
+        .range(offset, offset + ITEM_PAGE - 1);
+      if (itemsErr) throw new Error(`carving_items query failed: ${itemsErr.message}`);
+      const pageRows = (data ?? []) as unknown as CarvingItemRow[];
+      items.push(...pageRows);
+      if (pageRows.length < ITEM_PAGE) break;
+    }
   }
 
   const slabIds = Array.from(
@@ -578,13 +633,21 @@ export async function buildCncVariousCostReport(
   let slabMap = new Map<string, SlabRow>();
   if (slabIds.length > 0) {
     // Chunk to be safe — Supabase has soft caps on .in() lists.
+    // All chunks at once. Nothing here is ordered — each one writes
+    // into a Map keyed by slab id — so they were serial by accident of
+    // how a for-loop reads, exactly as in cutDoneDateByBlock.
     const CHUNK = 500;
-    for (let i = 0; i < slabIds.length; i += CHUNK) {
-      const part = slabIds.slice(i, i + CHUNK);
-      const { data: slabs, error: slabsErr } = await admin
-        .from("slab_requirements")
-        .select("id, length_ft, width_ft, thickness_ft, stone")
-        .in("id", part);
+    const chunks: string[][] = [];
+    for (let i = 0; i < slabIds.length; i += CHUNK) chunks.push(slabIds.slice(i, i + CHUNK));
+    const slabParts = await Promise.all(
+      chunks.map((part) =>
+        admin
+          .from("slab_requirements")
+          .select("id, length_ft, width_ft, thickness_ft, stone")
+          .in("id", part),
+      ),
+    );
+    for (const { data: slabs, error: slabsErr } of slabParts) {
       if (slabsErr) throw new Error(`slab_requirements query failed: ${slabsErr.message}`);
       for (const s of slabs ?? []) {
         slabMap.set(s.id as string, {

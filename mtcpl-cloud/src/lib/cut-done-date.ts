@@ -25,22 +25,51 @@ export async function cutDoneDateByBlock(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const ids = [...new Set(blockIds.filter((b): b is string => !!b))];
-  for (let i = 0; i < ids.length; i += 300) {
-    const chunk = ids.slice(i, i + 300);
-    if (chunk.length === 0) break;
-    const [{ data: csb }, { data: mc }] = await Promise.all([
-      admin
-        .from("cut_session_blocks")
-        .select("block_id, updated_at")
-        .eq("status", "done")
-        .in("block_id", chunk),
-      admin
-        .from("audit_logs")
-        .select("entity_id, created_at")
-        .eq("action", "manual_cut_block")
-        .eq("entity_type", "block")
-        .in("entity_id", chunk),
-    ]);
+  if (ids.length === 0) return out;
+
+  // ── Every chunk at once ─────────────────────────────────────────
+  //
+  // Nov 2026, measured. The chunk loop used to `await` each batch
+  // before starting the next, so 1,917 blocks — the cutter costing
+  // page's normal load — meant SEVEN round trips one after another,
+  // 736ms on a good run and 1,971ms on a bad one. That was the single
+  // largest item on that page, bigger than fetching the 11,136 slabs
+  // it was resolving dates for, and all of it was waiting.
+  //
+  // Nothing about the batches is ordered. Each one only writes into
+  // `out` under a latest-wins rule, so the result is identical
+  // whatever order they land in. They were serial by accident of how
+  // a for-loop reads, not by design.
+  //
+  // Six callers pay this: cutter costing, /slabs/ready, the ready
+  // embed, the slab export, the DPR and the costing report.
+  //
+  // 300 ids a chunk is kept — it is a URL length limit, not a
+  // concurrency one. A page with 10,000 distinct blocks would open 34
+  // chunks × 2 queries; the largest real caller opens 7 × 2, and
+  // PostgREST is pooled behind PgBouncer.
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 300) chunks.push(ids.slice(i, i + 300));
+
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      Promise.all([
+        admin
+          .from("cut_session_blocks")
+          .select("block_id, updated_at")
+          .eq("status", "done")
+          .in("block_id", chunk),
+        admin
+          .from("audit_logs")
+          .select("entity_id, created_at")
+          .eq("action", "manual_cut_block")
+          .eq("entity_type", "block")
+          .in("entity_id", chunk),
+      ]),
+    ),
+  );
+
+  for (const [{ data: csb }, { data: mc }] of results) {
     for (const r of (csb ?? []) as Array<{ block_id: string; updated_at: string | null }>) {
       if (!r.updated_at) continue;
       const prev = out.get(r.block_id);
