@@ -372,6 +372,14 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={{ ...th(), textAlign: "right" }}>CFT</th>
                 <th style={{ ...th(), textAlign: "right" }} title="SFT + CFT combined output">Total (S+C)</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ days in this period">Per day</th>
+                {/* The machine count sits in FRONT of per-machine/day
+                    rather than eight columns away from it. Daksh,
+                    Nov 2026: "SFT, CFT, total, per day, then machine,
+                    then per machine/day." A denominator reads as a
+                    denominator when it is next to the thing it
+                    divides; stranded past the rates it was just
+                    another number in a row of money. */}
+                <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Combined output ÷ machines ÷ days">Per mach/day</th>
                 {/* The two rates ride beside the machine's own output.
                     Daksh, Nov 2026: "that rupee/cft+sft tools next to
@@ -401,7 +409,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 >
                   ₹ / unit · labour
                 </th>
-                <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
                 <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
                 <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
                 <th style={{ ...th(), textAlign: "right" }}>Total</th>
@@ -426,6 +433,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtNum(v.perDay)}
                   </td>
+                  <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
+                    {v.machineCount}
+                  </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {Number.isFinite(v.perMachinePerDay) ? fmtNum(v.perMachinePerDay) : "—"}
                   </td>
@@ -449,9 +459,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                     {v.laborCost > 0 && Number.isFinite(v.laborPerCombined)
                       ? fmtINR(v.laborPerCombined)
                       : "—"}
-                  </td>
-                  <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
-                    {v.machineCount}
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
                     {fmtINR(v.operationalCost)}
@@ -494,6 +501,9 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtNum(totalPerDay)}
                 </td>
+                <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 800 }}>
+                  {totalMachines}
+                </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {Number.isFinite(totalPerMachDay) ? fmtNum(totalPerMachDay) : "—"}
                 </td>
@@ -511,9 +521,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   {report.laborForPeriod > 0 && Number.isFinite(report.laborPerCombined)
                     ? fmtINR(report.laborPerCombined)
                     : "—"}
-                </td>
-                <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 800 }}>
-                  {totalMachines}
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(report.operationalForPeriod)}
