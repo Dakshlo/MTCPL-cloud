@@ -132,6 +132,25 @@ export type CncVendorRow = {
   maintenanceCost: number;
   /** maintenanceCost / (cft + sft). NaN when nothing was carved. */
   maintenancePerCombined: number;
+  /**
+   * The manpower slice, prorated and divided exactly like the other
+   * two. Daksh, Nov 2026: "like we have rupee/unit tool and
+   * maintenance, make same for labour (manpower)."
+   *
+   * The `labor` category has been collected since the module was
+   * written — it was in the cost breakdown at the bottom of the page
+   * and in nobody's rate. On a CNC shed it is usually the largest of
+   * the three, so leaving it out of the per-unit view meant the one
+   * number people compared vendors on was missing its biggest part.
+   *
+   * Note the spelling split, which is deliberate rather than sloppy:
+   * the stored category key is "labor" and stays that way — renaming
+   * it would orphan every row already entered — while anything a
+   * person reads says "Labour".
+   */
+  laborCost: number;
+  /** laborCost / (cft + sft). NaN when nothing was carved. */
+  laborPerCombined: number;
 };
 
 export type CncExpenseBreakdownRow = {
@@ -193,6 +212,10 @@ export type CncVariousCostReport = {
    *  it comes to per unit of combined output. */
   maintenanceForPeriod: number;
   maintenancePerCombined: number;
+  /** The plant's manpower spend for the period (prorated), and what it
+   *  comes to per unit of combined output. */
+  laborForPeriod: number;
+  laborPerCombined: number;
   /** Effective days in the window (clamped to "today" for current/future
    *  periods) — powers the per-day / per-machine-per-day columns. */
   daysInWindow: number;
@@ -848,6 +871,7 @@ export async function buildCncVariousCostReport(
     // stops throwing the tools slice away.
     const toolCost = exp?.byCategory.tools ?? 0;
     const maintenanceCost = exp?.byCategory.maintenance ?? 0;
+    const laborCost = exp?.byCategory.labor ?? 0;
     const depreciationCost = depreciationByVendor.get(vendorId) ?? 0;
     const totalCost = operationalCost + depreciationCost;
     const combined = sft + cft;
@@ -874,6 +898,8 @@ export async function buildCncVariousCostReport(
       toolPerCombined: combined > 0 ? toolCost / combined : NaN,
       maintenanceCost,
       maintenancePerCombined: combined > 0 ? maintenanceCost / combined : NaN,
+      laborCost,
+      laborPerCombined: combined > 0 ? laborCost / combined : NaN,
     };
   });
   // Sort by total cost desc — biggest contributors at the top.
@@ -896,6 +922,7 @@ export async function buildCncVariousCostReport(
   const totalCostForPeriod = operationalForPeriod + depreciationForPeriod;
   const toolCostForPeriod = aggregateByCategory.byCategory.tools || 0;
   const maintenanceForPeriod = aggregateByCategory.byCategory.maintenance || 0;
+  const laborForPeriod = aggregateByCategory.byCategory.labor || 0;
   const totalCombinedForPeriod = totalSft + totalCft;
 
   return {
@@ -916,6 +943,9 @@ export async function buildCncVariousCostReport(
     maintenanceForPeriod,
     maintenancePerCombined:
       totalCombinedForPeriod > 0 ? maintenanceForPeriod / totalCombinedForPeriod : NaN,
+    laborForPeriod,
+    laborPerCombined:
+      totalCombinedForPeriod > 0 ? laborForPeriod / totalCombinedForPeriod : NaN,
     daysInWindow,
     expenseBreakdown,
     perVendor,

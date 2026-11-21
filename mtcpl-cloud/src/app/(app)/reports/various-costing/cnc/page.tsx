@@ -390,6 +390,17 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 >
                   ₹ / unit · maint.
                 </th>
+                {/* Daksh, Nov 2026: "like we have rupee/unit tool and
+                    maintenance, make same for labour (manpower)."
+                    Usually the biggest of the three on a CNC shed, and
+                    until now it was only in the cost breakdown at the
+                    bottom — never in the number vendors get compared on. */}
+                <th
+                  style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
+                  title="Manpower spend ÷ (SFT + CFT) carved — what one unit costs in labour alone"
+                >
+                  ₹ / unit · labour
+                </th>
                 <th style={{ ...th(), textAlign: "right" }} title="CNC machines assigned to this vendor">Mach</th>
                 <th style={{ ...th(), textAlign: "right" }}>Op. Cost</th>
                 <th style={{ ...th(), textAlign: "right" }}>Dep.</th>
@@ -397,15 +408,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 <th style={{ ...th(), textAlign: "right" }}>₹ / SFT</th>
                 <th style={{ ...th(), textAlign: "right" }}>₹ / CFT</th>
                 <th style={{ ...th(), textAlign: "right" }} title="Total cost ÷ combined output">₹ / unit</th>
-                {/* Last, and on purpose: it is a dead amount next to the
-                    rates, kept because somebody will want to see the
-                    bill the rate came off. */}
-                <th
-                  style={{ ...th(), textAlign: "right", color: "var(--gold-dark)" }}
-                  title="The tools slice of this vendor's operational cost, prorated to this period"
-                >
-                  Tools ₹
-                </th>
               </tr>
             </thead>
             <tbody>
@@ -429,9 +431,11 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
                     {/* ₹0 would read as "his tools are free". Nothing
-                        was entered — which is a different fact, and the
-                        one the dash already means in the Tools ₹ column
-                        at the end of this row. */}
+                        was ENTERED, which is a different fact, and the
+                        dash is the only honest way to say it. The Tools ₹
+                        column that used to carry the raw amount is gone
+                        — Daksh, Nov 2026: "remove that, if we need to
+                        see it we can see it in other places too." */}
                     {v.toolCost > 0 && Number.isFinite(v.toolPerCombined)
                       ? fmtINR(v.toolPerCombined)
                       : "—"}
@@ -439,6 +443,11 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
                     {v.maintenanceCost > 0 && Number.isFinite(v.maintenancePerCombined)
                       ? fmtINR(v.maintenancePerCombined)
+                      : "—"}
+                  </td>
+                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "var(--gold-dark)" }}>
+                    {v.laborCost > 0 && Number.isFinite(v.laborPerCombined)
+                      ? fmtINR(v.laborPerCombined)
                       : "—"}
                   </td>
                   <td style={{ ...td(), textAlign: "right", color: "var(--muted)" }}>
@@ -461,9 +470,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                   </td>
                   <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
                     {fmtINR(v.costPerCombined)}
-                  </td>
-                  <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", color: "var(--gold-dark)" }}>
-                    {v.toolCost > 0 ? fmtINR(v.toolCost) : "—"}
                   </td>
                 </tr>
               ))}
@@ -501,6 +507,11 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                     ? fmtINR(report.maintenancePerCombined)
                     : "—"}
                 </td>
+                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
+                  {report.laborForPeriod > 0 && Number.isFinite(report.laborPerCombined)
+                    ? fmtINR(report.laborPerCombined)
+                    : "—"}
+                </td>
                 <td style={{ ...td(), textAlign: "right", color: "var(--muted)", fontWeight: 800 }}>
                   {totalMachines}
                 </td>
@@ -521,9 +532,6 @@ export default async function CncVariousCostingPage({ searchParams }: { searchPa
                 </td>
                 <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800 }}>
                   {fmtINR(costPerCombined)}
-                </td>
-                <td style={{ ...td(), textAlign: "right", fontFamily: "ui-monospace, monospace", fontWeight: 800, color: "var(--gold-dark)" }}>
-                  {report.toolCostForPeriod > 0 ? fmtINR(report.toolCostForPeriod) : "—"}
                 </td>
               </tr>
                 );

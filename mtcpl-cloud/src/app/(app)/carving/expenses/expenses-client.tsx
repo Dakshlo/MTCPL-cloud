@@ -155,6 +155,8 @@ export function CncExpensesClient({
         }`}
         backHref="/reports/various-costing/cnc"
         backLabel="CNC Costing"
+        extraHref={`/carving/expenses/timeline?year=${year}`}
+        extraLabel="See expenses in timeline"
       />
 
       {vendors.length === 0 && (

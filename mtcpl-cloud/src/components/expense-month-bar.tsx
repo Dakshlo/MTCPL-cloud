@@ -55,6 +55,8 @@ export function ExpenseMonthBar({
   totalCaption,
   backHref,
   backLabel,
+  extraHref,
+  extraLabel,
 }: {
   /** Route the month nav rewrites, e.g. "/carving/expenses". */
   basePath: string;
@@ -76,6 +78,12 @@ export function ExpenseMonthBar({
    *  navigation, so "back" would just undo a month change. */
   backHref?: string;
   backLabel?: string;
+  /** Optional second door out of this bar, next to the back button.
+   *  CNC uses it for the year timeline; the cutter page passes
+   *  nothing and is untouched — Daksh, Nov 2026: "for now make only
+   *  for CNC costing, not cutter." */
+  extraHref?: string;
+  extraLabel?: string;
 }) {
   const router = useRouter();
   const go = (y: number, m: number) =>
@@ -137,6 +145,13 @@ export function ExpenseMonthBar({
           >
             <span style={{ fontSize: 16, lineHeight: 1 }}>←</span>
             {backLabel ? `Back to ${backLabel}` : "Back"}
+          </Link>
+        )}
+
+        {extraHref && (
+          <Link href={extraHref} title={extraLabel} style={extraBtn()}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>▦</span>
+            {extraLabel}
           </Link>
         )}
 
@@ -334,6 +349,19 @@ export function ExpenseMonthBar({
       )}
     </>
   );
+}
+
+/** The timeline link. Gold rather than grey: it is the only control on
+ *  this bar that answers a question instead of changing what you are
+ *  looking at. */
+function extraBtn(): React.CSSProperties {
+  return {
+    display: "inline-flex", alignItems: "center", gap: 7,
+    padding: "8px 13px", borderRadius: 9, fontSize: 12.5, fontWeight: 700,
+    textDecoration: "none", whiteSpace: "nowrap",
+    color: "var(--gold-dark)", background: "var(--gold-subtle)",
+    border: "1px solid var(--gold-border)",
+  };
 }
 
 function backBtn(): React.CSSProperties {
