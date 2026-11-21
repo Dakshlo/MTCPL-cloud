@@ -115,20 +115,36 @@ export function canManageCncToolStore(p: ToolProfile): boolean {
  * May this person scan a supplier bill and post it to the shelf
  * (mig 237)?
  *
- * DEVELOPER ONLY, on purpose, and only for now. Daksh, Nov 2026: "for
- * now make that for my account, developer, in dashboard — not QR phone.
- * After this works fine we will remove the add item from Mohit's phone
- * QR."
+ * The office three — which, today, is the developer and the two owners
+ * who keep this cupboard.
  *
- * So this is the same shape the whole module started in: one pair of
- * hands while the matcher learns what the suppliers actually print, and
- * then it opens up. Widening it is one line here — canUseCncTools(p) —
- * once a few real bills have gone through without a surprise.
+ * It started developer-only and said so: "for now make that for my
+ * account, developer, in dashboard — not QR phone." That was never a
+ * rule about job titles, it was a quarantine while the matcher learned
+ * what the suppliers actually print, and the note left here said the
+ * widening would be one line — canUseCncTools(p) — once real bills had
+ * gone through without a surprise. They have.
  *
- * Kept deliberately narrower than canManageCncToolStore, because this
- * is the one door that can create catalogue entries in bulk from a
- * photograph. Everything else on the screen touches one tool at a time.
+ * Daksh, Nov 2026, with Nikhil's screenshot: "Nikhil owner sent me this
+ * image, he doesn't have all the options like developer have on tool
+ * inventory like scan bill and all. So enable that for owners too."
+ *
+ * So it is the same question the store screen asks, and the answer is
+ * the same flag granted by name: can_keep_tool_store, which is set for
+ * Nikhil, Vinay and Daksh and nobody else. Deliberately NOT
+ * role === "owner" — that would be a rule about a title, and the whole
+ * reason this module uses a flag is that the people who keep a cupboard
+ * are not a title. A fourth owner appointed next year gets nothing
+ * until somebody grants it on purpose.
+ *
+ * It stays its own function rather than folding into canUseCncTools.
+ * This is the one door that creates catalogue entries in bulk from a
+ * photograph, and the one that shows what the company pays its
+ * suppliers; everything else on the screen touches one tool at a time
+ * and carries no price at all. The day that matters it is edited here
+ * and every gate moves with it — the button, the scanned-bills page,
+ * the vision route and both posting actions all ask this one function.
  */
 export function canScanToolBills(p: ToolProfile): boolean {
-  return p.role === "developer";
+  return canUseCncTools(p);
 }
