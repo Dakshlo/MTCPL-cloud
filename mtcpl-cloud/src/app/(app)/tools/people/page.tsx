@@ -64,6 +64,22 @@ export default async function ToolPeoplePage() {
 
   const maxMonthTaken = Math.max(1, ...people.map((p) => p.takenQty));
   const maxMonthUsed = Math.max(1, ...people.map((p) => p.usedQty));
+  /* Daksh, Nov 2026: "consider the number of machines under the vendor
+     — Mohit has more machines and Manthan less, so Mohit taking a few
+     extra is fine."
+
+     Raw totals flatter the small fleet and damn the large one, and on
+     today's figures they do worse than that: Manthan's 8 over 17
+     machines is 0.47 each, Mohit's 4 over 23 is 0.17. By the headline
+     Manthan took twice as much; per machine he is running at nearly
+     three times the rate. The totals were pointing at the wrong man.
+
+     So the rate gets its own scale rather than sharing the totals' —
+     the two bars answer different questions and a shared axis would
+     make the rate look like a smaller version of the total. */
+  const perMachine = (p: PersonUsage) =>
+    p.machineCount > 0 ? p.takenQty / p.machineCount : 0;
+  const maxPerMachine = Math.max(0.0001, ...people.map(perMachine));
 
   return (
     <section className="page-fluid tp">
@@ -96,6 +112,7 @@ export default async function ToolPeoplePage() {
               days={days}
               maxTaken={maxMonthTaken}
               maxUsed={maxMonthUsed}
+              maxPerMachine={maxPerMachine}
             />
           ))}
         </div>
@@ -111,14 +128,16 @@ export default async function ToolPeoplePage() {
 }
 
 function PersonCard({
-  month, week, days, maxTaken, maxUsed,
+  month, week, days, maxTaken, maxUsed, maxPerMachine,
 }: {
   month: PersonUsage;
   week: PersonUsage | null;
   days: number;
   maxTaken: number;
   maxUsed: number;
+  maxPerMachine: number;
 }) {
+  const rate = month.machineCount > 0 ? month.takenQty / month.machineCount : null;
   const perDay = month.takenQty / days;
   const weekTaken = week?.takenQty ?? 0;
   const weekUsed = week?.usedQty ?? 0;
@@ -155,6 +174,18 @@ function PersonCard({
           <em>average</em>
           <span className="tp-sub">over {days} days</span>
         </div>
+        {/* The fleet-aware one. Without it this card rewards a small
+            shed for being small. */}
+        <div className="tp-col tp-col-rate">
+          <span className="tp-col-h">Per machine</span>
+          <b>{rate === null ? "—" : rate.toFixed(2)}</b>
+          <em>this month</em>
+          <span className="tp-sub">
+            {month.machineCount > 0
+              ? `${month.machineCount} machines in his firm`
+              : "no machines on his firm"}
+          </span>
+        </div>
       </div>
 
       {/* Bars are the comparison. Same scale on every card, so a short
@@ -169,6 +200,13 @@ function PersonCard({
           <span>Used</span>
           <div className="tp-bar"><i style={{ width: `${(month.usedQty / maxUsed) * 100}%` }} /></div>
           <b>{month.usedQty}</b>
+        </div>
+        <div className="tp-bar-row tp-bar-rate">
+          <span>Per mach.</span>
+          <div className="tp-bar">
+            <i style={{ width: `${rate === null ? 0 : (rate / maxPerMachine) * 100}%` }} />
+          </div>
+          <b>{rate === null ? "—" : rate.toFixed(2)}</b>
         </div>
       </div>
 
@@ -243,7 +281,8 @@ const CSS = `
 .tp-co { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
   color:var(--muted); }
 
-.tp-cols { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:14px; }
+.tp-cols { display:grid; grid-template-columns:repeat(4, 1fr); gap:7px; margin-bottom:14px; }
+@media (max-width: 1500px) { .tp-cols { grid-template-columns:repeat(2, 1fr); } }
 .tp-col { display:flex; flex-direction:column; gap:1px; padding:10px 11px; border-radius:10px;
   background:var(--surface-alt); border:1px solid transparent; }
 .tp-col-lead { background:var(--gold-subtle); border-color:var(--gold-border); }
@@ -263,6 +302,9 @@ const CSS = `
 .tp-bar { height:8px; border-radius:999px; background:var(--surface-alt); overflow:hidden; }
 .tp-bar i { display:block; height:100%; background:var(--gold); border-radius:999px; }
 .tp-bar-used .tp-bar i { background:#0ea5e9; }
+.tp-bar-rate .tp-bar i { background:#7c3aed; }
+.tp-col-rate { background:#f5f3ff; border-color:#ddd6fe; }
+.tp-col-rate b { color:#6d28d9; }
 
 .tp-gap { display:flex; align-items:baseline; justify-content:space-between; gap:10px;
   font-size:11.5px; line-height:1.5; color:var(--muted); padding:9px 11px; border-radius:9px;

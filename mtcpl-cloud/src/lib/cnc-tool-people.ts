@@ -48,6 +48,32 @@ export type PersonUsage = {
   key: string;
   name: string;
   company: string | null;
+  /** His firm, for the fleet lookup below. */
+  vendorId: string | null;
+  /**
+   * CNC machines assigned to his company.
+   *
+   * Daksh, Nov 2026: "consider the number of machines under the vendor
+   * — Mohit has more machines and Manthan less, so Mohit taking a few
+   * extra is fine."
+   *
+   * He is right, and on the live numbers it does not just soften the
+   * comparison, it reverses it: Manthan's 8 across 17 machines is 0.47
+   * each, Mohit's 4 across 23 is 0.17. The raw totals say Manthan took
+   * twice as much; per machine he is running at nearly three times the
+   * rate. A fleet-blind league table would have pointed at the wrong
+   * man.
+   *
+   * It is the COMPANY's fleet, not the individual's — machines are
+   * assigned to a vendor and his men share them. So for a vendor
+   * principal this is exactly right, and if operators ever appear here
+   * as their own columns they would each show the firm's fleet, which
+   * is why the page labels it "machines in his firm" rather than his.
+   *
+   * 0 when the company has none, and the page then shows a dash rather
+   * than dividing by it.
+   */
+  machineCount: number;
   /** Pieces taken off the shelf in the window. */
   takenQty: number;
   /** How many DIFFERENT tools he took — "12 pcs across 4 kinds". */
@@ -110,7 +136,7 @@ export async function loadPeopleUsage(
       .gte("created_at", fromIso)
       .lt("created_at", toIso),
     admin.from("cnc_tools").select("id, name, unit"),
-    admin.from("cnc_machines").select("id, machine_code"),
+    admin.from("cnc_machines").select("id, machine_code, vendor_id"),
     admin.from("vendors").select("id, name"),
   ]);
 
@@ -119,8 +145,12 @@ export async function loadPeopleUsage(
     toolName.set(t.id, { name: t.name, unit: t.unit });
   }
   const machineCode = new Map<string, string>();
-  for (const m of (machinesRes.data ?? []) as Array<{ id: string; machine_code: string }>) {
+  const fleet = new Map<string, number>();
+  for (const m of (machinesRes.data ?? []) as Array<{
+    id: string; machine_code: string; vendor_id: string | null;
+  }>) {
     machineCode.set(m.id, m.machine_code);
+    if (m.vendor_id) fleet.set(m.vendor_id, (fleet.get(m.vendor_id) ?? 0) + 1);
   }
   const vendorName = new Map<string, string>();
   for (const v of (vendorsRes.data ?? []) as Array<{ id: string; name: string }>) {
@@ -154,6 +184,8 @@ export async function loadPeopleUsage(
         key,
         name: (readable ?? "").trim() || "Unsigned",
         company: vendorId ? vendorName.get(vendorId) ?? null : null,
+        vendorId: vendorId ?? null,
+        machineCount: vendorId ? fleet.get(vendorId) ?? 0 : 0,
         takenQty: 0,
         takenKinds: 0,
         takenLines: 0,
@@ -167,7 +199,11 @@ export async function loadPeopleUsage(
       machineAcc.set(key, new Map());
     }
     // A later line may carry the company when an earlier one did not.
-    if (!p.company && vendorId) p.company = vendorName.get(vendorId) ?? null;
+    if (!p.company && vendorId) {
+      p.company = vendorName.get(vendorId) ?? null;
+      p.vendorId = vendorId;
+      p.machineCount = fleet.get(vendorId) ?? 0;
+    }
     return p;
   };
 
