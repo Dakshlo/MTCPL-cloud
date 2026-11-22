@@ -334,27 +334,95 @@ export function StoreClient({
           ) : visible.length === 0 ? (
             <div className="tc-empty-search">Nothing matches “{q}”.</div>
           ) : (
-            <div className="tc-grid" data-photos={visible.some((t) => t.imageUrl) ? "1" : "0"}>
-              {visible.map((t) => (
+            (() => {
+              /* ── Two piles, not one list ───────────────────────
+                 Daksh, Nov 2026: "the UI of this inventory looks too
+                 boring."
+
+                 The sort was already right — empty first, then low,
+                 then the rest — but nothing on screen SAID so, and
+                 twenty-six identical rows with an amber edge on seven
+                 of them is a wall of text you have to read rather than
+                 scan. The information was there and the structure was
+                 not.
+
+                 So the same order gets two headings. The top one is
+                 the keeper's whole job in one line: these need
+                 ordering. Everything below it is fine and does not
+                 need reading. No new data, no new query, and the list
+                 is identical if nothing is low. */
+              const needs = visible.filter((t) => t.stock <= 0 || t.level !== "ok");
+              const fine = visible.filter((t) => !(t.stock <= 0 || t.level !== "ok"));
+              const photos = visible.some((t) => t.imageUrl) ? "1" : "0";
+              const row = (t: ToolRow) => (
                 <ToolCard
                   key={t.id} tool={t} canManage={canManage}
                   onAddStock={() => setIntent({ tool: t, kind: "receive" })}
                   onOpen={() => { setConfirmDelete(null); setSheetTool(t); }}
                 />
-              ))}
-            </div>
+              );
+              /* One heading over one pile is a label, not a split —
+                 and when nothing is low there is nothing to compare
+                 the rest against, so the list stays as it was. */
+              if (needs.length === 0 || fine.length === 0) {
+                return (
+                  <div className="tc-grid" data-photos={photos}>
+                    {visible.map(row)}
+                  </div>
+                );
+              }
+              return (
+                <>
+                  <div className="tc-shelf-h tc-shelf-h-warn">
+                    <strong>Needs ordering</strong>
+                    <em>{needs.length} of {visible.length}</em>
+                  </div>
+                  <div className="tc-grid" data-photos={photos}>
+                    {needs.map(row)}
+                  </div>
+                  <div className="tc-shelf-h">
+                    <strong>Stocked</strong>
+                    <em>{fine.length}</em>
+                  </div>
+                  <div className="tc-grid" data-photos={photos}>
+                    {fine.map(row)}
+                  </div>
+                </>
+              );
+            })()
           )}
         </>
       ) : (
-        <Register
-          movements={movements}
-          usage={usage}
-          tools={tools}
-          vendorNames={vendorNames}
-          truncated={movementsTruncated}
-          onlyTool={onlyTool}
-          onClearFilter={() => setOnlyTool(null)}
-        />
+        <>
+          {/* Under the register, not inside it. Daksh, Nov 2026: "a
+              place where we can see how many tools Mohit took this
+              week, machine-wise… all 3 in one page so we can compare.
+              Don't mix that with register — that will be a new thing
+              under register."
+
+              The register answers "what happened". This answers "who,
+              and how does he compare", which is a different question
+              and deserves its own screen rather than another filter on
+              this one. */}
+          <Link href="/tools/people" className="tc-people">
+            <span className="tc-people-ico" aria-hidden>👷</span>
+            <span className="tc-people-text">
+              <strong>Compare the men</strong>
+              <em>What each one took and used — this week against the month, side by side</em>
+            </span>
+            <span className="tc-people-go" aria-hidden>›</span>
+          </Link>
+
+          <Register
+            movements={movements}
+            usage={usage}
+            tools={tools}
+            vendorNames={vendorNames}
+            truncated={movementsTruncated}
+            onlyTool={onlyTool}
+            onClearFilter={() => setOnlyTool(null)}
+          />
+        </>
       )}
 
       <MoveSheet

@@ -305,6 +305,45 @@ export const TOOLS_CSS = `
   border:1px solid var(--gold-border); white-space:nowrap; }
 .tc-addstock:hover { background:var(--gold); border-color:var(--gold); color:#fff; }
 
+/* The two shelf headings. Deliberately quiet — they are signposts over
+   the rows, not another banner; the module was called a game once
+   already and that was mostly banners. */
+.tc-shelf-h {
+  display:flex; align-items:baseline; gap:9px;
+  margin:18px 2px 8px; padding-bottom:6px;
+  border-bottom:1px solid var(--border);
+}
+.tc-shelf-h:first-child { margin-top:4px; }
+.tc-shelf-h strong {
+  font-size:11px; font-weight:800; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted);
+}
+.tc-shelf-h em {
+  margin-left:auto; font-style:normal; font-size:11px; font-weight:700;
+  color:var(--muted-light); font-variant-numeric:tabular-nums;
+}
+.tc-shelf-h-warn strong { color:var(--warning); }
+.tc-shelf-h-warn { border-bottom-color:var(--gold-border); }
+
+/* The way through to the per-man comparison, above the register's own
+   lines. Gold-tinted rather than another grey row: it is the only thing
+   on this tab that leaves the page. */
+.tc-people {
+  display:flex; align-items:center; gap:12px; margin:0 0 14px;
+  padding:13px 15px; border-radius:var(--radius);
+  background:var(--gold-subtle); border:1px solid var(--gold-border);
+  text-decoration:none; color:inherit;
+}
+.tc-people:hover { background:var(--gold); border-color:var(--gold); }
+.tc-people:hover .tc-people-text strong,
+.tc-people:hover .tc-people-text em,
+.tc-people:hover .tc-people-go { color:#fff; }
+.tc-people-ico { font-size:19px; line-height:1; flex:0 0 auto; }
+.tc-people-text { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.tc-people-text strong { font-size:13.5px; font-weight:700; color:var(--gold-dark); }
+.tc-people-text em { font-style:normal; font-size:11.5px; color:var(--muted); }
+.tc-people-go { margin-left:auto; font-size:17px; color:var(--gold-dark); }
+
 /* The phone's Add tool.
    It was written as a phone-only floating button and then never given
    a single line of CSS, so it rendered as a bare unstyled <button>
