@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { istDateLabel, istDayRange, istHour } from "@/lib/ist";
 import { redirect } from "next/navigation";
@@ -119,46 +120,33 @@ export default async function DashboardPage() {
   // panel silently truncates and shows "Show all 1000 slabs (997 more)"
   // even when the real total is way higher. Loop in 1000-row pages
   // via .range() to grab everything.
-  type PushableSlabRow = {
-    id: string;
-    label: string | null;
-    temple: string;
-    stone: string | null;
-    status: string;
-    priority: boolean | null;
-    deadline: string | null;
-    priority_note: string | null;
-  };
-  async function fetchAllPushableSlabs(): Promise<PushableSlabRow[]> {
-    const PAGE = 1000;
-    const out: PushableSlabRow[] = [];
-    for (let offset = 0; offset < 50000; offset += PAGE) {
-      const { data, error } = await admin
-        .from("slab_requirements")
-        .select("id, label, temple, stone, status, priority, deadline, priority_note")
-        .in("status", ["open", "planned"])
-        .order("priority", { ascending: false })
-        .order("created_at", { ascending: true })
-        .range(offset, offset + PAGE - 1);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
-      out.push(...(data as PushableSlabRow[]));
-      if (data.length < PAGE) break;
-    }
-    return out;
-  }
-
+  /**
+   * The card below needs ONE NUMBER, so this asks for one number.
+   *
+   * Nov 2026, measured: this block was 377–468ms of a ~600ms dashboard
+   * — two thirds of it — because it paged every open and planned slab
+   * out of the database, 4,655 rows of eight columns across five round
+   * trips taken one after another, on every single load. All of it to
+   * render `{pushList.length}` in the Push Urgent card and nothing
+   * else. The panel that actually reads those rows lives on
+   * /dashboard/push-urgent and fetches them itself.
+   *
+   * `prioritySlabs` went with it. It was queried on every load and then
+   * discarded on the next line — `void prioritySlabs;` — with a comment
+   * explaining that PushPanel gets its own. A query nobody reads.
+   *
+   * head: true means the rows are counted in the database and never
+   * sent. Daksh asked whether the card should be removed; it does not
+   * need to be. The card was never the expensive part.
+   */
   const [
-    { data: prioritySlabs },
-    pushableSlabs,
+    { count: pushableCount },
     { data: onlineUsers },
   ] = await Promise.all([
     admin
       .from("slab_requirements")
-      .select("id, label, temple, deadline, priority_note")
-      .eq("priority", true)
+      .select("id", { count: "exact", head: true })
       .in("status", ["open", "planned"]),
-    fetchAllPushableSlabs(),
     admin
       .from("profiles")
       .select("id, full_name, role")
@@ -202,19 +190,6 @@ export default async function DashboardPage() {
   }
 
   // ── Derived display values ────────────────────────────────────────
-  // pushableSlabs is now non-null (paginated fetcher returns []) so no
-  // ?? needed. Coerce nullable label/priority to non-null shapes the
-  // PushPanel expects.
-  const pushList = pushableSlabs.map((s) => ({
-    id: s.id,
-    label: s.label ?? "",
-    temple: s.temple,
-    stone: s.stone,
-    status: s.status,
-    priority: s.priority ?? false,
-    deadline: s.deadline,
-    priority_note: s.priority_note,
-  }));
   const onlineList = onlineUsers ?? [];
 
   // Aug 2026 — this read the IST wall clock into a string, parsed it
@@ -226,11 +201,6 @@ export default async function DashboardPage() {
   const greeting = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
   const ownerName = profile.full_name || "there";
   const dateDisplay = istDateLabel();
-
-  // Priority count is passed to PushPanel via `pushableSlabs` so PushPanel
-  // can show its own urgent-list state. We just need the raw query on the page
-  // (no derived value needed here).
-  void prioritySlabs;
 
   const isOwnerOrDev = profile.role === "owner" || profile.role === "developer";
 
@@ -307,7 +277,26 @@ export default async function DashboardPage() {
         {/* Vehicles — owner/developer, same as the two above. Shows the
             most urgent insurance/PUC/fitness date so an expiry is visible
             from the dashboard; the department page re-checks the role. */}
-        {isOwnerOrDev && <VehiclesEntryCard />}
+        {/* Streamed, not awaited. Daksh, Nov 2026: "this vehicles KPI
+            card fetches data from that department — load the info after
+            you load the whole dashboard."
+
+            It is an async server component, so rendering it inline made
+            the ENTIRE dashboard wait on a department it is only
+            previewing. Nothing above it needs the answer. Inside
+            Suspense the shell — greeting, every tile, the email
+            snapshot — is sent immediately and the card fills itself in
+            when its query lands.
+
+            The fallback is the same size as the real card on purpose. A
+            placeholder that collapses would have the tile row reflow
+            under the cursor a moment after it is readable, which is
+            worse than the wait it replaced. */}
+        {isOwnerOrDev && (
+          <Suspense fallback={<VehiclesCardSkeleton />}>
+            <VehiclesEntryCard />
+          </Suspense>
+        )}
         {/* Two reports, straight off the card — the old
             /reports/various-costing landing in between did nothing but
             show these same two choices. Its per-report gate moves here
@@ -412,7 +401,7 @@ export default async function DashboardPage() {
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>🔔 Push Urgent Alert to Workers</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
-              {pushList.length} open / planned slabs · mark urgent + see which are already in a work order →
+              {pushableCount ?? 0} open / planned slabs · mark urgent + see which are already in a work order →
             </div>
           </div>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", background: "var(--gold)", borderRadius: 8, padding: "8px 16px", whiteSpace: "nowrap" }}>Open page →</span>
@@ -474,6 +463,34 @@ export default async function DashboardPage() {
         </div>
       )}
 
+    </div>
+  );
+}
+
+/** Placeholder for the streamed Vehicles tile — same footprint, same
+ *  slate, no numbers it does not have yet. */
+function VehiclesCardSkeleton() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 12,
+        height: "100%",
+        minHeight: 150,
+        background: "linear-gradient(135deg, #0f172a 0%, #475569 100%)",
+        borderRadius: 12,
+        padding: "22px 26px",
+        opacity: 0.55,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(255,255,255,0.55)" }}>
+        🚚 FLEET PAPERS
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: "rgba(255,255,255,0.8)" }}>Vehicles</div>
+      <div style={{ height: 22, width: 140, borderRadius: 999, background: "rgba(255,255,255,0.14)" }} />
     </div>
   );
 }
