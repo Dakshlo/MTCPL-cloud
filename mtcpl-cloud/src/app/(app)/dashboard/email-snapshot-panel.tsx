@@ -144,336 +144,341 @@ export function EmailSnapshotPanel({
     }
   }
 
+  const need = snap ? snap.items.filter((x) => x.urgency === "action_needed").length : 0;
+  const fyi = snap ? snap.items.length - need : 0;
+  const overview = snap ? (hi ? snap.overviewHi || snap.overview : snap.overview) : null;
+
   return (
     <>
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        padding: "14px 18px",
-        display: "flex",
-        flexDirection: "column",
-        gap: collapsed ? 0 : 12,
-      }}
-    >
-      {/* ── Header ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? "Expand" : "Collapse"}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            background: "none",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            color: "var(--text)",
-            flex: "1 1 auto",
-            minWidth: 0,
-            overflow: "hidden",
-            textAlign: "left",
-          }}
-        >
-          <span style={{ fontSize: 12, color: "var(--muted)", flexShrink: 0, transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }}>▼</span>
-          <span style={{ fontSize: 15, fontWeight: 800, flexShrink: 0 }}>📧 Email Snapshot</span>
-          {snap && !snap.error && (
-            <span className="muted" style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-              {fmtIst(snap.generatedAt)} · {RANGE_LABEL[snap.range] ?? "Today"} · {snap.scannedCount} scanned
-            </span>
-          )}
-        </button>
+      <section className={`es${collapsed ? " es-shut" : ""}`}>
+        <style>{CSS}</style>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Link
-            href="/dashboard/emails"
-            title="Browse every scanned email, newest first"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              height: 28,
-              padding: "0 10px",
-              fontSize: 11.5,
-              fontWeight: 700,
-              color: "var(--text)",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 7,
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            📂 All emails
-          </Link>
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            disabled={busy}
-            title="How far back to fetch when you refresh"
-            style={{
-              height: 28,
-              maxWidth: 130,
-              fontSize: 11.5,
-              fontWeight: 600,
-              padding: "0 6px",
-              borderRadius: 7,
-              border: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--text)",
-              cursor: busy ? "wait" : "pointer",
-            }}
-          >
-            {RANGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+        {/* ── bar ─────────────────────────────────────────────── */}
+        <header className="es-bar">
           <button
             type="button"
-            onClick={refresh}
-            disabled={busy}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              height: 28,
-              padding: "0 12px",
-              fontSize: 11.5,
-              fontWeight: 800,
-              color: "#fff",
-              background: "var(--accent, #4f46e5)",
-              border: "1px solid var(--accent, #4f46e5)",
-              borderRadius: 7,
-              cursor: busy ? "wait" : "pointer",
-              opacity: busy ? 0.75 : 1,
-              whiteSpace: "nowrap",
-            }}
+            className="es-title"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand the email snapshot" : "Collapse the email snapshot"}
           >
-            {busy ? "⏳ Reading…" : "↻ Refresh"}
+            <span className="es-caret" aria-hidden>▾</span>
+            <span className="es-name">Email snapshot</span>
+            {snap && !snap.error && (
+              <span className="es-meta">
+                {fmtIst(snap.generatedAt)} · {RANGE_LABEL[snap.range] ?? "Today"} · {snap.scannedCount} read
+              </span>
+            )}
           </button>
-        </div>
-      </div>
 
-      {err && <div style={{ fontSize: 11.5, color: "#b91c1c", fontWeight: 600 }}>⚠ {err}</div>}
+          <div className="es-tools">
+            <Link href="/dashboard/emails" className="es-btn" title="Browse every scanned email, newest first">
+              All emails
+            </Link>
+            <select
+              className="es-range"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              disabled={busy}
+              title="How far back to fetch when you refresh"
+            >
+              {RANGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <button type="button" className="es-btn es-btn-go" onClick={refresh} disabled={busy}>
+              {busy ? "Reading…" : "Refresh"}
+            </button>
+          </div>
+        </header>
 
-      {/* ── Body (hidden when collapsed) ── */}
-      {!collapsed && (
-        <>
-          {!configured || !snap ? (
-            <p className="muted" style={{ fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
-              Not set up yet — run migrations <code>119</code> &amp; <code>120</code>, then add{" "}
-              <code>GMAIL_USER</code>, <code>GMAIL_APP_PASSWORD</code> and <code>CRON_SECRET</code> in Vercel.
-              Snapshots run at 5:00 am and 2:00 pm IST, or tap Refresh.
-            </p>
-          ) : snap.error ? (
-            <p style={{ fontSize: 12.5, margin: 0, color: "#b91c1c", fontWeight: 600 }}>⚠ Last run failed: {snap.error}</p>
-          ) : (
-            <>
-              {/* Summary strip — the counts as glanceable pills, then the AI
-                  one-liner underneath. Reads faster than a single sentence
-                  doing both jobs. */}
-              {(() => {
-                const need = snap.items.filter((x) => x.urgency === "action_needed").length;
-                const fyi = snap.items.length - need;
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                      {need > 0 && (
-                        <span style={{ fontSize: 11.5, fontWeight: 800, padding: "3px 10px", borderRadius: 999, color: "#fff", background: "#dc2626", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
-                          {need} need{need === 1 ? "s" : ""} action
-                        </span>
-                      )}
-                      {fyi > 0 && (
-                        <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999, color: "var(--text)", background: "rgba(148,163,184,0.18)", border: "1px solid var(--border)" }}>
-                          {fyi} to note
-                        </span>
-                      )}
-                      {snap.items.length === 0 && (
-                        <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999, color: "#15803d", background: "rgba(21,128,61,0.12)" }}>
-                          Inbox quiet
-                        </span>
-                      )}
-                      <span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>of {snap.scannedCount} scanned</span>
+        {err && <div className="es-err" role="alert">{err}</div>}
 
-                      {/* Mig 224 — English / Hindi. Sits with the counts
-                          rather than in the header so it is next to the
-                          text it changes. The choice saves to the profile,
-                          so it is still set tomorrow and on another
-                          machine. */}
-                      <span
-                        style={{
-                          marginLeft: "auto",
-                          display: "inline-flex",
-                          border: "1px solid var(--border)",
-                          borderRadius: 999,
-                          overflow: "hidden",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {([["en", "EN"], ["hi", "हिं"]] as const).map(([code, label]) => (
-                          <button
-                            key={code}
-                            type="button"
-                            onClick={() => chooseLang(code)}
-                            title={code === "hi" ? "हिंदी में पढ़ें" : "Read in English"}
-                            aria-pressed={lang === code}
-                            style={{
-                              padding: "3px 11px",
-                              fontSize: 11,
-                              fontWeight: 800,
-                              border: "none",
-                              cursor: "pointer",
-                              background: lang === code ? "var(--accent, #4f46e5)" : "transparent",
-                              color: lang === code ? "#fff" : "var(--muted)",
-                            }}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </span>
-                    </div>
-                    {(hi ? snap.overviewHi || snap.overview : snap.overview) && (
-                      <p style={{ fontSize: 12.5, margin: 0, color: "var(--muted)", lineHeight: 1.5 }}>
-                        {hi ? snap.overviewHi || snap.overview : snap.overview}
-                      </p>
-                    )}
+        {!collapsed && (
+          <>
+            {!configured || !snap ? (
+              <p className="es-note">
+                Not set up yet — run migrations <code>119</code> &amp; <code>120</code>, then add{" "}
+                <code>GMAIL_USER</code>, <code>GMAIL_APP_PASSWORD</code> and <code>CRON_SECRET</code> in
+                Vercel. Snapshots run at 5:00 am and 2:00 pm IST, or tap Refresh.
+              </p>
+            ) : snap.error ? (
+              <p className="es-err">Last run failed: {snap.error}</p>
+            ) : (
+              <>
+                {/* ── the lede ───────────────────────────────────
+                    The counts and the one-line summary are one block
+                    with a gold rule down its edge, because together
+                    they ARE the snapshot: everything below is the
+                    evidence for this sentence. */}
+                <div className="es-lede">
+                  <div className="es-counts">
+                    {need > 0 && <span className="es-pill es-pill-act">{need} need{need === 1 ? "s" : ""} action</span>}
+                    {fyi > 0 && <span className="es-pill">{fyi} to note</span>}
+                    {snap.items.length === 0 && <span className="es-pill es-pill-ok">Inbox quiet</span>}
+                    <span className="es-of">of {snap.scannedCount} read</span>
+
+                    {/* Mig 224 — next to the text it changes, not in the
+                        bar. The choice saves to the profile. */}
+                    <span className="es-lang" role="group" aria-label="Language">
+                      {([["en", "EN"], ["hi", "हिं"]] as const).map(([code, label]) => (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => chooseLang(code)}
+                          aria-pressed={lang === code}
+                          className={lang === code ? "on" : ""}
+                          title={code === "hi" ? "हिंदी में पढ़ें" : "Read in English"}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </span>
                   </div>
-                );
-              })()}
-              {snap.items.length === 0 ? (
-                <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Nothing needs you — inbox is quiet. ✅</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {snap.items.map((it, i) => {
-                    const cat = CATEGORY_META[it.category] ?? CATEGORY_META.other;
-                    const action = it.urgency === "action_needed";
-                    const clickable = !!it.uid;
-                    const dateStr = fmtEmailDate(it.date);
-                    return (
-                      <div
-                        key={i}
-                        onClick={clickable ? () => openCard(it) : undefined}
-                        role={clickable ? "button" : undefined}
-                        tabIndex={clickable ? 0 : undefined}
-                        onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(it); } } : undefined}
-                        title={clickable ? "Open the full email" : undefined}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: `1px solid ${action ? "rgba(220,38,38,0.35)" : "var(--border)"}`,
-                          // A coloured rail down the left edge — red for
-                          // action-needed, quiet grey otherwise — so the eye
-                          // sorts the list before reading a word of it.
-                          borderLeft: `4px solid ${action ? "#dc2626" : "var(--border)"}`,
-                          background: action ? "rgba(220,38,38,0.05)" : "var(--bg)",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 3,
-                          cursor: clickable ? "pointer" : "default",
-                        }}
-                      >
-                        {/* Sender first (bold), then the email date, then the urgency badge */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {it.from}
-                          </span>
-                          {dateStr && (
-                            <span className="muted" style={{ fontSize: 11, fontWeight: 500, flexShrink: 0 }}>· {dateStr}</span>
-                          )}
-                          <span style={{ flex: 1 }} />
-                          <span
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 800,
-                              padding: "2px 8px",
-                              borderRadius: 999,
-                              textTransform: "uppercase",
-                              letterSpacing: "0.04em",
-                              flexShrink: 0,
-                              color: action ? "#fff" : "#475569",
-                              background: action ? "#dc2626" : "rgba(148,163,184,0.2)",
-                            }}
-                          >
-                            {action ? "Action needed" : "FYI"}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>{it.subject}</div>
-                        {/* Headline line — kept short and quiet; the facts sit in
-                            the key points below. */}
-                        {/* Hindi when chosen and present; English otherwise.
-                            A snapshot written before mig 224 has no Hindi at
-                            all, and falling back beats an empty line. */}
-                        {(hi ? it.summaryHi || it.summary : it.summary) && (
-                          <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted)" }}>
-                            {hi ? it.summaryHi || it.summary : it.summary}
-                          </div>
-                        )}
-
-                        {/* Key points — the substance, as separate facts. Falls
-                            back to nothing when an older snapshot has none (its
-                            summary already carried the detail). */}
-                        {(() => { const pts = hi ? it.keyPointsHi ?? it.keyPoints : it.keyPoints; return pts && pts.length > 0 && (
-                          <ul style={{ margin: "3px 0 0", paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
-                            {pts.map((k, ki) => (
-                              <li key={ki} style={{ fontSize: 12.5, lineHeight: 1.45, display: "flex", gap: 7 }}>
-                                <span style={{ color: action ? "#dc2626" : "var(--accent, #4f46e5)", fontWeight: 800, flexShrink: 0 }}>·</span>
-                                <span>{k}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ); })()}
-
-                        {/* The one thing to do, called out — with the deadline
-                            beside it when the email gave one. */}
-                        {it.action && (
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 5, padding: "6px 10px", borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
-                            <span style={{ fontSize: 11, fontWeight: 800, color: "#dc2626", flexShrink: 0, marginTop: 1 }}>DO</span>
-                            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", lineHeight: 1.4 }}>
-                              {hi ? it.actionHi || it.action : it.action}
-                              {it.deadline && (
-                                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 800, color: "#b91c1c", background: "rgba(220,38,38,0.14)", padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
-                                  ⏱ {it.deadline}
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        )}
-
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)" }}>
-                            {cat.icon} {cat.label}
-                          </span>
-                          {clickable && (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent, #4f46e5)", marginLeft: "auto" }}>
-                              Open full email →
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {overview && <p className="es-over">{overview}</p>}
                 </div>
-              )}
-              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-                Read-only · Google&apos;s own emails are hidden · auto-refreshes 5 am &amp; 2 pm (today only)
-              </div>
-            </>
-          )}
-        </>
-      )}
-    </div>
 
-    {/* Center-peek: the full email, fetched live (never stored). */}
-    {openItem && (
-      <EmailPeek
-        target={{ uid: openItem.uid, subject: openItem.subject, from: openItem.from, date: openItem.date }}
-        onClose={() => setOpenItem(null)}
-      />
-    )}
+                {snap.items.length === 0 ? (
+                  <p className="es-quiet">Nothing needs you — the inbox is quiet.</p>
+                ) : (
+                  <ol className="es-list">
+                    {snap.items.map((it, i) => {
+                      const cat = CATEGORY_META[it.category] ?? CATEGORY_META.other;
+                      const action = it.urgency === "action_needed";
+                      const clickable = !!it.uid;
+                      const dateStr = fmtEmailDate(it.date);
+                      const summary = hi ? it.summaryHi || it.summary : it.summary;
+                      const pts = hi ? it.keyPointsHi ?? it.keyPoints : it.keyPoints;
+                      return (
+                        <li
+                          key={i}
+                          className={`es-item${action ? " act" : ""}${clickable ? " hit" : ""}`}
+                          onClick={clickable ? () => openCard(it) : undefined}
+                          role={clickable ? "button" : undefined}
+                          tabIndex={clickable ? 0 : undefined}
+                          onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(it); } } : undefined}
+                          title={clickable ? "Open the full email" : undefined}
+                        >
+                          {/* The category as a tile down the left. It gives
+                              a list of near-identical grey boxes a rhythm,
+                              and says whose email this is before a word is
+                              read — which the little grey tag at the bottom
+                              never managed. */}
+                          <span className="es-ico" aria-hidden>{cat.icon}</span>
+
+                          <div className="es-body">
+                            <div className="es-who">
+                              <strong>{it.from}</strong>
+                              {dateStr && <span className="es-date">{dateStr}</span>}
+                              <span className={`es-tag${action ? " act" : ""}`}>
+                                {action ? "Action needed" : "FYI"}
+                              </span>
+                            </div>
+
+                            <h3 className="es-subj">{it.subject}</h3>
+                            {summary && <p className="es-sum">{summary}</p>}
+
+                            {pts && pts.length > 0 && (
+                              <ul className="es-pts">
+                                {pts.map((k, ki) => <li key={ki}>{k}</li>)}
+                              </ul>
+                            )}
+
+                            {it.action && (
+                              <div className="es-do">
+                                <span className="es-do-k">Do</span>
+                                <span className="es-do-v">
+                                  {hi ? it.actionHi || it.action : it.action}
+                                  {it.deadline && <b className="es-by">{it.deadline}</b>}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="es-foot">
+                              <span className="es-cat">{cat.label}</span>
+                              {clickable && <span className="es-open">Open full email →</span>}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+
+                <p className="es-fine">
+                  Read-only · Google&apos;s own emails are hidden · refreshes itself at 5 am and 2 pm, today only
+                </p>
+              </>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* Centre-peek: the full email, fetched live (never stored). */}
+      {openItem && (
+        <EmailPeek
+          target={{ uid: openItem.uid, subject: openItem.subject, from: openItem.from, date: openItem.date }}
+          onClose={() => setOpenItem(null)}
+        />
+      )}
     </>
   );
 }
+
+/* ── Why this is a stylesheet and not three hundred style props ────
+   Daksh, Nov 2026: "improve the UI of the email thing on dashboard,
+   really good professional UI. Complete makeover of the email module
+   only."
+
+   The old panel set every rule inline, which is why it drifted: the
+   accent fell back to #4f46e5, an indigo that belongs to no other
+   screen in this app, and it was on the Refresh button, the language
+   toggle, the bullets and the open link. Four purple things on a page
+   of gold and brown. Named classes make the palette one decision
+   rather than thirty, and buy hover and focus states that inline
+   styles cannot express at all. */
+const CSS = `
+.es {
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:15px 18px 16px; display:flex; flex-direction:column; gap:14px;
+}
+.es-shut { gap:0; padding-bottom:15px; }
+
+.es-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.es-title {
+  display:inline-flex; align-items:baseline; gap:9px; flex:1 1 auto; min-width:0;
+  background:none; border:0; padding:0; cursor:pointer; text-align:left; color:var(--text);
+}
+.es-caret { font-size:11px; color:var(--muted); transition:transform .15s; flex:none;
+  position:relative; top:-1px; }
+.es-shut .es-caret { transform:rotate(-90deg); }
+.es-name { font-size:15px; font-weight:800; letter-spacing:-.2px; flex:none; }
+.es-meta { font-size:11.5px; color:var(--muted); min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+
+.es-tools { display:flex; align-items:center; gap:7px; flex:none; flex-wrap:wrap; }
+.es-btn {
+  display:inline-flex; align-items:center; height:29px; padding:0 12px;
+  font:inherit; font-size:11.5px; font-weight:700; white-space:nowrap;
+  color:var(--text); background:var(--surface); border:1px solid var(--border);
+  border-radius:8px; text-decoration:none; cursor:pointer;
+}
+.es-btn:hover { background:var(--surface-alt); }
+/* Gold, like every other primary action in the app. It was indigo. */
+.es-btn-go { color:#fff; background:var(--gold); border-color:var(--gold-dark); }
+.es-btn-go:hover { background:var(--gold-dark); }
+.es-btn-go:disabled { opacity:.6; cursor:wait; }
+.es-range {
+  height:29px; max-width:150px; padding:0 8px; font:inherit; font-size:11.5px;
+  font-weight:600; color:var(--text); background:var(--bg);
+  border:1px solid var(--border); border-radius:8px; cursor:pointer;
+}
+.es-range:disabled { opacity:.6; cursor:wait; }
+
+/* ── the lede ───────────────────────────────────────────────────
+   The counts and the summary line are one block, because together
+   they are the snapshot; everything under them is the evidence. The
+   gold rule says "start here". */
+.es-lede {
+  display:flex; flex-direction:column; gap:7px;
+  padding:11px 14px; border-radius:10px;
+  background:var(--gold-subtle); border:1px solid var(--gold-border);
+  border-left:3px solid var(--gold);
+}
+.es-counts { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.es-pill {
+  font-size:11px; font-weight:800; padding:3px 11px; border-radius:999px;
+  background:rgba(255,255,255,.75); color:var(--text); border:1px solid var(--gold-border);
+}
+.es-pill-act { background:var(--danger); color:#fff; border-color:var(--danger); }
+.es-pill-ok { background:rgba(22,163,74,.14); color:var(--success); border-color:rgba(22,163,74,.3); }
+.es-of { font-size:11px; color:var(--muted); }
+.es-over { margin:0; font-size:13px; line-height:1.55; color:var(--text); }
+
+.es-lang { display:inline-flex; margin-left:auto; flex:none; border:1px solid var(--gold-border);
+  border-radius:999px; overflow:hidden; background:rgba(255,255,255,.6); }
+.es-lang button {
+  padding:3px 12px; font:inherit; font-size:10.5px; font-weight:800;
+  border:0; cursor:pointer; background:transparent; color:var(--muted);
+}
+.es-lang button.on { background:var(--gold); color:#fff; }
+
+/* ── the emails ─────────────────────────────────────────────── */
+.es-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
+.es-item {
+  display:grid; grid-template-columns:38px minmax(0,1fr); gap:12px;
+  padding:12px 14px; border-radius:11px;
+  background:var(--bg); border:1px solid var(--border);
+  border-left:3px solid var(--border);
+  transition:border-color .12s, background .12s, transform .12s;
+}
+.es-item.hit { cursor:pointer; }
+.es-item.hit:hover {
+  background:var(--surface); border-color:var(--gold-border);
+  border-left-color:var(--gold); transform:translateX(2px);
+}
+.es-item.act { border-left-color:var(--danger); background:rgba(220,38,38,.045); }
+.es-item.act.hit:hover { border-color:rgba(220,38,38,.4); border-left-color:var(--danger); }
+
+.es-ico {
+  width:38px; height:38px; border-radius:10px; display:grid; place-items:center;
+  font-size:18px; background:var(--surface-alt); border:1px solid var(--border);
+}
+.es-item.act .es-ico { background:rgba(220,38,38,.1); border-color:rgba(220,38,38,.22); }
+
+.es-body { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.es-who { display:flex; align-items:baseline; gap:8px; min-width:0; }
+.es-who strong { font-size:13px; font-weight:800; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.es-date { font-size:11px; color:var(--muted); flex:none; }
+.es-tag {
+  margin-left:auto; flex:none; font-size:9.5px; font-weight:800; letter-spacing:.07em;
+  text-transform:uppercase; padding:2px 8px; border-radius:999px;
+  color:var(--muted); background:var(--surface-alt); border:1px solid var(--border);
+}
+.es-tag.act { color:#fff; background:var(--danger); border-color:var(--danger); }
+
+.es-subj { margin:1px 0 0; font-size:13.5px; font-weight:700; line-height:1.35; color:var(--text); }
+.es-sum { margin:2px 0 0; font-size:12px; line-height:1.5; color:var(--muted); }
+
+/* Hanging bullets with a real indent, so a point that wraps lines up
+   under itself instead of under the dot. */
+.es-pts { list-style:none; margin:7px 0 0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.es-pts li { position:relative; padding-left:15px; font-size:12.5px; line-height:1.5; color:var(--text); }
+.es-pts li::before {
+  content:""; position:absolute; left:3px; top:7px; width:5px; height:5px;
+  border-radius:50%; background:var(--gold);
+}
+.es-item.act .es-pts li::before { background:var(--danger); }
+
+.es-do {
+  display:flex; align-items:flex-start; gap:9px; margin-top:9px;
+  padding:8px 11px; border-radius:9px;
+  background:rgba(220,38,38,.08); border:1px solid rgba(220,38,38,.22);
+}
+.es-do-k { flex:none; font-size:9.5px; font-weight:800; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--danger); margin-top:3px; }
+.es-do-v { font-size:12.5px; font-weight:600; line-height:1.45; color:var(--text); }
+.es-by { margin-left:8px; font-size:11px; font-weight:800; white-space:nowrap;
+  color:#991b1b; background:rgba(220,38,38,.14); padding:1px 8px; border-radius:999px; }
+
+.es-foot { display:flex; align-items:baseline; gap:10px; margin-top:9px;
+  padding-top:8px; border-top:1px solid var(--border); }
+.es-cat { font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--muted); }
+.es-open { margin-left:auto; font-size:11px; font-weight:700; color:var(--gold-dark); }
+.es-item.hit:hover .es-open { text-decoration:underline; }
+
+.es-note, .es-quiet { margin:0; font-size:12.5px; line-height:1.55; color:var(--muted); }
+.es-err { font-size:12px; font-weight:600; color:var(--danger);
+  background:var(--danger-bg); border:1px solid rgba(220,38,38,.25);
+  border-radius:8px; padding:8px 11px; }
+.es-fine { margin:2px 0 0; font-size:10.5px; color:var(--muted-light); }
+
+/* A phone has no room for the tile, and the sender line needs the width. */
+@media (max-width: 640px) {
+  .es { padding:13px 14px 14px; }
+  .es-item { grid-template-columns:minmax(0,1fr); gap:0; }
+  .es-ico { display:none; }
+}
+`;
