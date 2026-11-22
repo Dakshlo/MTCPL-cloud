@@ -236,6 +236,7 @@ export function FloorViewClient({
   initialMode,
   initialRotateSec,
   initialVendorId,
+  builtAt,
 }: {
   vendors: FloorVendor[];
   /** Month numbers for the two scoreboard slides. null when they could
@@ -245,6 +246,8 @@ export function FloorViewClient({
   initialMode: "grid" | "tv";
   initialRotateSec: number;
   initialVendorId: string | null;
+  /** Server clock at render. Moves on every soft refresh that lands. */
+  builtAt: number;
 }) {
   const [mode, setMode] = useState<"grid" | "tv">(initialMode);
   const [rotateSec, setRotateSec] = useState(initialRotateSec);
@@ -289,13 +292,77 @@ export function FloorViewClient({
     return () => clearInterval(t);
   }, [router]);
 
-  // The floor error boundary counts consecutive failures so it can stop
-  // reload-looping on a fault that will not clear. Reaching here means
-  // the wall rendered, so the run is over — without this reset, four
-  // unrelated blips across a week would eventually disable the recovery.
+  // The floor error boundary counts consecutive failures so it can back
+  // off on a fault that will not clear. Reaching here means the wall
+  // rendered, so the run is over — without this reset, unrelated blips
+  // across a week would have it waiting two minutes between tries.
   useEffect(() => {
     try { window.sessionStorage.removeItem("mtcpl-floor-reloads"); } catch { /* private mode */ }
   }, []);
+
+  /* ── The watchdog ────────────────────────────────────────────────
+   *
+   * The failure nobody reports, because it does not look like one.
+   *
+   * router.refresh() is fire-and-forget: it returns nothing, it throws
+   * nothing a timer can catch, and when it stops landing — a lapsed
+   * session answering 307 to the login page, a socket the browser
+   * quietly dropped, a fetch that never resolves — the wall goes on
+   * showing the last good render. Perfectly, brightly, for hours. A
+   * CNC that finished at ten still reads RUNNING at four, and the
+   * board is more dangerous than a blank screen because the floor
+   * believes it.
+   *
+   * So the server stamps each render and this watches the stamp move.
+   * Four missed refreshes (45s each) is three minutes of silence,
+   * which no healthy wall ever has, and the cure is the one that fixes
+   * everything here: throw the tab away and start again. A hard reload
+   * also re-runs auth, so an expired session lands on the login page
+   * visibly instead of hiding behind yesterday's data.
+   *
+   * Paused is left alone — somebody is deliberately reading a slide.
+   */
+  const lastBeatRef = useRef({ stamp: builtAt, seenAt: Date.now() });
+  useEffect(() => {
+    if (builtAt !== lastBeatRef.current.stamp) {
+      lastBeatRef.current = { stamp: builtAt, seenAt: Date.now() };
+    }
+  }, [builtAt]);
+
+  useEffect(() => {
+    if (paused) return;
+    const STALE_MS = 4 * 45_000;
+    const t = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      if (Date.now() - lastBeatRef.current.seenAt > STALE_MS) {
+        try {
+          void fetch("/api/client-error", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              where: "carving/floor",
+              message: "watchdog: soft refresh stopped landing",
+              silentMs: Date.now() - lastBeatRef.current.seenAt,
+              online: navigator.onLine,
+              at: new Date().toISOString(),
+            }),
+            keepalive: true,
+          }).catch(() => {});
+        } catch { /* reporting must never stop the reload */ }
+        window.location.reload();
+      }
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [paused]);
+
+  /* The network coming back beats any timer. The shed's wifi drops and
+   * returns, and a wall that waits out its own schedule after the
+   * connection is already up is just lost minutes on the floor. */
+  useEffect(() => {
+    const onBack = () => router.refresh();
+    window.addEventListener("online", onBack);
+    return () => window.removeEventListener("online", onBack);
+  }, [router]);
 
   /* Kiosk hygiene. Daksh: "when the TV stays on for like 2-3 hours the
    * error occurs." By then this page has done ~160 soft refreshes on a

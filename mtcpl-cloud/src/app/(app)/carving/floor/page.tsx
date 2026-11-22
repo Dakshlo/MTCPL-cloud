@@ -44,6 +44,11 @@ export default async function CarvingFloorPage({ searchParams }: { searchParams:
     <FloorViewClient
       vendors={floorVendors}
       production={production}
+      /* The heartbeat. Every soft refresh re-runs this component, so a
+         wall whose refreshes are landing sees this number move. One
+         that has quietly stopped talking to the server does not — see
+         the watchdog in floor-client. */
+      builtAt={Date.now()}
       initialMode={initialMode}
       initialRotateSec={initialRotateSec}
       initialVendorId={params.vendor ?? null}
