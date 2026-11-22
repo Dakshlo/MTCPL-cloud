@@ -39,12 +39,26 @@ export type NavItem = {
    *  current active_department in addition to the existing role
    *  check. */
   department?: Department;
-  /** Migration 074 — extra visibility via a profile flag. When set,
-   *  the entry shows for any user whose profile has that flag set
-   *  to TRUE, in addition to the role-based gate above.
+  /** Migration 074 — extra visibility via a profile flag.
    *
-   *  Mig 234 added the second one. Both work the same way: a page
-   *  that belongs to named people rather than to a job title. */
+   *  It is an OR, not an AND: the entry shows for anyone whose ROLE is
+   *  listed, OR anyone carrying the flag whatever their role. That is
+   *  what `pagesFor` actually does —
+   *
+   *      it.roles.includes(role) || (!!it.requiresFlag && !!flags?.[…])
+   *
+   *  — and it has to be, because the flag exists precisely for people
+   *  the role list does not name. CNC Tools lists only "developer" and
+   *  is carried by two owners and a crosscheck manager; under an AND
+   *  none of the three would see their own page.
+   *
+   *  This comment said "in addition to the role-based gate above" until
+   *  Nov 2026, which reads as AND and is the opposite of the code.
+   *  Worth the correction: it is the sentence somebody would check
+   *  before deciding why a grant had not worked.
+   *
+   *  Mig 234 added the second one. Both work the same way: a page that
+   *  belongs to named people rather than to a job title. */
   requiresFlag?: NavFlag;
 };
 
@@ -663,19 +677,23 @@ export const navEntries: NavEntry[] = [
     roles: ["developer", "owner", "storekeeper"],
     department: "inventory",
   },
-  {
-    // Mig 083 follow-on (Daksh, June 2026) — Approval List was
-    // also surfaced inside InventoryShell's sub-nav for every
-    // role. Storekeeper shouldn't see it (segregation of duties),
-    // so the sub-nav now defaults to hidden + the sidebar entry
-    // widens to owner / developer too so they can still reach
-    // the queue when they need to step in for crosscheck.
-    href: "/inventory/approvals",
-    label: "Audit Queue",
-    icon: "✅",
-    roles: ["crosscheck", "owner", "developer"],
-    department: "inventory",
-  },
+  // Audit Queue (/inventory/approvals) used to sit here. Daksh,
+  // Nov 2026, looking at the Inventory sidebar: "remove this audit
+  // queue from inventory."
+  //
+  // The PAGE stays — only the permanent sidebar row goes. It was a
+  // standing link to a screen that is empty most of the time, and
+  // the queue already announces itself when there is actually
+  // something in it: both the topbar task list and /tasks raise an
+  // "Inventory Audit — stock movement batches awaiting audit" card
+  // with a count, for exactly the people who can clear it. A thing
+  // that appears when it matters beats a link that is always there
+  // and usually dead.
+  //
+  // Checked before removing: layout.tsx and tasks/page.tsx both
+  // route to /inventory/approvals off inventoryAuditBadge, so
+  // crosscheck is not stranded. The in-page sub-nav entry
+  // (APPROVAL_NAV_ITEM) is unchanged.
   {
     // Mig 227 — the CNC vendors' tool register. Sits in INVENTORY
     // because it is stock, but it shares nothing with Scaffolding:
