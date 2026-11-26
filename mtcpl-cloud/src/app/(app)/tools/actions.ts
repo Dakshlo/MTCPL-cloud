@@ -47,6 +47,13 @@ import {
   type MoveOutcome,
   type ToolMovementKind,
 } from "@/lib/cnc-tool-stock";
+import {
+  getToolStockOrder,
+  saveToolStockOrder,
+  sendToolStockOrder,
+  toolStockRecipients,
+  type ToolStockOrderSetting,
+} from "@/lib/wa-tool-stock";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -706,9 +713,159 @@ async function maybeWarnLowStock(
         targetRoles: ["developer"], // v1 is developer-only; widens with the module
       },
     );
+
+    /**
+     * …and out to whoever actually buys the stuff.
+     *
+     * Deliberately inside the same `if` that decided this is NEW news.
+     * The in-app notice and the WhatsApp therefore fire together or not
+     * at all, which is the only way a supplier's phone is safe: the
+     * milestone rule above is what stops a shelf sitting one below its
+     * line from sending a message on every single take.
+     *
+     * Three locks, any one of which keeps it silent — the env template,
+     * the master switch, and autoOnLowStock. All three are off until
+     * somebody turns them on on purpose.
+     */
+    const { to } = await toolStockRecipients({ auto: true });
+    if (to.length > 0) {
+      const res = await sendToolStockOrder({
+        to,
+        askedBy: outNow ? "low stock alert (finished)" : "low stock alert",
+        lines: [
+          {
+            toolName: tool.name,
+            stockLabel: `${after} ${tool.unit} (warn line ${line})`,
+            needLabel: "please confirm quantity",
+          },
+        ],
+      });
+      if (res.sent > 0) {
+        void logAudit(actorId, "cnc_tool_stock_order_wa", "cnc_tool", tool.id, {
+          trigger: "low_stock",
+          stock_after: after,
+          low_line: line,
+          recipients: to.length,
+        });
+      }
+    }
   } catch {
     // A warning that fails must never cost the operator their entry.
   }
+}
+
+// ── Ordering stock by hand ────────────────────────────────────────
+
+/** Read the current WhatsApp order settings (store screen). */
+export async function getStockOrderSettingAction(): Promise<
+  { ok: true; value: ToolStockOrderSetting } | { ok: false; error: string }
+> {
+  const { profile } = await requireAuth();
+  if (!canUseCncTools(profile)) return { ok: false, error: "Not allowed." };
+  return { ok: true, value: await getToolStockOrder() };
+}
+
+/** Save who gets stock messages, and whether the cupboard may send them
+ *  by itself. Same gate as the rest of the catalogue: whoever keeps the
+ *  store decides who to ring about it. */
+export async function saveStockOrderSettingAction(
+  next: ToolStockOrderSetting,
+): Promise<{ ok: true; value: ToolStockOrderSetting } | { ok: false; error: string }> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const before = await getToolStockOrder();
+  const saved = await saveToolStockOrder(next, profile.id);
+  if (!saved.ok) return saved;
+
+  await logAudit(profile.id, "cnc_tool_stock_order_settings", "app_settings", "wa_tool_stock_order", {
+    enabled: saved.value.enabled,
+    auto: saved.value.autoOnLowStock,
+    recipients: saved.value.recipients.length,
+    was_enabled: before.enabled,
+    // Numbers themselves stay out of the audit row — the setting holds
+    // them, and an audit log is read by more people than the setting is.
+  });
+  refresh();
+  return saved;
+}
+
+/**
+ * Send a stock request for the ticked tools, now.
+ *
+ * The quantity is whatever the keeper typed, and it is ALWAYS his
+ * number rather than anything this code works out. A reorder quantity
+ * is a purchasing decision — what the supplier packs in, what the price
+ * break is, what is already on the way — and a guess dressed up as a
+ * figure in a message to a supplier is worse than no figure at all.
+ * Leave the box empty and the message asks him to confirm the quantity.
+ */
+export async function sendStockOrderAction(
+  items: Array<{ toolId: string; qty: number | null }>,
+): Promise<ActionResult> {
+  const { profile } = await requireAuth();
+  if (!canManageCncToolStore(profile)) return { ok: false, error: "Not allowed." };
+
+  const picked = (Array.isArray(items) ? items : []).filter((i) => i && typeof i.toolId === "string");
+  if (picked.length === 0) return { ok: false, error: "Tick at least one tool." };
+  if (picked.length > 20) return { ok: false, error: "Twenty at a time is the limit — that is twenty WhatsApps." };
+
+  const { to, setting } = await toolStockRecipients();
+  if (!setting.enabled) return { ok: false, error: "Stock messages are switched off. Turn them on above." };
+  if (to.length === 0) return { ok: false, error: "Add a mobile number first." };
+
+  const admin = createAdminSupabaseClient();
+  const { data: toolRows } = await admin
+    .from("cnc_tools")
+    .select("id, name, unit, low_stock_qty")
+    .in("id", picked.map((i) => i.toolId));
+  const tools = (toolRows ?? []) as Array<{
+    id: string; name: string; unit: string; low_stock_qty: number | null;
+  }>;
+  if (tools.length === 0) return { ok: false, error: "Those tools are no longer in the store." };
+
+  // Every shelf count at once. Twenty tools is twenty queries, and a
+  // for-loop awaiting each one is the single habit that makes pages in
+  // this codebase slow — see lib/cut-done-date.ts for the same fix.
+  const wanted = picked.filter((i) => tools.some((t) => t.id === i.toolId));
+  const stocks = await Promise.all(wanted.map((i) => stockForTool(i.toolId)));
+
+  const lines = wanted.map((item, idx) => {
+    const t = tools.find((x) => x.id === item.toolId)!;
+    const qty = Number(item.qty);
+    return {
+      toolName: t.name,
+      stockLabel: `${stocks[idx]} ${t.unit}`,
+      needLabel: Number.isFinite(qty) && qty > 0 ? `${qty} ${t.unit}` : "please confirm quantity",
+    };
+  });
+  if (lines.length === 0) return { ok: false, error: "Nothing to send." };
+
+  const res = await sendToolStockOrder({
+    lines,
+    askedBy: profile.full_name || "MTCPL tool store",
+    to,
+  });
+
+  await logAudit(profile.id, "cnc_tool_stock_order_wa", "cnc_tool", lines.length === 1 ? picked[0].toolId : "bulk", {
+    trigger: "manual",
+    items: lines.length,
+    sent: res.sent,
+    failed: res.failed,
+    recipients: to.length,
+  });
+
+  if (res.sent === 0) {
+    return { ok: false, error: res.reason || "Nothing sent — WhatsApp refused it." };
+  }
+  const who = to.length === 1 ? "1 number" : `${to.length} numbers`;
+  const what = res.sent === 1 ? "1 message" : `${res.sent} messages`;
+  return {
+    ok: true,
+    message: res.failed > 0
+      ? `${what} sent to ${who}. ${res.failed} failed — ${res.reason ?? "no reason given"}.`
+      : `${what} sent to ${who}.`,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────

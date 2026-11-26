@@ -30,6 +30,7 @@ import {
   canUseCncTools,
 } from "@/lib/cnc-tool-permissions";
 import { loadStore, stockSignature } from "@/lib/cnc-tool-stock";
+import { getToolStockOrder } from "@/lib/wa-tool-stock";
 import { loadHoldings, usageLinesSince } from "@/lib/cnc-tool-usage";
 
 import { StoreClient } from "./store-client";
@@ -42,7 +43,14 @@ export default async function ToolStorePage() {
 
   const admin = createAdminSupabaseClient();
 
-  const [{ tools, movements }, { data: vendorRows }, holdings, usage] = await Promise.all([
+  const [
+    { tools, movements },
+    { data: vendorRows },
+    holdings,
+    usage,
+    stockOrder,
+    { data: userRows },
+  ] = await Promise.all([
     loadStore(),
     // 28 rows. Cheaper to take the lot than to work out which ids the
     // register happens to mention this time.
@@ -59,6 +67,18 @@ export default async function ToolStorePage() {
       { profileId: profile.id, operatorId: null },
       2000,
     ),
+    // Nov 2026 — who a "send more of this" WhatsApp goes to. One row of
+    // app_settings, fired with everything else rather than after it.
+    getToolStockOrder(),
+    // Nineteen people. The recipient picker offers them by name so the
+    // keeper does not have to know Nikhil's number by heart, and a
+    // plain <select> is the whole of it at this size.
+    admin
+      .from("profiles")
+      .select("id, full_name, phone")
+      .eq("is_active", true)
+      .not("phone", "is", null)
+      .order("full_name"),
   ]);
 
   const vendorNames: Record<string, string> = {};
@@ -94,6 +114,14 @@ export default async function ToolStorePage() {
       // Mig 237. Developer only for now, while the matcher learns what
       // the suppliers actually print on their bills.
       canScanBills={canScanToolBills(profile)}
+      stockOrder={stockOrder}
+      orderUsers={((userRows ?? []) as Array<{ id: string; full_name: string | null; phone: string | null }>)
+        .map((u) => ({ id: u.id, name: u.full_name || "Unnamed", phone: u.phone || "" }))
+        .filter((u) => u.phone.replace(/\D/g, "").length >= 10)}
+      // The server knows whether the approved template is configured;
+      // the browser cannot read env, so it is told. Without this the
+      // sheet would look ready and fail at the last step.
+      stockOrderReady={!!(process.env.MSG91_WA_TOOL_STOCK_TEMPLATE ?? "").trim()}
     />
   );
 }

@@ -661,4 +661,81 @@ export const TOOLS_CSS = `
   .tc-stat span { margin-top:0; }
   .tc-grid { grid-template-columns:1fr; }
 }
+
+/* ── Order stock sheet (Nov 2026) ─────────────────────────────────
+   Two halves in one sheet: who gets the message, then what to ask
+   for. The second half is the one used every time, so it gets the
+   roomier rows and the first is kept to chips. */
+.tc-os-h { font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--muted); margin:2px 0 10px; display:flex; align-items:baseline; gap:8px; }
+.tc-os-h2 { margin-top:22px; padding-top:16px; border-top:1px solid var(--border); }
+.tc-os-h em { font-style:normal; font-weight:600; color:var(--muted); opacity:.8;
+  margin-left:auto; letter-spacing:0; text-transform:none; font-size:11px; }
+.tc-os-none { font-size:12.5px; color:var(--muted); margin:0 0 12px; }
+
+.tc-os-chips { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+.tc-os-chip { display:inline-flex; align-items:center; gap:7px; padding:6px 8px 6px 11px;
+  border:1px solid var(--border); border-radius:999px; background:var(--surface); font-size:12px; }
+.tc-os-chip b { font-weight:700; }
+.tc-os-chip i { font-style:normal; color:var(--muted); font-family:ui-monospace,monospace;
+  font-size:11px; }
+.tc-os-chip button { border:none; background:none; cursor:pointer; color:var(--muted);
+  font-size:13px; line-height:1; padding:2px 4px; border-radius:50%; }
+.tc-os-chip button:hover { color:#b91c1c; background:rgba(185,28,28,.08); }
+
+.tc-os-add { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.tc-os-add input { flex:1 1 150px; min-width:0; box-sizing:border-box; min-height:44px;
+  padding:0 13px; border:1.5px solid var(--border); border-radius:10px; font-size:15px;
+  font-family:inherit; background:var(--surface); color:var(--text); }
+.tc-os-add input:focus { border-color:var(--gold); outline:none; }
+.tc-os-add .tc-btn { min-height:44px; }
+
+.tc-os-pick { display:block; margin-bottom:16px; }
+.tc-os-pick span { display:block; font-size:11px; color:var(--muted); margin-bottom:5px; }
+.tc-os-pick select { width:100%; box-sizing:border-box; min-height:44px; padding:0 11px;
+  border:1.5px solid var(--border); border-radius:10px; font-size:14px; font-family:inherit;
+  background:var(--surface); color:var(--text); }
+
+.tc-os-switch { display:flex; gap:10px; align-items:flex-start; margin-bottom:12px;
+  cursor:pointer; }
+.tc-os-switch input { margin-top:3px; width:17px; height:17px; accent-color:var(--gold-dark);
+  flex:none; }
+.tc-os-switch b { display:block; font-size:13px; font-weight:700; }
+.tc-os-switch i { display:block; font-style:normal; font-size:11.5px; color:var(--muted);
+  line-height:1.5; margin-top:2px; }
+.tc-os-switch input:disabled + span { opacity:.45; }
+.tc-os-save { margin-bottom:4px; }
+.tc-os-err { font-size:12px; color:#b91c1c; margin:0 0 10px; font-weight:600; }
+
+.tc-os-note { font-size:12px; line-height:1.6; padding:10px 12px; border-radius:9px;
+  margin-bottom:16px; }
+.tc-os-note code { font-family:ui-monospace,monospace; font-size:11px; }
+.tc-os-note-warn { color:#7c2d12; background:rgba(249,115,22,.1);
+  border:1px solid rgba(249,115,22,.4); }
+
+.tc-os-list { display:flex; flex-direction:column; gap:2px; }
+.tc-os-row { display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:9px;
+  cursor:pointer; border:1px solid transparent; }
+.tc-os-row:hover { background:var(--bg); }
+.tc-os-row[data-on="1"] { border-color:var(--border); background:var(--surface); }
+.tc-os-row[data-on="0"] .tc-os-tool { opacity:.5; }
+.tc-os-row > input[type="checkbox"] { width:17px; height:17px; accent-color:#16a34a; flex:none; }
+.tc-os-tool { flex:1; min-width:0; }
+.tc-os-tool b { display:block; font-size:13.5px; font-weight:700; font-family:ui-monospace,monospace;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tc-os-tool i { display:block; font-style:normal; font-size:11px; color:var(--muted);
+  margin-top:1px; }
+.tc-os-qty { width:72px; flex:none; box-sizing:border-box; min-height:40px; padding:0 10px;
+  text-align:center; border:1.5px solid var(--border); border-radius:9px; font-size:15px;
+  font-weight:700; font-family:inherit; background:var(--surface); color:var(--text); }
+.tc-os-qty:focus { border-color:var(--gold); outline:none; }
+.tc-os-qty:disabled { opacity:.4; }
+
+.tc-os-fine { font-size:11.5px; color:var(--muted); line-height:1.6; margin:14px 0 0; }
+
+@media (max-width:760px) {
+  .tc-os-add input { flex:1 1 100%; }
+  .tc-os-add .tc-btn { width:100%; }
+}
+.tc-os-open { padding:5px 11px; font-size:11.5px; align-self:center; }
 `;

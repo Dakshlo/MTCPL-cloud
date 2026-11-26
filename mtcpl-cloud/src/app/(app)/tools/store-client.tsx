@@ -39,9 +39,13 @@ import {
   createToolAction,
   deleteToolAction,
   recordMovementAction,
+  saveStockOrderSettingAction,
+  sendStockOrderAction,
   undoMovementAction,
   updateToolAction,
 } from "./actions";
+import type { ToolStockOrderSetting } from "@/lib/wa-tool-stock";
+import { OrderStockSheet, type PickableUser } from "./order-stock-sheet";
 import { postToolBillAction } from "./bill-actions";
 import { MoveSheet, type MoveIntent } from "./move-sheet";
 import { AddToolSheet } from "./add-tool-sheet";
@@ -62,6 +66,7 @@ const OFFICE_POLL_MS = 6000;
 export function StoreClient({
   tools, movements, movementsTruncated = false, stockSig, vendorNames, usage, canManage,
   canScanBills = false, heldOut = 0,
+  stockOrder, orderUsers = [], stockOrderReady = false,
 }: {
   tools: ToolRow[];
   movements: ToolMovement[];
@@ -85,6 +90,16 @@ export function StoreClient({
    *  accounted for is the one number on this screen that asks to be
    *  chased. */
   heldOut?: number;
+  /** Nov 2026 — who gets a "send more of this" WhatsApp, and whether
+   *  the cupboard may send one by itself. Lives on this screen rather
+   *  than in Settings because the man who sees the shelf is low is the
+   *  man who decides who to ring about it. */
+  stockOrder: ToolStockOrderSetting;
+  /** Everyone with a phone on their profile, for the "pick a person"
+   *  half of the recipient picker. */
+  orderUsers?: PickableUser[];
+  /** Whether the approved MSG91 template is configured on the server. */
+  stockOrderReady?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -97,6 +112,10 @@ export function StoreClient({
   const [intent, setIntent] = useState<MoveIntent | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
+  const [orderOpen, setOrderOpen] = useState(false);
+  /** The server's answer, held locally so the sheet reflects a save
+   *  without waiting for the page to come round again. */
+  const [order, setOrder] = useState(stockOrder);
   /** The tool whose own sheet is open — reached by pressing its row
    *  rather than by picking a verb and then hunting for the tool. */
   const [sheetTool, setSheetTool] = useState<ToolRow | null>(null);
@@ -177,6 +196,31 @@ export function StoreClient({
       }
       setDone({ at: Date.now(), text: r.message });
       router.refresh();
+    });
+  }
+
+  /** Save who gets stock messages. Kept apart from `run` because it
+   *  writes a setting, not a movement — nothing here is undoable. */
+  function saveOrderSetting(next: ToolStockOrderSetting) {
+    setErr(null);
+    startTransition(async () => {
+      const r = await saveStockOrderSettingAction(next);
+      if (!r.ok) { setErr(r.error); return; }
+      setOrder(r.value);
+      setDone({ at: Date.now(), text: "Saved who gets stock messages" });
+    });
+  }
+
+  /** Send the ticked tools. The sheet closes only on success, so a
+   *  refusal — switched off, no number, template missing — is read with
+   *  the list still in front of you. */
+  function sendOrder(items: Array<{ toolId: string; qty: number | null }>) {
+    setErr(null);
+    startTransition(async () => {
+      const r = await sendStockOrderAction(items);
+      if (!r.ok) { setErr(r.error); return; }
+      setOrderOpen(false);
+      setDone({ at: Date.now(), text: r.message ?? "Sent" });
     });
   }
 
@@ -376,6 +420,20 @@ export function StoreClient({
                   <div className="tc-shelf-h tc-shelf-h-warn">
                     <strong>Needs ordering</strong>
                     <em>{needs.length} of {visible.length}</em>
+                    {/* The heading already says what is wrong; this is
+                        the one thing anybody does about it. Put here
+                        rather than in the hero because it is only ever
+                        wanted while looking at this pile. */}
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="tc-btn tc-os-open"
+                        onClick={() => setOrderOpen(true)}
+                        title="WhatsApp whoever buys for the store"
+                      >
+                        📩 Order stock
+                      </button>
+                    )}
                   </div>
                   <div className="tc-grid" data-photos={photos}>
                     {needs.map(row)}
@@ -462,6 +520,21 @@ export function StoreClient({
           fd.set("tool_id", t.id);
           run(() => deleteToolAction(fd), (msg) => setDone({ at: Date.now(), text: msg ?? "Deleted" }));
         }}
+      />
+
+      <OrderStockSheet
+        open={orderOpen}
+        onClose={() => setOrderOpen(false)}
+        // `short`, not the filtered `visible` pile: a search typed into
+        // the box above must not quietly shorten the order list.
+        tools={short}
+        users={orderUsers}
+        setting={order}
+        canManage={canManage}
+        templateReady={stockOrderReady}
+        busy={pending}
+        onSaveSetting={saveOrderSetting}
+        onSend={sendOrder}
       />
 
       <BillSheet
