@@ -991,6 +991,20 @@ function ConfirmedBatch({
       })
     : null;
 
+  /**
+   * The bank file's "extension" is the day's FILE NUMBER, not a type.
+   *
+   * buildHdfcFilename() ignores the extension argument on the CSV path
+   * and ends the name with the 3-digit day sequence: 56042611.001 is
+   * the first file generated today, .004 the fourth. The sequence is
+   * shared with the xlsx preview, so a preview click moves it on too.
+   *
+   * Nov 2026 — this panel used to say ".001" in prose. On most days
+   * the real file is .003 or .005, so the one line meant to reassure
+   * the accountant was telling him his file looked wrong.
+   */
+  const downloadedExt = downloaded?.filename.split(".").pop() || "001";
+
   const isUnbatched = batchId === "unbatched";
   const previewHref = isUnbatched
     ? "/api/accounts/hdfc-export?format=xlsx"
@@ -1398,10 +1412,60 @@ function ConfirmedBatch({
             >
               {downloaded.filename}
             </code>
-            . <strong>That is the right file.</strong> HDFC asks for this exact name and the{" "}
-            <code style={{ fontFamily: "ui-monospace, monospace" }}>.001</code> ending — do not
-            rename it, do not open it in Excel first, and do not download the Excel copy instead.
-            Upload this one to HDFC ENet.
+            . <strong>That is the right file.</strong> HDFC asks for this exact name. The{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace" }}>.{downloadedExt}</code>{" "}
+            on the end is only today&apos;s file number — it changes with every file, so a{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace" }}>.003</code>{" "}
+            is just as correct as a{" "}
+            <code style={{ fontFamily: "ui-monospace, monospace" }}>.001</code>.
+          </div>
+
+          {/* ── The complaint this panel exists for ─────────────────
+              Govind raised it twice (24 and 26 Nov) — "zip file gets
+              downloaded". Nothing was wrong either time. He takes the
+              bank file FIRST, so his file is the day's number 001, and
+              .001 is the extension every archiver on earth claims as
+              the first volume of a split ZIP. Windows gives it a
+              WinRAR icon, double-clicking opens WinRAR, WinRAR says it
+              cannot read it, and the file looks broken.
+
+              Virendra has never reported it because he clicks the
+              Excel preview first, so his bank file is .002 or later
+              and no archiver answers for it. Daksh cannot reproduce it
+              because he is on a Mac, where nothing claims .001 at all.
+              Hence "mainly it happens to accountant ★" — it is about
+              who clicks what first, not about the role.
+
+              Said in Hindi too. Both accountants read the English
+              panel and clicked the Excel button twelve seconds later
+              anyway. ───────────────────────────────────────────── */}
+          <div
+            style={{
+              fontSize: 12,
+              marginTop: 9,
+              padding: "9px 11px",
+              lineHeight: 1.65,
+              color: "#7c2d12",
+              background: "rgba(249, 115, 22, 0.1)",
+              border: "1px solid rgba(249, 115, 22, 0.45)",
+              borderRadius: 8,
+            }}
+          >
+            <strong>Your PC will show it as a WinRAR / 7-Zip file. It is not one.</strong> A name
+            ending in <code style={{ fontFamily: "ui-monospace, monospace" }}>.001</code> looks to
+            Windows like the first part of a split ZIP, so it gets an archive icon and
+            double-clicking it opens WinRAR — which then says it cannot read the file. The file is
+            perfectly fine; there is simply nothing inside it to extract. Do not open it, do not
+            unzip it, do not rename it. Upload it to HDFC ENet exactly as it downloaded.
+            <br />
+            <span style={{ fontWeight: 600 }}>
+              यह ZIP नहीं है। WinRAR / 7-Zip में खोलने की कोशिश न करें — file सही है, इसे सीधे HDFC
+              ENet में upload कर दें।
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#166534", marginTop: 7, lineHeight: 1.55 }}>
+            To read the payments on screen, use <strong>👁 Check in Excel</strong> — that copy is
+            for reading only and must never be uploaded to the bank.
           </div>
           <button
             type="button"
