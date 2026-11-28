@@ -671,10 +671,27 @@ export const navEntries: NavEntry[] = [
     department: "inventory",
   },
   {
+    // Daksh, Nov 2026: "remove this scaffolding page also, or hide —
+    // keep CNC tools only."
+    //
+    // The PAGE stays and so does the stock on it (9,962 pcs at the
+    // plant, 93 out at two sites). Only the sidebar row narrows, to
+    // the one role whose entire workspace it is.
+    //
+    // Checked before narrowing it: the module has not been touched
+    // since 3 June 2026. 55 movements in its lifetime, all of them in
+    // the May–June window when it was being filled, and nothing since.
+    // Both storekeeper accounts — the only people this row still shows
+    // for — last signed in that same month. So this is a standing link
+    // to a board nobody has moved a part on in half a year, sitting in
+    // the department whose live screen is the tool store.
+    //
+    // It is not deleted, because the fleet is real and the day the
+    // yard starts issuing again it should be where it was.
     href: "/inventory/scaffolding",
     label: "Scaffolding",
     icon: "📦",
-    roles: ["developer", "owner", "storekeeper"],
+    roles: ["storekeeper"],
     department: "inventory",
   },
   // Audit Queue (/inventory/approvals) used to sit here. Daksh,
@@ -795,6 +812,41 @@ export function pagesFor(role: AppRole, dept: Department | null, flags?: NavFlag
   const seen = new Set<string>();
   const uniq = out.filter((p) => (seen.has(p.href) ? false : (seen.add(p.href), true)));
   return dept ? uniq.filter((p) => p.department === dept) : uniq;
+}
+
+/**
+ * Does this person have a single sidebar row in `dept`?
+ *
+ * The department tiles used to be filtered on the role's allowed list
+ * alone, which assumed every allowed department had something in it.
+ * Narrowing Scaffolding to the storekeeper broke that assumption: an
+ * owner without the tool-store flag — Naresh — would have kept an
+ * Inventory tile that opened a department with nothing below the
+ * heading. A tile that leads to an empty room is worse than no tile.
+ *
+ * Mirrors the sidebar's own two filters exactly, so the tile can never
+ * promise a row the sidebar then declines to draw: role OR flag for a
+ * plain item, role-only for a group's children (which is what the
+ * group renderer checks).
+ */
+export function hasSidebarEntriesIn(
+  dept: Department,
+  role: AppRole,
+  flags?: NavFlags,
+): boolean {
+  const inDept = (d: Department | undefined) => (d ?? "production") === dept;
+  const allowed = (it: NavItem) =>
+    it.roles.includes(role) || (!!it.requiresFlag && !!flags?.[it.requiresFlag]);
+
+  return navEntries.some((e) => {
+    if ("type" in e && e.type === "divider") return false;
+    if ("type" in e && e.type === "group") {
+      if (!inDept(e.department) || !e.roles.includes(role)) return false;
+      return e.children.some((c) => c.roles.includes(role));
+    }
+    const it = e as NavItem;
+    return inDept(it.department) && allowed(it);
+  });
 }
 
 /** Look up one page by href — used to render a saved pin. */

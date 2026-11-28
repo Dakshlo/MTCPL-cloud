@@ -12,7 +12,7 @@ import { TopbarTasksBadge, type TopbarTask } from "@/components/topbar-tasks-bad
 import { TopbarDiaryBadge, type DiaryBadgeItem } from "@/components/topbar-diary-badge";
 import { TopbarIdLookup } from "@/components/topbar-id-lookup";
 import { QuickSearch } from "@/components/quick-search";
-import { canUseQuickSearch, pagesFor } from "@/lib/nav-registry";
+import { canUseQuickSearch, hasSidebarEntriesIn, pagesFor } from "@/lib/nav-registry";
 import { TopbarRefreshButton } from "@/components/topbar-refresh-button";
 import { TabletKeyboardProvider } from "@/components/tablet-keyboard";
 import { Toast } from "@/components/toast";
@@ -221,7 +221,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       href: string;
     }> = [];
     if (effectiveStatus.source === "department") {
-      const permittedDepts = rolePermittedDepartments(profile.role);
+      // Nov 2026 — and only the ones that still hold a row for them.
+      // Scaffolding narrowed to the storekeeper, so "Go to Inventory"
+      // would have offered an owner without the tool-store flag a way
+      // out of a locked department into an empty one.
+      const navFlagBag = {
+        can_assign_carving: (profile as { can_assign_carving?: boolean | null }).can_assign_carving,
+        can_keep_tool_store: profile.can_keep_tool_store,
+      };
+      const permittedDepts = rolePermittedDepartments(profile.role).filter((d) =>
+        hasSidebarEntriesIn(d, profile.role, navFlagBag),
+      );
       const otherPermitted = permittedDepts.filter((d) => d !== requestDept);
       if (otherPermitted.length > 0) {
         const statuses = await Promise.all(

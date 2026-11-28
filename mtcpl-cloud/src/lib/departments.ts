@@ -73,10 +73,13 @@ export const DEPARTMENTS: ReadonlyArray<{
     id: "inventory",
     label: "Inventory",
     icon: "📦",
-    // Scaffolding stays the fallback. Anyone who can open the CNC tool
-    // store lands THERE instead — see departmentLandingFor().
+    // Scaffolding stays the fallback, for the storekeeper — the one
+    // role it is still in the sidebar for. Everyone who can open the
+    // CNC tool store lands THERE instead; see departmentLandingFor(),
+    // which every caller now goes through, the app-reopen path
+    // included.
     landingHref: "/inventory/scaffolding",
-    tooltip: "CNC tool store · Scaffolding · Stock movements",
+    tooltip: "CNC tool store — the cupboard, the register and what is out",
   },
   {
     // Mig 101 + 102 — standalone Activity Register (proof of demos /

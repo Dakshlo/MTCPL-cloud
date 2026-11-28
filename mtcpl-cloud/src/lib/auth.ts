@@ -5,9 +5,9 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
 import {
-  DEPARTMENTS,
   allowedDepartmentsForRole,
   departmentForRoute,
+  departmentLandingFor,
   type Department,
 } from "@/lib/departments";
 
@@ -113,7 +113,12 @@ export function getDefaultRouteForRole(role?: AppRole | null) {
 }
 
 export function getDefaultRouteForProfile(
-  profile?: Pick<Profile, "role" | "is_active" | "active_department"> | null,
+  profile?:
+    | (Pick<Profile, "role" | "is_active" | "active_department"> & {
+        /** Decides which door Inventory opens — see departmentLandingFor. */
+        can_keep_tool_store?: boolean | null;
+      })
+    | null,
 ) {
   if (!profile) {
     return "/login";
@@ -124,6 +129,30 @@ export function getDefaultRouteForProfile(
   }
 
   const roleRoute = getDefaultRouteForRole(profile.role);
+
+  // ── Developer and owner always open on the dashboard ──────────────
+  //
+  // Daksh, Nov 2026, from the scaffolding board: "is this page default?
+  // As I open software I land here only. Fix that, that's supposed to
+  // be the dashboard."
+  //
+  // He had clicked Inventory two evenings earlier to look at the tool
+  // store with me. The rule below then treated that click as a standing
+  // preference and reopened him there every time, for two days.
+  //
+  // That rule is right for the roles it was written for — an accountant
+  // who moves into Employees for a week is working there, and a
+  // department is their workbench. It is wrong for these two. They
+  // range across all eight departments in a morning, and their home is
+  // not a workbench at all: /dashboard is the cross-department overview,
+  // which being dumped into the last room visited defeats entirely.
+  //
+  // Costs Nikhil and Vinay one click into Inventory when they reopen —
+  // deliberate, and far cheaper than the developer and the owner both
+  // losing the screen that shows them the whole company.
+  if (profile.role === "developer" || profile.role === "owner") {
+    return roleRoute;
+  }
 
   // Reopen the app where the user left off. This used to always land
   // on the ROLE's fixed home — so an accountant who'd switched into the
@@ -138,8 +167,14 @@ export function getDefaultRouteForProfile(
   const dept = (profile.active_department ?? null) as Department | null;
   if (dept && allowedDepartmentsForRole(profile.role).includes(dept)) {
     if (dept !== departmentForRoute(roleRoute)) {
-      const landing = DEPARTMENTS.find((d) => d.id === dept)?.landingHref;
-      if (landing) return landing;
+      // departmentLandingFor, NOT the raw landingHref. The switcher has
+      // asked the per-person question since mig 234 — Inventory opens on
+      // the tool store for whoever keeps it — and this path did not, so
+      // clicking Inventory and REOPENING in Inventory went to two
+      // different screens. That split is what put Daksh on the
+      // scaffolding board: the cupboard was one click away from where
+      // the app kept leaving him.
+      return departmentLandingFor(dept, profile);
     }
   }
 

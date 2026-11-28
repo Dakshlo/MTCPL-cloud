@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AppRole } from "@/lib/types";
-import { navEntries, type NavEntry, type NavFlag, type NavItem, type NavDivider, type NavGroup } from "@/lib/nav-registry";
+import { hasSidebarEntriesIn, navEntries, type NavEntry, type NavFlag, type NavItem, type NavDivider, type NavGroup } from "@/lib/nav-registry";
 import { VEHICLES_ROLES } from "@/lib/vehicles-access";
 import {
   DEPARTMENTS,
@@ -245,17 +245,34 @@ export function Sidebar({
   }
 
   const switchable = canSwitchDepartment(role);
-  const currentDept = effectiveDepartment(role, activeDepartment ?? null);
   // Mig 058 follow-on (Daksh) — switcher tiles are filtered to the
   // role's allowed list. ACCOUNTANT★ (final_auditor) sees only
   // Finance + Invoicing; dev/owner still see all 4.
   const allowedDepts = allowedDepartmentsForRole(role);
-  const visibleDeptTiles = DEPARTMENTS.filter((d) => allowedDepts.includes(d.id));
 
   const navFlags: Record<NavFlag, boolean> = {
     can_assign_carving: canAssignCarving,
     can_keep_tool_store: canKeepToolStore,
   };
+
+  // ...and then to the departments that actually hold a row for THIS
+  // person. Nov 2026: Scaffolding narrowed to the storekeeper, so an
+  // owner without the tool-store flag had an Inventory tile over an
+  // empty department. See hasSidebarEntriesIn.
+  const visibleDeptTiles = DEPARTMENTS.filter(
+    (d) => allowedDepts.includes(d.id) && hasSidebarEntriesIn(d.id, role, navFlags),
+  );
+
+  // Where the tiles say we are. A stored active_department can name a
+  // department this person no longer has anything in — Naresh's row
+  // still reads 'inventory' from before the narrowing — and left alone
+  // that is a sidebar with no rows and no tile lit. Fall back to the
+  // first room they do have.
+  const storedDept = effectiveDepartment(role, activeDepartment ?? null);
+  const currentDept =
+    switchable && !visibleDeptTiles.some((d) => d.id === storedDept)
+      ? visibleDeptTiles[0]?.id ?? storedDept
+      : storedDept;
 
   // Step 1: role OR flag filter. Mig 074 — entries with a
   // `requiresFlag` ALSO match when the profile has that flag set,
